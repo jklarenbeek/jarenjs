@@ -4,6 +4,8 @@ import { AssignError } from './errors.js';
 import { admitAssignmentList, compareIds, idOf, indexOfProblem, intervalOf, isRecord, jsonCopy, pointer } from './model.js';
 import { ruleSetOf, RULE_LEVELS } from './rules.js';
 import { AssignView, EvaluationContext } from './view.js';
+import { buildDays, dayPath } from './day-table.js';
+import { DAY_SEAMS } from './seam.js';
 import { contentKey, stableStringify } from '../object.js';
 
 /** @typedef {import('./rules.js').RegisteredRule} RegisteredRule */
@@ -92,6 +94,9 @@ export const ASSIGN_LIMITS = /* @__PURE__ */ Object.freeze({
  * @property {'full'} algorithm
  * @property {string} assignments - fingerprint of the scored assignments, sorted
  * @property {string | number | null} baseline - the baseline's revision
+ * @property {Readonly<{ policy: 'rfc5545' | 'later' | 'reject', provider: { readonly name: string, readonly revision: string } }>} [days] -
+ *   present when the scoring was given `options.days`: the policy and the identity of the
+ *   zone provider its civil days were told with
  * @property {Readonly<Record<string, string | number>>} facts - each fact table's revision
  * @property {string | number} problem - the problem's revision
  * @property {string} ruleSet - the rule set's hash
@@ -135,16 +140,29 @@ const NO_PARAMS = /* @__PURE__ */ Object.freeze({});
 const NO_INTERVALS = /* @__PURE__ */ Object.freeze([]);
 
 /**
- * Read `{ limits? }`.
+ * Read `{ days? }`: a seam `civilDays()` built, or none.
+ * @param {unknown} options
+ * @returns {import('./seam.js').DayOperations | null}
+ */
+function seamOf(options) {
+  const days = isRecord(options) ? options.days : undefined;
+  if (days === undefined) return null;
+  const seam = days !== null && typeof days === 'object' ? DAY_SEAMS.get(days) : undefined;
+  if (seam === undefined) throw new AssignError('JN0021', 'days is the value civilDays from @jarenjs/core/assign/days answered', '/options/days');
+  return seam;
+}
+
+/**
+ * Read `{ limits?, days? }`'s limits.
  * @param {unknown} options
  * @returns {Required<AssignLimits>}
  */
 function limitsOf(options) {
   const out = { ...ASSIGN_LIMITS };
   if (options === undefined) return out;
-  if (!isRecord(options)) throw new AssignError('JN0015', 'scoring options are { limits? }', '/options');
+  if (!isRecord(options)) throw new AssignError('JN0015', 'scoring options are { limits?, days? }', '/options');
   for (const key of Object.keys(options))
-    if (key !== 'limits') throw new AssignError('JN0015', `${key} is not a scoring option`, `/options/${pointer(key)}`);
+    if (key !== 'limits' && key !== 'days') throw new AssignError('JN0015', `${key} is not a scoring option`, `/options/${pointer(key)}`);
   const limits = options.limits;
   if (limits === undefined) return out;
   if (!isRecord(limits)) throw new AssignError('JN0015', 'limits is { maxUnits?, maxMatches?, maxWork? }', '/options/limits');
@@ -158,7 +176,8 @@ function limitsOf(options) {
 }
 
 /**
- * The units a scope is evaluated over, in id order.
+ * The units a scope is evaluated over, in id order. `resource-day` units
+ * are told by the day table, at the first rule of that scope.
  * @param {ProblemIndex} index
  * @returns {Record<'resource' | 'task' | 'global', readonly RuleUnit[]>}
  */
@@ -177,6 +196,7 @@ function unitsOf(index) {
  */
 function unitPath(rule, unit) {
   const base = `/rules/${pointer(rule.id)}`;
+  if (unit.scope === 'resource-day') return dayPath(base, unit);
   return unit.id === null ? `${base}/global` : `${base}/${unit.scope}s/${pointer(unit.id)}`;
 }
 
@@ -310,6 +330,43 @@ function unknownOf(rule, unit, reason, fact, subjects) {
 }
 
 /**
+ * One unknown `no-zone` per assigned task of `resource` that has no
+ * zone, in canonical order: the resource's days cannot be told.
+ * @param {RegisteredRule} rule @param {RuleUnit} unit @param {string} resource
+ * @param {readonly string[]} tasks
+ * @returns {AssignUnknown[]}
+ */
+function noZoneOf(rule, unit, resource, tasks) {
+  const resources = Object.freeze([resource]);
+  return tasks.map((task) => unknownOf(rule, unit, 'no-zone', null, Object.freeze({ resources, tasks: Object.freeze([task]) })))
+    .map((unknown) => /** @type {[string, AssignUnknown]} */ ([/** @type {string} */ (stableStringify(unknown)), unknown]))
+    .sort((a, b) => compareIds(a[0], b[0])).map(([, unknown]) => unknown);
+}
+
+/**
+ * The `resource-day` units of a day table, in order of resource id, zone
+ * and date. A resource whose days cannot be told has one unit, with
+ * `zone` and `date` null, which is not evaluated: it carries the
+ * unknowns `no-zone`.
+ * @param {ProblemIndex} index @param {import('./day-table.js').DayTable} table
+ * @returns {readonly { unit: RuleUnit, zoneless: readonly string[] | null }[]}
+ */
+function dayUnitsOf(index, table) {
+  /** @type {{ unit: RuleUnit, zoneless: readonly string[] | null }[]} */
+  const out = [];
+  for (const resource of index.resources) {
+    const zoneless = table.zoneless.get(resource.id);
+    if (zoneless !== undefined) {
+      out.push({ unit: Object.freeze({ date: null, id: resource.id, scope: /** @type {const} */ ('resource-day'), zone: null }), zoneless });
+      continue;
+    }
+    for (const day of table.byResource.get(resource.id) ?? [])
+      out.push({ unit: Object.freeze({ date: day.date, id: resource.id, scope: /** @type {const} */ ('resource-day'), zone: day.zone }), zoneless: null });
+  }
+  return Object.freeze(out);
+}
+
+/**
  * Sum match scores per level, exactly.
  * @param {readonly { level: RuleLevel, score: number | string }[]} matches
  * @returns {Record<RuleLevel, bigint>}
@@ -354,27 +411,47 @@ export function scoreOf(sums) {
  * naming the limit, rule and unit, and no score, matches or unknowns -
  * never a partial total.
  *
+ * A `resource-day` rule is evaluated once per resource and civil day of
+ * a zone the resource works in: each assigned task's interval is cut at
+ * the civil-day boundaries of the task's own `zone` through
+ * `options.days` (`civilDays({ zoneProvider, policy })` from
+ * `@jarenjs/core/assign/days`), so a day across a change of the clock is
+ * 23 or 25 hours long. A resource with an assigned task that has no zone
+ * has days nobody can tell: its day units are not evaluated, and each
+ * day rule reports one unknown `no-zone` per such task (a hard one makes
+ * the verdict unknown); the engine never supplies a zone, UTC included.
+ * The seam's policy and provider identity are `provenance.days`.
+ *
  * Answers are frozen JSON, identical in every host time zone, for every
  * key order of the inputs and every order of their resources, tasks,
- * demands and assignments (fact rows keep the host's order).
+ * demands and assignments (fact rows keep the host's order); with day
+ * rules, for one provider identity and policy.
  * @param {unknown} problem - admitted with {@link admitProblem} when it is not yet
  * @param {import('./rules.js').RuleSet} ruleSet - from `registerRules`
  * @param {unknown} assignments - the assignments to score, checked as the problem's are
- * @param {{ limits?: AssignLimits }} [options]
+ * @param {{ limits?: AssignLimits, days?: import('./days.js').CivilDays }} [options]
  * @returns {AssignResult}
  * @throws {AssignError} the problem's and assignments' refusals (JN0001-JN0009),
  *   JN0014 for a rule set registerRules did not build, JN0015 for an option,
- *   JN0016-JN0018 for a rule that threw, answered out of contract or read an undeclared fact
+ *   JN0016-JN0018 for a rule that threw, answered out of contract or read an undeclared fact,
+ *   JN0021 for a day rule without `options.days` or a day read outside one,
+ *   JN0022 for a task the seam cannot split (`docPath` `/tasks/<i>/zone`, `i` its
+ *   place in the admitted problem, whose tasks are sorted by id)
  */
 export function scoreAssignment(problem, ruleSet, assignments, options = undefined) {
   const index = indexOfProblem(problem);
   const set = ruleSetOf(ruleSet);
   const limits = limitsOf(options);
+  const seam = seamOf(options);
+  if (seam === null && set.rules.some((rule) => rule.scope === 'resource-day'))
+    throw new AssignError('JN0021', 'a resource-day rule needs options.days, from civilDays in @jarenjs/core/assign/days', '/options/days');
   const scored = admitAssignmentList(index, assignments, '/assignments');
   const context = new EvaluationContext(index, scored, limits.maxWork);
   const units = unitsOf(index);
+  /** @type {readonly { unit: RuleUnit, zoneless: readonly string[] | null }[] | null} */
+  let dayUnits = null;
   const counts = { rules: set.rules.length, units: 0, matches: 0, unknowns: 0, work: 0 };
-  const provenance = provenanceOf(index, set, scored);
+  const provenance = provenanceOf(index, set, scored, /** @type {any} */ (options)?.days);
   /** @type {AssignMatch[]} */
   const matches = [];
   /** @type {AssignUnknown[]} */
@@ -401,9 +478,28 @@ export function scoreAssignment(problem, ruleSet, assignments, options = undefin
       continue;
     }
     const view = new AssignView(context, rule);
-    for (const unit of units[rule.scope]) {
+    if (rule.scope === 'resource-day' && dayUnits === null) {
+      const table = buildDays(context, /** @type {import('./seam.js').DayOperations} */ (seam), limits.maxWork);
+      if ('stoppedAt' in table)
+        return stop('maxWork', rule, Object.freeze({ date: null, id: table.stoppedAt, scope: /** @type {const} */ ('resource-day'), zone: null }));
+      context.days = table;
+      dayUnits = dayUnitsOf(index, table);
+    }
+    const list = rule.scope === 'resource-day'
+      ? /** @type {readonly { unit: RuleUnit, zoneless: readonly string[] | null }[]} */ (dayUnits)
+      : units[rule.scope].map((unit) => ({ unit, zoneless: null }));
+    for (const { unit, zoneless } of list) {
+      if (zoneless !== null) {
+        const told = noZoneOf(rule, unit, /** @type {string} */ (unit.id), zoneless);
+        for (const unknown of told) unknowns.push(unknown);
+        counts.unknowns += told.length;
+        context.work += told.length;
+        if (context.work > limits.maxWork) return stop('maxWork', rule, unit);
+        continue;
+      }
       if (counts.units >= limits.maxUnits) return stop('maxUnits', rule, unit);
       counts.units++;
+      context.noZone = null;
       /** @type {unknown} */
       let answer;
       try {
@@ -411,10 +507,21 @@ export function scoreAssignment(problem, ruleSet, assignments, options = undefin
       }
       catch (error) {
         if (context.stopped) return stop('maxWork', rule, unit);
-        if (error instanceof AssignError && error.code === 'JN0018') throw error;
-        throw new AssignError('JN0016', `rule ${JSON.stringify(rule.id)} threw`, unitPath(rule, unit), error);
+        if (context.noZone === null) {
+          if (error instanceof AssignError && (error.code === 'JN0018' || error.code === 'JN0021')) throw error;
+          throw new AssignError('JN0016', `rule ${JSON.stringify(rule.id)} threw`, unitPath(rule, unit), error);
+        }
       }
       if (context.stopped) return stop('maxWork', rule, unit);
+      if (context.noZone !== null) {
+        const resource = context.noZone;
+        const told = noZoneOf(rule, unit, resource, /** @type {readonly string[]} */ (/** @type {import('./day-table.js').DayTable} */ (context.days).zoneless.get(resource)));
+        for (const unknown of told) unknowns.push(unknown);
+        counts.unknowns += told.length;
+        context.work += told.length;
+        if (context.work > limits.maxWork) return stop('maxWork', rule, unit);
+        continue;
+      }
       const read = readAnswer(index, rule, unit, answer, sums);
       context.work += read.matches.length + read.unknowns.length;
       if (context.work > limits.maxWork) return stop('maxWork', rule, unit);
@@ -443,9 +550,10 @@ export function scoreAssignment(problem, ruleSet, assignments, options = undefin
 /**
  * @param {ProblemIndex} index @param {import('./rules.js').RuleSet} set
  * @param {readonly import('./model.js').Assignment[]} scored
+ * @param {AssignProvenance['days'] | undefined} days - the seam, already checked
  * @returns {AssignProvenance}
  */
-function provenanceOf(index, set, scored) {
+function provenanceOf(index, set, scored, days) {
   const problem = index.problem;
   /** @type {Record<string, string | number>} */
   const facts = {};
@@ -455,6 +563,7 @@ function provenanceOf(index, set, scored) {
     algorithm: /** @type {const} */ ('full'),
     assignments: contentKey(scored),
     baseline: problem.baseline?.revision ?? null,
+    ...(days === undefined ? {} : { days }),
     facts: Object.freeze(facts),
     problem: problem.revision,
     ruleSet: set.hash,

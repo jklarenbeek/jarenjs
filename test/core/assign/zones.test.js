@@ -2,7 +2,8 @@
 /**
  * Scoring reads no clock and no zone: the same scorings print the same
  * bytes in a child process under each of three host time zones (one of
- * them 13 hours east of UTC, one with daylight saving time).
+ * them 13 hours east of UTC, one with daylight saving time), day-scoped
+ * scorings with the fixture provider included.
  */
 
 import { describe, it } from 'node:test';

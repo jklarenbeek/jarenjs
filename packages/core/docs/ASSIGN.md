@@ -17,9 +17,9 @@ import {
 } from '@jarenjs/core/assign';
 ```
 
-Pure JSON goes in and out. The engine reads no clock, no zone, no locale and no storage. Scoring the same inputs gives the same bytes in every host time zone, for every key order of the inputs, and for every order of their resources, tasks, demands and assignments. Fact rows and arrays inside `attributes` are host data and keep the host's order.
+Pure JSON goes in and out. The engine reads no clock, no locale and no storage, and no zone but the ones a task names, through the provider the host injects (§7). Scoring the same inputs gives the same bytes in every host time zone, for every key order of the inputs, and for every order of their resources, tasks, demands and assignments. Fact rows and arrays inside `attributes` are host data and keep the host's order.
 
-Not here: civil-day scopes (a rule over "one resource on one local day"), incremental re-scoring of one edit, and search. Scoring answers how good a given assignment list is; it does not look for a better one.
+A rule over one resource on one civil day of a zone (`resource-day`) gets its days through the separate subpath `@jarenjs/core/assign/days` and a zone provider the host injects (§7). Not here: incremental re-scoring of one edit, and search. Scoring answers how good a given assignment list is; it does not look for a better one.
 
 ## 1. The problem
 
@@ -33,7 +33,7 @@ Every object carries a `revision`: the problem, each resource, each task, each f
 | Member | Form | Notes |
 |---|---|---|
 | `resources[]` | `{ id, revision, attributes? }` | whoever or whatever fills a slot |
-| `tasks[]` | `{ id, revision, interval: { start, end }, demands: [{ slot, count, attributes? }], attributes? }` | the interval is half-open `[start, end)` in safe integers (epoch milliseconds by convention), start before end; `count` resources may fill a slot |
+| `tasks[]` | `{ id, revision, interval: { start, end }, demands: [{ slot, count, attributes? }], attributes?, zone? }` | the interval is half-open `[start, end)` in safe integers (epoch milliseconds by convention), start before end; `count` resources may fill a slot; `zone` (a non-empty zone name) is read only by `resource-day` rules (§7) |
 | `facts` | `{ <name>: { revision, rows: [...] } }` | named host tables (availability spans, bookings, preferences); only rules read them |
 | `assignments[]` | `{ task, slot, resource, lock?: 'hard' \| 'soft' }` | the stored assignment; locks are kept as data and scoring does not read them |
 | `baseline` | `{ revision, assignments: [...] }` | a snapshot to compare against |
@@ -56,7 +56,7 @@ It answers the problem as frozen canonical JSON:
 - every object's keys written in code-unit order (JavaScript still lists integer-like keys such as `9` and `10` first, in numeric order);
 - `facts` and `assignments` default to empty.
 
-Two problems that differ only in key order, or in the order of their resources, tasks, demands and assignments, admit to the same bytes. Admitting the answer again answers it unchanged. Every refusal is an `AssignError` with its own code (§7) and the JSON Pointer at fault as `docPath`.
+Two problems that differ only in key order, or in the order of their resources, tasks, demands and assignments, admit to the same bytes. Admitting the answer again answers it unchanged. Every refusal is an `AssignError` with its own code (§8) and the JSON Pointer at fault as `docPath`.
 
 Ids sort by UTF-16 code unit: `r10` before `r9`, `B` before `b`, and an astral character before `U+FFFF`. They never sort by number, locale or insertion order. An id is data: `__proto__` and `constructor` are ordinary ids.
 
@@ -157,7 +157,7 @@ A rule is a plain object with one pure, synchronous function:
 | `id` | non-empty string, unique in the set | — |
 | `version` | non-empty string or whole number from 0 | — |
 | `level` | `'hard'`, `'service'` or `'soft'` | — |
-| `scope` | `'resource'` (once per resource), `'task'` (once per task) or `'global'` (once) | — |
+| `scope` | `'resource'` (once per resource), `'resource-day'` (once per resource and civil day, §7), `'task'` (once per task) or `'global'` (once) | — |
 | `evaluate(view, unit)` | answers `{ matches?, unknowns? }` | — |
 | `weight` | whole number from 1: a match scores minus magnitude times weight | `1` |
 | `measure` | the unit a magnitude counts in, such as `ms` or `count` | `'count'` |
@@ -165,7 +165,7 @@ A rule is a plain object with one pure, synchronous function:
 
 `registerRules(rules)` checks every declaration and answers a frozen rule set `{ hash, rules }`, sorted by id. The hash is a fingerprint of the declarations (id, version, level, scope, weight, measure, reads), so the same rules in any order agree. It does not cover the functions: a rule whose behaviour changes must change its `version`. The set's identity is its rule list, which every result carries: the hash is a short fingerprint, not a digest that can never collide.
 
-`unit` is `{ scope, id }`: the resource's or task's id, or `null` for a global rule. `view` is frozen and answers only frozen data:
+`unit` is `{ scope, id }`: the resource's or task's id, or `null` for a global rule. A `resource-day` unit also has `zone` and `date` (§7). `view` is frozen and answers only frozen data:
 
 | Call | Answers |
 |---|---|
@@ -461,7 +461,139 @@ export const outcome = {
 }
 ```
 
-## 7. Codes
+## 7. Civil days
+
+A rule of scope `resource-day` judges one resource on one civil day: consecutive days, a total per day, the rest a day leaves. Its unit is `{ scope: 'resource-day', id, zone, date }`, and the engine evaluates it once per resource and civil day of a zone that resource works in: by resource id, then zone, then date.
+
+A day is a civil day of the task's own `zone` (an optional task member), cut by `@jarenjs/core/calendar`'s `splitByCivilDay`. A day across a change of the clock is 23 or 25 hours long (23.5 or 24.5 across a half-hour change), and a skipped day has no instant, so it has no piece. A shift that ends exactly at local midnight has no piece of the next day. The same date in two zones is two days, never merged.
+
+The zone data is the host's. Pass `civilDays({ zoneProvider, policy })`, from its own subpath, as `options.days`:
+
+```js
+import { civilDays } from '@jarenjs/core/assign/days';
+```
+
+- `zoneProvider` has `candidates` and `toParts`, as `@jarenjs/locales/intl-zones`'s `createIntlZoneProvider` answers, or a fixed table of your own.
+- `policy` matters only where a change carries the clock back across midnight, so a day starts twice: `rfc5545` takes the earlier start, `later` the later, and `reject` refuses the scoring (`JN0022`).
+- The provider's identity (`{ name, revision }`, else `unrecorded`) and the policy are the result's `provenance.days`. Day-scoped answers are the same bytes on every host for one provider identity and policy. With the host's own `Intl` data they can differ where that data differs.
+- The base `@jarenjs/core/assign` carries no calendar code. A scoring without a day rule never asks the seam, and `provenance.days` is there only when `days` was given.
+
+The view answers a day rule two more calls. Only a `resource-day` rule may make them (`JN0021`):
+
+| Call | Answers |
+|---|---|
+| `daysOf(resource)` | the resource's days, by zone and then date |
+| `day(resource, zone, date)` | one day, or `null` when the resource works no part of it |
+
+A day is `{ date, end, pieces, start, zone }`. `start` and `end` are the day's whole span, the next day's first instant being its end. `pieces` are `{ end, slot, start, task }`, the part of each assignment's task inside the day, in time order.
+
+**A task without a zone is unknown, never guessed.** The engine supplies no zone, UTC included. A resource with an assigned task that has no zone has days nobody can tell:
+
+- none of its days is evaluated;
+- each day rule reports one unknown `reason: 'no-zone'` per such task, at the unit `{ scope: 'resource-day', id, zone: null, date: null }`;
+- a rule that reads that resource's days from another unit makes that unit `no-zone` too, whatever it answers.
+
+A floor rule (at least so many hours a day) judged on the zoned tasks alone would report a violation that may not exist, so a hard day rule's `no-zone` makes the verdict `unknown`.
+
+```js
+import { registerRules, scoreAssignment } from '@jarenjs/core/assign';
+import { civilDays } from '@jarenjs/core/assign/days';
+import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
+
+const HOUR = 3_600_000;
+const days = civilDays({ zoneProvider: createIntlZoneProvider({ revision: '2026a' }), policy: 'rfc5545' });
+
+const rules = registerRules([{
+  id: 'eight-hours-a-day', version: 1, level: 'hard', scope: 'resource-day', measure: 'ms',
+  evaluate(view, unit) {
+    const day = view.day(unit.id, unit.zone, unit.date);
+    let worked = 0;
+    for (const piece of day.pieces) worked += piece.end - piece.start;
+    if (worked <= 8 * HOUR) return {};
+    return { matches: [{
+      magnitude: worked - 8 * HOUR, messageId: 'over-eight-hours',
+      subjects: { resources: [unit.id] }, params: { dayHours: (day.end - day.start) / HOUR },
+    }] };
+  },
+}]);
+
+const shift = (id, start, end, zone) => ({
+  id, revision: 1, interval: { start: Date.parse(start), end: Date.parse(end) },
+  demands: [{ slot: 'crew', count: 1 }], ...(zone ? { zone } : {}),
+});
+const problem = {
+  revision: 1,
+  resources: [{ id: 'ari', revision: 1 }, { id: 'nina', revision: 1 }],
+  tasks: [
+    // 22:00 to 08:00 in Amsterdam, across the night the clocks go back
+    shift('night', '2026-10-24T20:00:00Z', '2026-10-25T07:00:00Z', 'Europe/Amsterdam'),
+    // no zone: nobody can tell which day it is on
+    shift('remote', '2026-10-25T08:00:00Z', '2026-10-25T18:00:00Z'),
+  ],
+};
+
+const result = scoreAssignment(problem, rules, [
+  { task: 'night', slot: 'crew', resource: 'ari' },
+  { task: 'remote', slot: 'crew', resource: 'nina' },
+], { days });
+
+export const answer = {
+  verdict: result.verdict,
+  matches: result.matches.map(({ unit, magnitude, params }) => ({ unit, hours: magnitude / HOUR, params })),
+  unknowns: result.unknowns.map(({ reason, subjects, unit }) => ({ reason, subjects, unit })),
+  days: result.provenance.days,
+};
+```
+
+```json
+{
+  "verdict": "infeasible-by-validation",
+  "matches": [
+    {
+      "unit": {
+        "date": "2026-10-25",
+        "id": "ari",
+        "scope": "resource-day",
+        "zone": "Europe/Amsterdam"
+      },
+      "hours": 1,
+      "params": {
+        "dayHours": 25
+      }
+    }
+  ],
+  "unknowns": [
+    {
+      "reason": "no-zone",
+      "subjects": {
+        "resources": [
+          "nina"
+        ],
+        "tasks": [
+          "remote"
+        ]
+      },
+      "unit": {
+        "date": null,
+        "id": "nina",
+        "scope": "resource-day",
+        "zone": null
+      }
+    }
+  ],
+  "days": {
+    "policy": "rfc5545",
+    "provider": {
+      "name": "intl",
+      "revision": "2026a"
+    }
+  }
+}
+```
+
+The day table counts toward `maxWork`: one for each task split, each piece and each day span. Each day read is charged like any view call, and day units count toward `maxUnits`. A task that cannot be split is refused (`JN0022`, with the calendar's refusal as `cause`): a zone the provider does not know, a provider that fails, or a task spanning more than 36600 civil days. Its `docPath` is `/tasks/<i>/zone`, where `i` is the task's place in the admitted problem (tasks sorted by id).
+
+## 8. Codes
 
 Every refusal is an `AssignError`, a coded error whose `docPath` is a JSON Pointer:
 
@@ -481,7 +613,7 @@ Every refusal is an `AssignError`, a coded error whose `docPath` is a JSON Point
 | `JN0009` | a value inside attributes, facts or params is not JSON: a non-finite number, undefined, a function, a symbol, a cycle or deeper than 64 levels |
 | `JN0010` | a rule is not of the contract's form: a missing member, one it does not define, a wrong type, or an evaluate that is not a function |
 | `JN0011` | a rule's level is not hard, service or soft |
-| `JN0012` | a rule's scope is not resource, task or global |
+| `JN0012` | a rule's scope is not resource, resource-day, task or global |
 | `JN0013` | a rule's weight is not a whole number from 1 |
 | `JN0014` | a rule set was not built by registerRules |
 | `JN0015` | an option is not of the form this call takes: an unknown option, a limit that is not a whole number from 0, or an unknown group |
@@ -490,3 +622,5 @@ Every refusal is an `AssignError`, a coded error whose `docPath` is a JSON Point
 | `JN0018` | a rule read a fact it does not declare in reads.facts |
 | `JN0019` | a score is not of the form scoreAssignment answers |
 | `JN0020` | a result is incomplete or not one scoreAssignment answers, so it has no total to explain |
+| `JN0021` | civil days were asked for without the seam that answers them: a resource-day rule scored without options.days from civilDays, a days value civilDays did not build, or a day read by a rule whose scope is not resource-day |
+| `JN0022` | a task's interval could not be split into civil days in its zone: the provider does not know the zone, failed, a day starts twice under the reject policy, or the task spans more than 36600 civil days; the calendar's refusal is the cause |

@@ -72,7 +72,7 @@ describe('registerRules', () => {
     ['a duplicate id', [base(), { ...base() }], 'JN0003', '/rules/1/id'],
     ['a fractional version', [{ ...base(), version: 1.5 }], 'JN0004', '/rules/0/version'],
     ['an unknown level', [{ ...base(), level: 'critical' }], 'JN0011', '/rules/0/level'],
-    ['the reserved resource-day scope', [{ ...base(), scope: 'resource-day' }], 'JN0012', '/rules/0/scope'],
+    ['an unknown scope', [{ ...base(), scope: 'resource-week' }], 'JN0012', '/rules/0/scope'],
     ['a zero weight', [{ ...base(), weight: 0 }], 'JN0013', '/rules/0/weight'],
     ['a fractional weight', [{ ...base(), weight: 1.5 }], 'JN0013', '/rules/0/weight'],
   ]);

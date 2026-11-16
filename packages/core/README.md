@@ -210,6 +210,7 @@ such a value used to escape as an uncoded `RangeError`.*
 | `@jarenjs/core/series` | the temporal kernel over plain records: instant/sample/interval normalization with a stable sort, half-open `[start, end)` set algebra (overlap, merge, subtract, gaps, coverage, slot enumeration, concurrency counts, short gaps), a static interval index, and the series operations built on them — fixed and calendar buckets with five fill policies, time-width rolling aggregates, as-of joins and gap-aware downsampling, on an injected zone seam |
 | `@jarenjs/core/calendar` | local-time resolution over the injected zone seam: `classifyLocal` (exists, gap or fold, with every candidate instant), `resolveLocal` under a named `rfc5545`/`later`/`reject` policy with no default, `isZone`/`assertZone`, `todayIn` over the runtime clock; the date, floating, utc, zoned and date-range values as frozen JSON with a schema twin, `bindFloating`/`toUtc`/`shiftCivil`, `splitByCivilDay`; RFC 5545 recurrence rules (the whole grammar checked, DAILY, WEEKLY, MONTHLY and YEARLY expanded) inside an explicit horizon and budget, recurring series with RDATE, EXDATE and overrides, `weeklyPattern`; prioritized availability layers evaluated into available, busy and unknown spans (unknown is never free) with `availabilityOf`, `freeBusy` and `findAvailableSlots`; and the `CalendarError` code table |
 | `@jarenjs/core/assign` | the assignment engine's mechanism, with no rule vocabulary: an assignment problem (resources, timed tasks with demand slots, fact tables, assignments with locks, a baseline) as revisioned JSON with a schema twin at `@jarenjs/core/schemas/assign/problem.schema.json`, `admitProblem`; the host rule contract, `registerRules`; exact explained scoring, `scoreAssignment`, `compareScores` and `explain`, under `ASSIGN_LIMITS`; and the `AssignError` code table |
+| `@jarenjs/core/assign/days` | the civil-day seam for `resource-day` rules, `civilDays({ zoneProvider, policy })`: each task's interval cut at the civil days of its own zone by the calendar (23- and 25-hour days included), with the provider's identity in provenance; a separate subpath so the base `@jarenjs/core/assign` carries no calendar |
 | `@jarenjs/core/text` | text validators: emails, hostnames, IPs, URIs/IRIs, UUIDs, punycode, ... |
 | `@jarenjs/core/math` | int32/float64 math and 2D/3D vector classes; the linear `remap` and unit-interval `clamp01` |
 | `@jarenjs/core/finance` | zero-dependency finance/trading formulas: TVM, cash flow, amortization, interest, depreciation, bonds, technical indicators, returns/risk |
@@ -369,10 +370,11 @@ The kernel is measured against one-pass loops written for one question and again
 `@jarenjs/core/assign` scores assignment problems such as staff rosters, delivery slots and room bookings. It carries the mechanism and none of the vocabulary: every constraint is a rule the host writes, and the engine ships none.
 
 - `admitProblem` admits a problem as frozen canonical JSON, or refuses it with an `AssignError` and a JSON Pointer. A problem holds resources, tasks with half-open integer intervals and demand slots, named fact tables, assignments with optional locks and a baseline, each revisioned.
-- `registerRules` checks the host's rules (`{ id, version, level, scope, evaluate }`; level `hard`, `service` or `soft`; scope `resource`, `task` or `global`) and fingerprints their declarations.
+- `registerRules` checks the host's rules (`{ id, version, level, scope, evaluate }`; level `hard`, `service` or `soft`; scope `resource`, `resource-day`, `task` or `global`) and fingerprints their declarations.
 - `scoreAssignment` evaluates every rule over a frozen, indexed view. It answers a lexicographic score that is the exact integer sum of the explained matches, with decimal strings past `Number.MAX_SAFE_INTEGER` and nothing rounded.
 - The verdict is never `feasible` while a hard rule is undecided: a missing fact makes the rule unknown, not satisfied. Past `ASSIGN_LIMITS` the result is typed incomplete and claims no total.
 - `compareScores` orders scores exactly, and `explain` groups a result by rule, level, resource or task.
+- A rule of scope `resource-day` judges one resource on one civil day of a task's own `zone`, through `civilDays({ zoneProvider, policy })` from `@jarenjs/core/assign/days`: days across a change of the clock are 23 or 25 hours long, and a task without a zone is an unknown `no-zone`, never a guessed zone.
 
 Answers carry their provenance and are the same bytes in every host time zone, for every key order, and for every order of resources, tasks, demands and assignments. The full module reference is [docs/ASSIGN.md](./docs/ASSIGN.md).
 
@@ -469,6 +471,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/core/series/zone` | JavaScript | declared |
 | `@jarenjs/core/calendar` | JavaScript | declared |
 | `@jarenjs/core/assign` | JavaScript | declared |
+| `@jarenjs/core/assign/days` | JavaScript | declared |
 | `@jarenjs/core/schemas/assign/problem.schema.json` | schema | — |
 | `@jarenjs/core/schemas/calendar/rrule.schema.json` | schema | — |
 | `@jarenjs/core/schemas/calendar/temporal.schema.json` | schema | — |

@@ -418,11 +418,15 @@ describe('the engine source', () => {
     }
   });
 
-  it('imports only its own modules and the core errors and object helpers', () => {
+  it('imports only its own modules and the core errors and object helpers; only the day seam imports the calendar', () => {
+    const calendar = ['../calendar/bind.js', '../calendar/model.js', '../calendar/resolve.js'];
     for (const file of files) {
       const text = fs.readFileSync(new URL(file, dir), 'utf8');
-      for (const [, specifier] of text.matchAll(/^\s*(?:import|export)\s[^;]*?from\s+['"]([^'"]+)['"]/gm))
-        assert.ok(/^\.\/[a-z]+\.js$/.test(specifier) || ['../errors.js', '../object.js'].includes(specifier), `${file} imports ${specifier}`);
+      for (const [, specifier] of text.matchAll(/^\s*(?:import|export)\s[^;]*?from\s+['"]([^'"]+)['"]/gm)) {
+        assert.ok(/^\.\/[a-z-]+\.js$/.test(specifier) || ['../errors.js', '../object.js'].includes(specifier)
+          || (file === 'days.js' && calendar.includes(specifier)), `${file} imports ${specifier}`);
+        assert.ok(file === 'days.js' || specifier !== './days.js', `${file} imports the day seam`);
+      }
     }
   });
 

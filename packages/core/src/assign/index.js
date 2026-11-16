@@ -10,7 +10,9 @@
  * (hard, service, soft) is the integer sum of the matches it reports, an
  * undecided hard rule makes the verdict unknown and never feasible, and
  * a scoring past its limits is incomplete and claims no total. Pure JSON
- * in and out, no clock, no storage. See docs/ASSIGN.md.
+ * in and out, no clock, no storage. A `resource-day` rule's civil days
+ * come through `@jarenjs/core/assign/days`, so this entry carries no
+ * calendar. See docs/ASSIGN.md.
  * @module
  */
 
@@ -39,6 +41,8 @@ export { explain } from './explain.js';
 /** @typedef {import('./rules.js').RuleLevel} RuleLevel */
 /** @typedef {import('./rules.js').RuleScope} RuleScope */
 /** @typedef {import('./view.js').AssignView} AssignView */
+/** @typedef {import('./day-table.js').AssignDay} AssignDay */
+/** @typedef {import('./day-table.js').DayPiece} DayPiece */
 /** @typedef {import('./score.js').AssignResult} AssignResult */
 /** @typedef {import('./score.js').AssignCompleteResult} AssignCompleteResult */
 /** @typedef {import('./score.js').AssignIncompleteResult} AssignIncompleteResult */

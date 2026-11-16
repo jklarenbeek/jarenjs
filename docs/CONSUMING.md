@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->10 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->45 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -213,7 +213,7 @@ exact: `npm run test:tree-shaking` fails when one differs from the
 tree's. The heaps are re-measured for every release
 (`npm run test:tree-shaking -- --write`), and
 [`benchmark/node-closures.json`](../benchmark/node-closures.json) holds
-the same figures for all <!--fact:closure.subpaths-->277<!--/fact--> importable subpaths of
+the same figures for all <!--fact:closure.subpaths-->278<!--/fact--> importable subpaths of
 every package, each file of a wildcard export (`@jarenjs/core/dates/*`)
 included.
 
@@ -297,7 +297,7 @@ included.
 | `.` | 87 | core 61, json 26 | 3.9 |
 | `./basic` | 3 | json 2, core 1 | 0.2 |
 | `./canonical` | 17 | core 10, json 7 | 0.9 |
-| `./formula` | 85 | core 61, json 24 | 3.8 |
+| `./formula` | 85 | core 61, json 24 | 3.7 |
 | `./formula/batch` | 86 | core 61, json 25 | 3.8 |
 | `./formula/migrate` | 88 | core 61, json 27 | 4.1 |
 | `./jslt` | 103 | core 72, json 31 | 4.1 |
@@ -333,7 +333,8 @@ included.
 |---|---:|---|---:|
 | `.` | 5 | core 5 | 0.3 |
 | `./array` | 6 | core 6 | 0.3 |
-| `./assign` | 15 | core 15 | 0.7 |
+| `./assign` | 17 | core 17 | 0.7 |
+| `./assign/days` | 19 | core 19 | 0.8 |
 | `./async` | 6 | core 6 | 0.3 |
 | `./bigint` | 6 | core 6 | 0.3 |
 | `./cache` | 9 | core 9 | 0.6 |

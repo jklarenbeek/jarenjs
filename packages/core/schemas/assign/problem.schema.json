@@ -98,6 +98,11 @@
         },
         "attributes": {
           "$ref": "#/$defs/attributes"
+        },
+        "zone": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The zone the task's civil days are told in; read only by resource-day rules."
         }
       }
     },

@@ -204,6 +204,29 @@ if (assignLeak.length > 0)
   throw new Error(`@jarenjs/core/assign pulled a calendar, series, date, locale or storage module into the bundle: ${assignLeak.map(([file]) => file).join(', ')}`);
 console.log(`Tree-shaking smoke test passed (${assignResult.outputFiles[0].contents.length} byte assign bundle carries no calendar, series, date, locale or storage module).`);
 
+// The civil-day seam is where the calendar enters assignment scoring, and
+// only for a host that imports it: it carries the calendar's splitting
+// code but no zone data (the provider is the host's) and no storage.
+const assignDaysResult = await build({
+  stdin: {
+    contents: `import { civilDays } from '@jarenjs/core/assign/days'; export { civilDays };`,
+    resolveDir: process.cwd(),
+    sourcefile: 'assign-days-consumer.js',
+  },
+  bundle: true,
+  format: 'esm',
+  metafile: true,
+  minify: true,
+  platform: 'neutral',
+  treeShaking: true,
+  write: false,
+});
+const assignDaysLeak = Object.entries(Object.values(assignDaysResult.metafile.outputs)[0].inputs)
+  .filter(([file, info]) => /packages\/locales\/|packages\/db\//.test(file) && info.bytesInOutput > 0);
+if (assignDaysLeak.length > 0)
+  throw new Error(`@jarenjs/core/assign/days pulled a locale or storage module into the bundle: ${assignDaysLeak.map(([file]) => file).join(', ')}`);
+console.log(`Tree-shaking smoke test passed (${assignDaysResult.outputFiles[0].contents.length} byte assign/days bundle carries no zone data or storage module).`);
+
 // Every `@jarenjs/linq` subpath's measured size, collected as the probes
 // run and checked against docs/CONSUMING.md's table at the end: a price
 // this repository publishes is a price this gate measured, so it can go

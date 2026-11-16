@@ -13,6 +13,8 @@ import { compareIds, isRecord, pointer } from './model.js';
 
 /** What a view throws when a rule's reads pass `maxWork`. */
 const WORK_LIMIT = /* @__PURE__ */ Object.freeze({ limit: 'maxWork' });
+/** What a view throws when a rule reads the days of a resource whose days cannot be told. */
+const NO_ZONE = /* @__PURE__ */ Object.freeze({ reason: 'no-zone' });
 
 const EMPTY = /* @__PURE__ */ Object.freeze([]);
 
@@ -67,6 +69,10 @@ export class EvaluationContext {
     this.longest = longest;
     /** @type {Map<string, Map<string, Map<unknown, readonly unknown[]>>>} */
     this.factIndexes = new Map();
+    /** @type {import('./day-table.js').DayTable | null} - built at the first `resource-day` rule */
+    this.days = null;
+    /** @type {string | null} - the resource whose days a rule read when they cannot be told */
+    this.noZone = null;
   }
 
   /**
@@ -266,12 +272,61 @@ export class AssignView {
   }
 
   /**
+   * A resource's civil days, sorted by zone and then date: each day's
+   * whole span and the resource's pieces in it. Read only by a
+   * `resource-day` rule. A resource with an assigned task that has no
+   * zone has days nobody can tell: reading them makes the unit being
+   * evaluated an unknown `no-zone`, whatever the rule answers.
+   * @param {string} resource
+   * @returns {readonly import('./day-table.js').AssignDay[]}
+   */
+  daysOf(resource) {
+    const days = this.#days(resource);
+    const list = days.byResource.get(resource) ?? EMPTY;
+    let rows = list.length;
+    for (const day of list) rows += day.pieces.length;
+    this.#context.charge(rows);
+    return list;
+  }
+
+  /**
+   * One civil day of a resource in a zone, or null when the resource
+   * works no part of it. Read as {@link daysOf} is.
+   * @param {string} resource @param {string} zone @param {string} date - `YYYY-MM-DD`
+   * @returns {import('./day-table.js').AssignDay | null}
+   */
+  day(resource, zone, date) {
+    const days = this.#days(resource);
+    const day = days.byKey.get(resource)?.get(`${zone}\n${date}`) ?? null;
+    this.#context.charge(day === null ? 0 : day.pieces.length);
+    return day;
+  }
+
+  /**
    * The problem's own attributes (host data), or null.
    * @returns {Readonly<Record<string, unknown>> | null}
    */
   attributes() {
     this.#context.charge(0);
     return this.#context.index.problem.attributes ?? null;
+  }
+
+  /**
+   * The day table, for a `resource-day` rule reading a resource whose
+   * days can be told.
+   * @param {string} resource
+   * @returns {import('./day-table.js').DayTable}
+   */
+  #days(resource) {
+    const context = this.#context;
+    if (this.#rule.scope !== 'resource-day')
+      throw new AssignError('JN0021', `rule ${JSON.stringify(this.#rule.id)} reads civil days; only a resource-day rule does`, `/rules/${pointer(this.#rule.id)}/scope`);
+    const days = /** @type {import('./day-table.js').DayTable} */ (context.days);
+    if (days.zoneless.has(resource)) {
+      context.noZone = resource;
+      throw NO_ZONE;
+    }
+    return days;
   }
 
   /**

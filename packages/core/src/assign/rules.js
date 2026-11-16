@@ -5,14 +5,19 @@ import { compareIds, idOf, isRecord, pointer, revisionOf } from './model.js';
 import { contentKey } from '../object.js';
 
 /** @typedef {'hard' | 'service' | 'soft'} RuleLevel */
-/** @typedef {'resource' | 'task' | 'global'} RuleScope */
+/** @typedef {'resource' | 'resource-day' | 'task' | 'global'} RuleScope */
 
 /**
- * The scope instance a rule is evaluated for: one resource, one task, or
- * the whole problem (`id` null).
+ * The scope instance a rule is evaluated for: one resource, one task, the
+ * whole problem (`id` null), or one resource on one civil day of one zone
+ * (`resource-day`: `id` the resource, with `zone` and `date`). A
+ * `resource-day` unit whose `zone` and `date` are null names a resource
+ * whose days could not be told, in an unknown `no-zone`.
  * @typedef {Object} RuleUnit
  * @property {RuleScope} scope
  * @property {string | null} id
+ * @property {string | null} [zone] - `resource-day` only: the zone the day is civil in
+ * @property {string | null} [date] - `resource-day` only: the civil date, `YYYY-MM-DD`
  */
 
 /**
@@ -79,7 +84,7 @@ import { contentKey } from '../object.js';
 
 /** The levels, best kept first. */
 export const RULE_LEVELS = /* @__PURE__ */ Object.freeze(/** @type {const} */ (['hard', 'service', 'soft']));
-const SCOPES = /* @__PURE__ */ Object.freeze(['resource', 'task', 'global']);
+const SCOPES = /* @__PURE__ */ Object.freeze(['resource', 'resource-day', 'task', 'global']);
 const MEMBERS = /* @__PURE__ */ Object.freeze(['id', 'version', 'level', 'scope', 'evaluate', 'weight', 'measure', 'reads']);
 
 /** @type {WeakSet<object>} */
@@ -101,7 +106,7 @@ function ruleOf(rule, path) {
   if (!RULE_LEVELS.includes(/** @type {any} */ (record.level)))
     throw new AssignError('JN0011', `${JSON.stringify(record.level)} is not hard, service or soft`, `${path}/level`);
   if (!SCOPES.includes(/** @type {any} */ (record.scope)))
-    throw new AssignError('JN0012', `${JSON.stringify(record.scope)} is not resource, task or global`, `${path}/scope`);
+    throw new AssignError('JN0012', `${JSON.stringify(record.scope)} is not resource, resource-day, task or global`, `${path}/scope`);
   if (typeof record.evaluate !== 'function') throw new AssignError('JN0010', 'evaluate is a function', `${path}/evaluate`);
   const weight = record.weight ?? 1;
   if (!Number.isSafeInteger(weight) || /** @type {number} */ (weight) < 1)
@@ -144,7 +149,9 @@ function ruleOf(rule, path) {
  *
  * A rule is `{ id, version, level, scope, evaluate, weight?, measure?, reads? }`:
  * `level` is `hard`, `service` or `soft`; `scope` is `resource` (evaluated
- * once per resource), `task` (once per task) or `global` (once);
+ * once per resource), `resource-day` (once per resource and civil day of a
+ * zone it works in; scoring then needs `options.days` from
+ * `@jarenjs/core/assign/days`), `task` (once per task) or `global` (once);
  * `evaluate(view, unit)` is synchronous and pure and answers
  * `{ matches?, unknowns? }`. `reads.facts` names the fact tables it reads:
  * a rule may read no other, and a problem missing one makes the rule

@@ -34,6 +34,9 @@ import { AssignError } from './errors.js';
  * @property {AssignInterval} interval
  * @property {AssignDemand[]} demands
  * @property {Record<string, unknown>} [attributes] - host data, never read by the engine
+ * @property {string} [zone] - the zone the task's civil days are told in, such as
+ *   `Europe/Amsterdam`; read only by `resource-day` rules, and a task without
+ *   one has days nobody can tell (an unknown `no-zone`, never UTC)
  */
 
 /**
@@ -271,7 +274,7 @@ function demandOf(value, path) {
  * @returns {AssignTask}
  */
 function taskOf(value, path) {
-  const record = shape(value, path, 'a task', ['id', 'revision', 'interval', 'demands'], ['attributes']);
+  const record = shape(value, path, 'a task', ['id', 'revision', 'interval', 'demands'], ['attributes', 'zone']);
   /** @type {Record<string, unknown>} */
   const out = {};
   if (record.attributes !== undefined) out.attributes = attributesOf(record.attributes, `${path}/attributes`);
@@ -284,6 +287,11 @@ function taskOf(value, path) {
   out.id = idOf(record.id, `${path}/id`);
   out.interval = intervalOf(record.interval, `${path}/interval`);
   out.revision = revisionOf(record.revision, `${path}/revision`);
+  if (record.zone !== undefined) {
+    if (typeof record.zone !== 'string' || record.zone.length === 0)
+      throw new AssignError('JN0001', 'a zone is a non-empty string', `${path}/zone`);
+    out.zone = record.zone;
+  }
   return /** @type {AssignTask} */ (Object.freeze(out));
 }
 

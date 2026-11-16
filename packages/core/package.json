@@ -153,6 +153,10 @@
       "types": "./dist/types/assign/index.d.ts",
       "default": "./src/assign/index.js"
     },
+    "./assign/days": {
+      "types": "./dist/types/assign/days.d.ts",
+      "default": "./src/assign/days.js"
+    },
     "./schemas/*": "./schemas/*",
     "./stats": {
       "types": "./dist/types/stats.d.ts",
