@@ -40,8 +40,9 @@ import { AssignError } from './errors.js';
  */
 
 /**
- * One resource filling one slot of one task. `lock` is kept as data for
- * the host and for later search; scoring does not read it.
+ * One resource filling one slot of one task. `lock` is kept as data:
+ * scoring does not read it, and `solve`'s `local` strategy holds a
+ * `hard` one and changes a `soft` one only as churn against the baseline.
  * @typedef {Object} Assignment
  * @property {string} task
  * @property {string} slot

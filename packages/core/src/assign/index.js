@@ -14,7 +14,9 @@
  * only the units the edit touches and answers the bytes full scoring
  * answers; and `solve`, which proposes assignments for the open places
  * by exhaustive enumeration (within a declared size) or a greedy fill,
- * re-validates the proposal and says how much its status proves. Pure
+ * improves or repairs a list by local search against a baseline (hard
+ * locks never move, soft ones only as churn, which it reports beside the
+ * score), re-validates the proposal and says how much its status proves. Pure
  * JSON in and out, no clock, no storage. A `resource-day` rule's civil days
  * come through `@jarenjs/core/assign/days`, so this entry carries no
  * calendar. See docs/ASSIGN.md.
@@ -69,6 +71,7 @@ export { solve, SOLVE_LIMITS } from './search/solve.js';
 /** @typedef {import('./search/solve.js').SolveResult} SolveResult */
 /** @typedef {import('./search/solve.js').SolveCounts} SolveCounts */
 /** @typedef {import('./search/solve.js').SolveProvenance} SolveProvenance */
+/** @typedef {import('./search/churn.js').SolveChurn} SolveChurn */
 /** @typedef {import('./search/construct.js').RankHook} RankHook */
 /** @typedef {import('./search/construct.js').RankCandidate} RankCandidate */
 /** @typedef {import('./search/construct.js').RankState} RankState */

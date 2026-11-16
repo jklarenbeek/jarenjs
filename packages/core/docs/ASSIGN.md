@@ -6,7 +6,7 @@
 - a rule contract through which the host supplies every constraint;
 - exact, explained scoring;
 - an evaluator that, after an edit or for a hypothetical one, re-evaluates only what the edit touches and answers the bytes full scoring answers;
-- `solve`, which proposes assignments for a problem's open places, re-validates the proposal, and says how much its status proves.
+- `solve`, which proposes assignments for a problem's open places or repairs its list against a baseline, re-validates the proposal, and says how much its status proves.
 
 It knows nothing about rest periods, skills, opening hours or fairness. Those are rules the host writes against the contract, and **the engine ships none**.
 
@@ -715,23 +715,24 @@ The scope is the declaration, and the view checks it. Suppose one of a rule's un
 
 ## 9. Search
 
-`solve(problem, ruleSet, { strategy, seed?, budgets?, rank?, signal?, limits?, days? })` proposes assignments for a problem's open places. It scores with the rules the host gave it, through an evaluator (§8), and re-validates what it proposes with a fresh full scoring.
+`solve(problem, ruleSet, { strategy, seed?, budgets?, rank?, signal?, limits?, days? })` proposes assignments for a problem's open places, or repairs its list (`local`). It scores with the rules the host gave it, through an evaluator (§8), and re-validates what it proposes with a fresh full scoring.
 
-**The space.** An open place is room left in a demand slot past the assignments the problem already holds. Those assignments stay as they are: a solve fills, it does not repair. A *candidate* is the problem's assignments plus, for each slot, a set of resources not already in it no larger than its room. A place may stay open, because the model never requires a slot to be filled: a rule that wants it filled says so. The model has no eligibility either. Every resource is a candidate for every place, and the rules judge it.
+**The space.** An open place is room left in a demand slot past the assignments the problem already holds. For `exhaustive`, `construct` and `auto`, those assignments stay as they are: these strategies fill, and only `local` repairs (below). A *candidate* is the problem's assignments plus, for each slot, a set of resources not already in it no larger than its room. A place may stay open, because the model never requires a slot to be filled: a rule that wants it filled says so. The model has no eligibility either. Every resource is a candidate for every place, and the rules judge it.
 
 The answer is frozen JSON:
 
 ```text
-{ status, best, added, score, bound?, cancelled?, counts, provenance }
+{ status, best, added, removed?, score, churn?, bound?, cancelled?, counts, provenance }
 ```
 
-- `best` is the whole proposed list (the problem's assignments and the added ones, sorted as scoring sorts them), and `added` the assignments the solve adds.
+- `best` is the whole proposed list (sorted as scoring sorts it), `added` the assignments it holds that the problem's list does not, and, for `local` and `auto`, `removed` the problem's assignments it no longer holds. The host applies `best`.
 - `score` is `scoreAssignment(problem, ruleSet, best, { limits, days })`, made again after the search. The search's own scoring of `best` must be the same bytes; when it is not, a rule read state past its view, and the solve is refused (`JN0026`).
 - `bound`, when present, is a score no candidate of the space can beat.
-- `counts` is `{ nodes, moves, ranked, undecided, space }`, defined under the strategies below.
-- `provenance` is the scoring provenance of the problem as given (§3), with the strategy as `algorithm`, and `budgets`, `limits`, `rank` (whether a hook ordered the candidates) and `seed` (null for none).
+- `churn`, for `local` and `auto` on a problem with a `baseline`, is how `best` differs from the baseline (below). Without a baseline it is absent, not zero. It is never part of `score`.
+- `counts` is `{ nodes, moves, ranked, undecided, space }`, defined under the strategies below; `local` and `auto` add `restarts` and `editWork`.
+- `provenance` is the scoring provenance of the problem as given (§3), which carries the baseline's revision, with the strategy that ran as `algorithm`, and `budgets`, `limits`, `rank` (whether a hook ordered the candidates) and `seed` (null for none). For `local` and `auto` it also names the `strategy` asked for, and `budgets` holds all four budgets.
 
-A proposal never commits itself. Nothing is written, and the host rechecks revisions and authority before it applies `added`.
+A proposal never commits itself. Nothing is written, and the host rechecks revisions and authority before it applies `best`.
 
 ```js
 import { registerRules, solve } from '@jarenjs/core/assign';
@@ -743,7 +744,7 @@ const problem = {
     { id: 'mon-early', revision: 1, interval: { start: 0, end: 480 }, demands: [{ slot: 'crew', count: 2 }] },
     { id: 'mon-late', revision: 1, interval: { start: 450, end: 900 }, demands: [{ slot: 'crew', count: 1 }] },
   ],
-  // kept by every candidate: a solve fills, it does not repair
+  // kept by every candidate: exhaustive and construct fill, they do not repair
   assignments: [{ task: 'mon-early', slot: 'crew', resource: 'nina' }],
 };
 // one resource's overlapping tasks
@@ -824,9 +825,9 @@ The budget of 4 moves stops `construct` while it previews the second place, so i
 | `infeasible` | `exhaustive` scored every candidate, and every one has a hard match |
 | `feasible` | the best candidate is fully validated feasible (verdict `feasible`), and nothing more is proved |
 | `limit` | a budget ran out, or the signal aborted (`cancelled: true`); `best` is the best candidate held, and there is no bound |
-| `unknown` | no candidate is validated feasible and nothing is proved: a hard rule could not decide, a scoring stopped at a limit, or (for `construct`) the proposal has a hard match |
+| `unknown` | no candidate is validated feasible and nothing is proved: a hard rule could not decide, a scoring stopped at a limit, or (for `construct`, `local` and `auto`'s heuristic path) the proposal has a hard match |
 
-`optimal` and `infeasible` come only from a complete `exhaustive` search. A cancelled or budget-exhausted search is `limit`, never `infeasible`.
+`optimal` and `infeasible` come only from a complete `exhaustive` search, so `local` and `auto`'s `construct` path answer `feasible` (a validated feasible proposal at a local optimum, or after the restarts asked for) or `unknown`. A cancelled or budget-exhausted search is `limit`, never `infeasible`, even when the problem has no feasible list.
 
 **How the proof reads unknowns.** An unknown only hides matches: a rule that could decide might lower a score, never raise it. So a candidate scores at best what its scoring answers, and at worst that score with every level from the first level an unknown is reported at unbounded below. `optimal` needs the best feasible candidate's worst score to be no less than every other candidate's best score, apart from candidates with a hard match. A candidate of verdict `unknown` that could beat it, or a scoring that stopped at a limit, blocks the proof. The answer is then `feasible` if a validated feasible candidate exists, else `unknown`, and `counts.undecided` says how many candidates were undecided. The bound is the best score any candidate answered, given only when every scoring was complete.
 
@@ -857,9 +858,151 @@ Leaving the place open wins a tie. A tie between resources goes to the first in 
 
 **The rank hook.** `rank(candidate, state)` orders the admissible candidates; a lower integer goes first. It answers a safe integer or a bigint, and anything else, or a throw, is refused (`JN0025`, the throw as `cause`). `candidate` is `{ task, slot, resource, result }`, with `resource: null` for leaving the place open and `result` the scoring the choice would have. `state` is `{ problem, assignments, added }`: the admitted problem, the current list, and what this pass added, in the order it added it. Both are frozen. A rank orders candidates and never waives a hard rule. A greedy that depends on its own path, such as "least time already assigned in this pass first", is a rank over `state.added` in the problem's integer units.
 
+### `local` and repair
+
+`local` starts from the problem's own list and improves it one edit at a time. The edits are those of the evaluator (§8): assign a resource to a slot with room, unassign, move to another resource, and swap the resources of two assignments. Each is previewed with `whatIf`, and one is applied only when it is strictly better under the objective below. When no single edit is better, the list is a local optimum.
+
+**Positions.** The search visits *positions*: each assignment it may change, and each slot with room. Positions named by the most severe match or unknown come first: hard, then service, then soft, then the rest. A match names an assignment when it names its resource (or no resource) and its task (or no task). Within a rank, assignments come before open slots, in task, slot and resource order. At each position, every edit it offers is previewed. The best is applied if it is strictly better than the current list. A tie between the best edits goes to the first in order, or, with a `seed`, to a draw of `mulberry32(seed)` among them. A sweep over every position that applies nothing ends the descent.
+
+**Restarts.** With a `seed` and `budgets.maxRestarts`, the search restores the best list it has held, makes 3 seeded edits, and descends again, `maxRestarts` times. Each restart and each of its edits is counted. The answer is always the best list the search held. A stop by a budget or the signal does not change it.
+
+**The objective** is lexicographic:
+
+1. the class: verdict `feasible`, then `unknown`, then `infeasible-by-validation` (an incomplete scoring is never better);
+2. the hard level, then the service level;
+3. with a baseline, the churn total, fewer changes first;
+4. the soft level;
+5. then the worst score, as for the other strategies.
+
+So a repair first meets the hard rules and the service levels, then changes as little as it can, then improves what is left. `score` stays exactly `scoreAssignment` of `best`: churn is its own member and is never added to a level. A host that wants churn scored writes a rule that reads `baseline()`.
+
+**Locks.** Locks are read from the problem's own list:
+
+- a `hard`-locked assignment is never unassigned, moved or swapped, and `best` holds it as it is;
+- a `soft`-locked assignment may change only when its change counts as churn: when the problem has a baseline that holds it;
+- without a baseline, or when the baseline does not hold it, a `soft` lock is held like a `hard` one;
+- an assignment with no lock may change freely.
+
+**A proposal's locks are exactly the held ones.** An assignment in `best` carries a lock only when the problem's own list holds that same assignment (task, slot, resource) with that lock. So a soft-locked assignment that moves arrives at its new resource with no lock, and if the search makes the original assignment again, it gets its lock back. The evaluator's own `move` and `swap` keep the lock (§8), so `local` makes such a change as unassigns and then assigns instead. Such an edit is made whole or not at all: each evaluator edit counts as a move, and a budget that cannot cover all of them stops the search before it.
+
+**Churn** compares assignments by task, slot and resource; a lock is not churn. Within one slot, the baseline's resources the list no longer holds and the resources it holds that the baseline did not are paired in id order. Each pair is one `moved` assignment `{ task, slot, from, to }`, and what is left over is `removed` or `added`. `total` counts each change once. `byResource` counts the changes each resource is in, so a move counts for both of its resources; `byTask` counts each task's changes. Ids with no change are not listed, and every list is sorted by id. Churn is counted against the baseline, not against the list the search started from.
+
+```js
+import { registerRules, solve } from '@jarenjs/core/assign';
+
+const published = [
+  { task: 'mon-early', slot: 'crew', resource: 'ari' },
+  { task: 'mon-early', slot: 'crew', resource: 'nina', lock: 'hard' },
+  { task: 'mon-late', slot: 'crew', resource: 'ari', lock: 'soft' },
+];
+const problem = {
+  revision: 'week-12-r2',
+  resources: [{ id: 'ari', revision: 1 }, { id: 'nina', revision: 1 }, { id: 'sam', revision: 1 }],
+  tasks: [
+    { id: 'mon-early', revision: 1, interval: { start: 0, end: 480 }, demands: [{ slot: 'crew', count: 2 }] },
+    { id: 'mon-late', revision: 1, interval: { start: 480, end: 900 }, demands: [{ slot: 'crew', count: 1 }] },
+  ],
+  // ari is away all Monday now
+  facts: { away: { revision: 2, rows: [{ resource: 'ari' }] } },
+  assignments: published,
+  baseline: { revision: 'week-12', assignments: published },
+};
+// an assignment of someone away
+const notAway = {
+  id: 'not-away', version: 1, level: 'hard', scope: 'resource', reads: { facts: ['away'] },
+  evaluate(view, unit) {
+    if (view.factRows('away', 'resource', unit.id).length === 0) return {};
+    return { matches: view.assignmentsOf(unit.id).map((a) => ({ magnitude: 1, messageId: 'away', subjects: { resources: [unit.id], tasks: [a.task] } })) };
+  },
+};
+// each place a task leaves open
+const covered = {
+  id: 'covered', version: 1, level: 'service', scope: 'task',
+  evaluate(view, unit) {
+    const want = view.task(unit.id).demands.reduce((sum, demand) => sum + demand.count, 0);
+    const open = want - view.assignmentsFor(unit.id).length;
+    return open > 0 ? { matches: [{ magnitude: open, messageId: 'open', subjects: { tasks: [unit.id] } }] } : {};
+  },
+};
+const rules = registerRules([notAway, covered]);
+const repaired = solve(problem, rules, { strategy: 'local' });
+
+export const repair = {
+  status: repaired.status,
+  best: repaired.best.map((a) => `${a.task} ${a.resource}${a.lock ? ` (${a.lock})` : ''}`),
+  score: { hard: repaired.score.score.hard, service: repaired.score.score.service },
+  churn: { total: repaired.churn.total, moved: repaired.churn.moved, byResource: repaired.churn.byResource },
+  baseline: repaired.provenance.baseline,
+};
+```
+
+```json
+{
+  "status": "feasible",
+  "best": [
+    "mon-early nina (hard)",
+    "mon-early sam",
+    "mon-late nina"
+  ],
+  "score": {
+    "hard": 0,
+    "service": 0
+  },
+  "churn": {
+    "total": 2,
+    "moved": [
+      {
+        "from": "ari",
+        "slot": "crew",
+        "task": "mon-early",
+        "to": "sam"
+      },
+      {
+        "from": "ari",
+        "slot": "crew",
+        "task": "mon-late",
+        "to": "nina"
+      }
+    ],
+    "byResource": [
+      {
+        "count": 2,
+        "resource": "ari"
+      },
+      {
+        "count": 1,
+        "resource": "nina"
+      },
+      {
+        "count": 1,
+        "resource": "sam"
+      }
+    ]
+  },
+  "baseline": "week-12"
+}
+```
+
+Ari's two assignments now carry a hard match. Moving each costs one change, and leaving a place open would cost the service level. The soft lock on Monday's late shift was in the baseline, so it could move: the churn lists it, and Nina's new assignment carries no lock, because the problem never locked it. Nina's hard lock stayed. A tie between Nina and Sam for the late shift went to the first id.
+
+### `auto`
+
+`auto` runs `exhaustive` when its space is within `SOLVE_LIMITS.maxSpace`, and otherwise `construct` and then `local` over the same space: the problem's own list is kept, and `local` changes only what `construct` added. So both paths answer one question, and `auto` within the limit answers exactly what `exhaustive` answers. Both paths use the order of the other strategies, without churn. A repair is asked for with `local`.
+
+`provenance.algorithm` names what ran: `exhaustive`, `construct+local`, or `construct` when a budget or the signal stopped `construct`. `provenance.strategy` is `auto`. It never falls back silently: `exhaustive` past its limit is still refused (`JN0024`), and `auto` says which path it took. The limit is not settable per call, so the same problem always takes the same path.
+
+`seed` and `rank` go to `construct`, and `seed` to `local`. When `exhaustive` runs, they are unused, and the provenance says so: `algorithm` is `exhaustive`.
+
 ### Budgets and the signal
 
-`budgets` is `{ maxNodes?, maxMoves? }`, each a whole number from 1. They count work and never time it, so the same budget stops at the same place on every host. The search stops before a node or a move the budget does not cover.
+`budgets` is `{ maxNodes?, maxMoves?, maxRestarts?, maxEditWork? }`, each a whole number from 1. They count work and never time it, so the same budget stops at the same place on every host. The search stops before a node or a move the budget does not cover.
+
+- `maxNodes` counts the candidates `exhaustive` scores, the places `construct` decides and the positions `local` tries.
+- `maxMoves` counts the evaluator answers each asks for: a preview, an edit, or the restore of the best list before a restart.
+- `maxRestarts` (`local` and `auto` only, and only with a `seed`) is the number of restarts after the first descent. Making all of them is the search asked for, not a stop: the answer is then `feasible` or `unknown`, not `limit`.
+- `maxEditWork` (`local` and `auto` only) counts the evaluator's rule evaluations over one unit (`counts.evaluated` of §8), the first full scoring included, and is checked before each move. `counts.editWork` reports it.
+
+`exhaustive` and `construct` refuse the last two (`JN0015`).
 
 `signal` is an `AbortSignal`, read before each node and each move. A solve is synchronous, so it sees an abort raised before the call, or by host code it calls (a rule or the rank hook). Either way the answer is `limit` with `cancelled: true`.
 
