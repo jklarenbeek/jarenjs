@@ -15,7 +15,11 @@
  * iCalendar back into the same model through one engine, canonical
  * mode: a VTIMEZONE is compiled into the zone provider its TZID
  * resolves through, and what is outside the subset is reported, never
- * silently interpreted. See docs/ICAL.md.
+ * silently interpreted. `parseIcal(text, { mode: 'lossless' })` also
+ * keeps the syntax tree over the input's octets, and `patchIcal` edits
+ * it (move, cancel or exclude an occurrence, retitle, describe,
+ * relocate, remove), re-emitting every octet no edit reaches unchanged.
+ * See docs/ICAL.md.
  * @module
  */
 
@@ -307,3 +311,4 @@ export function stringifyIcal(calendar, options = undefined) {
 
 export { ICAL_CODES, ICAL_LIMIT_CODES, IcalError, JoslLimitError };
 export { parseIcal, createIcalReader, iterateIcal, IcalReader } from './ical-read.js';
+export { patchIcal } from './ical-lossless.js';

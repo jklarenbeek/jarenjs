@@ -39,7 +39,7 @@ import { IcalMachine } from './ical-machine.js';
 import { IANA_FORM, ZONE_HORIZON, ZoneTable } from './ical-vtimezone.js';
 import { IcalError, daysOf, readDuration, wallOf } from './ical-wire.js';
 import { limitOption } from './limits.js';
-import { ICAL_ITERATE, ICAL_READ, admitOptions } from './options.js';
+import { ICAL_ITERATE, ICAL_PARSE, ICAL_READ, admitOptions } from './options.js';
 import { abortedError, closeIterator } from './pull.js';
 
 const DAY = 86400000;
@@ -92,6 +92,9 @@ const WITHHOLDING = Object.freeze(['ICAL1017', 'ICAL1018', 'ICAL1019', 'ICAL1020
 /**
  * The reader's options.
  * @typedef {Object} IcalReaderOptions
+ * @property {'canonical' | 'lossless'} [mode] - `'canonical'` (the default) reads the model;
+ *   `'lossless'`, which only `parseIcal` takes, also keeps the syntax tree over the input's
+ *   octets, for `patchIcal`
  * @property {import('@jarenjs/core/series').ZoneProvider | null} [provider] - resolves a TZID
  *   that names an IANA zone and that no VTIMEZONE of the file defines (every TZID under
  *   `vtimezone: 'provider'`); without it such a TZID is reported unresolved
@@ -125,6 +128,32 @@ const WITHHOLDING = Object.freeze(['ICAL1017', 'ICAL1018', 'ICAL1019', 'ICAL1020
  * @property {string[]} undeclared - TZIDs the read's values use that no VTIMEZONE of the file
  *   defines (RFC 5545 asks for one); they resolve through the caller's provider
  */
+
+/**
+ * The syntax tree a lossless read keeps beside the model: the input's
+ * octets and every component and property of the calendar over them.
+ * Each property carries its name (upper case), parameters and value as
+ * written (escapes kept), and `from`/`to`, the octets of its own lines -
+ * the folded spelling, folds and line break included; each component
+ * carries `from`/`head` (its BEGIN line), `tail`/`to` (its END line), its
+ * properties and its children in the order read. Unknown, X- and IANA
+ * content is in it exactly as written, and the octets between two spans
+ * (a byte order mark, an empty line) belong to neither. `patchIcal` reads
+ * only a tree `parseIcal` returned.
+ * @typedef {Object} IcalTree
+ * @property {'text' | 'octets'} form - what was read: a string, re-emitted as one, or octets
+ * @property {Uint8Array} source - the input's octets (a string's UTF-8), a copy
+ * @property {import('./ical-machine.js').IcalNode} root - the VCALENDAR component
+ * @property {{ prodId: string, method?: 'publish', components: Record<string, any>[] }} calendar - the model read
+ * @property {IcalZones} zones - the zones of the read
+ */
+
+/**
+ * The trees `parseIcal` made, each with the options it was read under:
+ * `patchIcal` takes no other, and reads its output under the same.
+ * @type {WeakMap<object, IcalReaderOptions>}
+ */
+export const TREES = /* @__PURE__ */ new WeakMap();
 
 //#region report
 
@@ -257,7 +286,7 @@ function paramsOf(prop, types, context) {
  * @param {import('./ical-machine.js').IcalProperty} prop
  * @returns {string}
  */
-function textOf(prop) {
+export function textOf(prop) {
   const { value } = prop;
   if (!value.includes('\\'))
     return value;
@@ -696,7 +725,7 @@ function readEvent(node, context) {
  * @param {any} value
  * @returns {string}
  */
-function slotId(value) {
+export function slotId(value) {
   if (value.kind === 'date')
     return value.date;
   if (value.kind === 'utc')
@@ -858,10 +887,21 @@ function readFreebusy(node, context) {
 //#region engine
 
 /**
+ * The calendar component of a reader's input, once read; set by the
+ * reader class, for `parseIcal`'s lossless tree.
+ * @type {(reader: IcalReader) => import('./ical-machine.js').IcalNode | null}
+ */
+let rootOf;
+
+/**
  * The incremental iCalendar reader: chunks in, components out. One
  * engine serves `parseIcal`, `createIcalReader` and `iterateIcal`.
  */
 export class IcalReader {
+  static {
+    rootOf = (reader) => reader.#machine.calendar;
+  }
+
   #machine;
   #report;
   /** @type {ReadContext} */
@@ -899,7 +939,7 @@ export class IcalReader {
       component: (node) => this.#component(node),
       lineFeed: (line) => this.#report.add('ICAL1010', 'LF', this.#machine.calendar === null ? '' : '/VCALENDAR', line,
         'the line ends in a bare line feed; it is read as CRLF'),
-    });
+    }, admitted.mode === 'lossless');
   }
 
   /**
@@ -1061,15 +1101,20 @@ export class IcalReader {
 
 //#region entries
 
+
 /**
  * Read a whole iCalendar text (RFC 5545) into the model `stringifyIcal`
  * writes, canonical mode: what is outside the supported subset is
- * listed in `report.unsupported`, never silently interpreted.
+ * listed in `report.unsupported`, never silently interpreted. Under
+ * `mode: 'lossless'` the answer also holds `tree`, the syntax tree over
+ * the input's octets that `patchIcal` edits; the model and report are
+ * the same in both modes.
  * @param {string | Uint8Array} text - the calendar, as text or UTF-8 octets
  * @param {IcalReaderOptions} [options]
  * @returns {{ calendar: { prodId: string, method?: 'publish', components: Record<string, any>[] }, report: IcalReport,
- *   zones: IcalZones }} single events and free/busy components in the order read, then every
- *   series in the order it began; `zones.provider` is what their zoned values resolve through
+ *   zones: IcalZones, tree?: IcalTree }} single events and free/busy components in the order read, then every
+ *   series in the order it began; `zones.provider` is what their zoned values resolve through; `tree`
+ *   under `mode: 'lossless'` only
  * @throws {IcalError} for text the reader cannot follow (`ICAL1001`-`ICAL1009`), and under `strict` for any report entry
  * @throws {import('./limits.js').JoslLimitError} for a limit the input crosses
  * @throws {TypeError} for an unknown or mistyped option
@@ -1080,11 +1125,20 @@ export class IcalReader {
  * report.unsupported[0].path; // '/VCALENDAR/VEVENT[0]/X-COLOR'
  */
 export function parseIcal(text, options = undefined) {
-  const reader = new IcalReader(options, 'parseIcal');
+  const reader = new IcalReader(options, 'parseIcal', ICAL_PARSE);
   const first = reader.feed(text);
   const { calendar, report, zones } = reader.end();
   calendar.components = [...first, ...calendar.components];
-  return { calendar, report, zones };
+  const root = rootOf(reader);
+  if (/** @type {any} */ (options)?.mode !== 'lossless' || root === null)
+    return { calendar, report, zones };
+  // the octets the machine read: a string has no lone surrogate here, so its UTF-8 is exact
+  const source = typeof text === 'string' ? new TextEncoder().encode(text) : text.slice();
+  /** @type {IcalTree} */
+  const tree = Object.freeze({ form: typeof text === 'string' ? 'text' : 'octets', source, root, calendar, zones });
+  const { mode: _mode, ...read } = /** @type {IcalReaderOptions} */ (options);
+  TREES.set(tree, read);
+  return { calendar, report, zones, tree };
 }
 
 /**

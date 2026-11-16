@@ -8,7 +8,10 @@ zoned time is written only under a zone mode the caller names. Nothing
 outside the documented subset is written raw: an unknown member, property
 or component is refused with a code. The reader reads the same subset
 back, canonical mode: what lies outside it is reported, never silently
-interpreted ([Reading](#reading)).
+interpreted ([Reading](#reading)). Foreign iCalendar can also be edited
+without losing what lies outside the subset: a lossless read keeps the
+syntax tree, and `patchIcal` re-emits every octet no edit reaches
+unchanged ([Editing](#editing-lossless)).
 
 ```js
 import { stringifyIcal } from '@jarenjs/josl/ical';
@@ -465,6 +468,97 @@ is read.
 until the end, so `maxComponents` and `maxProperties` bound what the
 reader holds.
 
+## Editing (lossless)
+
+```js
+import { parseIcal, patchIcal } from '@jarenjs/josl/ical';
+import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
+
+const text = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Example//Shop//EN',
+  'BEGIN:VEVENT', 'UID:stock-count', 'DTSTAMP:20260301T000000Z',
+  'DTSTART;TZID=Europe/Amsterdam:20260302T090000', 'DTEND;TZID=Europe/Amsterdam:20260302T093000',
+  'RRULE:FREQ=WEEKLY;BYDAY=MO', 'SUMMARY:Stock count', 'X-SHOP-AISLE:3',
+  'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n');
+const { tree } = parseIcal(text, { mode: 'lossless', provider: createIntlZoneProvider({ revision: '2026e' }) });
+const edited = patchIcal(tree, [
+  { op: 'retitle', uid: 'stock-count', summary: 'Stock count, aisle 3' },
+  { op: 'cancel', uid: 'stock-count', recurrenceId: '2026-03-09T09:00:00' },
+]);
+edited.split('\r\n').slice(9, 12);
+// ['SUMMARY:Stock count\\, aisle 3', 'X-SHOP-AISLE:3', 'EXDATE;TZID=Europe/Amsterdam:20260309T090000']
+```
+
+`parseIcal(text, { mode: 'lossless' })` reads as the canonical mode does
+(the same `calendar`, `report` and `zones`) and also returns `tree`: the
+input's octets and every component and property of the calendar over
+them. A property carries its name (upper case), parameters and value as
+written, and `from`/`to`, the octets of its own lines - the folded
+spelling, its folds and line break included; a component carries
+`from`/`head` (its BEGIN line), `tail`/`to` (its END line), its
+properties and its children in the order read. X- and IANA properties,
+parameters and components, VALARMs, VTIMEZONEs, the order of everything,
+CRLF and bare LF line ends, a byte order mark and empty lines are in it
+exactly as written. Only `parseIcal`, which holds the whole input, reads
+in this mode; `createIcalReader` and `iterateIcal` take `mode:
+'canonical'` only.
+
+`patchIcal(tree, edits)` returns the calendar with the edits applied: a
+string when a string was read, octets when octets were. With no edits it
+is the input. Each edit names its event by `uid` and, for one occurrence
+of a series, its slot by `recurrenceId`, spelled as an occurrence spells
+it (`2026-03-02`, `2026-03-02T09:00:00`, `2026-03-02T08:00:00Z`).
+
+| Edit | What it writes |
+|---|---|
+| `{ op: 'retitle', uid, recurrenceId?, summary }` | SUMMARY of the event, or of the occurrence's own VEVENT: the line replaced, or added; `null` removes it |
+| `{ op: 'describe', uid, recurrenceId?, description }` | DESCRIPTION, the same way |
+| `{ op: 'relocate', uid, recurrenceId?, location }` | LOCATION, the same way |
+| `{ op: 'move', uid, recurrenceId, start, end? \| duration?, dtstamp? }` | the occurrence's own VEVENT gets the new DTSTART (and DTEND or DURATION); with none, a new VEVENT copied from the series' (every line but RRULE, RDATE, EXDATE and EXRULE, its VALARMs with it), with RECURRENCE-ID, the new times and, given `dtstamp`, a new DTSTAMP |
+| `{ op: 'cancel', uid, recurrenceId? }` | STATUS:CANCELLED on the event, or on the occurrence's own VEVENT; an occurrence with none gets an EXDATE |
+| `{ op: 'exdate', uid, recurrenceId }` | an EXDATE on the series |
+| `{ op: 'remove', uid, recurrenceId? }` | the event's lines (every VEVENT of its UID), or the occurrence's own VEVENT's, which returns the occurrence to its series' form |
+
+Every octet no edit reaches is the input's own. An edit writes whole
+content lines and only its own:
+
+- a replaced line (SUMMARY, DESCRIPTION, LOCATION, STATUS, DTSTAMP,
+  DTSTART, DTEND, DURATION) keeps its name and parameters as written and
+  its line break; only the value is new, escaped as TEXT where it is text
+  and folded at 75 octets. A DTEND that takes a DURATION's place, or the
+  reverse, is a new property and spelled anew; a new override's DTSTART,
+  DTEND, DURATION and DTSTAMP keep the series' names and parameters;
+- an inserted line takes the line break of the line it follows, after the
+  component's last property (an EXDATE after the last EXDATE, a new
+  override after the last VEVENT of its UID); times are spelled in the
+  series' kind (`VALUE=DATE`, the series' TZID, or `Z`);
+- a copied line stays octets, so a fold inside a UTF-8 sequence is copied
+  as it was;
+- an excluded or cancelled occurrence cancelled again, or a property
+  removed that is not there, writes nothing.
+
+Each edit is checked against the model the same read produced, and every
+edit is planned before anything is emitted, so a refusal returns nothing:
+
+- a slot must be one the series makes (asked of the calendar layer), of
+  an event the read did not withhold, and an occurrence's own VEVENT one
+  the read took into its series (`ICAL4006` otherwise);
+- a move's times are of the series' kind and zone, in whole seconds;
+- RANGE=THISANDFUTURE overrides stay as written and are never expanded:
+  an edit of their slot or a later one is refused (`ICAL4005`), while the
+  event's text, the override's own text and its removal are edits like
+  any other;
+- a text with an alternate representation (ALTREP), a property held more
+  than once, and an EXDATE over an occurrence's own VEVENT would lose or
+  contradict content (`ICAL4007`);
+- every edit reads the input as it was read: two that reach one line, one
+  occurrence, or an event another removes are refused (`ICAL4010`); read
+  the output again to edit further;
+- the output is read once more under the options the tree was read with,
+  and an edit after which that read would withhold an event it held
+  before is refused (`ICAL4012`): a zoned occurrence moved with a
+  `duration`, which the canonical read does not place, is moved with an
+  `end` instead.
+
 ## Codes
 
 `IcalError` is a coded error: `code`, `reason`, and `docPath`. The
@@ -473,7 +567,10 @@ writer's `docPath` is a JSON pointer into the calendar
 same pointer for the same component, and a refusal of the calendar layer
 is wrapped as `ICAL3005` with the `CalendarError` as `cause`. The reader's
 `docPath` is the path in the text (`/VCALENDAR/VEVENT[2]/DTSTART`), with
-the physical `line`.
+the physical `line`. `patchIcal`'s `docPath` points into its edits
+(`/edits/1/recurrenceId`); a text, a fraction of a second or an end it
+refuses carries the writer's code for it (`ICAL3004`, `ICAL3006`,
+`ICAL3007`, `ICAL3003` for a malformed duration).
 
 | Code | Meaning |
 |---|---|
@@ -521,23 +618,69 @@ the physical `line`.
 | `ICAL3018` | the writer has ended or refused, and takes no more components |
 | `ICAL3019` | `zones: 'embed'` and no horizon for a zone's VTIMEZONE |
 | `ICAL3020` | a zoned time outside the horizon its VTIMEZONE covers |
+| `ICAL4001` | an edit is not one of the documented edits, or a member of it has a form it does not take |
+| `ICAL4002` | no VEVENT holds the UID, or the occurrence, an edit names |
+| `ICAL4003` | more than one VEVENT could be the one an edit names |
+| `ICAL4004` | the event is not recurring, its series makes no such occurrence, or a moved occurrence is excluded or cancelled |
+| `ICAL4005` | the occurrence lies at or after an override over this and future occurrences, which is kept and never expanded |
+| `ICAL4006` | the read withheld the event, or the occurrence's own VEVENT, so the occurrence cannot be checked |
+| `ICAL4007` | the edit would lose content: a property held more than once, a text with an alternate representation, an occurrence with its own VEVENT |
+| `ICAL4008` | a moved occurrence's start or end is not of its series' kind and zone |
+| `ICAL4009` | a move gives no end, and the length is held by a DTEND the new start would leave behind |
+| `ICAL4010` | two edits reach one property or occurrence, or an event another edit removes |
+| `ICAL4011` | the tree is not one `parseIcal` returned under `mode: 'lossless'` |
+| `ICAL4012` | the edited calendar would not read back with every event an edit reached and kept |
 
 ## Capability matrix
 
-| Component or property | Written | Read |
-|---|---|---|
-| VCALENDAR: VERSION, PRODID | supported | supported (VERSION 2.0) |
-| CALSCALE | not written | GREGORIAN; any other refused (`ICAL1008`) |
-| METHOD | `PUBLISH` only | `PUBLISH`; any other reported (`ICAL1011`) |
-| VEVENT: UID, DTSTAMP, DTSTART, DTEND, DURATION | supported | supported |
-| VEVENT: SUMMARY, DESCRIPTION, LOCATION, STATUS, SEQUENCE | supported | supported |
-| VEVENT: RRULE | DAILY, WEEKLY, MONTHLY and YEARLY, for date, floating and utc series, and zoned ones under `zones: 'embed'` | DAILY, WEEKLY, MONTHLY and YEARLY, every kind; sub-daily withheld (`ICAL1020`, `JY0020`) |
-| VEVENT: RDATE (DATE, DATE-TIME, PERIOD), EXDATE, RECURRENCE-ID | supported (no RANGE) | supported; RANGE=THISANDFUTURE kept and reported (`ICAL1015`) |
-| VEVENT: EXRULE | not written | withheld (`ICAL1022`) |
-| VFREEBUSY: UID, DTSTAMP, DTSTART, DTEND, FREEBUSY with FBTYPE | supported | supported |
-| TZID | `zones: 'embed'` (`zones: 'utc'` converts) | a TZID a VTIMEZONE defines, or an IANA name the provider knows; any other withheld (`ICAL1019`) |
-| VTIMEZONE | `zones: 'embed'`: RDATE onsets over the horizon (two days wider), TZUNTIL | compiled (`vtimezone: 'embedded'` by default); a disagreement with the provider reported (`ICAL1023`) |
-| VAVAILABILITY, AVAILABLE | not in this release | reported (`ICAL1013`) |
-| VTODO, VJOURNAL, VALARM, X- components | refused | reported (`ICAL1013`) |
-| ATTENDEE, ORGANIZER, X- and other properties | refused | reported (`ICAL1011`) |
-| LANGUAGE, ALTREP, X- and other parameters | not written | reported (`ICAL1012`) |
+Every component, property and parameter of RFC 5545, the properties and
+parameters RFC 7986 adds and the two RFC 7808 adds, with what the
+writer, the canonical reader and the lossless editor do with each. The
+reader's column is tested name by name (`test/josl/ical-matrix.test.js`):
+a calendar holding only that name is read and its code asserted. Under
+*Lossless*, *preserved* means re-emitted as written by `patchIcal`.
+
+| Component, property or parameter | Written | Read | Lossless |
+|---|---|---|---|
+| `VCALENDAR` | supported | supported | preserved |
+| `VEVENT` | supported | supported | preserved; the component `patchIcal` edits |
+| `VFREEBUSY` | supported | supported | preserved |
+| `VTIMEZONE`, `STANDARD`, `DAYLIGHT` | `zones: 'embed'` | compiled; one that cannot be is reported (`ICAL1014`) | preserved |
+| `VTODO`, `VJOURNAL`, `VAVAILABILITY`, `AVAILABLE`, X- and IANA components | refused (`ICAL3002`) | reported (`ICAL1013`) | preserved |
+| `VALARM` | refused (`ICAL3002`) | reported (`ICAL1013`) | preserved; copied into a new override |
+| `VERSION`, `PRODID` | supported | supported, VERSION 2.0 (any other refused, `ICAL1008`) | preserved |
+| `CALSCALE` | not written | GREGORIAN; any other refused (`ICAL1008`) | preserved |
+| `METHOD` | `PUBLISH` only | `PUBLISH`; any other reported (`ICAL1011`) | preserved |
+| `UID`, `DTSTAMP` | supported | supported | preserved; a new override's DTSTAMP from the edit |
+| `DTSTART`, `DTEND`, `DURATION` | supported | supported; a zoned override's DURATION that differs from its slot's withheld (`ICAL1022`) | preserved; written by `move` |
+| `SUMMARY`, `DESCRIPTION`, `LOCATION` | supported | supported | preserved; set or removed by `retitle`, `describe`, `relocate` |
+| `STATUS` | supported | supported | preserved; written by `cancel` |
+| `SEQUENCE` | supported | supported | preserved |
+| `RRULE` | DAILY, WEEKLY, MONTHLY and YEARLY, for date, floating and utc series, and zoned ones under `zones: 'embed'` | DAILY, WEEKLY, MONTHLY and YEARLY, every kind; sub-daily withheld (`ICAL1020`, `JY0020`) | preserved |
+| `RDATE` | supported (DATE, DATE-TIME, PERIOD) | supported | preserved |
+| `EXDATE` | supported | supported; with no rule or RDATE withheld (`ICAL1022`) | preserved; added by `exdate` and `cancel` |
+| `RECURRENCE-ID` | supported (no RANGE) | supported | preserved; written in a new override |
+| `EXRULE` | not written | withheld (`ICAL1022`) | preserved |
+| `FREEBUSY` | supported, with FBTYPE | supported | preserved |
+| `ATTACH`, `CATEGORIES`, `CLASS`, `COMMENT`, `GEO`, `PERCENT-COMPLETE`, `PRIORITY`, `RESOURCES`, `COMPLETED`, `DUE`, `TRANSP`, `ATTENDEE`, `CONTACT`, `ORGANIZER`, `RELATED-TO`, `URL`, `CREATED`, `LAST-MODIFIED`, `REQUEST-STATUS` | not written | reported (`ICAL1011`) | preserved |
+| `ACTION`, `REPEAT`, `TRIGGER` | not written | reported with their VALARM (`ICAL1013`) | preserved |
+| `TZID` (property), `TZOFFSETFROM`, `TZOFFSETTO`, `TZNAME` | `zones: 'embed'` | compiled | preserved |
+| `TZURL` | not written | read past, informational | preserved |
+| `TZUNTIL` (RFC 7808) | `zones: 'embed'` | compiled: the definition's end | preserved |
+| `TZID-ALIAS-OF` (RFC 7808) | not written | reported (`ICAL1011`) | preserved |
+| `NAME`, `REFRESH-INTERVAL`, `SOURCE`, `COLOR`, `IMAGE` (RFC 7986, calendar) | not written | reported (`ICAL1011`) | preserved |
+| `DESCRIPTION`, `UID`, `URL`, `LAST-MODIFIED`, `CATEGORIES` (RFC 7986, calendar) | not written | reported (`ICAL1011`) | preserved |
+| `CONFERENCE` (RFC 7986) | not written | reported (`ICAL1011`) | preserved |
+| X- and IANA properties | refused (`ICAL3002`) | reported (`ICAL1011`) | preserved |
+| `VALUE`, `TZID` (parameter) | supported | supported | preserved; spelled for every new time |
+| `RANGE` | not written | THISANDFUTURE kept as data and reported (`ICAL1015`); any other withheld (`ICAL1018`) | preserved; edits at or after it refused (`ICAL4005`) |
+| `FBTYPE` | supported | supported | preserved |
+| `ALTREP` | not written | reported (`ICAL1012`) | preserved; a text edit of its property refused (`ICAL4007`) |
+| `LANGUAGE`, `CN`, `CUTYPE`, `DELEGATED-FROM`, `DELEGATED-TO`, `DIR`, `ENCODING`, `FMTTYPE`, `MEMBER`, `PARTSTAT`, `RELATED`, `RELTYPE`, `ROLE`, `RSVP`, `SENT-BY`, `DISPLAY`, `EMAIL`, `FEATURE`, `LABEL`, X- and IANA parameters | not written | reported on a property of the subset (`ICAL1012`) | preserved; a replaced line keeps its parameters |
+
+The vendored RFC examples (`test/josl/fixtures/ical-rfc/`, beside the
+section 4 objects and the VTIMEZONE examples) read to the same model in
+both modes, give their octets back unchanged from `patchIcal`, and write
+canonically to a calendar that writes again to the same octets. One RFC
+7986 example (`rfc7986-erratum-conference.ics`, a parameter list ending
+in `;:`) is refused (`ICAL1003`), as its grammar requires.

@@ -1,0 +1,12 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//jarenjs//RFC example wrapper//EN
+BEGIN:VEVENT
+UID:rfc7986-erratum@example.com
+DTSTAMP:20160101T000000Z
+DTSTART:20160301T090000Z
+CONFERENCE;VALUE=URI;FEATURE=VIDEO;
+ LABEL="Web video chat, access code=76543";
+ :https://video-chat.example.com/;group-id=1234
+END:VEVENT
+END:VCALENDAR

@@ -1106,18 +1106,22 @@ what each does is its own documentation's job
   `findSlots([{ start: 0, end: 10 }], { duration: 0.5 })` answers twenty slots, while
   `@jarenjs/core/calendar`'s `findAvailableSlots` (and every calendar width) refuses a width that
   is not whole milliseconds. One of them should move.
-- [ ] **`@jarenjs/josl/ical` reads iCalendar in canonical mode only.** Events, recurring series and
-  free/busy spans are written by kind; under `zones: 'utc'` a zoned time is written as the UTC instant
-  `toUtc` answers, and a zoned recurring series as its occurrences over a caller's horizon (refused
-  without one, `ICAL3011`); under `zones: 'embed'` a zoned time keeps its wall clock and TZID, each
-  zone used is written as a VTIMEZONE of RDATE onsets over the horizon ending in TZUNTIL, and a zoned
-  series under the RFC's policy keeps its RRULE. `parseIcal`, `createIcalReader` and `iterateIcal`
-  read the same subset back; a VTIMEZONE is compiled into a zone provider (`compileVtimezone` in
-  `@jarenjs/core/calendar`) and defines its TZID by default (`vtimezone: 'embedded'`), a disagreement
-  with the caller's provider is reported (`ICAL1023`), and everything else outside the subset is
-  reported in `report.unsupported`, never interpreted. Not in it: a VTIMEZONE written by RRULE,
-  VAVAILABILITY, the scheduling methods, loss-aware (lossless) reading and editing, and
-  RANGE=THISANDFUTURE expansion.
+- [ ] **`@jarenjs/josl/ical` writes no VTIMEZONE by RRULE and reads no VAVAILABILITY or scheduling
+  method.** Events, recurring series and free/busy spans are written by kind; under `zones: 'utc'` a
+  zoned time is written as the UTC instant `toUtc` answers, and a zoned recurring series as its
+  occurrences over a caller's horizon (refused without one, `ICAL3011`); under `zones: 'embed'` a zoned
+  time keeps its wall clock and TZID, each zone used is written as a VTIMEZONE of RDATE onsets over the
+  horizon ending in TZUNTIL, and a zoned series under the RFC's policy keeps its RRULE. `parseIcal`,
+  `createIcalReader` and `iterateIcal` read the same subset back; a VTIMEZONE is compiled into a zone
+  provider (`compileVtimezone` in `@jarenjs/core/calendar`) and defines its TZID by default, and
+  everything else outside the subset is reported in `report.unsupported`, never interpreted.
+  `parseIcal(text, { mode: 'lossless' })` also keeps the syntax tree, and `patchIcal` moves, cancels or
+  excludes an occurrence and retitles, describes, relocates or removes an event, re-emitting every octet
+  no edit reaches unchanged; RANGE=THISANDFUTURE is kept as written and an edit at or after it is
+  refused (`ICAL4005`). Not in it: a VTIMEZONE written by RRULE, VAVAILABILITY, the scheduling methods,
+  RANGE=THISANDFUTURE expansion, a zoned override whose own DURATION differs from its slot's (withheld,
+  `ICAL1022`, so `patchIcal` refuses to write one, `ICAL4012`), and edits inside VTODO, VJOURNAL or VALARM
+  (kept as written).
 - [ ] **The RFC 3339 epoch readers disagree past the millisecond.**
   `getEpochOfDateTimeRFC3339('2026-03-29T01:30:00.9999Z')` truncates to `…00.999Z` (it reads
   through `Date.parse`), while `epochOfRFC3339Parts(parseRFC3339Parts(…))` rounds the same string

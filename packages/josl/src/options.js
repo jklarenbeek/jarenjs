@@ -167,27 +167,33 @@ function icalTable(stream) {
  * resolves a TZID that names an IANA zone; `vtimezone` chooses between
  * the file's definitions and the provider, `zoneHorizon` and `zoneLimits`
  * bound their compilation; `strict` turns every report entry into a
- * refusal; the limits are octet and count bounds.
+ * refusal; the limits are octet and count bounds. Only `parseIcal`, which
+ * holds the whole input, reads in `mode: 'lossless'`.
  */
-export const ICAL_READ = /* @__PURE__ */ icalReadTable(false);
+export const ICAL_READ = /* @__PURE__ */ icalReadTable('stream');
+
+/** `parseIcal`: the reader, in either mode. */
+export const ICAL_PARSE = /* @__PURE__ */ icalReadTable('parse');
 
 /** `iterateIcal`: the reader, plus cancellation. */
-export const ICAL_ITERATE = /* @__PURE__ */ icalReadTable(true);
+export const ICAL_ITERATE = /* @__PURE__ */ icalReadTable('iterate');
 
 /**
  * The iCalendar readers' tables, built only where they are imported.
- * @param {boolean} iterate - with the pull reader's signal
+ * @param {'parse' | 'stream' | 'iterate'} entry - which entry: the whole-text reader takes either mode,
+ *   the pull reader a signal
  * @returns {OptionTable}
  */
-function icalReadTable(iterate) {
+function icalReadTable(entry) {
   return table({
+    mode: entry === 'parse' ? oneOf('canonical', 'lossless') : oneOf('canonical'),
     provider: rule((v) => v === null || typeof v === 'object', 'a zone provider'),
     vtimezone: oneOf('embedded', 'provider'),
     zoneHorizon: rule((v) => v === null || (Array.isArray(v) && v.length === 2), 'a [start, end) pair'),
     zoneLimits: rule((v) => v === null || (typeof v === 'object' && !Array.isArray(v)), 'an object of zone limits'),
     strict: BOOLEAN,
     ...limits(['maxOctets', 'maxComponents', 'maxLineOctets', 'maxParameters', 'maxDepth', 'maxProperties', 'maxReported']),
-    ...(iterate ? { signal: SIGNAL } : {}),
+    ...(entry === 'iterate' ? { signal: SIGNAL } : {}),
   });
 }
 

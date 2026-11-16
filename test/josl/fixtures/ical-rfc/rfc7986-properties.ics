@@ -1,0 +1,33 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//jarenjs//RFC example wrapper//EN
+NAME:Company Vacation Days
+REFRESH-INTERVAL;VALUE=DURATION:P1W
+SOURCE;VALUE=URI:https://example.com/holidays.ics
+COLOR:turquoise
+IMAGE;VALUE=URI;DISPLAY=BADGE;FMTTYPE=image/png:h
+ ttp://example.com/images/party.png
+BEGIN:VEVENT
+UID:rfc7986-event@example.com
+DTSTAMP:20160101T000000Z
+DTSTART:20160301T090000Z
+CONFERENCE;VALUE=URI;FEATURE=PHONE,MODERATOR;
+ LABEL=Moderator dial-in:tel:+1-412-555-0123,,,654321
+CONFERENCE;VALUE=URI;FEATURE=PHONE;
+ LABEL=Attendee dial-in:tel:+1-412-555-0123,,,555123
+CONFERENCE;VALUE=URI;FEATURE=PHONE;
+ LABEL=Attendee dial-in:tel:+1-888-555-0456,,,555123
+CONFERENCE;VALUE=URI;FEATURE=CHAT;
+ LABEL=Chat room:xmpp:chat-123@conference.example.com
+CONFERENCE;VALUE=URI;FEATURE=AUDIO,VIDEO;
+ LABEL=Attendee dial-in:https://chat.example.com/audio?id=123456
+IMAGE;VALUE=URI;DISPLAY=BADGE,THUMBNAIL;FMTTYPE=image/png:https://exa
+ mple.com/images/weather-cloudy.png
+ATTENDEE;CN=Cyrus Daboo;EMAIL=cyrus@example.com:mailto:opaque-toke
+ n-1234@example.com
+CONFERENCE;VALUE=URI;FEATURE=AUDIO:rtsp://audio.example.com/
+ event
+CONFERENCE;VALUE=URI;FEATURE=AUDIO,VIDEO:https://video-chat.exam
+ ple.com/;group-id=1234
+END:VEVENT
+END:VCALENDAR

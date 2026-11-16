@@ -612,8 +612,30 @@ calendar.components[0].series.base.dtstart.zone; // 'Europe/Amsterdam'
 report.unsupported[0].path; // '/VCALENDAR/VEVENT[0]/X-COLOR'
 ```
 
-The model, the zone mode, the limits, the codes and the capability matrix
-are in [docs/ICAL.md](docs/ICAL.md). The writer and reader are reached only
+Foreign iCalendar can also be edited without losing what lies outside
+the subset. `parseIcal(text, { mode: 'lossless' })` returns, beside the
+same model, the syntax tree over the input's octets, and
+`patchIcal(tree, edits)` moves, cancels or excludes an occurrence, or
+retitles, describes, relocates or removes an event. Every octet no edit
+reaches comes back as it was: folds, line ends, X- properties, VALARMs,
+the order of everything. RANGE=THISANDFUTURE overrides are kept as
+written and never expanded, and an edit the tree cannot hold without
+losing content is refused by code.
+
+```js
+import { parseIcal, patchIcal } from '@jarenjs/josl/ical';
+
+const text = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Example//Rota//EN',
+  'BEGIN:VEVENT', 'UID:standup', 'DTSTAMP:20260301T000000Z', 'DTSTART:20260302T090000',
+  'DURATION:PT15M', 'RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=4', 'X-COLOR:teal',
+  'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n');
+const { tree } = parseIcal(text, { mode: 'lossless' });
+const edited = patchIcal(tree, [{ op: 'cancel', uid: 'standup', recurrenceId: '2026-03-09T09:00:00' }]);
+edited.split('\r\n').slice(9, 11); // ['X-COLOR:teal', 'EXDATE:20260309T090000']
+```
+
+The model, the zone mode, the limits, the codes, the edits and the
+capability matrix are in [docs/ICAL.md](docs/ICAL.md). The writer and reader are reached only
 through their subpath, so the root import does not load the calendar layer.
 
 ## Generating JOSL with LLMs

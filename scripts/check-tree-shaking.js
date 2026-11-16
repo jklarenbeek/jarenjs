@@ -1242,6 +1242,14 @@ if (Object.keys(collectionEngine.metafile.inputs).some((file)=>/packages\/(app|d
   throw new Error('Collection engine imported coordination or the DOM component');
 console.log(`Collection geometry/engine tree shaking passed (${collectionGeometry.outputFiles[0].contents.length}/${collectionEngine.outputFiles[0].contents.length} bytes).`);
 
+// The iCalendar codec's canonical entries carry none of the lossless editor: only patchIcal reaches ical-lossless.js.
+const canonicalIcal = await build({stdin:{contents:"export { parseIcal, createIcalReader, iterateIcal, stringifyIcal, createIcalWriter } from '@jarenjs/josl/ical';",resolveDir:process.cwd()},
+  bundle:true,write:false,minify:true,format:'esm',platform:'neutral',metafile:true});
+const canonicalIcalInputs = Object.values(canonicalIcal.metafile.outputs)[0].inputs;
+if (Object.entries(canonicalIcalInputs).some(([file, { bytesInOutput }])=>file.endsWith('ical-lossless.js') && bytesInOutput > 0))
+  throw new Error('The canonical iCalendar entries bundled the lossless editor (ical-lossless.js)');
+console.log(`iCalendar canonical tree shaking passed (${canonicalIcal.outputFiles[0].contents.length} bytes, no lossless editor).`);
+
 // Lexical mechanics are an opt-in core closure, independent of host adapters and reference engines.
 const lexicalEngine = await build({stdin:{contents:"export { compileLexical } from '@jarenjs/core/search';",resolveDir:process.cwd()},
   bundle:true,write:false,minify:true,format:'esm',platform:'browser',metafile:true});

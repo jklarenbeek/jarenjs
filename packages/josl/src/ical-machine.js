@@ -75,6 +75,8 @@ const isNameCode = (c) => (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A) |
  * @property {string} value - as written, escapes kept
  * @property {number} line - the physical line it starts on, from 1
  * @property {string} path - `/VCALENDAR/VEVENT[0]/DTSTART`
+ * @property {number} [from] - kept spans only: the octet its first physical line starts at
+ * @property {number} [to] - kept spans only: the octet after its last line break (or the input's end)
  */
 
 /**
@@ -87,6 +89,10 @@ const isNameCode = (c) => (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A) |
  * @property {IcalProperty[]} props
  * @property {IcalNode[]} children
  * @property {Map<string, number>} counts - components of each name seen inside it so far
+ * @property {number} [from] - kept spans only: the octet its BEGIN line starts at
+ * @property {number} [head] - kept spans only: the octet after its BEGIN line
+ * @property {number} [tail] - kept spans only: the octet its END line starts at
+ * @property {number} [to] - kept spans only: the octet after its END line
  */
 
 /**
@@ -109,11 +115,21 @@ const isNameCode = (c) => (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A) |
  */
 
 /**
- * The incremental content-line machine.
+ * The incremental content-line machine. With `keep`, every property and
+ * component carries the octet span of its own lines (folds and line
+ * breaks included; an empty line between two lines belongs to neither),
+ * and the calendar keeps the components directly inside it as children,
+ * so a caller holding the input can address its untouched bytes.
  */
 export class IcalMachine {
   #limits;
   #sink;
+  #keep;
+  /** the octet the line being read starts at */
+  #start = 0;
+  /** the span of the line just completed */
+  #from = 0;
+  #to = 0;
   #state = S_LINE;
   #failed = false;
   #ended = false;
@@ -137,10 +153,12 @@ export class IcalMachine {
   /**
    * @param {IcalMachineLimits} limits
    * @param {IcalSink} sink
+   * @param {boolean} [keep] - record octet spans and keep the calendar's components
    */
-  constructor(limits, sink) {
+  constructor(limits, sink, keep = false) {
     this.#limits = limits;
     this.#sink = sink;
+    this.#keep = keep;
   }
 
   /**
@@ -179,7 +197,7 @@ export class IcalMachine {
       if (this.#state === S_CR)
         this.#fail('ICAL1004', 'a carriage return ends the input with no line feed');
       if (this.#length !== 0)
-        this.#complete();
+        this.#complete(this.#octets);
       if (!this.#ended) {
         if (this.#calendar === null)
           throw new IcalError('ICAL1007', 'the input holds no BEGIN:VCALENDAR', '', undefined, this.#physical);
@@ -264,6 +282,7 @@ export class IcalMachine {
    */
   #bytes(chunk) {
     let n = chunk.length;
+    const base = this.#octets;
     const room = this.#limits.maxOctets - this.#octets;
     const over = n > room;
     if (over)
@@ -274,6 +293,8 @@ export class IcalMachine {
       if (chunk[i] === BOM[this.#bom]) {
         this.#bom++;
         i++;
+        if (this.#bom === 3)
+          this.#start = base + i;
         continue;
       }
       // not a byte order mark: the octets matched so far are text
@@ -320,8 +341,9 @@ export class IcalMachine {
         continue;
       }
       if (this.#length !== 0)
-        this.#complete();
+        this.#complete(base + i);
       this.#lineAt = this.#physical;
+      this.#start = base + i;
       this.#state = S_LINE;
     }
     if (over)
@@ -347,8 +369,13 @@ export class IcalMachine {
     this.#length = length;
   }
 
-  /** Decode the unfolded line and read it. */
-  #complete() {
+  /**
+   * Decode the unfolded line and read it.
+   * @param {number} end - the octet after the line's last line break
+   */
+  #complete(end) {
+    this.#from = this.#start;
+    this.#to = end;
     let text;
     try {
       text = this.#decoder.decode(this.#buffer.subarray(0, this.#length));
@@ -425,6 +452,8 @@ export class IcalMachine {
     const value = text.slice(i + 1);
     if (name === 'BEGIN' || name === 'END')
       this.#structure(name, params, value);
+    else if (this.#keep)
+      this.#property({ name, params, value, line: this.#lineAt, path: '', from: this.#from, to: this.#to });
     else
       this.#property({ name, params, value, line: this.#lineAt, path: '' });
   }
@@ -446,6 +475,10 @@ export class IcalMachine {
       if (top === undefined || top.name !== component)
         this.#fail('ICAL1005', top === undefined ? `END:${component} with no component open` : `END:${component} inside ${top.name}, begun on line ${top.line}`);
       this.#stack.pop();
+      if (this.#keep) {
+        top.tail = this.#from;
+        top.to = this.#to;
+      }
       if (this.#stack.length === 0)
         this.#ended = true;
       else if (this.#stack.length === 1)
@@ -456,6 +489,8 @@ export class IcalMachine {
       if (component !== 'VCALENDAR' || this.#calendar !== null)
         this.#fail('ICAL1007', `BEGIN:${component} outside a calendar`);
       this.#calendar = { name: component, line: this.#lineAt, path: '/VCALENDAR', props: [], children: [], counts: new Map() };
+      if (this.#keep)
+        this.#spans(this.#calendar);
       this.#stack.push(this.#calendar);
       return;
     }
@@ -469,11 +504,24 @@ export class IcalMachine {
     top.counts.set(component, index + 1);
     /** @type {IcalNode} */
     const node = { name: component, line: this.#lineAt, path: `${top.path}/${component}[${index}]`, props: [], children: [], counts: new Map() };
+    if (this.#keep)
+      this.#spans(node);
     // a component directly inside the calendar is handed over whole;
-    // one nested deeper stays with its parent
-    if (this.#stack.length > 1)
+    // one nested deeper stays with its parent (with `keep`, both stay)
+    if (this.#stack.length > 1 || this.#keep)
       top.children.push(node);
     this.#stack.push(node);
+  }
+
+  /**
+   * Give a component its BEGIN line's span; its END line fills the rest.
+   * @param {IcalNode} node
+   */
+  #spans(node) {
+    node.from = this.#from;
+    node.head = this.#to;
+    node.tail = this.#to;
+    node.to = this.#to;
   }
 
   /**

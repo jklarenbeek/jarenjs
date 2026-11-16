@@ -26,7 +26,9 @@ import { CodedError } from '@jarenjs/core/errors';
  *   | 'ICAL1021' | 'ICAL1022' | 'ICAL1023' | 'ICAL1024'
  *   | 'ICAL3001' | 'ICAL3002' | 'ICAL3003' | 'ICAL3004' | 'ICAL3005' | 'ICAL3006'
  *   | 'ICAL3007' | 'ICAL3008' | 'ICAL3009' | 'ICAL3010' | 'ICAL3011' | 'ICAL3012' | 'ICAL3013'
- *   | 'ICAL3014' | 'ICAL3015' | 'ICAL3016' | 'ICAL3017' | 'ICAL3018' | 'ICAL3019' | 'ICAL3020', string>>}
+ *   | 'ICAL3014' | 'ICAL3015' | 'ICAL3016' | 'ICAL3017' | 'ICAL3018' | 'ICAL3019' | 'ICAL3020'
+ *   | 'ICAL4001' | 'ICAL4002' | 'ICAL4003' | 'ICAL4004' | 'ICAL4005' | 'ICAL4006' | 'ICAL4007'
+ *   | 'ICAL4008' | 'ICAL4009' | 'ICAL4010' | 'ICAL4011' | 'ICAL4012', string>>}
  */
 export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
   ICAL1001: 'the input is not UTF-8, or a string holds a lone surrogate',
@@ -73,6 +75,18 @@ export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
   ICAL3018: 'the writer has ended or refused, and takes no more components',
   ICAL3019: "zones: 'embed' and no horizon for the VTIMEZONE of a zone",
   ICAL3020: "a zoned time outside the horizon its VTIMEZONE covers under zones: 'embed'",
+  ICAL4001: 'an edit is not one of the documented edits, or a member of it has a form it does not take',
+  ICAL4002: 'no VEVENT holds the UID, or the occurrence, an edit names',
+  ICAL4003: 'more than one VEVENT could be the one an edit names',
+  ICAL4004: 'the event is not recurring, or its series makes no such occurrence, or the occurrence is excluded or cancelled',
+  ICAL4005: 'the occurrence lies at or after an override over this and future occurrences, which is kept and never expanded',
+  ICAL4006: "the read withheld the event, or the occurrence's own VEVENT, so the occurrence cannot be checked",
+  ICAL4007: 'the edit would lose content: a property held more than once, a text with an alternate representation, or an occurrence with its own VEVENT',
+  ICAL4008: "a moved occurrence's start or end is not of its series' kind and zone",
+  ICAL4009: 'a move gives no end, and the length is held by a DTEND the new start would leave behind',
+  ICAL4010: 'two edits reach one property or occurrence, or an event another edit removes',
+  ICAL4011: "the tree is not one parseIcal returned under mode: 'lossless'",
+  ICAL4012: 'the edited calendar would not read back with every event an edit reached and kept',
 });
 
 /**
