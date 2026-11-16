@@ -9,7 +9,10 @@
  * rules); and exact, explained scoring, where the lexicographic score
  * (hard, service, soft) is the integer sum of the matches it reports, an
  * undecided hard rule makes the verdict unknown and never feasible, and
- * a scoring past its limits is incomplete and claims no total. Pure JSON
+ * a scoring past its limits is incomplete and claims no total; and an
+ * evaluator that, after an edit or for a hypothetical one, re-evaluates
+ * only the units the edit touches and answers the bytes full scoring
+ * answers. Pure JSON
  * in and out, no clock, no storage. A `resource-day` rule's civil days
  * come through `@jarenjs/core/assign/days`, so this entry carries no
  * calendar. See docs/ASSIGN.md.
@@ -21,6 +24,7 @@ export { admitProblem } from './model.js';
 export { registerRules } from './rules.js';
 export { scoreAssignment, compareScores, ASSIGN_LIMITS } from './score.js';
 export { explain } from './explain.js';
+export { createEvaluator } from './incremental.js';
 
 /** @typedef {import('./model.js').AssignProblem} AssignProblem */
 /** @typedef {import('./model.js').AssignResource} AssignResource */
@@ -53,4 +57,7 @@ export { explain } from './explain.js';
 /** @typedef {import('./score.js').AssignProvenance} AssignProvenance */
 /** @typedef {import('./score.js').AssignLimits} AssignLimits */
 /** @typedef {import('./explain.js').Explanation} Explanation */
+/** @typedef {import('./incremental.js').AssignEvaluator} AssignEvaluator */
+/** @typedef {import('./incremental.js').AssignEdit} AssignEdit */
+/** @typedef {import('./incremental.js').EvaluatorCounts} EvaluatorCounts */
 /** @typedef {import('./explain.js').ExplainGroup} ExplainGroup */

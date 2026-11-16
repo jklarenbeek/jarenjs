@@ -46,12 +46,7 @@ export class EvaluationContext {
       if (ofResource === undefined) byResource.set(assignment.resource, [assignment]);
       else ofResource.push(assignment);
     }
-    const taskById = index.taskById;
-    const byTime = (/** @type {Assignment} */ a, /** @type {Assignment} */ b) => {
-      const x = /** @type {AssignTask} */ (taskById.get(a.task)).interval;
-      const y = /** @type {AssignTask} */ (taskById.get(b.task)).interval;
-      return x.start - y.start || x.end - y.end || compareIds(a.task, b.task) || compareIds(a.slot, b.slot);
-    };
+    const byTime = timeOrder(index);
     /** @type {Map<string, readonly Assignment[]>} */
     this.byTask = new Map([...byTask].map(([id, list]) => [id, Object.freeze(list)]));
     /** @type {Map<string, readonly Assignment[]>} */
@@ -73,6 +68,35 @@ export class EvaluationContext {
     this.days = null;
     /** @type {string | null} - the resource whose days a rule read when they cannot be told */
     this.noZone = null;
+    /** @type {import('./rules.js').RuleUnit | null} - the unit being evaluated */
+    this.unit = null;
+  }
+
+  /**
+   * Note a read of assignments: one task's (`task`), one resource's,
+   * its days included (`resource`), or every assignment (`kind` null).
+   * A scoring reads them all again for every answer, so it notes nothing.
+   * @param {'task' | 'resource' | null} _kind @param {string | null} _id
+   */
+  row(_kind, _id) {}
+
+  /**
+   * The rows of fact table `name` grouped by the value of `member`: built
+   * at the first ask in this context and charged then, one per row plus
+   * the call.
+   * @param {string} name @param {string} member @param {AssignFact} table
+   * @returns {Map<unknown, readonly unknown[]>}
+   */
+  factIndex(name, member, table) {
+    let byMember = this.factIndexes.get(name);
+    if (byMember === undefined) this.factIndexes.set(name, byMember = new Map());
+    let byValue = byMember.get(member);
+    if (byValue === undefined) {
+      byValue = groupRows(table, member);
+      byMember.set(member, byValue);
+      this.charge(table.rows.length);
+    }
+    return byValue;
   }
 
   /**
@@ -86,6 +110,21 @@ export class EvaluationContext {
       throw WORK_LIMIT;
     }
   }
+}
+
+/**
+ * The order of one resource's assignments: by their tasks' start, then
+ * end, then task id, then slot.
+ * @param {ProblemIndex} index
+ * @returns {(a: Assignment, b: Assignment) => number}
+ */
+export function timeOrder(index) {
+  const taskById = index.taskById;
+  return (a, b) => {
+    const x = /** @type {AssignTask} */ (taskById.get(a.task)).interval;
+    const y = /** @type {AssignTask} */ (taskById.get(b.task)).interval;
+    return x.start - y.start || x.end - y.end || compareIds(a.task, b.task) || compareIds(a.slot, b.slot);
+  };
 }
 
 /**
@@ -162,6 +201,7 @@ export class AssignView {
    * @returns {readonly Assignment[]}
    */
   assignments() {
+    this.#context.row(null, null);
     const list = this.#context.assignments;
     this.#context.charge(list.length);
     return list;
@@ -174,6 +214,7 @@ export class AssignView {
    * @returns {readonly Assignment[]}
    */
   assignmentsOf(resource) {
+    this.#context.row('resource', resource);
     const list = this.#context.byResource.get(resource) ?? EMPTY;
     this.#context.charge(list.length);
     return list;
@@ -185,6 +226,7 @@ export class AssignView {
    * @returns {readonly Assignment[]}
    */
   assignmentsFor(task) {
+    this.#context.row('task', task);
     const list = this.#context.byTask.get(task) ?? EMPTY;
     this.#context.charge(list.length);
     return list;
@@ -229,23 +271,7 @@ export class AssignView {
   factRows(name, member, value) {
     const table = this.#table(name);
     const context = this.#context;
-    let byMember = context.factIndexes.get(name);
-    if (byMember === undefined) context.factIndexes.set(name, byMember = new Map());
-    let byValue = byMember.get(member);
-    if (byValue === undefined) {
-      /** @type {Map<unknown, unknown[]>} */
-      const groups = new Map();
-      for (const row of table.rows) {
-        if (!isRecord(row) || !Object.hasOwn(row, member)) continue;
-        const group = groups.get(row[member]);
-        if (group === undefined) groups.set(row[member], [row]);
-        else group.push(row);
-      }
-      byValue = new Map([...groups].map(([key, rows]) => [key, Object.freeze(rows)]));
-      byMember.set(member, byValue);
-      context.charge(table.rows.length);
-    }
-    const rows = byValue.get(value) ?? EMPTY;
+    const rows = context.factIndex(name, member, table).get(value) ?? EMPTY;
     context.charge(rows.length);
     return rows;
   }
@@ -321,6 +347,7 @@ export class AssignView {
     const context = this.#context;
     if (this.#rule.scope !== 'resource-day')
       throw new AssignError('JN0021', `rule ${JSON.stringify(this.#rule.id)} reads civil days; only a resource-day rule does`, `/rules/${pointer(this.#rule.id)}/scope`);
+    context.row('resource', resource);
     const days = /** @type {import('./day-table.js').DayTable} */ (context.days);
     if (days.zoneless.has(resource)) {
       context.noZone = resource;
@@ -338,6 +365,24 @@ export class AssignView {
       throw new AssignError('JN0018', `rule ${JSON.stringify(this.#rule.id)} reads fact ${JSON.stringify(name)} it does not declare`, `/rules/${pointer(this.#rule.id)}/reads/facts`);
     return /** @type {Record<string, AssignFact>} */ (this.#context.index.problem.facts)[name];
   }
+}
+
+/**
+ * The rows of a fact table that hold `member`, grouped by its value
+ * (SameValueZero), each group in the table's order.
+ * @param {AssignFact} table @param {string} member
+ * @returns {Map<unknown, readonly unknown[]>}
+ */
+export function groupRows(table, member) {
+  /** @type {Map<unknown, unknown[]>} */
+  const groups = new Map();
+  for (const row of table.rows) {
+    if (!isRecord(row) || !Object.hasOwn(row, member)) continue;
+    const group = groups.get(row[member]);
+    if (group === undefined) groups.set(row[member], [row]);
+    else group.push(row);
+  }
+  return new Map([...groups].map(([key, rows]) => [key, Object.freeze(rows)]));
 }
 
 /**

@@ -56,6 +56,53 @@ function byTime(a, b) {
 }
 
 /**
+ * The tasks of one resource's assignments that have no zone, sorted, or
+ * null when every task has one: such a resource's days cannot be told.
+ * @param {import('./model.js').ProblemIndex} index
+ * @param {readonly import('./model.js').Assignment[]} list
+ * @returns {readonly string[] | null}
+ */
+export function zonelessOf(index, list) {
+  /** @type {Set<string>} */
+  const zoneless = new Set();
+  for (const assignment of list)
+    if (/** @type {AssignTask} */ (index.taskById.get(assignment.task)).zone === undefined) zoneless.add(assignment.task);
+  return zoneless.size > 0 ? Object.freeze([...zoneless].sort(compareIds)) : null;
+}
+
+/**
+ * One resource's civil days, from its assignments in task time order and
+ * every task zoned: each task's pieces from `piecesOf`, each day's span
+ * from `spanOf` at the day's first piece, and `after` asked after each
+ * assignment, answering true to stop.
+ * @param {import('./model.js').ProblemIndex} index
+ * @param {readonly import('./model.js').Assignment[]} list
+ * @param {(task: AssignTask) => ReadonlyArray<{ date: string, start: number, end: number }>} piecesOf
+ * @param {(task: AssignTask, date: string) => { start: number, end: number }} spanOf
+ * @param {() => boolean} after
+ * @returns {readonly AssignDay[] | null} sorted by zone, then date; null when `after` stopped it
+ */
+export function daysOfList(index, list, piecesOf, spanOf, after) {
+  /** @type {Map<string, { zone: string, date: string, pieces: DayPiece[], span: { start: number, end: number } }>} */
+  const days = new Map();
+  for (const assignment of list) {
+    const task = /** @type {AssignTask} */ (index.taskById.get(assignment.task));
+    const zone = /** @type {string} */ (task.zone);
+    for (const piece of piecesOf(task)) {
+      const key = `${zone}\n${piece.date}`;
+      let day = days.get(key);
+      if (day === undefined) days.set(key, day = { zone, date: piece.date, pieces: [], span: spanOf(task, piece.date) });
+      day.pieces.push(Object.freeze({ end: piece.end, slot: assignment.slot, start: piece.start, task: task.id }));
+    }
+    if (after()) return null;
+  }
+  return Object.freeze([...days.values()].sort((a, b) => compareIds(a.zone, b.zone) || compareIds(a.date, b.date))
+    .map((day) => /** @type {AssignDay} */ (Object.freeze({
+      date: day.date, end: day.span.end, pieces: Object.freeze(day.pieces.sort(byTime)), start: day.span.start, zone: day.zone,
+    }))));
+}
+
+/**
  * Cut every resource's assignments into civil days, splitting each task
  * once. Work is one per split task plus one per piece and per day span;
  * past `maxWork` the build stops and names the resource it reached.
@@ -74,51 +121,37 @@ export function buildDays(context, seam, maxWork) {
   /** @type {DayTable} */
   const table = { byResource: new Map(), byKey: new Map(), zoneless: new Map() };
   const taskIndex = new Map(index.tasks.map((task, i) => [task.id, i]));
+  const piecesOf = (/** @type {AssignTask} */ task) => {
+    let pieces = split.get(task.id);
+    if (pieces === undefined) {
+      pieces = refusing(() => seam.split(task.interval, /** @type {string} */ (task.zone)), task, `/tasks/${taskIndex.get(task.id)}/zone`);
+      split.set(task.id, pieces);
+      context.work += 1 + pieces.length;
+    }
+    return pieces;
+  };
+  const spanOf = (/** @type {AssignTask} */ task, /** @type {string} */ date) => {
+    const zone = /** @type {string} */ (task.zone);
+    const key = `${zone}\n${date}`;
+    let span = spans.get(key);
+    if (span === undefined) {
+      spans.set(key, span = refusing(() => seam.span(zone, date), task, `/tasks/${taskIndex.get(task.id)}/zone`));
+      context.work += 1;
+    }
+    return span;
+  };
+  const after = () => context.work > maxWork;
   for (const resource of index.resources) {
     const list = context.byResource.get(resource.id);
     if (list === undefined) continue;
-    /** @type {Set<string>} */
-    const zoneless = new Set();
-    for (const assignment of list)
-      if (/** @type {AssignTask} */ (index.taskById.get(assignment.task)).zone === undefined) zoneless.add(assignment.task);
-    if (zoneless.size > 0) {
-      table.zoneless.set(resource.id, Object.freeze([...zoneless].sort(compareIds)));
+    const zoneless = zonelessOf(index, list);
+    if (zoneless !== null) {
+      table.zoneless.set(resource.id, zoneless);
       continue;
     }
-    /** @type {Map<string, { zone: string, date: string, pieces: DayPiece[] }>} */
-    const days = new Map();
-    for (const assignment of list) {
-      const task = /** @type {AssignTask} */ (index.taskById.get(assignment.task));
-      const zone = /** @type {string} */ (task.zone);
-      let pieces = split.get(task.id);
-      if (pieces === undefined) {
-        const at = `/tasks/${taskIndex.get(task.id)}`;
-        pieces = refusing(() => seam.split(task.interval, zone), task, `${at}/zone`);
-        split.set(task.id, pieces);
-        context.work += 1 + pieces.length;
-      }
-      for (const piece of pieces) {
-        const key = `${zone}\n${piece.date}`;
-        let day = days.get(key);
-        if (day === undefined) {
-          days.set(key, day = { zone, date: piece.date, pieces: [] });
-          if (!spans.has(key)) {
-            spans.set(key, refusing(() => seam.span(zone, piece.date), task, `/tasks/${taskIndex.get(task.id)}/zone`));
-            context.work += 1;
-          }
-        }
-        day.pieces.push(Object.freeze({ end: piece.end, slot: assignment.slot, start: piece.start, task: task.id }));
-      }
-      if (context.work > maxWork) return { stoppedAt: resource.id };
-    }
-    const ordered = [...days.values()].sort((a, b) => compareIds(a.zone, b.zone) || compareIds(a.date, b.date))
-      .map((day) => {
-        const span = /** @type {{ start: number, end: number }} */ (spans.get(`${day.zone}\n${day.date}`));
-        return /** @type {AssignDay} */ (Object.freeze({
-          date: day.date, end: span.end, pieces: Object.freeze(day.pieces.sort(byTime)), start: span.start, zone: day.zone,
-        }));
-      });
-    table.byResource.set(resource.id, Object.freeze(ordered));
+    const ordered = daysOfList(index, list, piecesOf, spanOf, after);
+    if (ordered === null) return { stoppedAt: resource.id };
+    table.byResource.set(resource.id, ordered);
     table.byKey.set(resource.id, new Map(ordered.map((day) => [`${day.zone}\n${day.date}`, day])));
   }
   return table;

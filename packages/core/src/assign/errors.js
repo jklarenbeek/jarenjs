@@ -8,7 +8,7 @@ import { CodedError } from '../errors.js';
  * out of contract, and both from an option this call does not take.
  * @type {Readonly<Record<'JN0001'|'JN0002'|'JN0003'|'JN0004'|'JN0005'|'JN0006'|'JN0007'
  *   |'JN0008'|'JN0009'|'JN0010'|'JN0011'|'JN0012'|'JN0013'|'JN0014'|'JN0015'|'JN0016'
- *   |'JN0017'|'JN0018'|'JN0019'|'JN0020'|'JN0021'|'JN0022', string>>}
+ *   |'JN0017'|'JN0018'|'JN0019'|'JN0020'|'JN0021'|'JN0022'|'JN0023', string>>}
  */
 export const ASSIGN_CODES = /* @__PURE__ */ Object.freeze({
   JN0001: 'the problem or one of its members is not of the form the schema takes: a wrong type, a missing member or one it does not define',
@@ -33,6 +33,7 @@ export const ASSIGN_CODES = /* @__PURE__ */ Object.freeze({
   JN0020: 'a result is incomplete or not one scoreAssignment answers, so it has no total to explain',
   JN0021: 'civil days were asked for without the seam that answers them: a resource-day rule scored without options.days from civilDays, a days value civilDays did not build, or a day read by a rule whose scope is not resource-day',
   JN0022: 'a task\'s interval could not be split into civil days in its zone: the provider does not know the zone, failed, a day starts twice under the reject policy, or the task spans more than 36600 civil days; the calendar\'s refusal is the cause',
+  JN0023: 'an edit is not one an evaluator takes: an unknown op or member, an unassign, move or swap naming an assignment the list does not hold, a revise naming nothing to change, or any edit to a closed evaluator',
 });
 
 /**

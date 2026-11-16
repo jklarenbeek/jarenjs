@@ -144,7 +144,7 @@ const NO_INTERVALS = /* @__PURE__ */ Object.freeze([]);
  * @param {unknown} options
  * @returns {import('./seam.js').DayOperations | null}
  */
-function seamOf(options) {
+export function seamOf(options) {
   const days = isRecord(options) ? options.days : undefined;
   if (days === undefined) return null;
   const seam = days !== null && typeof days === 'object' ? DAY_SEAMS.get(days) : undefined;
@@ -157,7 +157,7 @@ function seamOf(options) {
  * @param {unknown} options
  * @returns {Required<AssignLimits>}
  */
-function limitsOf(options) {
+export function limitsOf(options) {
   const out = { ...ASSIGN_LIMITS };
   if (options === undefined) return out;
   if (!isRecord(options)) throw new AssignError('JN0015', 'scoring options are { limits?, days? }', '/options');
@@ -181,7 +181,7 @@ function limitsOf(options) {
  * @param {ProblemIndex} index
  * @returns {Record<'resource' | 'task' | 'global', readonly RuleUnit[]>}
  */
-function unitsOf(index) {
+export function unitsOf(index) {
   return {
     resource: Object.freeze(index.resources.map((resource) => Object.freeze({ id: resource.id, scope: /** @type {const} */ ('resource') }))),
     task: Object.freeze(index.tasks.map((task) => Object.freeze({ id: task.id, scope: /** @type {const} */ ('task') }))),
@@ -325,7 +325,7 @@ function readAnswer(index, rule, unit, answer, sums) {
  * @param {string | null} fact @param {{ resources: readonly string[], tasks: readonly string[] }} subjects
  * @returns {AssignUnknown}
  */
-function unknownOf(rule, unit, reason, fact, subjects) {
+export function unknownOf(rule, unit, reason, fact, subjects) {
   return Object.freeze({ fact, level: rule.level, reason, rule: rule.id, subjects, unit, version: rule.version });
 }
 
@@ -336,7 +336,7 @@ function unknownOf(rule, unit, reason, fact, subjects) {
  * @param {readonly string[]} tasks
  * @returns {AssignUnknown[]}
  */
-function noZoneOf(rule, unit, resource, tasks) {
+export function noZoneOf(rule, unit, resource, tasks) {
   const resources = Object.freeze([resource]);
   return tasks.map((task) => unknownOf(rule, unit, 'no-zone', null, Object.freeze({ resources, tasks: Object.freeze([task]) })))
     .map((unknown) => /** @type {[string, AssignUnknown]} */ ([/** @type {string} */ (stableStringify(unknown)), unknown]))
@@ -364,6 +364,48 @@ function dayUnitsOf(index, table) {
       out.push({ unit: Object.freeze({ date: day.date, id: resource.id, scope: /** @type {const} */ ('resource-day'), zone: day.zone }), zoneless: null });
   }
   return Object.freeze(out);
+}
+
+/**
+ * Evaluate one rule over one unit as a scoring does: run the rule, read
+ * its answer into frozen canonical matches and unknowns, and charge the
+ * matches and unknowns to the context's work. A unit that read the days
+ * of a resource whose days cannot be told answers that resource's
+ * unknowns `no-zone` instead. Answers null when the rule's reads passed
+ * the context's `maxWork`.
+ * @param {ProblemIndex} index @param {EvaluationContext} context
+ * @param {AssignView} view @param {RegisteredRule} rule @param {RuleUnit} unit
+ * @returns {{ matches: AssignMatch[], unknowns: AssignUnknown[], sum: bigint } | null}
+ *   `sum` the exact sum of the matches' scores
+ * @throws {AssignError} JN0016 for a rule that threw, JN0017 for an answer out of
+ *   contract, JN0018 and JN0021 for a read the rule may not make
+ */
+export function evaluateUnit(index, context, view, rule, unit) {
+  context.noZone = null;
+  context.unit = unit;
+  /** @type {unknown} */
+  let answer;
+  try {
+    answer = rule.evaluate(view, unit);
+  }
+  catch (error) {
+    if (context.stopped) return null;
+    if (context.noZone === null) {
+      if (error instanceof AssignError && (error.code === 'JN0018' || error.code === 'JN0021')) throw error;
+      throw new AssignError('JN0016', `rule ${JSON.stringify(rule.id)} threw`, unitPath(rule, unit), error);
+    }
+  }
+  if (context.stopped) return null;
+  if (context.noZone !== null) {
+    const resource = context.noZone;
+    const told = noZoneOf(rule, unit, resource, /** @type {readonly string[]} */ (/** @type {import('./day-table.js').DayTable} */ (context.days).zoneless.get(resource)));
+    context.work += told.length;
+    return { matches: [], unknowns: told, sum: 0n };
+  }
+  const sums = { hard: 0n, service: 0n, soft: 0n };
+  const read = readAnswer(index, rule, unit, answer, sums);
+  context.work += read.matches.length + read.unknowns.length;
+  return { matches: read.matches, unknowns: read.unknowns, sum: sums[rule.level] };
 }
 
 /**
@@ -499,37 +541,14 @@ export function scoreAssignment(problem, ruleSet, assignments, options = undefin
       }
       if (counts.units >= limits.maxUnits) return stop('maxUnits', rule, unit);
       counts.units++;
-      context.noZone = null;
-      /** @type {unknown} */
-      let answer;
-      try {
-        answer = rule.evaluate(view, unit);
-      }
-      catch (error) {
-        if (context.stopped) return stop('maxWork', rule, unit);
-        if (context.noZone === null) {
-          if (error instanceof AssignError && (error.code === 'JN0018' || error.code === 'JN0021')) throw error;
-          throw new AssignError('JN0016', `rule ${JSON.stringify(rule.id)} threw`, unitPath(rule, unit), error);
-        }
-      }
-      if (context.stopped) return stop('maxWork', rule, unit);
-      if (context.noZone !== null) {
-        const resource = context.noZone;
-        const told = noZoneOf(rule, unit, resource, /** @type {readonly string[]} */ (/** @type {import('./day-table.js').DayTable} */ (context.days).zoneless.get(resource)));
-        for (const unknown of told) unknowns.push(unknown);
-        counts.unknowns += told.length;
-        context.work += told.length;
-        if (context.work > limits.maxWork) return stop('maxWork', rule, unit);
-        continue;
-      }
-      const read = readAnswer(index, rule, unit, answer, sums);
-      context.work += read.matches.length + read.unknowns.length;
-      if (context.work > limits.maxWork) return stop('maxWork', rule, unit);
-      if (counts.matches + read.matches.length > limits.maxMatches) return stop('maxMatches', rule, unit);
-      for (const match of read.matches) matches.push(match);
-      for (const unknown of read.unknowns) unknowns.push(unknown);
-      counts.matches += read.matches.length;
-      counts.unknowns += read.unknowns.length;
+      const answer = evaluateUnit(index, context, view, rule, unit);
+      if (answer === null || context.work > limits.maxWork) return stop('maxWork', rule, unit);
+      if (counts.matches + answer.matches.length > limits.maxMatches) return stop('maxMatches', rule, unit);
+      for (const match of answer.matches) matches.push(match);
+      for (const unknown of answer.unknowns) unknowns.push(unknown);
+      counts.matches += answer.matches.length;
+      counts.unknowns += answer.unknowns.length;
+      sums[rule.level] += answer.sum;
     }
   }
   const check = sumMatches(matches);
@@ -551,9 +570,10 @@ export function scoreAssignment(problem, ruleSet, assignments, options = undefin
  * @param {ProblemIndex} index @param {import('./rules.js').RuleSet} set
  * @param {readonly import('./model.js').Assignment[]} scored
  * @param {AssignProvenance['days'] | undefined} days - the seam, already checked
+ * @param {string} [key] - `contentKey(scored)`, when the caller holds it
  * @returns {AssignProvenance}
  */
-function provenanceOf(index, set, scored, days) {
+export function provenanceOf(index, set, scored, days, key = contentKey(scored)) {
   const problem = index.problem;
   /** @type {Record<string, string | number>} */
   const facts = {};
@@ -561,7 +581,7 @@ function provenanceOf(index, set, scored, days) {
     Object.defineProperty(facts, name, { value: table.revision, enumerable: true });
   return Object.freeze({
     algorithm: /** @type {const} */ ('full'),
-    assignments: contentKey(scored),
+    assignments: key,
     baseline: problem.baseline?.revision ?? null,
     ...(days === undefined ? {} : { days }),
     facts: Object.freeze(facts),

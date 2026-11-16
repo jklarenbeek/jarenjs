@@ -4,7 +4,8 @@
 
 - an assignment problem as plain, revisioned JSON with a schema twin;
 - a rule contract through which the host supplies every constraint;
-- exact, explained scoring.
+- exact, explained scoring;
+- an evaluator that, after an edit or for a hypothetical one, re-evaluates only what the edit touches and answers the bytes full scoring answers.
 
 It knows nothing about rest periods, skills, opening hours or fairness. Those are rules the host writes against the contract, and **the engine ships none**.
 
@@ -12,14 +13,14 @@ It knows nothing about rest periods, skills, opening hours or fairness. Those ar
 
 ```js
 import {
-  admitProblem, registerRules, scoreAssignment, compareScores, explain,
+  admitProblem, registerRules, scoreAssignment, compareScores, explain, createEvaluator,
   ASSIGN_LIMITS, ASSIGN_CODES, AssignError,
 } from '@jarenjs/core/assign';
 ```
 
 Pure JSON goes in and out. The engine reads no clock, no locale and no storage, and no zone but the ones a task names, through the provider the host injects (§7). Scoring the same inputs gives the same bytes in every host time zone, for every key order of the inputs, and for every order of their resources, tasks, demands and assignments. Fact rows and arrays inside `attributes` are host data and keep the host's order.
 
-A rule over one resource on one civil day of a zone (`resource-day`) gets its days through the separate subpath `@jarenjs/core/assign/days` and a zone provider the host injects (§7). Not here: incremental re-scoring of one edit, and search. Scoring answers how good a given assignment list is; it does not look for a better one.
+A rule over one resource on one civil day of a zone (`resource-day`) gets its days through the separate subpath `@jarenjs/core/assign/days` and a zone provider the host injects (§7). An edit or a hypothetical one is answered by an evaluator (§8). Not here: search. Scoring answers how good a given assignment list is; it does not look for a better one.
 
 ## 1. The problem
 
@@ -56,7 +57,7 @@ It answers the problem as frozen canonical JSON:
 - every object's keys written in code-unit order (JavaScript still lists integer-like keys such as `9` and `10` first, in numeric order);
 - `facts` and `assignments` default to empty.
 
-Two problems that differ only in key order, or in the order of their resources, tasks, demands and assignments, admit to the same bytes. Admitting the answer again answers it unchanged. Every refusal is an `AssignError` with its own code (§8) and the JSON Pointer at fault as `docPath`.
+Two problems that differ only in key order, or in the order of their resources, tasks, demands and assignments, admit to the same bytes. Admitting the answer again answers it unchanged. Every refusal is an `AssignError` with its own code (§9) and the JSON Pointer at fault as `docPath`.
 
 Ids sort by UTF-16 code unit: `r10` before `r9`, `B` before `b`, and an astral character before `U+FFFF`. They never sort by number, locale or insertion order. An id is data: `__proto__` and `constructor` are ordinary ids.
 
@@ -593,7 +594,125 @@ export const answer = {
 
 The day table counts toward `maxWork`: one for each task split, each piece and each day span. Each day read is charged like any view call, and day units count toward `maxUnits`. A task that cannot be split is refused (`JN0022`, with the calendar's refusal as `cause`): a zone the provider does not know, a provider that fails, or a task spanning more than 36600 civil days. Its `docPath` is `/tasks/<i>/zone`, where `i` is the task's place in the admitted problem (tasks sorted by id).
 
-## 8. Codes
+## 8. Incremental and what-if evaluation
+
+`createEvaluator(problem, ruleSet, assignments, { limits?, days? })` scores once and keeps every rule's answer for every unit. It takes the arguments and options `scoreAssignment` takes, and refuses what it refuses.
+
+- `apply(edit)` makes the edit and answers the new result.
+- `whatIf(edit)` answers the result the edit would have, and changes nothing.
+- `result` is the current answer, and `assignments` the current list, admitted.
+- `counts` says what the evaluator did, and `close()` drops what it keeps. After `close()`, every edit is refused, while `result` and `assignments` still answer.
+
+Each answer is the bytes `scoreAssignment` answers for the same problem, rule set, assignments and options. That covers the score, the matches and unknowns in their order, `counts`, `provenance` and the refusals. `provenance.algorithm` stays `'full'`: it names what the answer is, and the evaluator's own `counts` say how it was reached.
+
+```js
+import { createEvaluator, registerRules, scoreAssignment } from '@jarenjs/core/assign';
+
+const problem = {
+  revision: 'week-12',
+  resources: [{ id: 'ari', revision: 1 }, { id: 'nina', revision: 1 }, { id: 'sam', revision: 1 }],
+  tasks: [
+    { id: 'mon-early', revision: 1, interval: { start: 0, end: 480 }, demands: [{ slot: 'crew', count: 1 }] },
+    { id: 'mon-late', revision: 1, interval: { start: 450, end: 900 }, demands: [{ slot: 'crew', count: 1 }] },
+  ],
+};
+// one resource's overlapping tasks: it reads only its own row
+const noOverlap = {
+  id: 'no-overlap', version: 1, level: 'hard', scope: 'resource', measure: 'ms',
+  evaluate(view, unit) {
+    const intervals = view.assignmentsOf(unit.id).map((a) => view.task(a.task).interval);
+    const matches = [];
+    for (let i = 1; i < intervals.length; i++) {
+      const overlap = intervals[i - 1].end - intervals[i].start;
+      if (overlap > 0) matches.push({ magnitude: overlap, messageId: 'overlap', subjects: { resources: [unit.id] } });
+    }
+    return { matches };
+  },
+};
+const rules = registerRules([noOverlap]);
+const evaluator = createEvaluator(problem, rules, [
+  { task: 'mon-early', slot: 'crew', resource: 'ari' },
+  { task: 'mon-late', slot: 'crew', resource: 'ari' },
+]);
+const move = { op: 'move', task: 'mon-late', slot: 'crew', from: 'ari', to: 'nina' };
+const preview = evaluator.whatIf(move);
+const kept = evaluator.result.score.hard;
+const applied = evaluator.apply(move);
+const full = scoreAssignment(problem, rules, evaluator.assignments);
+
+export const edits = {
+  before: kept,
+  preview: preview.score.hard,
+  applied: applied.score.hard,
+  sameBytes: JSON.stringify(applied) === JSON.stringify(full),
+  counts: evaluator.counts,
+};
+```
+
+```json
+{
+  "before": -30,
+  "preview": 0,
+  "applied": 0,
+  "sameBytes": true,
+  "counts": {
+    "edits": 1,
+    "previews": 1,
+    "evaluated": 7,
+    "reused": 2,
+    "fullFallbacks": 0,
+    "fullScorings": 1
+  }
+}
+```
+
+### Edits
+
+| Edit | What it does |
+|---|---|
+| `{ op: 'assign', task, slot, resource, lock? }` | adds an assignment |
+| `{ op: 'unassign', task, slot, resource }` | removes one |
+| `{ op: 'move', task, slot, from, to }` | hands one assignment, its lock with it, to another resource |
+| `{ op: 'swap', a, b }` | exchanges the resources of two assignments, each `{ task, slot, resource }`; each keeps its lock |
+| `{ op: 'revise', problem?, ruleSet?, days?, assignments? }` | replaces any of the four, and every rule is evaluated again |
+
+An edit the list cannot take is refused and changes nothing:
+
+- `JN0023`: an edit out of form, or one naming an assignment the list does not hold;
+- `JN0002` or `JN0007`: an id;
+- `JN0008`: an assignment held twice, or a slot past its count.
+
+Every id is checked before the list is. An edit that changes nothing, such as a move to the resource that holds the assignment, answers the current result.
+
+### What an edit evaluates again
+
+A unit's *row* is one of two things:
+
+- for a `task` unit, its task's assignments;
+- for a `resource` or `resource-day` unit, its resource's assignments and that resource's days.
+
+An edit evaluates again the units of the rows it touches, and every `global` rule. Every other answer is kept. Nothing else a view answers changes for the evaluator's life: resources, tasks, demands, facts, stored assignments and the baseline. Fact indexes and civil-day splits are kept too, and are counted in `work` as a scoring counts them.
+
+The scope is the declaration, and the view checks it. Suppose one of a rule's units reads assignments outside its row: another task's, another resource's or its days, or `assignments()`. From then on, that rule is evaluated over every unit of its scope on every edit, and `counts.fullFallbacks` counts each such answer, so the answers stay exact. A rule must be pure. The evaluator cannot see host state that a rule reads past the view, through a closure.
+
+### When it scores in full
+
+`counts.fullScorings` counts the answers for which every rule was evaluated over every unit:
+
+- the first answer;
+- each `revise` naming an object other than the one held. This goes by identity, not revision: a rule set's hash covers its declarations, not its `evaluate`, and a host may reuse a revision;
+- each answer past a limit, which is full scoring's incomplete result and never a partial total;
+- each answer while a rule throws or answers out of contract, or while the seam refuses a task. That answer is full scoring's own answer or refusal. A refused `apply` changes nothing.
+
+| Count | Counts |
+|---|---|
+| `edits`, `previews` | the answers of `apply` and of `whatIf` |
+| `evaluated` | rule evaluations over one unit |
+| `reused` | unit answers kept from an earlier answer |
+| `fullFallbacks` | answers in which a rule was evaluated over every unit because it read outside its row |
+| `fullScorings` | answers in which every rule was evaluated over every unit |
+
+## 9. Codes
 
 Every refusal is an `AssignError`, a coded error whose `docPath` is a JSON Pointer:
 
@@ -624,3 +743,4 @@ Every refusal is an `AssignError`, a coded error whose `docPath` is a JSON Point
 | `JN0020` | a result is incomplete or not one scoreAssignment answers, so it has no total to explain |
 | `JN0021` | civil days were asked for without the seam that answers them: a resource-day rule scored without options.days from civilDays, a days value civilDays did not build, or a day read by a rule whose scope is not resource-day |
 | `JN0022` | a task's interval could not be split into civil days in its zone: the provider does not know the zone, failed, a day starts twice under the reject policy, or the task spans more than 36600 civil days; the calendar's refusal is the cause |
+| `JN0023` | an edit is not one an evaluator takes: an unknown op or member, an unassign, move or swap naming an assignment the list does not hold, a revise naming nothing to change, or any edit to a closed evaluator |
