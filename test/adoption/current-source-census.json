@@ -11,11 +11,11 @@
       "role": "physical discovery and preserve/refuse",
       "matches": [
         "3: * @file Database → model: `introspectModel(connection)` reads a live",
-        "208:export function readSchema(connection, options = undefined) {",
-        "223: * catalog where the dialect reads one, as {@link readSchema} reads them for",
-        "226: * `readSchema`'s shape and holds the one table asked for (none where the",
-        "1218:export function introspectModel(connection, options = undefined) {",
-        "1230:  return chain(readSchema(connection, options), (schema) => {"
+        "212:export function readSchema(connection, options = undefined) {",
+        "227: * catalog where the dialect reads one, as {@link readSchema} reads them for",
+        "230: * `readSchema`'s shape and holds the one table asked for (none where the",
+        "1222:export function introspectModel(connection, options = undefined) {",
+        "1234:  return chain(readSchema(connection, options), (schema) => {"
       ],
       "disposition": "retained"
     },

@@ -62,6 +62,8 @@ export const INTROSPECT_CODES = Object.freeze({
   'document-members': 'the document\'s unindexed members are not in the physical shape',
   'ambiguous-relation': 'a foreign key whose relation cannot be inferred from the shape alone',
   'unguarded-number': 'a number column whose type holds a NaN no validated CHECK refuses',
+  'trigger-rule': 'an application trigger read back as a declared database rule: the rule refuses with its own '
+    + 'message, and the database holds the trigger, not the rule\'s program',
 });
 
 /**
@@ -71,7 +73,7 @@ export const INTROSPECT_CODES = Object.freeze({
  * @param {string} detail
  * @returns {{ code: string, object: string, detail: string }}
  */
-function loss(code, object, detail) {
+export function loss(code, object, detail) {
   return { code, object, detail };
 }
 
@@ -187,7 +189,7 @@ const onDeleteOf = (dialect, action) => MODEL_ACTIONS.find((word) =>
  * @param {any} options
  */
 function readIntrospectOptions(options) {
-  readOptionsOrNull(options, ['strict', 'tables', 'keys', 'expressions'], 'introspect');
+  readOptionsOrNull(options, ['strict', 'tables', 'keys', 'expressions', 'triggers'], 'introspect');
   if (options === undefined || options === null) return;
   const refuse = (/** @type {string} */ name, /** @type {string} */ rule) =>
     new DbCompileError('JD0013', `introspect option '${name}' ${rule}`);
@@ -196,6 +198,8 @@ function readIntrospectOptions(options) {
     throw refuse('tables', 'is an array of table names');
   if (options.keys !== undefined && (!isJsonObject(options.keys)))
     throw refuse('keys', 'is an object of document pointers by table');
+  if (options.triggers !== undefined && typeof options.triggers?.read !== 'function')
+    throw refuse('triggers', 'is a trigger reader, such as sqliteTriggers from @jarenjs/db/trigger-rules');
 }
 
 /**
@@ -1147,7 +1151,7 @@ function plannedDifference(dialect, table, index, rendered, readable) {
  * writes into a column of that type. The derived type is then a choice.
  * @param {any} dialect @param {any} table @param {any} column @param {(row: any) => void} report
  */
-function reportLossyType(dialect, table, column, report) {
+export function reportLossyType(dialect, table, column, report) {
   const comparable = dialect.comparableColumnType(column.type);
   const derived = dialect.schemaTypeOf(column.type);
   const origins = new Set([derived]);
@@ -1235,17 +1239,22 @@ export function introspectModel(connection, options = undefined) {
       add(loss('unmapped-view', view,
         'a view is not a shape a model document can declare'));
     }
-    /** The triggers a collection's container keys own, which a model read back creates again. @type {Set<string>} */
-    const owned = new Set();
-    for (const object of schema.objects) {
-      if (object.type === 'trigger') add({ ...loss('unmapped-object', object.name,
-        'an application-owned trigger program must be explicitly preserved; inspection grants no drop permission'),
-      sql: object.sql, owner: object.owner });
-    }
-
     const joinTables = new Set(schema.tables
       .filter((table) => looksLikeJoinTable(dialect, table))
       .map((table) => table.name));
+
+    /** The triggers a collection's container keys own, which a model read back creates again. @type {Set<string>} */
+    const owned = new Set();
+    // a trigger is read back as a rule only by the reader the host passes (MODEL-FORMAT §13.6)
+    const rules = options?.triggers === undefined ? null : options.triggers.read(dialect, schema, joinTables);
+    for (const object of schema.objects) {
+      if (object.type !== 'trigger') continue;
+      const row = { ...loss('unmapped-object', object.name,
+        'an application-owned trigger program must be explicitly preserved; inspection grants no drop permission'),
+      sql: object.sql, owner: object.owner };
+      add(rules !== null ? rules.rowOf(row) : dialect.name === 'sqlite'
+        ? { ...row, reason: 'it is read back as a database rule only with the triggers option of @jarenjs/db/trigger-rules' } : row);
+    }
 
     /** @type {any} */
     const model = { $model: MODEL_VERSION };
@@ -1265,6 +1274,13 @@ export function introspectModel(connection, options = undefined) {
         if (!looksLikeCollection(dialect, table)) reportUnguardedNumbers(dialect, table, add);
         continue;
       }
+      const layout = rules?.layouts.get(table.name);
+      if (layout !== undefined) {
+        setObjectMember(entities, table.name, layout.entity);
+        for (const row of layout.rows) add(row);
+        reportUnguardedNumbers(dialect, table, add);
+        continue;
+      }
       if (looksLikeCollection(dialect, table)) {
         setObjectMember(collections, table.name, deriveCollection(dialect, table, add, options?.keys, byName, schema.objects, owned));
         continue;
@@ -1280,7 +1296,7 @@ export function introspectModel(connection, options = undefined) {
       setObjectMember(entities, table.name, deriveEntity(dialect, table, add, edges, { byName, declarations: options?.expressions }));
       reportUnguardedNumbers(dialect, table, add);
     }
-    declareEdges(dialect, entities, schema.tables, edges, add);
+    declareEdges(dialect, entities, schema.tables, rules === null ? edges : edges.filter((edge) => rules.keepsEdge(edge, add)), add);
     for (let i = report.length - 1; i >= 0; i--)
       if (report[i].code === 'unmapped-object' && owned.has(report[i].object)) report.splice(i, 1);
 
@@ -1296,6 +1312,7 @@ export function introspectModel(connection, options = undefined) {
           'the join table points at something this read did not derive as an entity'));
         continue;
       }
+      if (rules !== null && !rules.keepsJoin(table.name, left, right, add)) continue;
       // the edge's name on `left` is its target's, pluralised, unless a column
       // or another edge between the two already has it: then the join table's
       // name tells them apart, so no member is replaced

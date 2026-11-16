@@ -21,7 +21,9 @@ PostgreSQL catalogs retain available object definitions; unavailable source tabl
 DDL is explicitly `null`. `introspectModel()` also returns an `inventory` with
 `derived` or `preserve` dispositions. A disposition never authorizes a drop.
 Application triggers appear as `unmapped-object` losses with their owner and SQL,
-and so do the rule programs of a store-owned entity (§13.4): the derived model
+except a SQLite trigger that the `triggers` option's reader reads back as the
+database rule it equals (§13.6), which is a `trigger-rule` row; the rule programs of a store-owned entity (§13.4) are
+`unmapped-object` losses too: the derived model
 declares no `invariants`, so it neither opens over that table (`JD0002`, an
 undeclared trigger) nor migrates to the authored model (the plan's `CREATE`s
 meet the installed programs and fail `JD0023`); the model that declares the
@@ -5481,6 +5483,151 @@ row afterward when the final stored revision is needed; native mutation adds no
 implicit read to its admitted statement budget (see [NATIVE-PLANS](NATIVE-PLANS.md)).
 Existing unrecognized triggers remain application-owned physical objects
 requiring preservation dispositions.
+
+### 13.6 Porting existing SQLite triggers
+
+An application that guards its SQLite tables with hand-written triggers can
+read them back as declared rules, through the reader its own subpath holds, so
+a store that never does carries none of it:
+
+```js
+import { sqliteTriggers } from '@jarenjs/db/trigger-rules';
+const { model, report } = await store.introspect({ triggers: sqliteTriggers });
+```
+
+With the reader, introspection (`store.introspect()`, `introspectModel`) on
+SQLite reads each application trigger's CREATE text and, where the trigger is
+one of the families below, declares the database rule it is exactly equal to
+on the entity of its table, named as the trigger. Without it, every
+application trigger stays an `unmapped-object` row, as before, its `reason`
+naming the option, and the model is the one the database derives without its
+triggers. Each table such a rule
+judges or probes is read back as a column layout (§12) instead of the hybrid
+mapping: every column under its own name and the codec its type reads back
+as (`INTEGER`, `TEXT`, `REAL`), a nullable column as `null` and a `NOT NULL`
+one as `reject`, a column with a default as `default: "database"`, the key
+in its declared order, and each index over plain columns without a condition
+or a collation of its own in `physical.indexes`, which keys a probe (§13.2).
+A layout declares no relation, so a foreign key to or from such a table is an
+`unmapped-constraint` row, as are its CHECKs. A table read back for no rule
+is derived as before.
+
+| Family | Trigger | Rule |
+|---|---|---|
+| Unconditional guard (append-only) | `BEFORE DELETE ON orders BEGIN SELECT RAISE(ABORT, 'orders are kept'); END` | `{ "on": ["delete"], "assert": false }` |
+| Unconditional guard (immutable) | `BEFORE UPDATE OF kind ON rooms BEGIN SELECT RAISE(ABORT, '…'); END` | `{ "on": ["update"], "columns": ["kind"], "assert": false }` |
+| Same-row guard | `BEFORE UPDATE ON documents WHEN OLD.status <> 'draft' BEGIN SELECT RAISE(ABORT, '…'); END` | `{ "on": ["update"], "when": "assigned", "assert": { "$eq": ["$.old.status", "draft"] } }` |
+| `UPDATE OF` guard | `BEFORE UPDATE OF sealed_at ON documents WHEN OLD.sealed_at IS NOT NULL OR NEW.sealed_at IS NULL …` | `{ "on": ["update"], "columns": ["sealed_at"], "assert": { "$and": [{ "$eq": ["$.old.sealed_at", null] }, { "$ne": ["$.new.sealed_at", null] }] } }` |
+| Cross-table guard | `BEFORE INSERT ON lines WHEN (SELECT status FROM orders WHERE id = NEW.order_id) <> 'draft' …` | `{ "on": ["insert"], "assert": { "$or": [{ "$not": { "$exists-row": { "entity": "orders", "match": { "id": "$.new.order_id" } } } }, { "$exists-row": { "entity": "orders", "match": { "id": "$.new.order_id", "status": "draft" } } }] } }` |
+| Cross-table guard (`EXISTS`) | `AFTER INSERT ON bookings WHEN NOT EXISTS (SELECT 1 FROM rooms WHERE kind = NEW.room_kind AND open = 1) …` | `{ "on": ["insert"], "assert": { "$exists-row": { "entity": "rooms", "match": { "kind": "$.new.room_kind", "open": 1 } } } }` |
+| Revision bump | `AFTER UPDATE ON counters WHEN NEW.revision = OLD.revision BEGIN UPDATE counters SET revision = OLD.revision + 1 WHERE id = NEW.id; END` | `{ "on": ["update"], "when": "assigned", "assert": true, "effects": [{ "increment": "revision" }] }` |
+
+Every rule read back has `enforcement: "database"`, and the table's columns
+decide its spelling: the same-row guard above reads a `NOT NULL` `status`;
+over a nullable one, which `<>` passes where it is NULL, the rule is
+`{ "$or": [{ "$eq": ["$.old.status", null] }, { "$eq": ["$.old.status", "draft"] }] }`
+(three-valued logic, below). A guard's program is one
+`SELECT RAISE(ABORT, '<text>')`, its condition the trigger's `WHEN`, the
+`RAISE`'s own `WHERE`, or both. A condition is `AND`, `OR`, `NOT` and
+parentheses over comparisons (`=`, `==`, `<>`, `!=`, `<`, `<=`, `>`, `>=`),
+`IS [NOT]`, `[NOT] IN` a list of literals, and `[NOT] EXISTS`, between
+`NEW.<column>`, `OLD.<column>`, text and number literals, `NULL`, and a
+scalar subquery that reads one column of another table's row by equalities
+joined with `AND`. A text column compares with a text literal and a number
+column with a number, as the rule does: SQLite converts a value of the other
+type by the column's affinity first, and the reader leaves such a trigger
+unmapped. An update guard judges every assignment, as the trigger does, so it
+is read back `when: "assigned"`, or with `columns` for an `UPDATE OF`. A
+bump updates the row it fired on, by its whole key, when the writer left the
+revision alone; the column is a non-key `NOT NULL INTEGER` (§13.5).
+
+**Three-valued logic.** A trigger fires where its condition is true, and SQL
+NULL makes a comparison neither true nor false. The reader reads each
+condition into two formulas, where it is true and where it is false (`NOT`
+swaps them), so the rule refuses exactly where the trigger fires: `WHEN
+NEW.owner_id <= 0` passes a NULL `owner_id`, and so does its rule
+(`{ "$not": { "$le": ["$.new.owner_id", 0] } }`, false against SQL NULL);
+`WHEN NOT (NEW.title <> '')` passes a NULL title as the rule `{ "$ne":
+["$.new.title", ""] }` does. A subquery reads SQL NULL where no row
+matches: the rule of `(SELECT status …) <> 'draft'` lets a missing parent
+pass, through `$not` of the key probe. **The NULL trap**: that comparison
+passes a parent whose `status` is NULL too, which `$exists-row
+{ status: 'draft' }` would refuse, so the reader maps it only where the
+schema declares the column `NOT NULL`; over a nullable column it stays
+unmapped, naming the column. `IS NULL` and `IS NOT NULL` of a subquery are
+exact over any column (`sealed_at: null` matches SQL NULL, §13.2). An
+`EXISTS` term compares with `=`, which never matches SQL NULL, where a probe's
+unkeyed members compare null-safely; the two differ only where both sides can
+hold SQL NULL, and such a term stays unmapped.
+
+**What the rule does not carry.** Each trigger read back is a `trigger-rule`
+row (`entity`, `rule`, `message`, `timing`, `sql`, `owner`), which `strict`
+refuses like any other row:
+
+- The message. The rule refuses `JD2096` with `jaren invariant:<rule>` on
+  both engines (§13.4); the trigger's own `RAISE` text is the row's
+  `message`. A rule has no member for it, and adding one would change the
+  text of every installed program.
+- The timing of a `BEFORE INSERT` or `BEFORE UPDATE` trigger. It judges a row
+  before conflict resolution and the rule's program after it, so a row that
+  `OR IGNORE` or `ON CONFLICT DO NOTHING` skips, or `ON CONFLICT DO UPDATE`
+  turns into an update, is refused by the trigger and meets no such rule
+  (the row names it). A `BEFORE INSERT` read of the row id alias, which SQLite
+  has not allocated yet, stays unmapped. A `BEFORE DELETE` meets no conflict
+  clause and is exact.
+- The value domain. A rule refuses a write whose columns it reads hold a
+  value their codec does not read back — text in an `INTEGER` column of a
+  table that is not `STRICT`, an integer past ±(2^53 − 1), a blob — which
+  the trigger compared under SQLite's ordering of storage classes (§13.4).
+
+A bump is read back only where it is the table's one trigger that its own
+UPDATE fires: SQLite runs every other UPDATE trigger again for the bump's
+update — a guard such as `WHEN OLD.status <> 'draft'` then judges the row
+the outer update has just written — while the rule's program, one trigger
+whose increment is its last statement, does not. Beside such a trigger the
+bump stays unmapped, naming it.
+
+**What stays unmapped.** Every other trigger is an `unmapped-object` row
+whose `reason` (also in its `detail`) names the first construct the reader
+does not map:
+
+| Construct | Why |
+|---|---|
+| a program with more than one statement, an `INSERT`, `DELETE` or other write, a `CASE` | a rule has one assertion, and its effects are audits and increments (§13.5) |
+| an aggregate over other rows (`SELECT count(*) …`), a probe of the trigger's own table | §13.4's boundary: a probe reads one row of another table |
+| a scalar subquery by columns no key or unique index covers | it reads the first row, where a probe asks for any |
+| an ordered comparison of another row's column, a comparison with a column of this row | a probe matches by equality to a value |
+| a function, `LIKE`, `GLOB`, `BETWEEN`, `COLLATE`, `CAST`, arithmetic, a concatenation | outside the bounded expression the lowering spells (§13.4) |
+| a text comparison on a table that declares a collation other than `BINARY` | the rule compares by code point |
+| `RAISE(IGNORE)`, `RAISE(FAIL)`, `RAISE(ROLLBACK)` | the rule's refusal aborts the statement, as `RAISE(ABORT)` does |
+| an `INSTEAD OF` trigger, a temporary trigger, a trigger on a table laid out as the store owns it or that is no column layout | a rule judges a writable column layout's row |
+| a trigger the store named for a rule (`_jaren_…`), a name that is no identifier | a rule's name is an identifier, and the store's programs are its own |
+| a rule the lowering refuses (a probe no verified index keys, say) | the planner's reason, quoted |
+
+The model read back plans nothing against the database it was read from:
+`planMigration(derived, derived)` has no step, and neither has
+`planPhysicalMigration` with every object preserved, which inspection never
+chooses for the host (`JD0021`). The database still holds the triggers and
+not the rules' programs, so opening the model read back refuses (`JD0002`,
+naming the program that is missing) until a reviewed migration installs each
+program and drops each trigger read back:
+
+```js
+const { model, report } = await introspectModel(connection, { triggers: sqliteTriggers });
+const read = report.filter((row) => row.code === 'trigger-rule').map((row) => row.object);
+const steps = [...read.map((name) => ({ kind: 'ddl', sql: `DROP TRIGGER "${name}"` })),
+  ...planInvariants(model, { dialect: sqliteDialect }).map((statement) => ({ kind: 'ddl', sql: statement.sql }))];
+const source = (await readSchema(connection)).objects;
+const migration = await planPhysicalMigration(connection, model, model, { id: 'adopt-trigger-rules', steps, assertions: [],
+  dispositions: Object.fromEntries(source.map((object) => [physicalObjectKey(object), read.includes(object.name) ? 'drop' : 'preserve'])) });
+await migrate({ driver }, [migration], { baseline: model, shadow: false, model });
+```
+
+On PostgreSQL the same rules lower to PL/pgSQL functions and row triggers
+(§13.4), and refuse exactly the writes the original SQLite triggers refuse
+(`test/db/postgres-trigger-rules.test.js` replays the streams there).
+PostgreSQL's own trigger programs are not read back: each stays an
+`unmapped-object` row, whose `reason` says so where the reader is passed.
 
 ## Native column mutation documents
 

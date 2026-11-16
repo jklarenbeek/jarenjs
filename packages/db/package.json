@@ -26,6 +26,10 @@
       "types": "./types/search.d.ts",
       "default": "./src/search.js"
     },
+    "./trigger-rules": {
+      "types": "./types/trigger-rules.d.ts",
+      "default": "./src/trigger-rules.js"
+    },
     ".": {
       "types": "./types/index.d.ts",
       "default": "./src/index.js"

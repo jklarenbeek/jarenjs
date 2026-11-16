@@ -1910,6 +1910,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/db/schedules` | JavaScript | declared |
 | `@jarenjs/db/node-process` | JavaScript | declared |
 | `@jarenjs/db/search` | JavaScript | declared |
+| `@jarenjs/db/trigger-rules` | JavaScript | declared |
 | `@jarenjs/db` | JavaScript | declared |
 | `@jarenjs/db/node` | JavaScript | declared |
 | `@jarenjs/db/postgres` | JavaScript | declared |

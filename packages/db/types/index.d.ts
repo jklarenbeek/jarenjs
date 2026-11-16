@@ -1676,6 +1676,17 @@ export interface IntrospectReportRow {
   /** The physical object it is about (`users`, `users.gx_age`). */
   readonly object: string;
   readonly detail: string;
+  /** A trigger's or another object's source SQL, and the table it belongs to. */
+  readonly sql?: string | null;
+  readonly owner?: string;
+  /** An `unmapped-object` SQLite trigger: the first construct the reader does not map (MODEL-FORMAT §13.6). */
+  readonly reason?: string;
+  /** A `trigger-rule` row: the entity and rule the trigger was read back as, the trigger's own
+   * `RAISE` text (`null` for a revision bump) and its timing. */
+  readonly entity?: string;
+  readonly rule?: string;
+  readonly message?: string | null;
+  readonly timing?: 'before' | 'after';
 }
 
 /** Every code the loss report uses, with what it means. */
@@ -1692,6 +1703,8 @@ export declare function introspectModel(connection: unknown, options?: {
   tables?: readonly string[];
   /** The document pointer a text key column cannot record, per table. */
   keys?: Record<string, string>;
+  /** Read application triggers back as database rules: `sqliteTriggers` from `@jarenjs/db/trigger-rules`. */
+  triggers?: { read(dialect: unknown, schema: unknown, joinTables: ReadonlySet<string>): unknown };
 }): unknown;
 
 /** The neutral IR one read produces: tables with their columns,

@@ -634,9 +634,28 @@ what each does is its own documentation's job
   needs the text it reads back rebuilt from milliseconds in SQL on both
   engines, the document member a JSON read inside the trigger with the
   engine's missing/null/type semantics, each with an oracle of its own.
-  Introspection reports such a table's triggers as unmapped objects, so a
+  Introspection reports such a table's rule programs as unmapped objects, so a
   model derived from the database neither reopens nor migrates to the
-  authored one: no reader turns an installed program back into its rule.
+  authored one: no reader turns the store's own installed program back into
+  its rule (an application's hand-written SQLite triggers are read back as the
+  rules they equal with the `triggers` option of `@jarenjs/db/trigger-rules`,
+  MODEL-FORMAT §13.6).
+- [ ] **Read the store's own rule programs back.** After a reviewed migration
+  adopts a table's triggers as rules, `introspect()` reports the
+  `_jaren_rule_*` programs as unmapped, so the derived model loses the rules it
+  was read with. Wanted: recognise each program as the text the rule lowering
+  plans for a rule read from it.
+- [ ] **Read PostgreSQL trigger programs back as rules.** `introspect()` reads
+  an application's SQLite triggers back as the database rules they equal
+  (MODEL-FORMAT §13.6); PostgreSQL's PL/pgSQL programs stay `unmapped-object`
+  rows. Wanted: a reader of a function body's bounded shapes
+  (`IF … THEN RAISE EXCEPTION`), with the same differential oracle on both
+  engines.
+- [ ] **`jaren-db plan --store` over a hand-written table.** The CLI compares
+  the CREATE text a store would plan with the text stored, so it refuses any
+  table the application wrote in its own spelling, where `openStore` accepts
+  the same shape. Wanted: the shape comparison `openStore` makes, and a
+  `jaren-db introspect` command that can pass the trigger reader.
 - [ ] **Pushdown beyond the proven scalar shapes.** Group keys the schema does
   not declare as scalars alone (untyped, a union that lists an object or an
   array, reached by a negative index),

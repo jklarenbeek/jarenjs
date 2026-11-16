@@ -213,7 +213,7 @@ exact: `npm run test:tree-shaking` fails when one differs from the
 tree's. The heaps are re-measured for every release
 (`npm run test:tree-shaking -- --write`), and
 [`benchmark/node-closures.json`](../benchmark/node-closures.json) holds
-the same figures for all <!--fact:closure.subpaths-->278<!--/fact--> importable subpaths of
+the same figures for all <!--fact:closure.subpaths-->279<!--/fact--> importable subpaths of
 every package, each file of a wildcard export (`@jarenjs/core/dates/*`)
 included.
 
@@ -258,9 +258,10 @@ included.
 | `./node-worker` | 101 | core 61, json 21, db 19 | 4.7 |
 | `./postgres` | 119 | core 62, db 36, json 21 | 5.1 |
 | `./query` | 132 | core 62, db 43, json 21, validate 6 | 7.5 |
-| `./relational` | 122 | core 62, db 33, json 21, validate 6 | 6.0 |
+| `./relational` | 122 | core 62, db 33, json 21, validate 6 | 5.9 |
 | `./schedules` | 44 | core 29, db 9, json 6 | 1.9 |
 | `./search` | 92 | core 66, json 21, db 5 | 4.1 |
+| `./trigger-rules` | 120 | core 62, db 31, json 21, validate 6 | 6.0 |
 | `./typed` | 1 | db 1 | 0.1 |
 | `./wasm` | 103 | core 61, db 21, json 21 | 4.8 |
 | `./worker-endpoint` | 133 | core 62, db 44, json 21, validate 6 | 6.8 |
@@ -297,7 +298,7 @@ included.
 | `.` | 87 | core 61, json 26 | 3.9 |
 | `./basic` | 3 | json 2, core 1 | 0.2 |
 | `./canonical` | 17 | core 10, json 7 | 0.9 |
-| `./formula` | 85 | core 61, json 24 | 3.7 |
+| `./formula` | 85 | core 61, json 24 | 3.8 |
 | `./formula/batch` | 86 | core 61, json 25 | 3.8 |
 | `./formula/migrate` | 88 | core 61, json 27 | 4.1 |
 | `./jslt` | 103 | core 72, json 31 | 4.1 |

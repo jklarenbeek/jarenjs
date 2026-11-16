@@ -844,7 +844,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,143,300 (measured 1143252): recurring job schedules' engine seam — the four root calls and their JD0016 refusal (jobs 683), the open option's check and wiring (store 146), the JD0016 message (errors 165), the seam brand (job-schedules 81) and the engine table name (engine-metadata 29), with minifier renames elsewhere net 179 — the calendar itself stays in @jarenjs/db/schedules, add 1283.
 // Raised to 1,143,500 (measured 1143393): a bare collection root's count planned as the native COUNT(*) its explain reports (plan 141).
 // Raised to 1,144,600 (measured 1144552): the validator's string length unit (grapheme, code point or UTF-16 unit) chosen by one option (string ~566, index 273, schema 214, tools 111).
-if (clientBytes > 1144600)
+// Raised to 1,145,400 (measured 1145314): introspect()'s triggers option, which reads application triggers back as rules only through the reader @jarenjs/db/trigger-rules passes — the option's check, each trigger row, foreign key and join table handed to the reader, the trigger-rule code and the reason naming the option (introspect 762).
+if (clientBytes > 1145400)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
