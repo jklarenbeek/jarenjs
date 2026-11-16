@@ -90,7 +90,9 @@ export function createProjectDataRuntime(options = {}) {
       ['label', {}, t('studio/store/insert'), ['textarea', {
         class: 'editor project-data-insert', 'aria-label': t('studio/store/insert'),
         value: h.draft, on: { input: 'draft' }, rows: 4,
-      }]],
+        // a safe profile writes a control's value as its attribute, which a
+        // textarea does not show: its text is the draft there
+      }, ...(h.profiled ? [h.draft] : [])]],
       ['button', { class: 'btn', type: 'button', on: { click: 'insert' }, disabled: !h.ready }, t('studio/store/insert-row')],
       ['label', {}, t('studio/store/delete'), ['input', {
         class: 'editor line', 'aria-label': t('studio/store/delete'), value: h.deleteDraft, on: { input: 'delete-draft' },
@@ -133,10 +135,12 @@ export function createProjectDataRuntime(options = {}) {
     catch (error) { if (current()) { h.status = String(error.message ?? error); draw(h); } }
   };
   const widget = {
-    mount(host, props) {
+    mount(host, props, _emit, context) {
       const h = { dead: false, generation: 0, draft: '{"id":"n1","title":"New note","points":20}',
-        deleteDraft: '"n1"', result: null, plan: null, live: null, props };
-      h.render = createDomRenderer(host, { onEvent: async (binding, event) => {
+        deleteDraft: '"n1"', result: null, plan: null, live: null, props, profiled: context?.safe !== undefined };
+      // under a safe profile the widget context carries the profile, its
+      // grants and its id namespace: this widget's view renders under them
+      h.render = createDomRenderer(host, { ...(context?.safe === undefined ? {} : context), onEvent: async (binding, event) => {
         if (binding === 'draft') { h.draft = event.target.value; return; }
         if (binding === 'delete-draft') { h.deleteDraft = event.target.value; return; }
         if (!h.ready) return;

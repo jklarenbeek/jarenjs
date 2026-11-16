@@ -386,6 +386,15 @@ delete it or fix it.
 
 ## @jarenjs/view & @jarenjs/app
 
+- [ ] **Controlled inputs under `safe: 'interactive'`.** Inputs stay
+  attribute-only, so app state cannot reset a field the user edited. Wanted:
+  the controlled-value path for `value`/`checked` (not `file`) under the
+  interactive profile, with its serializer counterpart.
+- [ ] **One id namespace per untrusted document.** `idPrefix` defaults to
+  `jaren-u-` in both safe profiles; two untrusted documents on one page, or a
+  host id that starts with the prefix, must be kept apart by the host passing
+  its own prefix. Wanted: a check that refuses a second render with the same
+  prefix into one document, or a per-render default that DOM and SSR agree on.
 - [ ] **`createFormView`'s own form-chrome defaults are English.** `@jarenjs/app`
   keeps a hand copy of the add/remove/JSON-hint words because it does not depend on
   `@jarenjs/forms`, whose `formChromeLabels(catalog)` speaks every pack; a host passes

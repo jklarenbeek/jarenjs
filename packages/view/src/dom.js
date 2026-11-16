@@ -53,7 +53,7 @@ import {
   WIDGET_TAG,
 } from './vnode.js';
 import { ENUMERATED_ALIASES, enumeratedAttribute, isAliased, isInlineHandler, removeProperty, writeProperty, writingSpelling } from './properties.js';
-import { createSafePolicy } from './safe.js';
+import { createSafePolicy, grantedWidgets, idPrefixOf, projectEvent } from './safe.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -117,7 +117,14 @@ const WIDGET_SKIP_PROPS = new Set(['name', 'props', 'tag']);
  * own registry and document, frozen, one object per renderer. A widget
  * that renders vnodes of its own (a dialog's content) renders them with
  * the registry it was mounted from.
- * @typedef {Readonly<{ widgets: Record<string, WidgetDef>, document: any, controlled?: 'focus' }>} WidgetContext
+ * Under the interactive profile it also carries the profile itself —
+ * `safe: 'interactive'`, the granted `capabilities`, the `idPrefix` and the
+ * `onUnsafe` sink — and `widgets` holds only the granted widgets, so a widget that
+ * renders vnode content of its own (a dialog) hands these members to its
+ * renderer and the content renders under the same profile and grants.
+ * @typedef {Readonly<{ widgets: Record<string, WidgetDef>, document: any, controlled?: 'focus',
+ *   safe?: 'interactive', capabilities?: Readonly<{ widgets: readonly string[] }>, idPrefix?: string,
+ *   onUnsafe?: (info: { kind: 'tag' | 'prop' | 'event' | 'widget', name: string }) => void }>} WidgetContext
  */
 
 /**
@@ -136,18 +143,35 @@ const WIDGET_SKIP_PROPS = new Set(['name', 'props', 'tag']);
  *   write is deferred and reconciled when the control loses focus — the
  *   operator's typing survives a background refresh until blur
  *   (VIEW-FORMAT §3). Absent, the controlled value always wins.
- * @property {boolean} [safe=false] - Render under the SAFE policy
- *   ({@link createSafePolicy}): treat the vnode as untrusted. Tags are
+ * @property {boolean | 'interactive'} [safe=false] - Render under the SAFE
+ *   policy ({@link createSafePolicy}): treat the vnode as untrusted. Tags are
  *   restricted to an inert HTML/SVG allow-list, scripting-sink and inline
  *   `on*` properties are dropped, injection-shaped names are rejected, URL
  *   attributes are sanitized, and `on` event bindings are stripped. The
  *   default is trusted rendering — the equivalent of writing the DOM by
  *   hand — so a source-authored view is unaffected. Client and server share
  *   the one policy, so they neutralize an attack identically.
+ *   `'interactive'` is the same sanitizer keeping two things: `on` bindings
+ *   that are JSON data on a gesture event (`onEvent` then receives a frozen
+ *   data projection of the event, never the native event), and the widgets
+ *   `capabilities.widgets` grants. Any other truthy value is `true`.
+ * @property {{ widgets?: string[] }} [capabilities] - Under
+ *   `safe: 'interactive'`, the registered widget names the document may
+ *   render; absent, none. A name that is not registered in `widgets` is a
+ *   `TypeError`. Read by no other profile.
+ * @property {string} [idPrefix='jaren-u-'] - Under either safe profile, the
+ *   render's id namespace ({@link createSafePolicy}): every id the document
+ *   declares and every id reference it makes is prefixed with it, so the
+ *   document's references resolve among its own elements and never reach or
+ *   shadow the host's. Pass the same prefix to {@link renderToString} for
+ *   markup this renderer hydrates; give each untrusted document on a page its
+ *   own. Never read in trusted mode.
  * @property {(info: { kind: 'tag' | 'prop' | 'event' | 'widget', name: string }) => void}
  *   [onUnsafe] - In safe mode, called for everything stripped: a disallowed
  *   `tag`, a rejected or sanitized-away `prop`, a stripped `on` binding
- *   (`event`) or a `widget`.
+ *   (`event`; under the interactive profile named by its event type, `on`
+ *   when the member is not an object, `emit` for a widget's) or a
+ *   `widget`.
  * @property {(thrown: unknown) => void} [onCleanupError] - Receives
  *   the first VALUE a widget `unmount` threw during TERMINAL teardown
  *   (`destroy()`, direct or deferred) — by identity, whatever host
@@ -191,14 +215,22 @@ export function createDomRenderer(container, options = {}) {
   if (options.controlled !== undefined && options.controlled !== 'focus') {
     throw new TypeError(`view: the controlled option is 'focus' or absent, got ${JSON.stringify(options.controlled) ?? String(options.controlled)}`);
   }
+  const interactive = options.safe === 'interactive';
+  const granted = interactive ? grantedWidgets(options.capabilities, options.widgets) : null;
   const ctx = {
     doc: options.document ?? container.ownerDocument,
     onEvent: options.onEvent ?? null,
-    widgets: options.widgets ?? EMPTY_PROPS,
+    /** Under the interactive profile, only the granted widgets. */
+    widgets: granted === null ? options.widgets ?? EMPTY_PROPS
+      : Object.freeze(Object.fromEntries(granted.map((name) => [name, options.widgets?.[name]]))),
     /** The safe render policy, or null for trusted (default) rendering.
      * Consulted for every tag and prop; the same object the SSR serializer
      * uses, so client and server strip an attack identically. */
-    policy: options.safe ? createSafePolicy() : null,
+    policy: interactive ? createSafePolicy({ interactive: true, widgets: granted ?? [], idPrefix: options.idPrefix })
+      : options.safe ? createSafePolicy({ idPrefix: options.idPrefix }) : null,
+    /** What a fired `on` binding is delivered to: `onEvent` itself, or under
+     * the interactive profile `onEvent` handed the event's data projection. */
+    eventSink: /** @type {EventBindingHandler | null} */ (null),
     /** Reports everything safe mode strips — a tag, a property, an `on`
      * binding or a widget — so a host can observe a hostile document rather
      * than have it silently vanish. The policy stays a pure decision; the
@@ -254,14 +286,23 @@ export function createDomRenderer(container, options = {}) {
     /** The one `emit` every widget of this renderer receives. */
     emit: /** @type {WidgetEmit | null} */ (null),
   };
-  ctx.emit = function emit(binding, nativeEvent) {
+  ctx.eventSink = interactive ? interactiveSink(ctx) : ctx.onEvent;
+  ctx.emit = interactive ? interactiveEmit(ctx) : function emit(binding, nativeEvent) {
     if (ctx.onEvent !== null) ctx.onEvent(binding, nativeEvent);
   };
   // a widget that renders a vnode tree of its own (a dialog's content)
-  // renders it under the same controlled mode as this renderer's
-  ctx.widgetContext = Object.freeze(ctx.deferFocused
-    ? { widgets: ctx.widgets, document: ctx.doc, controlled: /** @type {'focus'} */ ('focus') }
-    : { widgets: ctx.widgets, document: ctx.doc });
+  // renders it under the same controlled mode as this renderer's, and under
+  // the interactive profile with the same grants
+  ctx.widgetContext = Object.freeze({
+    widgets: ctx.widgets, document: ctx.doc,
+    ...(ctx.deferFocused ? { controlled: /** @type {'focus'} */ ('focus') } : {}),
+    ...(granted === null ? {} : {
+      safe: /** @type {'interactive'} */ ('interactive'),
+      capabilities: Object.freeze({ widgets: Object.freeze([...granted]) }),
+      idPrefix: idPrefixOf(options.idPrefix),
+      ...(ctx.onUnsafe === null ? {} : { onUnsafe: ctx.onUnsafe }),
+    }),
+  });
   /** @type {any} */
   let oldVnode = null;
   /** @type {any} */
@@ -501,7 +542,8 @@ function createNode(ctx, vnode, ns) {
   }
   const tag = vnode[0];
   if (tag === WIDGET_TAG) {
-    // Only reachable in trusted mode: `resolveForPolicy` already turned a
+    // Only reachable in trusted mode and for a widget the interactive
+    // profile granted: `resolveForPolicy` already turned every other
     // safe-mode widget into an empty text node above.
     return createWidgetNode(ctx, vnode, ns);
   }
@@ -514,6 +556,7 @@ function createNode(ctx, vnode, ns) {
   const node = ns !== null
     ? ctx.doc.createElementNS(ns, tag)
     : ctx.doc.createElement(tag);
+  if (ctx.policy !== null) writeFixed(ctx, node, tag);
   const props = propsOf(vnode);
   for (const name in props) {
     setProp(ctx, node, name, undefined, props[name], ns);
@@ -568,9 +611,10 @@ function adoptChildren(ctx, parent, children, ns) {
 }
 
 /**
- * Map a vnode the safe policy rejects — a widget (imperative JS) or an
- * element whose tag is off the allow-list or is injection-shaped — to a
- * stable empty-text sentinel. Trusted mode returns the vnode untouched.
+ * Map a vnode the safe policy rejects — a widget (imperative JS) the
+ * interactive profile did not grant, or an element whose tag is off the
+ * allow-list or is injection-shaped — to a stable empty-text sentinel.
+ * Trusted mode returns the vnode untouched.
  *
  * This runs at the top of BOTH `createNode` and `patchNode`, which is what
  * closes the update-path escape: a rejected node has the identity of an empty
@@ -588,8 +632,18 @@ function resolveForPolicy(ctx, vnode, report) {
   if (ctx.policy === null || !isElementNode(vnode)) return vnode;
   const tag = vnode[0];
   if (tag === WIDGET_TAG) {
+    const props = propsOf(vnode);
+    // the interactive profile renders a granted widget fed data, with no
+    // children, in a host element the tag allow-list admits; safe: true
+    // renders none
+    if (ctx.policy.widget(props.name, props.props) && childrenOf(vnode).length === 0) {
+      const host = props.tag ?? 'div';
+      if (ctx.policy.tag(host) !== null) return vnode;
+      if (report && ctx.onUnsafe !== null) ctx.onUnsafe({ kind: 'tag', name: String(host) });
+      return '';
+    }
     if (report && ctx.onUnsafe !== null) {
-      ctx.onUnsafe({ kind: 'widget', name: String(propsOf(vnode).name ?? '') });
+      ctx.onUnsafe({ kind: 'widget', name: String(props.name ?? '') });
     }
     return '';
   }
@@ -909,12 +963,20 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
       if (ctx.onUnsafe !== null) ctx.onUnsafe({ kind: 'event', name: 'on' });
       return;
     }
+    // The interactive profile wires only the data bindings on allowed events
+    // — a fresh object of them, never the document's own `on`.
+    if (ctx.policy !== null) {
+      const decided = ctx.policy.events(newValue);
+      if (ctx.onUnsafe !== null) for (const dropped of decided.dropped) ctx.onUnsafe({ kind: 'event', name: dropped });
+      setEvents(ctx, node, decided.kept ?? undefined);
+      return;
+    }
     setEvents(ctx, node, newValue);
     return;
   }
   if (SKIP_PROPS.has(name)) return;
   if (ctx.policy !== null) {
-    const decided = ctx.policy.prop(name, newValue);
+    const decided = ctx.policy.prop(name, newValue, node.localName ?? String(node.tagName).toLowerCase());
     // A rejected NAME (scripting sink, inline `on*`, injection-shaped) is
     // dropped; a sanitized-away URL or dangerous style keeps its (safe) name
     // and clears the value.
@@ -927,6 +989,10 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
     name = decided.name;
     const given = newValue;
     newValue = decided.value;
+    // a field that was ever a password field stays one to the event
+    // projection: a later frame switching its type to text must not let a
+    // binding read what the browser filled in
+    if (typeof newValue === 'string' && name.toLowerCase() === 'type' && newValue.trim().toLowerCase() === 'password') node.__jarenSecret = true;
     if (newValue === null && given != null && ctx.onUnsafe !== null) ctx.onUnsafe({ kind: 'prop', name });
     // SAFE MODE IS ATTRIBUTE-ONLY. Never `node[name] = …`: a live DOM property
     // write can THROW (`input.files` is read-only) and it diverges from SSR
@@ -988,6 +1054,19 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
 }
 
 /**
+ * Write the attributes the safe policy gives every element of `tag`
+ * whatever the document says (a `form`'s `method="dialog"`), before its
+ * props, as the serializer writes them first.
+ * @param {any} ctx
+ * @param {any} node
+ * @param {string} tag
+ */
+function writeFixed(ctx, node, tag) {
+  const fixed = ctx.policy.fixed(tag);
+  if (fixed !== null) for (const [name, value] of fixed) node.setAttribute(name, value);
+}
+
+/**
  * An enumerated attribute (the property table) is an attribute in every
  * mode, written with its keyword: never through the boolean property that
  * reads `'false'` as true. Answers whether `name` was one.
@@ -1018,6 +1097,60 @@ function eventProxy(event) {
 }
 
 /**
+ * The interactive profile's event delivery: `onEvent` receives the event's
+ * data projection, never the native event. An event that rose from inside a
+ * widget's subtree (the host's DOM, not the document's) is projected with
+ * what was typed withheld.
+ * @param {any} ctx
+ * @returns {EventBindingHandler | null}
+ */
+function interactiveSink(ctx) {
+  const onEvent = ctx.onEvent;
+  if (onEvent === null) return null;
+  return (binding, event) => {
+    // a submission reaches the app through its binding alone: the form's
+    // own default never runs (its `method="dialog"` would send nothing, but
+    // inside a dialog it would close it behind the app's back)
+    if (event?.type === 'submit' && typeof event.preventDefault === 'function') event.preventDefault();
+    onEvent(binding, projectEvent(event, event?.target?.__jarenSecret === true
+      || risesFromWidget(event?.target, event?.currentTarget)));
+  };
+}
+
+/**
+ * Whether an event's target lies inside a widget host, at or below the node
+ * whose binding fired: the path from the target up to that node crosses a
+ * node this renderer made a widget host.
+ * @param {any} target
+ * @param {any} bound
+ * @returns {boolean}
+ */
+function risesFromWidget(target, bound) {
+  for (let node = target; node != null; node = node.parentNode) {
+    if (node.__jarenWidget !== undefined) return true;
+    if (node === bound) return false;
+  }
+  return false;
+}
+
+/**
+ * The interactive profile's widget `emit`: the binding a widget emits is
+ * held to the same data rule as an `on` binding (a widget's bindings come
+ * from the document's props), and the event it hands on is projected.
+ * @param {any} ctx
+ * @returns {WidgetEmit}
+ */
+function interactiveEmit(ctx) {
+  return function emit(binding, nativeEvent) {
+    if (!ctx.policy.binding(binding)) {
+      if (ctx.onUnsafe !== null) ctx.onUnsafe({ kind: 'event', name: 'emit' });
+      return;
+    }
+    if (ctx.onEvent !== null) ctx.onEvent(binding, projectEvent(nativeEvent, false));
+  };
+}
+
+/**
  * Reconcile the `on` prop: `{ [eventType]: binding }`, against the
  * bindings the node holds (the node, not the old vnode, is what carries
  * the listeners).
@@ -1029,7 +1162,7 @@ function setEvents(ctx, node, newOn) {
   const prev = node.__jarenOn ?? EMPTY_PROPS;
   const next = newOn ?? EMPTY_PROPS;
   node.__jarenOn = next;
-  node.__jarenEmit = ctx.onEvent;
+  node.__jarenEmit = ctx.eventSink;
   for (const type in prev) {
     if (!(type in next)) node.removeEventListener(type, eventProxy);
   }
@@ -1080,6 +1213,7 @@ function createWidgetNode(ctx, vnode, ns) {
   const node = ns !== null
     ? ctx.doc.createElementNS(ns, tag)
     : ctx.doc.createElement(tag);
+  if (ctx.policy !== null) writeFixed(ctx, node, tag);
   for (const name in props) {
     if (WIDGET_SKIP_PROPS.has(name)) continue;
     setProp(ctx, node, name, undefined, props[name], ns);

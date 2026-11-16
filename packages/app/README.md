@@ -362,7 +362,27 @@ Optional `capabilities: { effects, subs, widgets, eventFields }` arrays grant
 specific host registry names; with safe mode or explicit grants, omitted lists
 are empty. See [APP-FORMAT §8.2.1](docs/APP-FORMAT.md#821-dom-profiles-and-host-capability-grants)
 for the disposal and trust contract. Safe mode is a display policy and removes
-DOM event bindings and widgets.
+DOM event bindings and widgets. `safe: 'interactive'` is the same sanitizer
+keeping data-only bindings on gesture events and the widgets
+`capabilities.widgets` grants, for an untrusted app a host cannot put in a
+sandboxed frame:
+
+```js
+import { createApp } from '@jarenjs/app';
+
+const untrusted = {
+  state: { n: 0 },
+  actions: { add: { patch: [{ op: 'replace', path: '/n', value: { $add: ['$.n', 1] } }] } },
+  view: [{ match: '$', body: ['button', { on: { click: 'add' }, onclick: 'steal()' }, '$.n'] }],
+};
+const app = createApp(untrusted, {
+  node: document.getElementById('app'),
+  safe: 'interactive',
+  onUnsafe: (info) => console.warn(info), // { kind: 'prop', name: 'onclick' }
+});
+// a click runs `add`, an action the document declared, and renders <button>1</button>;
+// a binding naming any other action runs nothing and reports JA2001
+```
 
 `createArrayRangeProvider` and `createCollectionCoordinator` provide injected collection coordination and complete snapshot output; see [the provider contract](docs/COLLECTION-PROVIDER.md).
 

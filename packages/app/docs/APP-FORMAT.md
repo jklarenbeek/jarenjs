@@ -688,7 +688,8 @@ The options object itself is a closed set, checked before anything
 compiles: a member `createApp` does not take, or one of the wrong kind
 — a callback (`onError`, `schedule`, `afterRender`, `validateState`,
 `viewModel`, `compileTypeTest`, `onUnsafe`) that is not a function, a
-flag (`safe`, `hydrate`, `capturePayloads`) that is not a boolean,
+flag (`safe`, `hydrate`, `capturePayloads`) that is not a boolean (`safe`
+also takes `'interactive'`), an `idPrefix` that is not a string,
 a registry (`effects`, `subs`, `eventFields`, `widgets`) that is not an
 object of named members (a function, an array, a `Map` or `Set`, a
 promise), `capabilities` that is not a plain object or has a member other
@@ -835,6 +836,25 @@ effects belong to this app's disposal lifecycle. Without either option, the
 existing registered capabilities remain available. Safe mode still removes
 DOM event bindings and widgets; a widget grant does not override that display
 policy. A trusted interactive app can use explicit grants without `safe`.
+
+`safe: 'interactive'` selects the view's interactive profile (VIEW-FORMAT
+§8.1) for an untrusted app the host cannot put in a sandboxed frame. The
+sanitizer is `safe: true`'s; the renderer keeps the `on` bindings that are
+JSON data on a gesture event, and renders exactly the widgets
+`capabilities.widgets` grants (empty by default, as every grant list is under
+either safe value). What a kept binding can reach is this format's grammar
+(§4): a string or `action` naming an action the document's own `actions`
+declare — an undeclared name, `__proto__`, `constructor` or `toString`
+included, dispatches nothing, applies no native control and reports
+`JA2001` — with a JSON `with` payload. `$event` is built from the view's data
+projection of the event, never the native event, and so is what a granted
+`eventFields` extractor receives (an extractor that reads a host object, such
+as `createFileTokenRegistry`'s `extract`, finds none). A granted dialog widget
+(§8.7) renders its `content` under the same profile and grants. Any other
+string for `safe` is a `TypeError`. Under either safe value `idPrefix`
+(forwarded to the renderer, default `'jaren-u-'`) is the id namespace every
+id and id reference of the document joins (VIEW-FORMAT §8 rule 7); a granted
+dialog's own id joins it too.
 
 The action vocabulary is local to the app document. Effect/subscription/widget
 registries and custom event fields are host boundaries. These controls bound

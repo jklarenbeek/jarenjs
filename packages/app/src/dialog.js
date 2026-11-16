@@ -8,7 +8,10 @@ import { AppRuntimeError, APP_CODES } from './errors.js';
  * @property {Record<string, import('@jarenjs/view').WidgetDef>} [widgets] - Nested content widget registry.
  *   Absent, the content renders with the registry the dialog itself was
  *   mounted from (the renderer's `context.widgets`). The content renders
- *   under the app's controlled mode too (`context.controlled`).
+ *   under the app's controlled mode too (`context.controlled`), and under
+ *   the renderer's interactive profile with its grants when it has one
+ *   (`context.safe`, `context.capabilities`, `context.idPrefix`, `context.onUnsafe`): untrusted
+ *   content inside a granted dialog is sanitized as everything around it.
  * @property {Readonly<Record<string, unknown>> | (() => Readonly<Record<string, unknown>> | undefined)} [messages] -
  *   The reader's compiled `@jarenjs/locales` pack (or a function answering
  *   the current one, read at each mount) for the dialog's own words (its
@@ -31,9 +34,17 @@ export function createDialogWidget(options = {}) {
       check(props);
       const handle = { props, owner: null };
       const messages = typeof options.messages === 'function' ? options.messages() : options.messages;
-      handle.owner = createDialog(host, props, { widgets: options.widgets ?? context?.widgets, onEvent: emit,
+      const widgets = options.widgets ?? context?.widgets;
+      handle.owner = createDialog(host, props, { widgets, onEvent: emit,
         ...(messages == null ? {} : { messages }),
         ...(context?.controlled === undefined ? {} : { controlled: context.controlled }),
+        ...(context?.safe === undefined ? {} : {
+          safe: context.safe,
+          // the renderer's grant, narrowed to what this content registry holds
+          capabilities: { widgets: (context.capabilities?.widgets ?? []).filter((name) => widgets != null && Object.hasOwn(widgets, name)) },
+          ...(context.onUnsafe === undefined ? {} : { onUnsafe: context.onUnsafe }),
+          ...(context.idPrefix === undefined ? {} : { idPrefix: context.idPrefix }),
+        }),
         onClose: (_reason, event) => emit(handle.props.close, event) });
       return handle;
     },

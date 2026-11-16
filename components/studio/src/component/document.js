@@ -66,8 +66,12 @@ function validateAppDocument(doc) {
  */
 function vnodeWidget(view) {
   return {
-    mount(host, props, emit) {
+    mount(host, props, emit, context) {
       const render = createDomRenderer(host, {
+        // under a safe profile the widget context carries the profile, its
+        // grants and its id namespace: the projection renders under them,
+        // never trusted
+        ...(context?.safe === undefined ? {} : context),
         document: host.ownerDocument,
         onEvent: (binding, event) => emit(binding, event),
       });

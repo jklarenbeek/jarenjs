@@ -54,9 +54,17 @@ import { rejectionText } from './tasks.js';
  *   `'focus'`, a controlled text control the operator is typing into
  *   keeps their text until it loses focus, then the state's value is
  *   reconciled (VIEW-FORMAT §3). Absent, the state's value always wins.
- * @property {boolean} [safe] - Forward the inert view render profile. In
- *   this mode host capabilities default to empty allow-lists.
+ * @property {boolean | 'interactive'} [safe] - Forward the inert view
+ *   render profile (`true`), or the interactive one (`'interactive'`: the
+ *   same sanitizer, keeping data-only `on` bindings on gesture events and
+ *   the widgets `capabilities.widgets` grants; actions then receive the
+ *   view's data projection of each event, and so do granted `eventFields`
+ *   extractors). In either mode host capabilities default to empty
+ *   allow-lists.
  * @property {import('@jarenjs/view').DomRendererOptions['onUnsafe']} [onUnsafe]
+ * @property {string} [idPrefix] - Forwarded to the renderer: under either
+ *   safe profile, the id namespace every id and id reference of the
+ *   document joins (default `'jaren-u-'`; VIEW-FORMAT §8).
  * @property {{ effects?: string[], subs?: string[], widgets?: string[], eventFields?: string[] }} [capabilities]
  *   Restrict the host registry names the document may access. Omitted
  *   lists grant nothing when this option or `safe` is enabled.
@@ -274,8 +282,9 @@ const APP_OPTIONS = {
   document: optionRule('an object', (value) => typeof value === 'object', true),
   hydrate: optionRule('a boolean', isBoolean, true),
   controlled: null,
-  safe: optionRule('a boolean', isBoolean, true),
+  safe: optionRule("a boolean or 'interactive'", (value) => isBoolean(value) || value === 'interactive', true),
   onUnsafe: optionRule('a function', isFunction, true),
+  idPrefix: optionRule('a string', (value) => typeof value === 'string', true),
   capabilities: optionRule('a plain object', isPlainOptions, true),
   effects: registryRule('handlers'),
   subs: registryRule('handlers'),
@@ -1715,6 +1724,10 @@ export function createApp(appDoc, options = {}) {
           onEvent: handleBinding,
           widgets,
           safe: options.safe,
+          // the interactive profile renders exactly the widgets this app
+          // granted (`capabilities.widgets`, empty by default)
+          ...(options.safe === 'interactive' ? { capabilities: { widgets: Object.keys(widgets) } } : {}),
+          ...(options.idPrefix == null ? {} : { idPrefix: options.idPrefix }),
           hydrate: options.hydrate,
           controlled: options.controlled,
           onUnsafe: options.onUnsafe,

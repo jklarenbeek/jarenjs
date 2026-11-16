@@ -598,6 +598,7 @@
     ["' awaited effect '", "developer-facing"],
     ["' threw while cleaning up: ", "developer-facing"],
     ["' threw while disposing: ", "developer-facing"],
+    ["a boolean or 'interactive'", "developer-facing"],
     ["a plain object", "developer-facing"],
     ["an object of ", "developer-facing"],
     ["effect handler '", "developer-facing"],

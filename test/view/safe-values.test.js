@@ -41,15 +41,16 @@ describe('view safe profile — prop values of another kind', () => {
   it('an attribute value that cannot be turned into text renders as the attribute dropped, in both renderers', () => {
     for (const name of ['title', 'data-x', 'class', 'href', 'srcset', 'width']) {
       const vnode = ['div', { [name]: BOMB, id: 'k' }];
-      assert.strictEqual(renderToString(vnode, { safe: true }), '<div id="k"></div>', name);
+      // a safe profile namespaces the id the document declares (`jaren-u-` by default)
+      assert.strictEqual(renderToString(vnode, { safe: true }), '<div id="jaren-u-k"></div>', name);
       const seen = domSafe(vnode);
-      assert.strictEqual(seen.markup, '<div><div id="k"></div></div>', name);
+      assert.strictEqual(seen.markup, '<div><div id="jaren-u-k"></div></div>', name);
       assert.deepStrictEqual(seen.reports, [`prop:${name}`], name);
     }
   });
 
   it('a list or an object is not an attribute value, and a list of strings keeps its answer on the value of a select', () => {
-    assert.strictEqual(renderToString(['div', { title: ['a', 'b'], 'data-o': { a: 1 }, id: 'k' }], { safe: true }), '<div id="k"></div>');
+    assert.strictEqual(renderToString(['div', { title: ['a', 'b'], 'data-o': { a: 1 }, id: 'k' }], { safe: true }), '<div id="jaren-u-k"></div>');
     const multiple = ['select', { multiple: true, value: ['b', 'c'] },
       ['option', { value: 'a' }, 'A'], ['option', { value: 'b' }, 'B'], ['option', { value: 'c' }, 'C']];
     assert.strictEqual(renderToString(multiple, { safe: true }),
@@ -65,7 +66,7 @@ describe('view safe profile — prop values of another kind', () => {
   it('a prop the author left empty is not reported as stripped, in either renderer', () => {
     const vnode = ['a', { href: null, title: null, srcset: null, style: null, id: 'x' }, 'x'];
     const seen = [];
-    assert.strictEqual(renderToString(vnode, { safe: true, onUnsafe: (r) => seen.push(`${r.kind}:${r.name}`) }), '<a id="x">x</a>');
+    assert.strictEqual(renderToString(vnode, { safe: true, onUnsafe: (r) => seen.push(`${r.kind}:${r.name}`) }), '<a id="jaren-u-x">x</a>');
     assert.deepStrictEqual(seen, []);
     assert.deepStrictEqual(domSafe(vnode).reports, []);
   });

@@ -2,6 +2,7 @@
 /** Native modal ownership inside one renderer-owned widget host. */
 import { CodedError } from '@jarenjs/core/errors';
 import { createDomRenderer } from '../dom.js';
+import { idPrefixOf } from '../safe.js';
 import { findByRef } from './focus.js';
 import { viewText } from '../messages.js';
 
@@ -29,6 +30,17 @@ export const DIALOG_CODES = Object.freeze({
  * @property {'focus'} [controlled] - The content renderer's controlled mode
  *   (`createDomRenderer`'s): a control the operator is typing into keeps its
  *   text until it loses focus. A dialog mounted as a widget inherits it.
+ * @property {boolean | 'interactive'} [safe] - The content renderer's profile
+ *   (`createDomRenderer`'s `safe`), with its `capabilities` and `onUnsafe`:
+ *   content that is not the host's own renders sanitized. A dialog mounted
+ *   as a widget under the interactive profile inherits all three from the
+ *   widget context.
+ * @property {{ widgets?: string[] }} [capabilities]
+ * @property {string} [idPrefix] - With `safe`, the content's id namespace
+ *   (`createDomRenderer`'s), which the dialog's own `id` and its title's join
+ *   too, so the document's references to them resolve and none reaches the
+ *   host's ids.
+ * @property {(info: { kind: 'tag' | 'prop' | 'event' | 'widget', name: string }) => void} [onUnsafe]
  * @property {Readonly<Record<string, unknown>> | null} [messages] - The reader's
  *   compiled catalog (`compileMessageCatalog` over a locale pack): the close
  *   button's default text renders through it (`view/dialog/close`), falling
@@ -73,10 +85,13 @@ export function createDialog(host, initial, options = {}) {
   let render;
   try {
     render = createDomRenderer(content, { document: doc, onEvent: options.onEvent, widgets: options.widgets,
-      ...(options.controlled === undefined ? {} : { controlled: options.controlled }) });
+      ...(options.controlled === undefined ? {} : { controlled: options.controlled }),
+      ...(options.safe === undefined ? {} : { safe: options.safe, capabilities: options.capabilities, onUnsafe: options.onUnsafe, idPrefix: options.idPrefix }) });
   }
   catch (error) { host.removeChild(dialog); throw error; }
   let props = initial, disposed = false, opener = null, suppressedCloses = 0;
+  /** The id namespace the dialog's own ids join: the content's, under a safe profile. */
+  const scope = options.safe ? idPrefixOf(options.idPrefix) : '';
 
   function focusable() {
     // Native selectors handle disabled fieldsets. Layout checks exclude hidden
@@ -130,13 +145,14 @@ export function createDialog(host, initial, options = {}) {
     update(next) {
       if (disposed) return;
       properties(next);
-      for (const [id, element] of [[next.id, dialog], [`${next.id}-title`, title]]) {
-        const existing = doc.getElementById(id);
+      const id = scope + next.id;
+      for (const [own, element] of [[id, dialog], [`${id}-title`, title]]) {
+        const existing = doc.getElementById(own);
         if (existing && existing !== element) refuse('JV1001');
       }
       props = next;
-      dialog.setAttribute('id', props.id); title.setAttribute('id', `${props.id}-title`);
-      dialog.setAttribute('aria-labelledby', `${props.id}-title`);
+      dialog.setAttribute('id', id); title.setAttribute('id', `${id}-title`);
+      dialog.setAttribute('aria-labelledby', `${id}-title`);
       title.textContent = props.title; closeButton.textContent = props.closeLabel ?? viewText(options.messages)('view/dialog/close');
       const wasFocused = dialog.contains(doc.activeElement), opening = props.open && !dialog.open;
       if (opening) { opener = doc.activeElement; dialog.showModal(); }

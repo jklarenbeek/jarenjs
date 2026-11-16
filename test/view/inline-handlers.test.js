@@ -141,12 +141,13 @@ describe('an inline handler string is dropped by both renderers', () => {
     /** @type {string[]} */
     const seen = [];
     const onUnsafe = (/** @type {any} */ r) => seen.push(`${r.kind}:${r.name}`);
-    assert.strictEqual(renderToString(['div', { onclick: 'x', id: 'a' }], { safe: true, onUnsafe }), '<div id="a"></div>');
+    // (a safe profile namespaces the declared id)
+    assert.strictEqual(renderToString(['div', { onclick: 'x', id: 'a' }], { safe: true, onUnsafe }), '<div id="jaren-u-a"></div>');
     const h = host(false);
     const render = createDomRenderer(h.container, { document: h.document, safe: true, onUnsafe });
     render(['div', { onclick: 'x', id: 'a' }]);
     assert.deepStrictEqual(seen, ['prop:onclick', 'prop:onclick']);
-    assert.deepStrictEqual(attributesOf(h.container.childNodes[0]), [['id', 'a']]);
+    assert.deepStrictEqual(attributesOf(h.container.childNodes[0]), [['id', 'jaren-u-a']]);
   });
 });
 

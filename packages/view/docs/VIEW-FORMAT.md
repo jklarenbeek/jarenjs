@@ -268,7 +268,9 @@ control. `checked` and a `select`'s value are not deferred.
 
 The value of an `on` member is an opaque JSON **binding**. The view
 layer MUST deliver the binding verbatim to the environment's event hook
-(`onEvent(binding, nativeEvent)`) and MUST NOT interpret it. What a
+(`onEvent(binding, nativeEvent)`) and MUST NOT interpret it. (The
+interactive profile, §8.1, checks that it IS data and delivers a data
+projection of the event instead of the native one.) What a
 binding means belongs to the layer above; in `@jarenjs/app` it is an
 action name or `{"action": name, "with"?: payload, "event"?: [...],
 "preventDefault"?: bool, "stopPropagation"?: bool}`
@@ -747,6 +749,33 @@ Under the safe profile a renderer MUST:
 5. **Strip `on` bindings and `jaren-widget` nodes**: an untrusted document
    MUST NOT bind host actions or mount imperative code. Safe-mode views are
    display-oriented.
+6. **Keep every form submission inside the document.** A `form`'s `action`,
+   `method`, `target` and `enctype`, and a submitter's `formaction`,
+   `formmethod`, `formtarget`, `formenctype` and `formnovalidate` (on any
+   element), are dropped and reported, and every `form` is written with
+   `method="dialog"` before its props: a submission sends nothing anywhere
+   (outside a `dialog` it is a no-op; inside one it closes that dialog),
+   while its `submit` event still fires. Upgrade note: a safe form used to keep
+   a sanitized `action` and its `method`; it now submits nowhere.
+7. **Namespace every id.** Every id the document declares, and every id
+   reference it makes, is prefixed with the render's `idPrefix` (default
+   `jaren-u-`; a host-supplied letter followed by letters, digits, `_` or
+   `-`): `id`; the single references `for` (and `htmlFor`), `form`, `list`,
+   `popovertarget`, `commandfor`, `interestfor`, `anchor`, `contextmenu`,
+   `aria-activedescendant`; the reference lists `headers`, `itemref`,
+   `aria-labelledby`, `aria-describedby`, `aria-controls`, `aria-owns`,
+   `aria-details`, `aria-errormessage`, `aria-flowto`; a `#fragment` `href`
+   and `usemap`; `url(#…)` in the SVG `fill`, `stroke`, `clip-path`, `mask`,
+   `marker-*` and `filter` attributes and in an inline `style`. `name` is
+   prefixed on `form`, `img`, `embed`, `object` and `iframe`, the elements
+   whose name becomes a property of `document` (and `window`). References
+   inside the document therefore still resolve, and none can reach — or a
+   declared id or name shadow — an element or property of the host's page.
+   Both renderers apply the same prefix, so markup serialized with a prefix
+   hydrates under the same prefix. A host rendering several untrusted
+   documents in one page gives each its own prefix, and uses no id of its
+   own that starts with one. Upgrade note: a safe document's ids, id
+   references and those names used to be written as given.
 
 A dropped element serializes to nothing and patches to an empty node; the
 patching and serializing renderers MUST make the **same** decision for a
@@ -762,9 +791,9 @@ the runtime policy is authoritative; a host validating untrusted input
 SHOULD do both.
 
 Safe mode reduces an untrusted view to a display; it is **not a complete
-sandbox**. The tag allow-list still admits anchors, forms, controls and media,
-so native navigation, form submission, focus and network loads remain
-possible. It is also a **renderer** policy. `@jarenjs/app` forwards `safe`
+sandbox**. The tag allow-list still admits anchors, controls and media, so
+native navigation, focus and network loads remain possible (a form submits
+nowhere, rule 6). It is also a **renderer** policy. `@jarenjs/app` forwards `safe`
 and `onUnsafe` and provides explicit effect/subscription/widget/event-field
 grants (APP-FORMAT §8.2.1). Those grants bound named host access; they do not
 isolate computation, navigation or network activity.
@@ -780,6 +809,102 @@ controlled-input policy.
 Native OS IME fidelity and assistive-technology behavior still require manual
 audits. MathML and Trusted Types integration remain outside this version.
 Safe mode is one layer under a Content-Security-Policy, not a substitute for one.
+
+### 8.1 The interactive profile
+
+A host that must render an untrusted *interactive* document without a
+sandboxed frame selects `safe: 'interactive'` on either renderer. It is the
+safe profile — rules 1–4, 6 and 7 above are the **same decisions**, made by the same
+policy object, with the same results and the same reports — except for rule 5,
+where it keeps two things:
+
+1. **Data-only `on` bindings on gesture events.** A binding is kept when its
+   event type is one of `click`, `dblclick`, `mousedown`, `mouseup`,
+   `pointerdown`, `pointerup`, `keydown`, `keyup`, `input`, `change`,
+   `submit`, `reset`, `blur` or `focusout` (matched exactly: event types are
+   case-sensitive), and its value is JSON data: a string, a finite number, a
+   boolean, `null`, or a plain list or object of those, at most 64 levels
+   deep and 65536 values in all. A function, a getter (never run), a
+   symbol-keyed member, an object with a prototype of its own (a class
+   instance, a `Date`, a `Map`), a hole or an extra member on a list,
+   `undefined` and a non-finite number are not data. An `on` member that is
+   not a plain object binds nothing. Every other type and every other value
+   is dropped and reported as `{ kind: 'event', name: <type> }` (`'on'` for
+   the member itself). The types left out fire without a deliberate gesture
+   — `load` and `error`, `toggle` on an open `details`, CSS animation and
+   transition events, the `focus`/`focusin` that `autofocus` fires, hover and
+   pointer movement, `wheel` and `scroll` — or carry a host object as their
+   payload (`paste`, `drop`).
+2. **The widgets the host granted.** `capabilities: { widgets: [name, ...] }`
+   names the registered widgets a document may render (absent: none; a name
+   not registered in `widgets` is a `TypeError`). A granted widget renders
+   only with props that are data (as above), no vnode children, and a host
+   `tag` the tag allow-list admits; otherwise it is dropped and reported
+   (`widget`, or `tag` for the host tag), on every frame, without throwing.
+   Its host-element props pass rules 2–4, 6 and 7, its `ssr` fallback is serialized
+   under the profile, and the bindings it `emit`s are held to the data rule
+   (an `emit` that fails it is reported as `{ kind: 'event', name: 'emit' }`).
+   The fourth `mount` argument carries `safe: 'interactive'`, the granted
+   `capabilities`, `idPrefix` and `onUnsafe`, and holds only the granted
+   widgets in `widgets`, so a widget that renders vnode content of its own
+   (§7.5's dialog does, and so do the studio's document widgets) renders it
+   under the same profile, grants and id namespace — a widget does that by
+   spreading the context into its renderer's options when `context.safe` is
+   set. The dialog's own `id` joins the namespace too.
+
+**What the handler receives.** Under the profile a `submit` event's default is prevented before the
+binding is delivered, so a submission reaches the app only as data. `onEvent(binding, event)`
+receives, in place of the native event, a frozen object with no prototype
+holding the event's `type`, its keyboard, modifier, button and pointer fields
+(`key`, `code`, `repeat`, `location`, `isComposing`, `shiftKey`, `ctrlKey`,
+`altKey`, `metaKey`, `button`, `buttons`, `detail`, `clientX`/`Y`,
+`offsetX`/`Y`, `pageX`/`Y`, `movementX`/`Y`, `pointerId`, `pointerType`,
+`pressure`, `isPrimary`; a member that is not a string, finite number or
+boolean reads `null`), a frozen `target` slice (`value`, `checked`,
+`selectionStart`, `selectionEnd`), and `preventDefault()` and
+`stopPropagation()`, which act on the native event. No node, window or event
+object is reachable from it. What a user typed — `key`, `code` and the whole
+`target` slice — reads `null` when the target is a password field, and when
+the event rose from inside a widget's subtree, which is the host's DOM, not
+the document's. A binding is delivered verbatim and never evaluated.
+
+**What it keeps from the safe profile.** Controls stay attribute-only (a
+state change does not reset a control the user has edited), hydration still
+rebuilds the server's markup, and the serializer writes no trace of a
+binding. Under `safe: true`, or any other truthy value, nothing changes: every
+binding and widget is stripped, and `capabilities` is not read.
+
+| | trusted | `safe: true` | `safe: 'interactive'` |
+|---|---|---|---|
+| tags | any element name | inert allow-list | inert allow-list |
+| prop names | any | bare identifiers; no `on*`, HTML sinks or `is` | the same |
+| URL attributes | as written | `sanitizeUrl` deny-list | the same |
+| inline `style` | as written | CSS vectors dropped | the same |
+| prop values | any | scalars (a select's `value` list, `style` object) | the same |
+| `on` bindings | any, verbatim | stripped | data only, gesture events only |
+| `onEvent`'s event | the native event | (never called) | a frozen data projection |
+| widgets | any registered | stripped | granted by name, data props, allowed host tag |
+| forms | as written | `method="dialog"`, no destination | the same; a `submit`'s default is always prevented |
+| ids and id references | as written | in the render's `idPrefix` namespace | the same, shared with granted widgets' content |
+| controlled inputs | property writes | attributes only | attributes only |
+
+**What it does not defend.** It narrows what a document can do inside the
+host's page; it does not move the document out of it. Rule 3 denies script and
+document schemes, not origins, so a document can still load
+`https://elsewhere/?…` through an image, a link, a form or a style — and an
+interactive document can put what a user types into such a URL without a
+submit: a URL attribute is checked for its scheme only, whatever the
+document wrote into it. It can still overlay and imitate the host's
+interface, and a binding may stop an event from bubbling out of the
+document's elements (listeners in the capture phase still see it). The
+browser may still fill the host origin's saved credentials into a document's
+form; a handler never sees a password field's value and the form submits
+nowhere (rule 6), but a username field's value is ordinary input.
+A granted widget is host code fed untrusted props: it must treat them as
+untrusted. **A sandboxed frame on an opaque origin remains the stronger
+isolation**; use the profile where a frame is not possible, under a
+Content-Security-Policy that restricts `img-src`, `form-action`,
+`connect-src` and `style-src`.
 
 ## 9. Open items (roadmap, non-normative)
 

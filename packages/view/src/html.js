@@ -22,7 +22,7 @@ import {
 } from './vnode.js';
 import { styleToString } from './dom.js';
 import { aliasOf, enumeratedAttribute, isInlineHandler, writingSpelling } from './properties.js';
-import { createSafePolicy } from './safe.js';
+import { createSafePolicy, grantedWidgets } from './safe.js';
 
 /** Void elements per the HTML standard: no children, no end tag. */
 const VOID_ELEMENTS = new Set([
@@ -93,9 +93,10 @@ export function escapeAttribute(value) {
  * @param {import('./safe.js').SafePolicy | null} policy
  * @param {((info: { kind: string, name: string }) => void) | null} onUnsafe - the
  *   safe-mode report sink, or null
+ * @param {string} tag - the element the props belong to
  * @returns {string}
  */
-function serializeProps(props, skip, policy, onUnsafe) {
+function serializeProps(props, skip, policy, onUnsafe, tag) {
   let out = '';
   for (const name in props) {
     if (skip.has(name)) continue;
@@ -105,7 +106,7 @@ function serializeProps(props, skip, policy, onUnsafe) {
     let attr = name;
     let value = props[name];
     if (policy !== null) {
-      const decided = policy.prop(attr, value);
+      const decided = policy.prop(attr, value, tag);
       // Omit a rejected NAME or a cleared VALUE. Omission — not an empty
       // attribute — is what the DOM renderer's `removeAttribute` also does in
       // safe mode, so the two outputs match.
@@ -146,12 +147,23 @@ function serializeProps(props, skip, policy, onUnsafe) {
  *   serializes its host element around the widget's `ssr(props)` vnode
  *   when the widget is registered and has one, else empty
  *   (VIEW-FORMAT §7).
- * @property {boolean} [safe=false] - Serialize under the SAFE policy
- *   ({@link createSafePolicy}): treat the vnode as untrusted. Disallowed
- *   tags, scripting-sink and inline `on*` properties, injection-shaped tag
- *   and attribute names, and unsafe URLs are stripped, and widget vnodes are
- *   dropped. This is the SAME policy {@link createDomRenderer} applies, so a
- *   document renders to the same safe markup on the server as on the client.
+ * @property {boolean | 'interactive'} [safe=false] - Serialize under the
+ *   SAFE policy ({@link createSafePolicy}): treat the vnode as untrusted.
+ *   Disallowed tags, scripting-sink and inline `on*` properties,
+ *   injection-shaped tag and attribute names, and unsafe URLs are stripped,
+ *   and widget vnodes are dropped. This is the SAME policy
+ *   {@link createDomRenderer} applies, so a document renders to the same safe
+ *   markup on the server as on the client. `'interactive'` serializes a
+ *   widget `capabilities.widgets` grants (its host element, around its `ssr`
+ *   fallback, both through the policy) and reports the `on` bindings the
+ *   DOM renderer would drop; no binding is ever markup. Any other truthy
+ *   value is `true`.
+ * @property {{ widgets?: string[] }} [capabilities] - Under
+ *   `safe: 'interactive'`, the registered widget names the document may
+ *   render, exactly as {@link createDomRenderer} reads it.
+ * @property {string} [idPrefix='jaren-u-'] - Under either safe profile, the
+ *   render's id namespace, exactly as {@link createDomRenderer} reads it: the
+ *   same prefix on both sides gives the same markup.
  * @property {(info: { kind: 'tag' | 'prop' | 'event' | 'widget', name: string }) => void}
  *   [onUnsafe] - In safe mode, called for everything stripped: a `tag`, a
  *   `prop`, an `on` binding (`event`) or a `widget`.
@@ -169,9 +181,38 @@ function serializeProps(props, skip, policy, onUnsafe) {
  * @returns {string}
  */
 export function renderToString(vnode, options = {}) {
-  const policy = options.safe ? createSafePolicy() : null;
+  const policy = options.safe === 'interactive'
+    ? createSafePolicy({ interactive: true, widgets: grantedWidgets(options.capabilities, options.widgets), idPrefix: options.idPrefix })
+    : options.safe ? createSafePolicy({ idPrefix: options.idPrefix }) : null;
   const onUnsafe = typeof options.onUnsafe === 'function' ? options.onUnsafe : null;
   return renderNode(vnode, options.widgets, policy, onUnsafe, null, vnode, false);
+}
+
+/**
+ * The attributes the safe policy gives every element of `tag` (a `form`'s
+ * `method="dialog"`), written before its props as the DOM renderer writes
+ * them first; empty in trusted mode.
+ * @param {import('./safe.js').SafePolicy | null} policy
+ * @param {string} tag
+ * @returns {string}
+ */
+function fixedAttributes(policy, tag) {
+  const fixed = policy === null ? null : policy.fixed(tag);
+  if (fixed === null) return '';
+  let out = '';
+  for (const [name, value] of fixed) out += ' ' + name + '="' + escapeAttribute(value) + '"';
+  return out;
+}
+
+/**
+ * Report the `on` bindings the interactive profile drops, as the DOM
+ * renderer reports them: the same decision, so the same names.
+ * @param {import('./safe.js').SafePolicy} policy
+ * @param {any} on
+ * @param {(info: { kind: string, name: string }) => void} onUnsafe
+ */
+function reportEvents(policy, on, onUnsafe) {
+  for (const name of policy.events(on).dropped) onUnsafe({ kind: 'event', name });
 }
 
 /**
@@ -203,10 +244,19 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
   if (tag === WIDGET_TAG) {
     // A widget is arbitrary imperative JS. In safe mode an untrusted document
     // must not mount one, so it drops to nothing — the same nothing the DOM
-    // renderer produces for a widget in safe mode.
+    // renderer produces for a widget in safe mode. The interactive profile
+    // keeps one the host granted, fed data, with no children, in a host
+    // element the tag allow-list admits: the DOM renderer's very decision.
     if (policy !== null) {
-      if (onUnsafe !== null) onUnsafe({ kind: 'widget', name: String(props.name ?? '') });
-      return '';
+      if (!policy.widget(props.name, props.props) || childrenOf(vnode).length !== 0) {
+        if (onUnsafe !== null) onUnsafe({ kind: 'widget', name: String(props.name ?? '') });
+        return '';
+      }
+      if (policy.tag(props.tag ?? 'div') === null) {
+        if (onUnsafe !== null) onUnsafe({ kind: 'tag', name: String(props.tag ?? 'div') });
+        return '';
+      }
+      if (onUnsafe !== null) reportEvents(policy, props.on, onUnsafe);
     }
     const hostTag = props.tag ?? 'div';
     if (!isElementName(hostTag)) throw elementNameError(root, vnode, hostTag);
@@ -221,7 +271,7 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
       ? renderNode(ssr.call(def, props.props ?? null), widgets, policy, onUnsafe, selection, root,
         hostTag === 'foreignObject' ? false : svg || hostTag === 'svg')
       : '';
-    return '<' + hostTag + serializeProps(props, WIDGET_SKIP_PROPS, policy, onUnsafe) + '>'
+    return '<' + hostTag + fixedAttributes(policy, hostTag) + serializeProps(props, WIDGET_SKIP_PROPS, policy, onUnsafe, hostTag) + '>'
       + inner + '</' + hostTag + '>';
   }
   // Safe mode: a disallowed or injection-shaped tag drops to the empty
@@ -237,7 +287,8 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
   // renderer — SSR never emits `on`, but a host still wants to know an
   // untrusted document tried to bind an action.
   if (policy !== null && onUnsafe !== null && props.on !== undefined) {
-    onUnsafe({ kind: 'event', name: 'on' });
+    if (policy.dropsEvents) onUnsafe({ kind: 'event', name: 'on' });
+    else reportEvents(policy, props.on, onUnsafe);
   }
   const controlledTextarea = policy === null && tag === 'textarea' && 'value' in props;
   const controlledSelect = policy === null && tag === 'select' && 'value' in props;
@@ -250,9 +301,9 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
     } : null;
   }
   const controlledOption = tag === 'option' && selection !== null;
-  let out = '<' + tag + serializeProps(props,
+  let out = '<' + tag + fixedAttributes(policy, tag) + serializeProps(props,
     controlledTextarea || controlledSelect ? VALUE_SKIP_PROPS
-      : controlledOption ? OPTION_SKIP_PROPS : SKIP_PROPS, policy, onUnsafe);
+      : controlledOption ? OPTION_SKIP_PROPS : SKIP_PROPS, policy, onUnsafe, tag);
   if (controlledOption) {
     const value = props.value == null || props.value === false
       ? optionText(vnode).replace(/[\t\n\f\r ]+/g, ' ').replace(/^ | $/g, '')

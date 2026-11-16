@@ -167,7 +167,18 @@ client and the server neutralize an attack identically. In safe mode:
   to be written as its text;
 - **`on` event bindings and `jaren-widget` nodes are stripped** — an untrusted
   document must not bind the host's actions or mount imperative JavaScript, so
-  safe-mode views are display-oriented.
+  safe-mode views are display-oriented;
+- **a form submits nowhere**: `action`, `method`, `target` and `enctype` on a
+  form and `formaction`/`formmethod`/`formtarget`/`formenctype`/`formnovalidate`
+  anywhere are dropped, and every form is `method="dialog"`. Upgrade note: a
+  safe form used to keep a sanitized `action` and its `method`;
+- **ids live in the render's namespace**: every declared id, every id
+  reference (`for`, `form`, `list`, `popovertarget`, `commandfor`, `headers`,
+  the `aria-*` relations, `#fragment` hrefs, `url(#…)`) and `name` on `form`,
+  `img`, `embed`, `object` and `iframe` are prefixed with `idPrefix`
+  (default `jaren-u-`, the same on both renderers), so the document's
+  references resolve among its own elements and none reaches or shadows the
+  host's. Upgrade note: these used to be written as given.
 
 A companion schema,
 [`schemas/jaren-vnode-safe.schema.json`](schemas/jaren-vnode-safe.schema.json),
@@ -180,8 +191,8 @@ render with `{ safe: true }`.
 untrusted *view* to a display: it strips script, raw-HTML sinks, inline and
 `on` handlers, widgets, and unsafe URLs, and the client and server strip
 identically. It is **not a complete sandbox** — the allow-list still includes
-anchors, forms, controls and media, so native navigation, form submission,
-focus and network loads remain possible; treat safe mode as one layer under a
+anchors, controls and media, so native navigation, focus and network loads
+remain possible; treat safe mode as one layer under a
 Content-Security-Policy, not a replacement for one. It also applies to the
 **renderer only**: [`@jarenjs/app`](../app) forwards `safe` to the renderer, while
 an app document names host actions, effects and subscriptions, so a safe
@@ -189,6 +200,66 @@ an app document names host actions, effects and subscriptions, so a safe
 app documents. Automated Chromium/Firefox/WebKit tests cover controlled inputs,
 composition and multiple-select behavior. Native OS IME and assistive-technology
 qualification and a Trusted Types integration remain separate work.
+
+### Untrusted *interactive* views: `safe: 'interactive'`
+
+A host that must render an untrusted app that responds to the user, and cannot
+put it in a sandboxed frame, passes `safe: 'interactive'`. Tags, names, sinks,
+URLs, style and values go through the **same** policy decisions as
+`safe: true` — the attack corpus renders to the same bytes under both — and
+two things are kept: `on` bindings that are JSON data on a gesture event, and
+the widgets the host grants by name.
+
+```js
+import { createDomRenderer, renderToString } from '@jarenjs/view';
+
+const chart = {
+  mount(host, props) { host.textContent = props.points.join(' '); },
+  ssr: (props) => ['span', { class: 'chart' }, props.points.join(' ')],
+};
+const map = { mount() {} };
+const untrusted = ['div', {},
+  ['button', { onclick: 'steal()', on: { click: { action: 'add', with: { n: 1 } } } }, 'Add'],
+  ['img', { src: 'javascript:alert(1)', alt: 'x', on: { error: 'add' } }],
+  ['jaren-widget', { name: 'chart', props: { points: [3, 1, 2] } }],
+  ['jaren-widget', { name: 'map' }]];
+const options = {
+  safe: 'interactive',
+  widgets: { chart, map },
+  capabilities: { widgets: ['chart'] }, // map is registered, not granted
+  onUnsafe: (info) => console.warn(info),
+};
+
+renderToString(untrusted, options);
+// -> '<div><button>Add</button><img alt="x"><div><span class="chart">3 1 2</span></div></div>'
+// onUnsafe: prop onclick, event error, prop src, widget map
+
+const render = createDomRenderer(document.getElementById('app'), {
+  ...options,
+  // a click on Add delivers the binding verbatim, with a frozen data
+  // projection of the event: never the Event, never a node
+  onEvent: (binding, event) => console.log(binding, event.type, event.shiftKey),
+});
+render(untrusted);
+```
+
+| | `safe: true` | `safe: 'interactive'` |
+|---|---|---|
+| tags, prop names, URLs, style, values | sanitized | the same decisions |
+| `on` bindings | stripped | kept when JSON data on `click`, `dblclick`, `mousedown`, `mouseup`, `pointerdown`, `pointerup`, `keydown`, `keyup`, `input`, `change`, `submit`, `reset`, `blur` or `focusout`; every other type dropped |
+| what `onEvent` receives | (never called) | a frozen data projection: primitive fields, a `target` slice of `value`/`checked`/selection, `preventDefault()`, `stopPropagation()`; nothing typed into a password field or inside a widget |
+| widgets | stripped | only names in `capabilities.widgets`, with data props and an allowed host tag; the widget's context carries the profile to any content it renders |
+| forms | submit nowhere (`method="dialog"`) | the same; a `submit` reaches the app only through its binding, default prevented |
+| ids and id references | prefixed with `idPrefix` | the same, shared with granted widgets' content |
+| controlled inputs | attributes only | attributes only |
+
+Events that fire with no gesture (`load`, `error`, `toggle`, animation and
+transition events, `autofocus`'s `focus`, hover, `scroll`) cannot be bound.
+Like `safe: true`, the profile does not stop network loads to other origins
+(a URL is checked for its scheme only) or an overlay imitating the host:
+**a sandboxed frame remains the stronger isolation**, and the profile belongs
+under a Content-Security-Policy. The contract, with every bound, is
+[VIEW-FORMAT §8.1](docs/VIEW-FORMAT.md#81-the-interactive-profile).
 
 ### Shared view helpers — `@jarenjs/view/helpers`
 

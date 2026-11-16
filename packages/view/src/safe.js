@@ -39,6 +39,21 @@
  *    able to bind the host's application actions. Safe-mode views are
  *    display-oriented by construction.
  *
+ * **The interactive profile** (`{ safe: 'interactive' }`) is this policy with
+ * the SAME tag, name, sink, URL and style decisions, and exactly two more —
+ * the two places it differs from `safe: true`:
+ *
+ *  - **`on` bindings are kept when they are data** ({@link createSafePolicy}'s
+ *    `events`): a binding is JSON (a string, a finite number, a boolean,
+ *    `null`, or a plain list or object of those — no function, accessor,
+ *    symbol key or prototype of its own, within a fixed depth and size), on
+ *    an event type from {@link INTERACTIVE_EVENTS}: events a user fires by a
+ *    deliberate gesture. The handler receives {@link projectEvent}'s frozen
+ *    data slice, never the native event or a node.
+ *  - **Widgets render only when the host granted their name** (`widget`), and
+ *    only with data props; the renderers also hold a granted widget's host
+ *    tag to the tag allow-list.
+ *
  * The policy is a set of pure decisions. The DOM renderer and the SSR
  * serializer call the *same* functions, which is what guarantees the client
  * and the server neutralize an attack identically.
@@ -129,18 +144,120 @@ const RE_DANGEROUS_STYLE = /expression\s*\(|url\s*\(\s*['"]?\s*(?:javascript|vbs
  * live rule. */
 const RE_SAFE_STYLE_KEY = /^(?:--[A-Za-z0-9-]+|[A-Za-z][A-Za-z0-9-]*)$/;
 
+/** A submitter's override of where and how its form is sent: dropped on
+ * every element, so no button or input can send the document's form, or the
+ * host's, anywhere. Compared case-insensitively. */
+const SUBMITTER_ATTRS = new Set(['formaction', 'formmethod', 'formtarget', 'formenctype', 'formnovalidate']);
+
+/** Where and how a `form` is sent: dropped on a `form`, which the profiles
+ * give `method="dialog"` instead ({@link FORM_FIXED}). */
+const FORM_DESTINATION_ATTRS = new Set(['action', 'method', 'target', 'enctype']);
+
+/** The attributes every `form` a safe profile renders carries, whatever the
+ * document says: `method="dialog"` sends nothing anywhere — outside a
+ * `dialog` a submission is a no-op, inside one it closes that dialog — while
+ * the `submit` event still fires, so an interactive binding still sees it. */
+const FORM_FIXED = Object.freeze([Object.freeze(/** @type {const} */ (['method', 'dialog']))]);
+
+/** Attributes whose value is ONE element id the browser resolves in the
+ * whole page: rewritten into the render's id namespace. */
+const ID_REF_ATTRS = new Set([
+  'for', 'htmlfor', 'form', 'list', 'popovertarget', 'commandfor', 'interestfor', 'anchor',
+  'contextmenu', 'aria-activedescendant',
+]);
+
+/** Attributes whose value is a whitespace-separated LIST of element ids. */
+const ID_LIST_ATTRS = new Set([
+  'headers', 'itemref', 'aria-labelledby', 'aria-describedby', 'aria-controls', 'aria-owns',
+  'aria-details', 'aria-errormessage', 'aria-flowto',
+]);
+
+/** The elements whose `name` becomes a named property of `document` (and of
+ * `window`): their `name` is namespaced like an id, so a document cannot
+ * shadow `document.cookie`, `document.forms` or a host global. */
+const NAMED_TAGS = new Set(['form', 'img', 'embed', 'object', 'iframe']);
+
+/** SVG presentation attributes that reference a paint server, clip path,
+ * mask, marker or filter by `url(#id)`. */
+const URL_REF_ATTRS = new Set([
+  'fill', 'stroke', 'clip-path', 'mask', 'marker-start', 'marker-mid', 'marker-end', 'filter',
+]);
+
+/** A `url(#id)` reference, as CSS and SVG spell one. */
+const RE_URL_FRAGMENT = /(url\(\s*['"]?\s*)#/gi;
+const RE_HAS_URL_FRAGMENT = /url\(\s*['"]?\s*#/i;
+
+/** The id namespace a render uses when its host names none. Deterministic,
+ * so the DOM renderer and the serializer agree without being told. */
+const DEFAULT_ID_PREFIX = 'jaren-u-';
+
+/** An id prefix a host may supply: a letter, then letters, digits, `_` or
+ * `-`, so a prefixed id stays a plain token in a `#fragment` and a `url()`. */
+const RE_ID_PREFIX = /^[A-Za-z][A-Za-z0-9_-]*$/;
+
 /**
  * @typedef {Object} SafePolicy
  * @property {(tag: string) => string | null} tag - The tag to render, or
  *   `null` to drop the element and its subtree.
- * @property {(name: string, value: any) => { name: string, value: any } | null}
- *   prop - The name/value to write, `{ name, value: null }` to clear an
+ * @property {(tag: string) => ReadonlyArray<readonly [string, string]> | null} fixed -
+ *   Attributes an element of this tag carries whatever the document says,
+ *   written before its props (a `form`'s `method="dialog"`), or `null`.
+ * @property {(name: string, value: any, tag?: string) => { name: string, value: any } | null}
+ *   prop - The name/value to write on an element of `tag`, `{ name, value: null }` to clear an
  *   existing attribute (a sanitized-away URL, a dangerous style), or `null` to
  *   drop the property entirely (a rejected name).
- * @property {boolean} dropsEvents - Whether `on` bindings are stripped (always
- *   true for the default policy; the renderers read this to skip the `on`
- *   path in safe mode).
+ * @property {boolean} dropsEvents - Whether `on` bindings are stripped (true
+ *   for the default policy, false for the interactive one; the renderers read
+ *   this to skip the `on` path in safe mode).
+ * @property {(on: any) => { kept: Record<string, any> | null, dropped: string[] }}
+ *   events - The interactive decision on an `on` member: the bindings to wire
+ *   (a fresh object of own, allowed, data-only entries, or `null` for none)
+ *   and the names of what was dropped (an event type, or `'on'` when the
+ *   member is not a plain object). The default policy keeps nothing.
+ * @property {(binding: any) => boolean} binding - Whether a binding a widget
+ *   emits may reach the host: the same data rule as `events` (always false
+ *   for the default policy).
+ * @property {(name: any, props: any) => boolean} widget - Whether a widget of
+ *   this name, configured by these props, may render: granted by the host and
+ *   fed data (always false for the default policy).
  */
+
+/**
+ * @typedef {Object} SafePolicyOptions
+ * @property {boolean} [interactive=false] - Build the interactive profile's
+ *   policy: data-only `on` bindings on {@link INTERACTIVE_EVENTS}, and the
+ *   granted widgets.
+ * @property {Iterable<string>} [widgets] - The widget names the host granted
+ *   (interactive only; none when absent).
+ * @property {string} [idPrefix='jaren-u-'] - The render's id namespace: every
+ *   id the document declares, and every id reference (`for`, `form`, `list`,
+ *   `popovertarget`, `headers`, the `aria-*` relations, `#fragment` hrefs,
+ *   `url(#…)`), is prefixed with it, as is `name` on `form`, `img`, `embed`,
+ *   `object` and `iframe`. A letter, then letters, digits, `_` or `-`.
+ */
+
+/**
+ * The event types an interactive binding may name: each fires from a
+ * deliberate user gesture on the document's own elements. Absent by design:
+ * events that fire with no gesture (`load`, `error`, `toggle` on an open
+ * `details`, CSS `animation*`/`transition*`, the `focus`/`focusin` an
+ * `autofocus` attribute fires), hover and movement (`mouseover`,
+ * `pointermove`, …), `wheel`/`scroll`, and events whose interesting payload
+ * is a host object (`paste`, `drop`). Matched exactly: an event type is
+ * case-sensitive, so `Click` names no event.
+ */
+const INTERACTIVE_EVENTS = new Set([
+  'click', 'dblclick', 'mousedown', 'mouseup', 'pointerdown', 'pointerup',
+  'keydown', 'keyup', 'input', 'change', 'submit', 'reset', 'blur', 'focusout',
+]);
+
+/** How deep a binding or widget props may nest, and how many values they may
+ * hold, before the profile stops reading and drops them: fixed bounds, so a
+ * cyclic or exponentially shared JS structure is refused deterministically,
+ * whatever the host's stack. */
+const MAX_DATA_DEPTH = 64;
+const MAX_DATA_VALUES = 65536;
+
 
 /**
  * Build the default safe policy. Stateless and cheap; a renderer builds one
@@ -150,11 +267,52 @@ const RE_SAFE_STYLE_KEY = /^(?:--[A-Za-z0-9-]+|[A-Za-z][A-Za-z0-9-]*)$/;
  * The renderer owns `onUnsafe` and reports at the point it acts on a
  * rejection, which is what lets it report the strips a policy never sees (an
  * `on` binding, a widget) with one contract.
+ *
+ * With `{ interactive: true }` it builds the interactive profile's policy:
+ * `tag` and `prop` are the very same decisions, and `events`, `binding` and
+ * `widget` keep what the profile keeps.
+ * @param {SafePolicyOptions} [options]
  * @returns {SafePolicy}
  */
-export function createSafePolicy() {
+export function createSafePolicy(options = {}) {
+  const interactive = options.interactive === true;
+  const granted = new Set(interactive ? options.widgets ?? [] : []);
+  const prefix = idPrefixOf(options.idPrefix);
   return {
-    dropsEvents: true,
+    dropsEvents: !interactive,
+
+    events(on) {
+      if (on == null) return { kept: null, dropped: [] };
+      if (!interactive || !isPlainRecord(on)) return { kept: null, dropped: ['on'] };
+      /** @type {string[]} */
+      const dropped = [];
+      /** @type {Record<string, any>} */
+      const kept = {};
+      let any = false;
+      for (const type of /** @type {string[]} */ (Reflect.ownKeys(on))) {
+        const own = /** @type {PropertyDescriptor} */ (Object.getOwnPropertyDescriptor(on, type));
+        // a member left undefined binds nothing, as in trusted mode, and was
+        // not stripped by anything
+        if ('value' in own && own.value === undefined) continue;
+        if (!own.enumerable || !('value' in own) || !INTERACTIVE_EVENTS.has(type) || !isData(own.value)) {
+          dropped.push(type);
+          continue;
+        }
+        kept[type] = own.value;
+        any = true;
+      }
+      // what is wired is a fresh object of the kept entries, never the
+      // document's own `on`
+      return { kept: any ? kept : null, dropped };
+    },
+
+    binding(value) {
+      return interactive && isData(value);
+    },
+
+    widget(name, props) {
+      return interactive && typeof name === 'string' && granted.has(name) && isData(props ?? null);
+    },
 
     tag(tag) {
       if (isElementName(tag) && (SAFE_HTML_TAGS.has(tag) || SAFE_SVG_TAGS.has(tag))) {
@@ -163,7 +321,11 @@ export function createSafePolicy() {
       return null;
     },
 
-    prop(name, value) {
+    fixed(tag) {
+      return tag === 'form' ? FORM_FIXED : null;
+    },
+
+    prop(name, value, tag) {
       const lower = name.toLowerCase();
       // A name that is not a bare identifier is structural injection, whatever
       // it spells: reject before it can reach a serializer or a DOM property.
@@ -175,21 +337,34 @@ export function createSafePolicy() {
         || lower === 'is' || DANGEROUS_PROPS.has(lower)) {
         return null;
       }
+      // No submission leaves the document's control: a submitter's override
+      // and a form's own destination are denied (the form is `method="dialog"`).
+      if (SUBMITTER_ATTRS.has(lower) || (tag === 'form' && FORM_DESTINATION_ATTRS.has(lower))) return null;
       // a value is a string, a number, a boolean or null, as the safe schema
       // says: anything else is turned into text by the renderers, and the
       // text of a list or an object is not what the checks below read (a
       // list holding a script URL) or cannot be made at all (a `toString`
       // member that is no function). A `multiple` select's `value` is the
       // one list.
-      if (lower === 'style') return { name, value: safeStyle(value) };
+      if (lower === 'style') return { name, value: scopeStyle(safeStyle(value), prefix) };
       if (!isScalar(value) && !(lower === 'value' && Array.isArray(value) && value.every(isScalar))) {
         return { name, value: null };
       }
+      // Every id the document declares, and every reference to one, lives in
+      // the render's namespace: references inside the document resolve, and
+      // none can reach — or shadow — an element of the host's.
+      if (lower === 'id' || ID_REF_ATTRS.has(lower) || (lower === 'name' && NAMED_TAGS.has(/** @type {string} */ (tag)))) {
+        return { name, value: scopeId(value, prefix) };
+      }
+      if (ID_LIST_ATTRS.has(lower)) return { name, value: scopeIdList(value, prefix) };
+      if (lower === 'usemap') return { name, value: scopeFragment(value, prefix) };
+      if (URL_REF_ATTRS.has(lower)) return { name, value: scopeUrlRefs(value, prefix) };
       if (URL_ATTRS.has(lower)) {
         const safe = sanitizeUrl(value);
         // Keep the (safe) name but clear the value when the URL is unsafe: a
         // patch from a good URL to a bad one must remove the old attribute.
-        return { name, value: safe };
+        // A same-document `#fragment` points into the render's namespace.
+        return { name, value: lower === 'href' ? scopeFragment(safe, prefix) : safe };
       }
       if (URL_LIST_ATTRS.has(lower)) {
         return { name, value: sanitizeUrlList(value, lower === 'srcset') };
@@ -197,6 +372,265 @@ export function createSafePolicy() {
       return { name, value };
     },
   };
+}
+
+/**
+ * The id prefix a render uses: the host's, checked, or the default.
+ * @param {any} value
+ * @returns {string}
+ */
+export function idPrefixOf(value) {
+  if (value === undefined) return DEFAULT_ID_PREFIX;
+  if (typeof value !== 'string' || !RE_ID_PREFIX.test(value)) {
+    throw new TypeError(`view: idPrefix must be a letter followed by letters, digits, _ or -, got ${JSON.stringify(value) ?? String(value)}`);
+  }
+  return value;
+}
+
+/**
+ * One id in the render's namespace. A value that is not a non-empty string
+ * or a number declares no id and is returned as it is.
+ * @param {any} value
+ * @param {string} prefix
+ * @returns {any}
+ */
+function scopeId(value, prefix) {
+  if (typeof value === 'number') return prefix + String(value);
+  return typeof value === 'string' && value !== '' ? prefix + value : value;
+}
+
+/**
+ * A whitespace-separated id list in the render's namespace.
+ * @param {any} value
+ * @param {string} prefix
+ * @returns {any}
+ */
+function scopeIdList(value, prefix) {
+  if (typeof value === 'number') return prefix + String(value);
+  if (typeof value !== 'string') return value;
+  const ids = value.split(/[\t\n\f\r ]+/).filter((id) => id !== '');
+  return ids.length === 0 ? value : ids.map((id) => prefix + id).join(' ');
+}
+
+/**
+ * A same-document `#fragment` URL in the render's namespace; any other URL
+ * (and `#` alone, the top of the page) unchanged.
+ * @param {any} value
+ * @param {string} prefix
+ * @returns {any}
+ */
+function scopeFragment(value, prefix) {
+  return typeof value === 'string' && value.length > 1 && value[0] === '#' ? '#' + prefix + value.slice(1) : value;
+}
+
+/**
+ * Every `url(#id)` in a value, in the render's namespace.
+ * @param {any} value
+ * @param {string} prefix
+ * @returns {any}
+ */
+function scopeUrlRefs(value, prefix) {
+  return typeof value === 'string' ? value.replace(RE_URL_FRAGMENT, (_match, open) => `${open}#${prefix}`) : value;
+}
+
+/**
+ * A safe inline style with its `url(#id)` references in the render's
+ * namespace: the same string or object when it holds none.
+ * @param {any} value
+ * @param {string} prefix
+ * @returns {any}
+ */
+function scopeStyle(value, prefix) {
+  if (typeof value === 'string') return scopeUrlRefs(value, prefix);
+  if (value === null || typeof value !== 'object') return value;
+  let out = null;
+  for (const key in value) {
+    const v = value[key];
+    if (typeof v === 'string' && RE_HAS_URL_FRAGMENT.test(v)) {
+      if (out === null) out = { ...value };
+      out[key] = scopeUrlRefs(v, prefix);
+    }
+  }
+  return out ?? value;
+}
+
+/**
+ * Whether `value` is a plain record: an object whose prototype is
+ * `Object.prototype` or `null`, so nothing it answers is inherited, and
+ * whose own keys are all strings.
+ * @param {any} value
+ * @returns {boolean}
+ */
+function isPlainRecord(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return (proto === Object.prototype || proto === null) && Object.getOwnPropertySymbols(value).length === 0;
+}
+
+/**
+ * Whether `value` is JSON data, as the interactive profile reads a binding or
+ * a widget's props: a string, a finite number, a boolean, `null`, or a plain
+ * list or record of those. Never a function, a getter (it is not run: the
+ * descriptor is read), a symbol-keyed or non-enumerable member (a hidden
+ * `toJSON` is still called by `JSON.stringify`), an object with a prototype
+ * of its own (a class instance, a `Date`, a `Map`), a hole or an extra
+ * member on a list, `undefined`, a non-finite number or a bigint — nothing
+ * that could run code when the host reads, copies or serializes it. Bounded
+ * by {@link MAX_DATA_DEPTH} and {@link MAX_DATA_VALUES}.
+ * @param {any} value
+ * @returns {boolean}
+ */
+export function isData(value) {
+  const budget = { left: MAX_DATA_VALUES };
+  return dataWalk(value, 0, budget);
+}
+
+/**
+ * The recursion of {@link isData}.
+ * @param {any} value
+ * @param {number} depth
+ * @param {{ left: number }} budget
+ * @returns {boolean}
+ */
+function dataWalk(value, depth, budget) {
+  if (--budget.left < 0) return false;
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value !== 'object' || depth >= MAX_DATA_DEPTH) return false;
+  const keys = Reflect.ownKeys(value);
+  if (Array.isArray(value)) {
+    // its own keys are exactly its indexes and `length`: no hole, no extra
+    if (Object.getPrototypeOf(value) !== Array.prototype || keys.length !== value.length + 1) return false;
+    for (let i = 0; i < value.length; i++) {
+      const own = Object.getOwnPropertyDescriptor(value, i);
+      if (own === undefined || !('value' in own) || !dataWalk(own.value, depth + 1, budget)) return false;
+    }
+    return true;
+  }
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return false;
+  for (const key of keys) {
+    if (typeof key !== 'string') return false;
+    const own = /** @type {PropertyDescriptor} */ (Object.getOwnPropertyDescriptor(value, key));
+    if (!own.enumerable || !('value' in own) || !dataWalk(own.value, depth + 1, budget)) return false;
+  }
+  return true;
+}
+
+/** The primitive fields of a native event an interactive handler receives:
+ * keyboard, modifier, button and pointer members. `screenX`/`screenY` (where
+ * the window sits on the screen) and the wheel deltas (no wheel binding) are
+ * left out. */
+const PROJECTED_FIELDS = [
+  'key', 'code', 'repeat', 'location', 'isComposing',
+  'shiftKey', 'ctrlKey', 'altKey', 'metaKey',
+  'button', 'buttons', 'detail',
+  'clientX', 'clientY', 'offsetX', 'offsetY', 'pageX', 'pageY', 'movementX', 'movementY',
+  'pointerId', 'pointerType', 'pressure', 'isPrimary',
+];
+
+/** The fields that carry what a user typed: withheld from an event at a
+ * password field or one that rose from inside a widget. */
+const TYPED_FIELDS = new Set(['key', 'code']);
+
+/** The projections this module made, so one handed on again (a widget's
+ * nested renderer emitting through its owner) is not projected twice. */
+const PROJECTED = new WeakSet();
+
+/**
+ * The data an interactive handler receives in place of a native event: a
+ * frozen, null-prototype object of the event's primitive fields
+ * ({@link PROJECTED_FIELDS}, a member that is not a string, number or
+ * boolean read as `null`), a frozen `target` slice of `value`, `checked`,
+ * `selectionStart` and `selectionEnd`, and the two native controls a binding
+ * may ask for, `preventDefault()` and `stopPropagation()`. No node, no
+ * window, no event object is reachable from it.
+ *
+ * What a user typed is withheld (`key`, `code` and the whole target slice read
+ * `null`) when the event's target is a password field — a document must not
+ * read a credential, typed or filled in by the browser — and when `withheld`
+ * is set: the renderer sets it for an event that rose from inside a widget's
+ * subtree, which is the host's, not the document's.
+ * @param {any} event - The native event, or what a widget emitted.
+ * @param {boolean} withheld
+ * @returns {any} the projection (`event` itself when it is not an object)
+ */
+export function projectEvent(event, withheld) {
+  if (event === null || typeof event !== 'object' || PROJECTED.has(event)) return event;
+  const target = event.target;
+  const sealed = withheld || isPasswordField(target);
+  const out = Object.create(null);
+  out.type = primitive(event.type);
+  for (const name of PROJECTED_FIELDS) {
+    out[name] = sealed && TYPED_FIELDS.has(name) ? null : primitive(event[name]);
+  }
+  const slice = Object.create(null);
+  slice.value = sealed ? null : primitive(target?.value);
+  slice.checked = sealed ? null : primitive(target?.checked);
+  slice.selectionStart = sealed ? null : primitive(target?.selectionStart);
+  slice.selectionEnd = sealed ? null : primitive(target?.selectionEnd);
+  out.target = Object.freeze(slice);
+  out.preventDefault = () => {
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+  };
+  out.stopPropagation = () => {
+    if (typeof event.stopPropagation === 'function') event.stopPropagation();
+  };
+  Object.freeze(out);
+  PROJECTED.add(out);
+  return out;
+}
+
+/**
+ * A value an event projection may carry: a string, a finite number or a
+ * boolean; anything else reads `null`.
+ * @param {any} value
+ * @returns {string | number | boolean | null}
+ */
+function primitive(value) {
+  return typeof value === 'string' || typeof value === 'boolean'
+    || (typeof value === 'number' && Number.isFinite(value)) ? value : null;
+}
+
+/**
+ * Whether an event target is a password field: its `type` property, or its
+ * `type` attribute where the node reflects none.
+ * @param {any} target
+ * @returns {boolean}
+ */
+function isPasswordField(target) {
+  if (target === null || typeof target !== 'object') return false;
+  const type = typeof target.type === 'string' ? target.type
+    : typeof target.getAttribute === 'function' ? target.getAttribute('type') : null;
+  return typeof type === 'string' && type.trim().toLowerCase() === 'password';
+}
+
+/**
+ * Validate the interactive profile's widget grant, `capabilities.widgets`,
+ * against the registry the renderer was handed, and return the granted
+ * names. Shared by both renderers, so a grant the DOM renderer refuses the
+ * serializer refuses too. Absent (`capabilities` or its `widgets` member
+ * `undefined` or `null`) grants nothing.
+ * @param {any} capabilities
+ * @param {Record<string, any> | undefined} widgets
+ * @returns {string[]}
+ */
+export function grantedWidgets(capabilities, widgets) {
+  if (capabilities == null) return [];
+  if (typeof capabilities !== 'object' || Array.isArray(capabilities)) {
+    throw new TypeError('view: capabilities must be an object, as { widgets: [name, ...] }');
+  }
+  const names = capabilities.widgets;
+  if (names == null) return [];
+  if (!Array.isArray(names) || names.some((name) => typeof name !== 'string')) {
+    throw new TypeError('view: capabilities.widgets must be a list of widget names');
+  }
+  for (const name of names) {
+    if (widgets == null || !Object.hasOwn(widgets, name)) {
+      throw new TypeError(`view: capabilities.widgets grants '${name}', which is not a registered widget`);
+    }
+  }
+  return [...names];
 }
 
 /**

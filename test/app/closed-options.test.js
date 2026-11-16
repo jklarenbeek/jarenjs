@@ -52,7 +52,7 @@ describe('createApp — a closed option set', function () {
     refuses(() => createApp(doc(), { capturePayloads: /** @type {any} */ ('yes') }),
       /^createApp: options\.capturePayloads must be a boolean, got "yes"$/);
     refuses(() => createApp(doc(), { safe: /** @type {any} */ ('false') }),
-      /options\.safe must be a boolean, got "false"/);
+      /options\.safe must be a boolean or 'interactive', got "false"/);
     refuses(() => createApp(doc(), { hydrate: /** @type {any} */ (1) }),
       /options\.hydrate must be a boolean, got 1/);
     refuses(() => createApp(doc(), { capabilities: /** @type {any} */ ('all') }),
