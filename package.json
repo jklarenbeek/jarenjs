@@ -124,6 +124,7 @@
     "benchmark:flow": "node ./benchmark/flow-workflow.js",
     "benchmark:vector": "node ./benchmark/vector.js",
     "benchmark:series": "node ./benchmark/series.js",
+    "benchmark:assign": "node --no-warnings=ExperimentalWarning ./benchmark/assign.js",
     "qt3:convert": "node ./benchmark/tools/qt3-convert.js --quiet",
     "benchmark:qt3": "node ./benchmark/qt3-runner.js",
     "benchmark:coverage": "node ./benchmark/coverage.js --dead-code",

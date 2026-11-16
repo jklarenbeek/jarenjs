@@ -872,10 +872,11 @@ copied into flat typed arrays at build time, so a query reads no source object
 and a row mutated afterwards cannot change what the index answers.
 
 Buckets, resampling, rolling windows and as-of joins are the layer above this
-one; named zones and scheduling solvers are outside it. Recurrence and calendar
-resolution live in `core/calendar`; this kernel stays recurrence-free.
+one; named zones are outside it, and so is choosing among its answers. Recurrence
+and calendar resolution live in `core/calendar`; this kernel stays recurrence-free.
 `findSlots` enumerates where a fixed-width span fits — choosing among the
-answers is a solver's job, deliberately not this kernel's.
+answers is `core/assign`'s job (scoring and search under the host's rules,
+[docs/ASSIGN.md](docs/ASSIGN.md)), deliberately not this kernel's.
 
 ```javascript
 import { createIntervalIndex, mergeIntervals, findSlots } from '@jarenjs/core/series';

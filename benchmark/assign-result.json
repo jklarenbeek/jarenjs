@@ -1,0 +1,2672 @@
+{
+  "format": "jaren-assign-measurements/1",
+  "inputs": [
+    "benchmark/assign.js",
+    "test/core/assign/corpus/domains.js",
+    "test/core/assign/corpus/run.js",
+    "test/core/assign/rules/reference.js",
+    "test/core/assign/rules/days.js",
+    "test/core/assign/rules/rolling.js",
+    "test/core/assign/oracle/validate.js",
+    "test/core/assign/oracle/score.js",
+    "test/core/assign/oracle/days.js",
+    "test/core/assign/oracle/rolling.js",
+    "test/core/assign/oracle/instances.js",
+    "test/core/assign/fixtures.js",
+    "test/core/assign/local-fixtures.js",
+    "test/core/assign/solve-fixtures.js",
+    "test/core/assign/stream.js"
+  ],
+  "inputsHash": "07b86c69961189f7a384f62b75112c5a48c3ed6e74f39e365dcdc80e37690e74",
+  "quick": false,
+  "runtime": {
+    "node": "v24.22.1",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics",
+    "loadBefore": [
+      1.05,
+      1.84,
+      2.01
+    ],
+    "freeMemBytes": 12025298944,
+    "totalMemBytes": 33009233920
+  },
+  "loadAfter": [
+    2.15,
+    2.12,
+    2.05
+  ],
+  "rival": "none: no JavaScript library takes host rules as plugins and scores and searches under them; the one comparison is incremental evaluation against the engine's own full rescoring",
+  "method": "each class in 3 processes of its own; a class timed in several rounds makes an untimed first call first, and a class timed in one round (the roster repair, the dense start and the large fill) is one cold call per process; never a forced collection in a timed process; the retained heap measured after two forced collections in a further process that times nothing; ns per operation",
+  "corpus": {
+    "instances": 80,
+    "calls": [
+      "exhaustive",
+      "construct",
+      "construct seed 7",
+      "local",
+      "local seed 7, 2 restarts",
+      "local, 3 moves",
+      "auto"
+    ],
+    "answers": 544,
+    "agreed": 544,
+    "statuses": {
+      "optimal": 58,
+      "feasible": 311,
+      "limit": 76,
+      "unknown": 79,
+      "infeasible": 20
+    },
+    "proofs": 64,
+    "proofsMatched": 64,
+    "optimaReached": {
+      "construct": {
+        "reached": 29,
+        "of": 29
+      },
+      "construct seed 7": {
+        "reached": 28,
+        "of": 29
+      },
+      "local": {
+        "reached": 29,
+        "of": 29
+      },
+      "local seed 7, 2 restarts": {
+        "reached": 29,
+        "of": 29
+      },
+      "auto": {
+        "reached": 29,
+        "of": 29
+      },
+      "local, 3 moves": {
+        "reached": 2,
+        "of": 2
+      }
+    }
+  },
+  "classes": [
+    {
+      "id": "overlaps/construct",
+      "group": "domain",
+      "domain": "overlaps",
+      "strategy": "construct",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 64,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "construct",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "-2",
+        "soft": "-1"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 62,
+      "removed": null,
+      "counts": {
+        "nodes": 64,
+        "moves": 684,
+        "restarts": null,
+        "editWork": null
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 41948566,
+            "roundsNs": [
+              43488540,
+              37488365,
+              41948566
+            ]
+          },
+          {
+            "medianNs": 43331121,
+            "roundsNs": [
+              43331121,
+              37915298,
+              43425894
+            ]
+          },
+          {
+            "medianNs": 43149327,
+            "roundsNs": [
+              43540432,
+              37716393,
+              43149327
+            ]
+          }
+        ],
+        "medianNs": 43149327,
+        "spread": 1.0329583375984772
+      },
+      "retainedBytes": 644096,
+      "maxRssBytes": [
+        89513984,
+        90804224,
+        89993216
+      ]
+    },
+    {
+      "id": "overlaps/local",
+      "group": "domain",
+      "domain": "overlaps",
+      "strategy": "local",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 64,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "local",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "-2",
+        "soft": "-1"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 62,
+      "removed": 0,
+      "counts": {
+        "nodes": 174,
+        "moves": 7049,
+        "restarts": 0,
+        "editWork": 92004
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 547485922,
+            "roundsNs": [
+              547485922,
+              519767493,
+              557388554
+            ]
+          },
+          {
+            "medianNs": 513101881,
+            "roundsNs": [
+              550281064,
+              513101881,
+              492026923
+            ]
+          },
+          {
+            "medianNs": 513718080,
+            "roundsNs": [
+              549921946,
+              513718080,
+              484539153
+            ]
+          }
+        ],
+        "medianNs": 513718080,
+        "spread": 1.0670121125515812
+      },
+      "retainedBytes": 786576,
+      "maxRssBytes": [
+        110555136,
+        110415872,
+        112500736
+      ]
+    },
+    {
+      "id": "overlaps/auto",
+      "group": "domain",
+      "domain": "overlaps",
+      "strategy": "auto",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 64,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "construct+local",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "-2",
+        "soft": "-1"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 62,
+      "removed": 0,
+      "counts": {
+        "nodes": 128,
+        "moves": 4387,
+        "restarts": 0,
+        "editWork": 55858
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 313644827,
+            "roundsNs": [
+              353472209,
+              313644827,
+              311591039
+            ]
+          },
+          {
+            "medianNs": 311716890,
+            "roundsNs": [
+              340226050,
+              311716890,
+              308253029
+            ]
+          },
+          {
+            "medianNs": 304672116,
+            "roundsNs": [
+              342928583,
+              304672116,
+              303636876
+            ]
+          }
+        ],
+        "medianNs": 311716890,
+        "spread": 1.029450384622661
+      },
+      "retainedBytes": 811192,
+      "maxRssBytes": [
+        95535104,
+        95809536,
+        95285248
+      ]
+    },
+    {
+      "id": "availability/construct",
+      "group": "domain",
+      "domain": "availability",
+      "strategy": "construct",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 61,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "construct",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "0",
+        "soft": "-2"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 61,
+      "removed": null,
+      "counts": {
+        "nodes": 61,
+        "moves": 660,
+        "restarts": null,
+        "editWork": null
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 40022584,
+            "roundsNs": [
+              38231604,
+              40022584,
+              42088665
+            ]
+          },
+          {
+            "medianNs": 50682493,
+            "roundsNs": [
+              50682493,
+              45156532,
+              58323632
+            ]
+          },
+          {
+            "medianNs": 38842426,
+            "roundsNs": [
+              43182432,
+              37089649,
+              38842426
+            ]
+          }
+        ],
+        "medianNs": 40022584,
+        "spread": 1.3048230561088023
+      },
+      "retainedBytes": 673648,
+      "maxRssBytes": [
+        90861568,
+        91365376,
+        90570752
+      ]
+    },
+    {
+      "id": "availability/local",
+      "group": "domain",
+      "domain": "availability",
+      "strategy": "local",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 61,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "local",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "0",
+        "soft": "-2"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 61,
+      "removed": 0,
+      "counts": {
+        "nodes": 172,
+        "moves": 7351,
+        "restarts": 0,
+        "editWork": 96360
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 504447711,
+            "roundsNs": [
+              547108855,
+              504447711,
+              489609267
+            ]
+          },
+          {
+            "medianNs": 509872473,
+            "roundsNs": [
+              557876387,
+              509872473,
+              498081573
+            ]
+          },
+          {
+            "medianNs": 506914045,
+            "roundsNs": [
+              546069355,
+              506914045,
+              483503634
+            ]
+          }
+        ],
+        "medianNs": 506914045,
+        "spread": 1.010753863842986
+      },
+      "retainedBytes": 978504,
+      "maxRssBytes": [
+        113000448,
+        114114560,
+        113602560
+      ]
+    },
+    {
+      "id": "availability/auto",
+      "group": "domain",
+      "domain": "availability",
+      "strategy": "auto",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 61,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "construct+local",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "0",
+        "soft": "-2"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 61,
+      "removed": 0,
+      "counts": {
+        "nodes": 122,
+        "moves": 4346,
+        "restarts": 0,
+        "editWork": 55530
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 303924897,
+            "roundsNs": [
+              362422012,
+              301352824,
+              303924897
+            ]
+          },
+          {
+            "medianNs": 302242518,
+            "roundsNs": [
+              439648363,
+              302242518,
+              293179154
+            ]
+          },
+          {
+            "medianNs": 320704896,
+            "roundsNs": [
+              360516842,
+              320704896,
+              308024303
+            ]
+          }
+        ],
+        "medianNs": 303924897,
+        "spread": 1.0610846485867353
+      },
+      "retainedBytes": 817704,
+      "maxRssBytes": [
+        97026048,
+        96477184,
+        95936512
+      ]
+    },
+    {
+      "id": "attributes/construct",
+      "group": "domain",
+      "domain": "attributes",
+      "strategy": "construct",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 68,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "construct",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "-8",
+        "soft": "-18"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 60,
+      "removed": null,
+      "counts": {
+        "nodes": 66,
+        "moves": 706,
+        "restarts": null,
+        "editWork": null
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 43226710,
+            "roundsNs": [
+              45381767,
+              42030977,
+              43226710
+            ]
+          },
+          {
+            "medianNs": 44787008,
+            "roundsNs": [
+              45622506,
+              42845871,
+              44787008
+            ]
+          },
+          {
+            "medianNs": 45949148,
+            "roundsNs": [
+              46854904,
+              42228485,
+              45949148
+            ]
+          }
+        ],
+        "medianNs": 44787008,
+        "spread": 1.062980458147289
+      },
+      "retainedBytes": 612752,
+      "maxRssBytes": [
+        90230784,
+        89767936,
+        92196864
+      ]
+    },
+    {
+      "id": "attributes/local",
+      "group": "domain",
+      "domain": "attributes",
+      "strategy": "local",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 68,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "local",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "-8",
+        "soft": "-17"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 60,
+      "removed": 0,
+      "counts": {
+        "nodes": 186,
+        "moves": 7130,
+        "restarts": 0,
+        "editWork": 92432
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 557275064,
+            "roundsNs": [
+              602146089,
+              557275064,
+              531010636
+            ]
+          },
+          {
+            "medianNs": 551307364,
+            "roundsNs": [
+              588838332,
+              551307364,
+              525966781
+            ]
+          },
+          {
+            "medianNs": 612898467,
+            "roundsNs": [
+              639709323,
+              612898467,
+              535127711
+            ]
+          }
+        ],
+        "medianNs": 557275064,
+        "spread": 1.111718266473219
+      },
+      "retainedBytes": 811712,
+      "maxRssBytes": [
+        110936064,
+        111550464,
+        110870528
+      ]
+    },
+    {
+      "id": "attributes/auto",
+      "group": "domain",
+      "domain": "attributes",
+      "strategy": "auto",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 68,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "construct+local",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "-8",
+        "soft": "-17"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 60,
+      "removed": 0,
+      "counts": {
+        "nodes": 198,
+        "moves": 7624,
+        "restarts": 0,
+        "editWork": 99020
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 605019382,
+            "roundsNs": [
+              645608161,
+              605019382,
+              585192887
+            ]
+          },
+          {
+            "medianNs": 599300244,
+            "roundsNs": [
+              639749831,
+              591147876,
+              599300244
+            ]
+          },
+          {
+            "medianNs": 588577619,
+            "roundsNs": [
+              634813111,
+              588577619,
+              568830253
+            ]
+          }
+        ],
+        "medianNs": 599300244,
+        "spread": 1.0279347404135664
+      },
+      "retainedBytes": 832896,
+      "maxRssBytes": [
+        111026176,
+        111271936,
+        111632384
+      ]
+    },
+    {
+      "id": "gaps/construct",
+      "group": "domain",
+      "domain": "gaps",
+      "strategy": "construct",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 62,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "construct",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "-4",
+        "soft": "-3"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 58,
+      "removed": null,
+      "counts": {
+        "nodes": 61,
+        "moves": 659,
+        "restarts": null,
+        "editWork": null
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 44256363,
+            "roundsNs": [
+              48534699,
+              44256363,
+              38302981
+            ]
+          },
+          {
+            "medianNs": 59231483,
+            "roundsNs": [
+              57825323,
+              64014065,
+              59231483
+            ]
+          },
+          {
+            "medianNs": 39310774,
+            "roundsNs": [
+              41893532,
+              38708962,
+              39310774
+            ]
+          }
+        ],
+        "medianNs": 44256363,
+        "spread": 1.506749345611969
+      },
+      "retainedBytes": 752208,
+      "maxRssBytes": [
+        89018368,
+        88158208,
+        89210880
+      ]
+    },
+    {
+      "id": "gaps/local",
+      "group": "domain",
+      "domain": "gaps",
+      "strategy": "local",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 62,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "local",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "-3",
+        "soft": "-3"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 59,
+      "removed": 0,
+      "counts": {
+        "nodes": 176,
+        "moves": 7270,
+        "restarts": 0,
+        "editWork": 94940
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 512083890,
+            "roundsNs": [
+              551653143,
+              512083890,
+              494097543
+            ]
+          },
+          {
+            "medianNs": 526640250,
+            "roundsNs": [
+              567922191,
+              526640250,
+              502871838
+            ]
+          },
+          {
+            "medianNs": 529218678,
+            "roundsNs": [
+              565224617,
+              529218678,
+              513577422
+            ]
+          }
+        ],
+        "medianNs": 526640250,
+        "spread": 1.0334609003224062
+      },
+      "retainedBytes": 819856,
+      "maxRssBytes": [
+        113713152,
+        113844224,
+        113758208
+      ]
+    },
+    {
+      "id": "gaps/auto",
+      "group": "domain",
+      "domain": "gaps",
+      "strategy": "auto",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 62,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "construct+local",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "-4",
+        "soft": "-3"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 58,
+      "removed": 0,
+      "counts": {
+        "nodes": 122,
+        "moves": 4073,
+        "restarts": 0,
+        "editWork": 51594
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 302696688,
+            "roundsNs": [
+              339285513,
+              302696688,
+              291051894
+            ]
+          },
+          {
+            "medianNs": 293338460,
+            "roundsNs": [
+              382336855,
+              293338460,
+              284820269
+            ]
+          },
+          {
+            "medianNs": 293228322,
+            "roundsNs": [
+              320870766,
+              292551152,
+              293228322
+            ]
+          }
+        ],
+        "medianNs": 293338460,
+        "spread": 1.0322900800830555
+      },
+      "retainedBytes": 824920,
+      "maxRssBytes": [
+        96419840,
+        95191040,
+        96673792
+      ]
+    },
+    {
+      "id": "rolling/construct",
+      "group": "domain",
+      "domain": "rolling",
+      "strategy": "construct",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 64,
+        "assignments": 0
+      },
+      "rules": 9,
+      "algorithm": "construct",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "0",
+        "soft": "-54000015"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 64,
+      "removed": null,
+      "counts": {
+        "nodes": 64,
+        "moves": 690,
+        "restarts": null,
+        "editWork": null
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 47015537,
+            "roundsNs": [
+              52708206,
+              45042554,
+              47015537
+            ]
+          },
+          {
+            "medianNs": 48644628,
+            "roundsNs": [
+              53483431,
+              47808991,
+              48644628
+            ]
+          },
+          {
+            "medianNs": 45828953,
+            "roundsNs": [
+              53607537,
+              45160583,
+              45828953
+            ]
+          }
+        ],
+        "medianNs": 47015537,
+        "spread": 1.0614387808510484
+      },
+      "retainedBytes": 629248,
+      "maxRssBytes": [
+        91488256,
+        91389952,
+        91516928
+      ]
+    },
+    {
+      "id": "rolling/local",
+      "group": "domain",
+      "domain": "rolling",
+      "strategy": "local",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 64,
+        "assignments": 0
+      },
+      "rules": 9,
+      "algorithm": "local",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "0",
+        "soft": "-46800013"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 64,
+      "removed": 0,
+      "counts": {
+        "nodes": 178,
+        "moves": 7752,
+        "restarts": 0,
+        "editWork": 116424
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 816069060,
+            "roundsNs": [
+              868996144,
+              814311463,
+              816069060
+            ]
+          },
+          {
+            "medianNs": 902440278,
+            "roundsNs": [
+              902440278,
+              917347863,
+              819723584
+            ]
+          },
+          {
+            "medianNs": 835265248,
+            "roundsNs": [
+              893860767,
+              835265248,
+              827979665
+            ]
+          }
+        ],
+        "medianNs": 835265248,
+        "spread": 1.1058381235529258
+      },
+      "retainedBytes": 821920,
+      "maxRssBytes": [
+        115896320,
+        116051968,
+        117587968
+      ]
+    },
+    {
+      "id": "rolling/auto",
+      "group": "domain",
+      "domain": "rolling",
+      "strategy": "auto",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 64,
+        "assignments": 0
+      },
+      "rules": 9,
+      "algorithm": "construct+local",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "0",
+        "soft": "-46800015"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 64,
+      "removed": 0,
+      "counts": {
+        "nodes": 190,
+        "moves": 8473,
+        "restarts": 0,
+        "editWork": 127690
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 901411811,
+            "roundsNs": [
+              954601984,
+              901411811,
+              897226712
+            ]
+          },
+          {
+            "medianNs": 902705600,
+            "roundsNs": [
+              954940499,
+              896445480,
+              902705600
+            ]
+          },
+          {
+            "medianNs": 922606475,
+            "roundsNs": [
+              958835623,
+              922606475,
+              906764848
+            ]
+          }
+        ],
+        "medianNs": 902705600,
+        "spread": 1.0235127427235364
+      },
+      "retainedBytes": 828184,
+      "maxRssBytes": [
+        117399552,
+        114954240,
+        117030912
+      ]
+    },
+    {
+      "id": "days/construct",
+      "group": "domain",
+      "domain": "days",
+      "strategy": "construct",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 6,
+        "tasks": 21,
+        "places": 21,
+        "assignments": 0
+      },
+      "rules": 4,
+      "algorithm": "construct",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "0",
+        "soft": "0"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 0,
+      "removed": null,
+      "counts": {
+        "nodes": 21,
+        "moves": 126,
+        "restarts": null,
+        "editWork": null
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 5614728,
+            "roundsNs": [
+              7062024,
+              5519256,
+              5614728
+            ]
+          },
+          {
+            "medianNs": 5626391,
+            "roundsNs": [
+              7334819,
+              5518977,
+              5626391
+            ]
+          },
+          {
+            "medianNs": 5444806,
+            "roundsNs": [
+              6867730,
+              5381531,
+              5444806
+            ]
+          }
+        ],
+        "medianNs": 5614728,
+        "spread": 1.0333501322177503
+      },
+      "retainedBytes": 501096,
+      "maxRssBytes": [
+        78823424,
+        78528512,
+        78299136
+      ]
+    },
+    {
+      "id": "days/local",
+      "group": "domain",
+      "domain": "days",
+      "strategy": "local",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 6,
+        "tasks": 21,
+        "places": 21,
+        "assignments": 0
+      },
+      "rules": 4,
+      "algorithm": "local",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "0",
+        "soft": "0"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 0,
+      "removed": 0,
+      "counts": {
+        "nodes": 21,
+        "moves": 126,
+        "restarts": 0,
+        "editWork": 504
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 5707754,
+            "roundsNs": [
+              7380565,
+              5707754,
+              5530919
+            ]
+          },
+          {
+            "medianNs": 6224572,
+            "roundsNs": [
+              7461859,
+              5905263,
+              6224572
+            ]
+          },
+          {
+            "medianNs": 5852114,
+            "roundsNs": [
+              9236776,
+              5712783,
+              5852114
+            ]
+          }
+        ],
+        "medianNs": 5852114,
+        "spread": 1.0905466493475366
+      },
+      "retainedBytes": 543800,
+      "maxRssBytes": [
+        80236544,
+        78401536,
+        78946304
+      ]
+    },
+    {
+      "id": "days/auto",
+      "group": "domain",
+      "domain": "days",
+      "strategy": "auto",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 6,
+        "tasks": 21,
+        "places": 21,
+        "assignments": 0
+      },
+      "rules": 4,
+      "algorithm": "construct+local",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "0",
+        "soft": "0"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 0,
+      "removed": 0,
+      "counts": {
+        "nodes": 42,
+        "moves": 252,
+        "restarts": 0,
+        "editWork": 1008
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 8411127,
+            "roundsNs": [
+              9621735,
+              8411127,
+              7879852
+            ]
+          },
+          {
+            "medianNs": 8411196,
+            "roundsNs": [
+              9392310,
+              8411196,
+              7848284
+            ]
+          },
+          {
+            "medianNs": 9183977,
+            "roundsNs": [
+              9756037,
+              9183977,
+              8471748
+            ]
+          }
+        ],
+        "medianNs": 8411196,
+        "spread": 1.0918842385806324
+      },
+      "retainedBytes": 646720,
+      "maxRssBytes": [
+        79822848,
+        80084992,
+        80035840
+      ]
+    },
+    {
+      "id": "coverage/construct",
+      "group": "domain",
+      "domain": "coverage",
+      "strategy": "construct",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 108,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "construct",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "-2",
+        "soft": "-8"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 79,
+      "removed": null,
+      "counts": {
+        "nodes": 98,
+        "moves": 1003,
+        "restarts": null,
+        "editWork": null
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 63683093,
+            "roundsNs": [
+              63683093,
+              63742666,
+              58115368
+            ]
+          },
+          {
+            "medianNs": 64151651,
+            "roundsNs": [
+              64151651,
+              71898038,
+              59470686
+            ]
+          },
+          {
+            "medianNs": 59105143,
+            "roundsNs": [
+              62760645,
+              59105143,
+              55410530
+            ]
+          }
+        ],
+        "medianNs": 63683093,
+        "spread": 1.085381876159237
+      },
+      "retainedBytes": 601720,
+      "maxRssBytes": [
+        91545600,
+        91971584,
+        91090944
+      ]
+    },
+    {
+      "id": "coverage/local",
+      "group": "domain",
+      "domain": "coverage",
+      "strategy": "local",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 108,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "local",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "-3",
+        "soft": "-4"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 77,
+      "removed": 0,
+      "counts": {
+        "nodes": 332,
+        "moves": 13309,
+        "restarts": 0,
+        "editWork": 173486
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 1006490198,
+            "roundsNs": [
+              1045720446,
+              1006490198,
+              995674475
+            ]
+          },
+          {
+            "medianNs": 1021584465,
+            "roundsNs": [
+              1041957459,
+              1002792302,
+              1021584465
+            ]
+          },
+          {
+            "medianNs": 991974345,
+            "roundsNs": [
+              1045706337,
+              981495672,
+              991974345
+            ]
+          }
+        ],
+        "medianNs": 1006490198,
+        "spread": 1.0298496832597017
+      },
+      "retainedBytes": 796704,
+      "maxRssBytes": [
+        114368512,
+        112427008,
+        112549888
+      ]
+    },
+    {
+      "id": "coverage/auto",
+      "group": "domain",
+      "domain": "coverage",
+      "strategy": "auto",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 108,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "construct+local",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "-2",
+        "soft": "-2"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 79,
+      "removed": 0,
+      "counts": {
+        "nodes": 293,
+        "moves": 11547,
+        "restarts": 0,
+        "editWork": 150036
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 890924408,
+            "roundsNs": [
+              932803274,
+              890924408,
+              872061987
+            ]
+          },
+          {
+            "medianNs": 930501412,
+            "roundsNs": [
+              930501412,
+              962098522,
+              871280644
+            ]
+          },
+          {
+            "medianNs": 848317647,
+            "roundsNs": [
+              915020576,
+              847080290,
+              848317647
+            ]
+          }
+        ],
+        "medianNs": 890924408,
+        "spread": 1.0968785280969169
+      },
+      "retainedBytes": 808544,
+      "maxRssBytes": [
+        110518272,
+        111550464,
+        110157824
+      ]
+    },
+    {
+      "id": "fairness/construct",
+      "group": "domain",
+      "domain": "fairness",
+      "strategy": "construct",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 46,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "construct",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "0",
+        "soft": "-1"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 46,
+      "removed": null,
+      "counts": {
+        "nodes": 46,
+        "moves": 506,
+        "restarts": null,
+        "editWork": null
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 31571416,
+            "roundsNs": [
+              31571416,
+              31834504,
+              26719905
+            ]
+          },
+          {
+            "medianNs": 28949829,
+            "roundsNs": [
+              32255499,
+              28949829,
+              26296394
+            ]
+          },
+          {
+            "medianNs": 30667475,
+            "roundsNs": [
+              30667475,
+              31917613,
+              28062162
+            ]
+          }
+        ],
+        "medianNs": 30667475,
+        "spread": 1.0905562171023533
+      },
+      "retainedBytes": 576272,
+      "maxRssBytes": [
+        81862656,
+        81670144,
+        83496960
+      ]
+    },
+    {
+      "id": "fairness/local",
+      "group": "domain",
+      "domain": "fairness",
+      "strategy": "local",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 46,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "local",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "0",
+        "soft": "-1"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 46,
+      "removed": 0,
+      "counts": {
+        "nodes": 92,
+        "moves": 2868,
+        "restarts": 0,
+        "editWork": 36110
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 183496976,
+            "roundsNs": [
+              219423550,
+              183496976,
+              180311920
+            ]
+          },
+          {
+            "medianNs": 187853321,
+            "roundsNs": [
+              219704307,
+              187853321,
+              179095585
+            ]
+          },
+          {
+            "medianNs": 185921335,
+            "roundsNs": [
+              228735117,
+              185921335,
+              176371403
+            ]
+          }
+        ],
+        "medianNs": 185921335,
+        "spread": 1.0237406909637574
+      },
+      "retainedBytes": 754824,
+      "maxRssBytes": [
+        94318592,
+        94912512,
+        94691328
+      ]
+    },
+    {
+      "id": "fairness/auto",
+      "group": "domain",
+      "domain": "fairness",
+      "strategy": "auto",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 46,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "construct+local",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "0",
+        "soft": "-1"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 46,
+      "removed": 0,
+      "counts": {
+        "nodes": 92,
+        "moves": 2868,
+        "restarts": 0,
+        "editWork": 36110
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 223078211,
+            "roundsNs": [
+              223078211,
+              210028174,
+              245011347
+            ]
+          },
+          {
+            "medianNs": 183454165,
+            "roundsNs": [
+              218733739,
+              183454165,
+              177418865
+            ]
+          },
+          {
+            "medianNs": 184331705,
+            "roundsNs": [
+              223734079,
+              184331705,
+              177120648
+            ]
+          }
+        ],
+        "medianNs": 184331705,
+        "spread": 1.2159888057052288
+      },
+      "retainedBytes": 769328,
+      "maxRssBytes": [
+        96145408,
+        96292864,
+        96768000
+      ]
+    },
+    {
+      "id": "locks/construct",
+      "group": "domain",
+      "domain": "locks",
+      "strategy": "construct",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 63,
+        "assignments": 63
+      },
+      "rules": 8,
+      "algorithm": "construct",
+      "status": "unknown",
+      "score": {
+        "hard": "-10",
+        "service": "-338400000",
+        "soft": "-67"
+      },
+      "verdict": "infeasible-by-validation",
+      "bound": null,
+      "churn": null,
+      "added": 0,
+      "removed": null,
+      "counts": {
+        "nodes": 0,
+        "moves": 0,
+        "restarts": null,
+        "editWork": null
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 2639117,
+            "roundsNs": [
+              3267259,
+              2639117,
+              2458021
+            ]
+          },
+          {
+            "medianNs": 2626965,
+            "roundsNs": [
+              3043002,
+              2626965,
+              2385737
+            ]
+          },
+          {
+            "medianNs": 2630317,
+            "roundsNs": [
+              3358819,
+              2630317,
+              2317084
+            ]
+          }
+        ],
+        "medianNs": 2630317,
+        "spread": 1.0046258705388158
+      },
+      "retainedBytes": 330640,
+      "maxRssBytes": [
+        75771904,
+        76587008,
+        75755520
+      ]
+    },
+    {
+      "id": "locks/local",
+      "group": "domain",
+      "domain": "locks",
+      "strategy": "local",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 63,
+        "assignments": 63
+      },
+      "rules": 8,
+      "algorithm": "local",
+      "status": "unknown",
+      "score": {
+        "hard": "-2",
+        "service": "-79200000",
+        "soft": "-43"
+      },
+      "verdict": "infeasible-by-validation",
+      "bound": null,
+      "churn": 19,
+      "added": 19,
+      "removed": 19,
+      "counts": {
+        "nodes": 90,
+        "moves": 12267,
+        "restarts": 0,
+        "editWork": 107220
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 944276165,
+            "roundsNs": [
+              944276165,
+              888287401,
+              949946830
+            ]
+          },
+          {
+            "medianNs": 890797594,
+            "roundsNs": [
+              890797594,
+              883904658,
+              958606860
+            ]
+          },
+          {
+            "medianNs": 892870447,
+            "roundsNs": [
+              932396787,
+              892870447,
+              888065100
+            ]
+          }
+        ],
+        "medianNs": 892870447,
+        "spread": 1.0600344807397404
+      },
+      "retainedBytes": 905320,
+      "maxRssBytes": [
+        149237760,
+        148676608,
+        148836352
+      ]
+    },
+    {
+      "id": "locks/auto",
+      "group": "domain",
+      "domain": "locks",
+      "strategy": "auto",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 63,
+        "assignments": 63
+      },
+      "rules": 8,
+      "algorithm": "exhaustive",
+      "status": "infeasible",
+      "score": {
+        "hard": "-10",
+        "service": "-338400000",
+        "soft": "-67"
+      },
+      "verdict": "infeasible-by-validation",
+      "bound": {
+        "hard": "-10",
+        "service": "-338400000",
+        "soft": "-67"
+      },
+      "churn": 0,
+      "added": 0,
+      "removed": 0,
+      "counts": {
+        "nodes": 1,
+        "moves": 0,
+        "restarts": 0,
+        "editWork": 122
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 2705464,
+            "roundsNs": [
+              3473287,
+              2705464,
+              2454529
+            ]
+          },
+          {
+            "medianNs": 2987898,
+            "roundsNs": [
+              3411269,
+              2726976,
+              2987898
+            ]
+          },
+          {
+            "medianNs": 2745344,
+            "roundsNs": [
+              3503109,
+              2745344,
+              2625288
+            ]
+          }
+        ],
+        "medianNs": 2745344,
+        "spread": 1.1043939228169364
+      },
+      "retainedBytes": 156808,
+      "maxRssBytes": [
+        75649024,
+        75874304,
+        76771328
+      ]
+    },
+    {
+      "id": "repair/construct",
+      "group": "domain",
+      "domain": "repair",
+      "strategy": "construct",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 61,
+        "assignments": 58
+      },
+      "rules": 8,
+      "algorithm": "construct",
+      "status": "unknown",
+      "score": {
+        "hard": "-14",
+        "service": "-28800003",
+        "soft": "-31"
+      },
+      "verdict": "infeasible-by-validation",
+      "bound": null,
+      "churn": null,
+      "added": 0,
+      "removed": null,
+      "counts": {
+        "nodes": 2,
+        "moves": 20,
+        "restarts": null,
+        "editWork": null
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 4588563,
+            "roundsNs": [
+              5296113,
+              4588563,
+              4343214
+            ]
+          },
+          {
+            "medianNs": 5172286,
+            "roundsNs": [
+              5923207,
+              5172286,
+              4266530
+            ]
+          },
+          {
+            "medianNs": 4765887,
+            "roundsNs": [
+              5501023,
+              4765887,
+              4269603
+            ]
+          }
+        ],
+        "medianNs": 4765887,
+        "spread": 1.1272125935723232
+      },
+      "retainedBytes": 458464,
+      "maxRssBytes": [
+        77422592,
+        77307904,
+        77295616
+      ]
+    },
+    {
+      "id": "repair/local",
+      "group": "domain",
+      "domain": "repair",
+      "strategy": "local",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 61,
+        "assignments": 58
+      },
+      "rules": 8,
+      "algorithm": "local",
+      "status": "feasible",
+      "score": {
+        "hard": "0",
+        "service": "-4",
+        "soft": "-18"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": 15,
+      "added": 14,
+      "removed": 15,
+      "counts": {
+        "nodes": 120,
+        "moves": 5768,
+        "restarts": 0,
+        "editWork": 77844
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 503429195,
+            "roundsNs": [
+              511860987,
+              503429195,
+              467602563
+            ]
+          },
+          {
+            "medianNs": 523563112,
+            "roundsNs": [
+              523563112,
+              503781608,
+              550672933
+            ]
+          },
+          {
+            "medianNs": 485264350,
+            "roundsNs": [
+              512062406,
+              485264350,
+              460244492
+            ]
+          }
+        ],
+        "medianNs": 503429195,
+        "spread": 1.0789235022107022
+      },
+      "retainedBytes": 829368,
+      "maxRssBytes": [
+        113410048,
+        114458624,
+        115040256
+      ]
+    },
+    {
+      "id": "repair/auto",
+      "group": "domain",
+      "domain": "repair",
+      "strategy": "auto",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 10,
+        "tasks": 40,
+        "places": 61,
+        "assignments": 58
+      },
+      "rules": 8,
+      "algorithm": "exhaustive",
+      "status": "infeasible",
+      "score": {
+        "hard": "-14",
+        "service": "-28800003",
+        "soft": "-31"
+      },
+      "verdict": "infeasible-by-validation",
+      "bound": {
+        "hard": "-14",
+        "service": "-28800003",
+        "soft": "-31"
+      },
+      "churn": 0,
+      "added": 0,
+      "removed": 0,
+      "counts": {
+        "nodes": 616,
+        "moves": 1229,
+        "restarts": 0,
+        "editWork": 9954
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 81827775,
+            "roundsNs": [
+              86381418,
+              81827775,
+              78144550
+            ]
+          },
+          {
+            "medianNs": 81252642,
+            "roundsNs": [
+              86415919,
+              79772801,
+              81252642
+            ]
+          },
+          {
+            "medianNs": 81597722,
+            "roundsNs": [
+              87860980,
+              81597722,
+              76417265
+            ]
+          }
+        ],
+        "medianNs": 81597722,
+        "spread": 1.0070783298344932
+      },
+      "retainedBytes": 616904,
+      "maxRssBytes": [
+        91373568,
+        94248960,
+        93351936
+      ]
+    },
+    {
+      "id": "tiny/exhaustive",
+      "group": "exhaustive",
+      "domain": "tiny",
+      "strategy": "exhaustive",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "instances": 30
+      },
+      "rules": 8,
+      "algorithm": "exhaustive",
+      "status": "per instance",
+      "score": null,
+      "verdict": null,
+      "bound": null,
+      "churn": null,
+      "added": null,
+      "removed": null,
+      "counts": null,
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 1127930281,
+            "roundsNs": [
+              1149511005,
+              1127930281,
+              1126648787
+            ]
+          },
+          {
+            "medianNs": 1116680233,
+            "roundsNs": [
+              1129239155,
+              1116680233,
+              1116273135
+            ]
+          },
+          {
+            "medianNs": 1138611762,
+            "roundsNs": [
+              1153019072,
+              1129564959,
+              1138611762
+            ]
+          }
+        ],
+        "medianNs": 1127930281,
+        "spread": 1.01963993661917
+      },
+      "retainedBytes": 884104,
+      "maxRssBytes": [
+        113393664,
+        112787456,
+        112709632
+      ]
+    },
+    {
+      "id": "limit/exhaustive",
+      "group": "exhaustive",
+      "domain": "limit",
+      "strategy": "exhaustive",
+      "options": {},
+      "validated": "oracle",
+      "size": {
+        "resources": 9,
+        "tasks": 5,
+        "places": 5,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "exhaustive",
+      "status": "optimal",
+      "score": {
+        "hard": "0",
+        "service": "0",
+        "soft": "-1"
+      },
+      "verdict": "feasible",
+      "bound": {
+        "hard": "0",
+        "service": "0",
+        "soft": "-1"
+      },
+      "churn": null,
+      "added": 5,
+      "removed": null,
+      "counts": {
+        "nodes": 100000,
+        "moves": 199997,
+        "restarts": null,
+        "editWork": null
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 5591103372,
+            "roundsNs": [
+              5561880783,
+              5620325961
+            ]
+          },
+          {
+            "medianNs": 5592858173.5,
+            "roundsNs": [
+              5608137541,
+              5577578806
+            ]
+          },
+          {
+            "medianNs": 5719446977.5,
+            "roundsNs": [
+              5683414527,
+              5755479428
+            ]
+          }
+        ],
+        "medianNs": 5592858173.5,
+        "spread": 1.0229549691645372
+      },
+      "retainedBytes": 637560,
+      "maxRssBytes": [
+        144142336,
+        142868480,
+        143704064
+      ]
+    },
+    {
+      "id": "roster-repair/local",
+      "group": "scale",
+      "domain": "roster repair",
+      "strategy": "local",
+      "options": {
+        "budgets": {
+          "maxMoves": 20000
+        }
+      },
+      "validated": "engine",
+      "size": {
+        "resources": 50,
+        "tasks": 500,
+        "places": 1500,
+        "assignments": 336
+      },
+      "rules": 6,
+      "algorithm": "local",
+      "status": "limit",
+      "score": {
+        "hard": "0",
+        "service": "-1170",
+        "soft": "-9"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": 6,
+      "added": 0,
+      "removed": 6,
+      "counts": {
+        "nodes": 361,
+        "moves": 20000,
+        "restarts": 0,
+        "editWork": 131868
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 3137893367,
+            "roundsNs": [
+              3137893367
+            ]
+          },
+          {
+            "medianNs": 3029222419,
+            "roundsNs": [
+              3029222419
+            ]
+          },
+          {
+            "medianNs": 3050879897,
+            "roundsNs": [
+              3050879897
+            ]
+          }
+        ],
+        "medianNs": 3050879897,
+        "spread": 1.0358742056437948
+      },
+      "retainedBytes": 1058392,
+      "maxRssBytes": [
+        114356224,
+        116084736,
+        115183616
+      ]
+    },
+    {
+      "id": "dense-start/local",
+      "group": "scale",
+      "domain": "dense start",
+      "strategy": "local",
+      "options": {
+        "budgets": {
+          "maxMoves": 20000
+        }
+      },
+      "validated": "engine",
+      "size": {
+        "resources": 50,
+        "tasks": 500,
+        "places": 1500,
+        "assignments": 1250
+      },
+      "rules": 8,
+      "algorithm": "local",
+      "status": "limit",
+      "score": {
+        "hard": "-5224620278",
+        "service": "-18035040255",
+        "soft": "-53"
+      },
+      "verdict": "infeasible-by-validation",
+      "bound": null,
+      "churn": 25,
+      "added": 20,
+      "removed": 25,
+      "counts": {
+        "nodes": 16,
+        "moves": 20000,
+        "restarts": 0,
+        "editWork": 279488
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 16943104296,
+            "roundsNs": [
+              16943104296
+            ]
+          },
+          {
+            "medianNs": 17038367975,
+            "roundsNs": [
+              17038367975
+            ]
+          },
+          {
+            "medianNs": 17170672595,
+            "roundsNs": [
+              17170672595
+            ]
+          }
+        ],
+        "medianNs": 17038367975,
+        "spread": 1.01343132256193
+      },
+      "retainedBytes": 1797360,
+      "maxRssBytes": [
+        221802496,
+        223322112,
+        221847552
+      ]
+    },
+    {
+      "id": "large/construct",
+      "group": "scale",
+      "domain": "large fill",
+      "strategy": "construct",
+      "options": {
+        "budgets": {
+          "maxMoves": 20000
+        }
+      },
+      "validated": "engine",
+      "size": {
+        "resources": 200,
+        "tasks": 2000,
+        "places": 6000,
+        "assignments": 0
+      },
+      "rules": 8,
+      "algorithm": "construct",
+      "status": "limit",
+      "score": {
+        "hard": "0",
+        "service": "-5901",
+        "soft": "-1"
+      },
+      "verdict": "feasible",
+      "bound": null,
+      "churn": null,
+      "added": 99,
+      "removed": null,
+      "counts": {
+        "nodes": 100,
+        "moves": 20000,
+        "restarts": null,
+        "editWork": null
+      },
+      "fullFallbacks": null,
+      "latency": {
+        "runs": [
+          {
+            "medianNs": 5990200329,
+            "roundsNs": [
+              5990200329
+            ]
+          },
+          {
+            "medianNs": 6146510869,
+            "roundsNs": [
+              6146510869
+            ]
+          },
+          {
+            "medianNs": 5900310006,
+            "roundsNs": [
+              5900310006
+            ]
+          }
+        ],
+        "medianNs": 5990200329,
+        "spread": 1.0417267673647044
+      },
+      "retainedBytes": 1832752,
+      "maxRssBytes": [
+        375906304,
+        378404864,
+        369217536
+      ]
+    }
+  ],
+  "incremental": [
+    {
+      "mode": "base",
+      "note": "the eight reference rules (two global)",
+      "assignments": 5000,
+      "units": 4802,
+      "rules": 8,
+      "timedEdits": 500,
+      "fullNs": [
+        62690338,
+        64570223,
+        61829279
+      ],
+      "applyNs": [
+        3067166.5,
+        2977247.5,
+        3217462.5
+      ],
+      "whatIfNs": [
+        3048100,
+        2998129.5,
+        3193717
+      ],
+      "speedup": [
+        20.43917015916808,
+        21.68789225618629,
+        19.21678310159015
+      ],
+      "fullFallbacks": 0,
+      "fullScorings": 1,
+      "edits": 600,
+      "previews": 600,
+      "sameBytes": true,
+      "liveBytes": 6416960
+    },
+    {
+      "mode": "local",
+      "note": "the six reference rules that read only their own row",
+      "assignments": 5000,
+      "units": 4800,
+      "rules": 6,
+      "timedEdits": 500,
+      "fullNs": [
+        61959391,
+        62406996,
+        62643963
+      ],
+      "applyNs": [
+        2612752.5,
+        2573572,
+        2576505.5
+      ],
+      "whatIfNs": [
+        2601787,
+        2544064.5,
+        2579717.5
+      ],
+      "speedup": [
+        23.71422130492651,
+        24.249174299378453,
+        24.31353746382455
+      ],
+      "fullFallbacks": 0,
+      "fullScorings": 1,
+      "edits": 600,
+      "previews": 600,
+      "sameBytes": true,
+      "liveBytes": 6390160
+    },
+    {
+      "mode": "days",
+      "note": "the four day rules over tasks in two zones",
+      "assignments": 2811,
+      "units": 7500,
+      "rules": 4,
+      "timedEdits": 500,
+      "fullNs": [
+        66713754,
+        66295762,
+        66060401
+      ],
+      "applyNs": [
+        1738285,
+        1685904.5,
+        1730288
+      ],
+      "whatIfNs": [
+        1724386,
+        1703818.5,
+        1732662.5
+      ],
+      "speedup": [
+        38.3790655732518,
+        39.323557176577914,
+        38.17884710522179
+      ],
+      "fullFallbacks": 0,
+      "fullScorings": 1,
+      "edits": 600,
+      "previews": 600,
+      "sameBytes": true,
+      "liveBytes": 6434528
+    },
+    {
+      "mode": "wide",
+      "note": "the eight reference rules and one that reads the next resource's row",
+      "assignments": 5000,
+      "units": 5002,
+      "rules": 9,
+      "timedEdits": 500,
+      "fullNs": [
+        70788364,
+        73878439,
+        73368463
+      ],
+      "applyNs": [
+        11462712,
+        11690920,
+        11473513
+      ],
+      "whatIfNs": [
+        11527767.5,
+        11700832,
+        11426580
+      ],
+      "speedup": [
+        6.175533678242985,
+        6.319300705162639,
+        6.394594489063637
+      ],
+      "fullFallbacks": 1196,
+      "fullScorings": 1,
+      "edits": 600,
+      "previews": 600,
+      "sameBytes": true,
+      "liveBytes": 6660328
+    }
+  ]
+}

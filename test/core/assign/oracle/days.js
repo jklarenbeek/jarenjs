@@ -24,7 +24,7 @@
 const MINUTE = 60000;
 const DAY = 86400000;
 const HALF_HOUR = 30 * MINUTE;
-const LEVEL = /** @type {Record<string, 'hard' | 'service' | 'soft'>} */ ({
+export const LEVEL = /** @type {Record<string, 'hard' | 'service' | 'soft'>} */ ({
   'day-cap': 'hard', 'day-min': 'hard', 'consecutive-days': 'soft', 'daily-rest': 'service',
 });
 const WEIGHT = /** @type {Record<string, bigint>} */ ({ 'consecutive-days': 2n });

@@ -790,7 +790,8 @@ overlaps unknown or busy time:
   10000) stops there and is `incomplete` with `limit: 'maxSlots'`.
 
 The answer is `{ status, slots, counts: { emitted }, limit? }`. Choosing
-among the candidates is a solver's job, not this function's.
+among the candidates is the assignment engine's job
+([`@jarenjs/core/assign`](ASSIGN.md)), not this function's.
 
 ## Zone definitions (VTIMEZONE)
 

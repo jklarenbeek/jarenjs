@@ -269,6 +269,20 @@ describe('limits', () => {
     assert.strictEqual(scoreAssignment(rosterProblem(), raw, [], { limits: { maxWork: 50 } }).stoppedAt?.limit, 'maxWork');
   });
 
+  it('the unknowns of a rule whose facts are missing count toward maxWork, and past it the scoring stops at that rule', () => {
+    const problem = admitProblem({ revision: 1, resources: [{ id: 'r', revision: 1 }], tasks: [{ id: 't', revision: 1, interval: { start: 0, end: 10 }, demands: [{ slot: 's', count: 1 }] }] });
+    const rules = registerRules([{ id: 'needs', version: 1, level: 'hard', scope: 'task', reads: { facts: ['a', 'b', 'c'] }, evaluate: () => ({}) }]);
+    const full = scoreAssignment(problem, rules, []);
+    assert.deepStrictEqual([full.complete, full.counts.work, full.verdict], [true, 3, 'unknown']);
+    assert.strictEqual(JSON.stringify(scoreAssignment(problem, rules, [], { limits: { maxWork: 3 } })), JSON.stringify(full));
+    const stopped = scoreAssignment(problem, rules, [], { limits: { maxWork: 2 } });
+    assert.deepStrictEqual([stopped.complete, stopped.verdict, stopped.stoppedAt], [false, 'unknown', { limit: 'maxWork', rule: 'needs', unit: null }]);
+    assert.deepStrictEqual(Object.keys(stopped), ['complete', 'counts', 'provenance', 'stoppedAt', 'verdict']);
+    assert.strictEqual(stopped.counts.work, 3);
+    const evaluator = assign.createEvaluator(problem, rules, [], { limits: { maxWork: 2 } });
+    assert.strictEqual(JSON.stringify(evaluator.result), JSON.stringify(stopped), 'the evaluator answers the bytes full scoring answers');
+  });
+
   for (const [options, docPath] of /** @type {[unknown, string][]} */ ([
     [[], '/options'], [{ limit: {} }, '/options/limit'], [{ limits: 3 }, '/options/limits'],
     [{ limits: { maxRows: 1 } }, '/options/limits/maxRows'], [{ limits: { maxWork: -1 } }, '/options/limits/maxWork'],

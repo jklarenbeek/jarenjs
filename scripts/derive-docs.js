@@ -38,6 +38,7 @@ import { executionFacts } from './generate-execution-facts.js';
 import { postgresFacts } from './generate-postgres-facts.js';
 import { migrationFacts } from './generate-migration-facts.js';
 import { closureFacts } from './generate-closure-facts.js';
+import { assignFacts } from './generate-assign-facts.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const profileDrift = generateAuthoringProfiles({ check: process.argv.includes('--check') });
@@ -48,6 +49,6 @@ if (profileDrift.length) {
 
 process.exit(main({
   root: ROOT,
-  registries: [measuredFigures, penTables, exportInventory, penCoverage, formsFacts, adoptionFacts, relationalFacts, collectionFacts, lexicalFacts, providerFacts, durableFacts, formulaFacts, siteFacts, executionFacts, postgresFacts, migrationFacts, closureFacts],
+  registries: [measuredFigures, penTables, exportInventory, penCoverage, formsFacts, adoptionFacts, relationalFacts, collectionFacts, lexicalFacts, providerFacts, durableFacts, formulaFacts, siteFacts, executionFacts, postgresFacts, migrationFacts, closureFacts, assignFacts],
   argv: process.argv.slice(2),
 }));

@@ -8,7 +8,7 @@
 - an evaluator that, after an edit or for a hypothetical one, re-evaluates only what the edit touches and answers the bytes full scoring answers;
 - `solve`, which proposes assignments for a problem's open places or repairs its list against a baseline, re-validates the proposal, and says how much its status proves.
 
-It knows nothing about rest periods, skills, opening hours or fairness. Those are rules the host writes against the contract, and **the engine ships none**.
+It knows nothing about rest periods, skills, opening hours or fairness. Those are rules the host writes against the contract, and **the engine ships none**: every rule in this document, and every rule its measurements (§11) are scored with, is an example written for it, not an export. What a rule means, its level and its weight are the host's decisions, and so is every policy value it reads.
 
 > Every score is the exact sum of explained rule matches. Every result says how complete it is and what produced it. The engine never decides what a rule means.
 
@@ -399,7 +399,7 @@ Past a limit the result is typed incomplete:
 { complete: false, verdict: 'unknown', stoppedAt: { limit, rule, unit }, counts, provenance }
 ```
 
-It has no score, no matches and no unknowns: a partial total is never answered. A rule that catches the stop and returns normally is still stopped.
+It has no score, no matches and no unknowns: a partial total is never answered. A rule that catches the stop and returns normally is still stopped. `unit` is the unit being evaluated, or `null` when the `missing-fact` unknowns of a rule that never ran (§2) were the work that passed `maxWork`.
 
 ## 6. Explanations
 
@@ -1015,6 +1015,8 @@ Every refusal is an `AssignError`, a coded error whose `docPath` is a JSON Point
 - into the argument (`/tasks/2/demands/0/count`, `/rules/1/level`, `/options/limits/maxWork`);
 - or, for a rule's answer, into that answer under the rule and unit (`/rules/no-overlap/resources/ari/matches/0/magnitude`; a global rule's is `/rules/<id>/global`).
 
+An input with more than one fault is refused at the first one met, in the input's own order of members and items, so two orders of a faulty input can be refused at two different paths. An answer is the same bytes for every order; a refusal names one fault, not every fault.
+
 | Code | Meaning |
 |---|---|
 | `JN0001` | the problem or one of its members is not of the form the schema takes: a wrong type, a missing member or one it does not define |
@@ -1043,3 +1045,76 @@ Every refusal is an `AssignError`, a coded error whose `docPath` is a JSON Point
 | `JN0024` | an exhaustive solve was asked for a space holding more candidates than SOLVE_LIMITS.maxSpace; it is refused before anything is scored, never answered by another strategy |
 | `JN0025` | a rank hook threw or answered other than a safe integer or a bigint; what it threw is the cause |
 | `JN0026` | a fresh scoring of a solve's best list differs from the search's scoring of it: a rule read state past its view, so the search's answers cannot be trusted |
+
+## 11. Measurements
+
+There is no JavaScript library that takes a host's rules as plugins and scores and searches under them, so these figures have no rival. The one comparison is the evaluator against the engine's own full scoring of the same state. Every row is published, including the ones that lose. `node benchmark/assign.js` measures them into `benchmark/assign-result.json`.
+
+**The quality corpus** (`test/core/assign/corpus/`, synthetic and seeded, with its provenance) holds the 30 tiny instances and ten domains (overlaps, availability spans, skills, gaps, a rolling window, consecutive days across a change of the clock, coverage, fairness, locks, and repair from a baseline), each at a size the oracle can enumerate and at a medium size. Every instance is solved by every strategy that applies to it. An independent validator then checks each answer: it reads raw JSON, imports no engine module, and scores the proposal again by brute force, checking the locks, `added`, `removed` and `churn` against raw differences and the status against what the answer can claim.
+
+<!--fact:assign.corpus-->
+
+80 instances, 7 calls each where they apply: 544 answers, **544 of 544** agreed with by the independent validator (optimal 58, feasible 311, limit 76, unknown 79, infeasible 20). On the 64 instances the oracle enumerates within `SOLVE_LIMITS`, `exhaustive` answered the proof's status, best score and bound 64 times of 64. The heuristics reached a proven optimum (counted where the proof is `optimal`, `local` only where the problem holds no assignment of its own, `limit` answers left out): construct 29 of 29; construct seed 7 28 of 29; local 29 of 29; local seed 7, 2 restarts 29 of 29; auto 29 of 29; local, 3 moves 2 of 2.
+
+<!--/fact-->
+
+**Classes.** A row is one instance class, solved by one strategy. Each class runs in three processes of its own, and the engine must answer the same status, score, churn and counts in every round of every process. The domain classes are the corpus generators at a larger size, scored by the domain's rule set (the reference rules; with `rolling-cap` for `rolling`; the four day rules for `days`). The oracle also validates their answers. The last three classes are the losses measured when local search and greedy construction were built:
+
+- a roster repaired after one person was withdrawn;
+- a dense start that is infeasible almost everywhere, repaired under a move budget: the swap neighbourhood costs about one preview per free assignment per position;
+- greedy construction over 200 people and 2,000 tasks under a move budget, which answers `limit`.
+
+Only the engine's fresh scoring re-validates those three. "Retained heap" is the live set the answer holds after forced collections, measured in a process that times nothing. It is not the search's peak.
+
+<!--fact:assign.measurements-->
+
+Measured on v24.22.1, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics (load average 1.05 before, 2.15 after). Method: each class in 3 processes of its own; a class timed in several rounds makes an untimed first call first, and a class timed in one round (the roster repair, the dense start and the large fill) is one cold call per process; never a forced collection in a timed process; the retained heap measured after two forced collections in a further process that times nothing; ns per operation. Rival: none: no JavaScript library takes host rules as plugins and scores and searches under them; the one comparison is incremental evaluation against the engine's own full rescoring.
+
+| Class | Strategy | Resources × tasks | Status | Score (hard / service / soft) | Bound | Churn | Nodes / moves | Restarts / rule evaluations | Median ms (process 1 / 2 / 3) | Spread | Retained heap KiB | Validated by |
+|---|---|---|---|---|---|---:|---|---|---|---:|---:|---|
+| overlaps | `construct` | 10 × 40 (64 places) | feasible | 0 / -2 / -1 | — | — | 64 / 684 | — | 41.9 / 43.3 / 43.1 | 1.03 | 629 | oracle |
+| overlaps | `local` | 10 × 40 (64 places) | feasible | 0 / -2 / -1 | — | — | 174 / 7,049 | 0 / 92,004 | 547 / 513 / 514 | 1.07 | 768 | oracle |
+| overlaps | `auto` | 10 × 40 (64 places) | feasible | 0 / -2 / -1 | — | — | 128 / 4,387 | 0 / 55,858 | 314 / 312 / 305 | 1.03 | 792 | oracle |
+| availability | `construct` | 10 × 40 (61 places) | feasible | 0 / 0 / -2 | — | — | 61 / 660 | — | 40.0 / 50.7 / 38.8 | 1.30 | 658 | oracle |
+| availability | `local` | 10 × 40 (61 places) | feasible | 0 / 0 / -2 | — | — | 172 / 7,351 | 0 / 96,360 | 504 / 510 / 507 | 1.01 | 956 | oracle |
+| availability | `auto` | 10 × 40 (61 places) | feasible | 0 / 0 / -2 | — | — | 122 / 4,346 | 0 / 55,530 | 304 / 302 / 321 | 1.06 | 799 | oracle |
+| attributes | `construct` | 10 × 40 (68 places) | feasible | 0 / -8 / -18 | — | — | 66 / 706 | — | 43.2 / 44.8 / 45.9 | 1.06 | 598 | oracle |
+| attributes | `local` | 10 × 40 (68 places) | feasible | 0 / -8 / -17 | — | — | 186 / 7,130 | 0 / 92,432 | 557 / 551 / 613 | 1.11 | 793 | oracle |
+| attributes | `auto` | 10 × 40 (68 places) | feasible | 0 / -8 / -17 | — | — | 198 / 7,624 | 0 / 99,020 | 605 / 599 / 589 | 1.03 | 813 | oracle |
+| gaps | `construct` | 10 × 40 (62 places) | feasible | 0 / -4 / -3 | — | — | 61 / 659 | — | 44.3 / 59.2 / 39.3 | 1.51 | 735 | oracle |
+| gaps | `local` | 10 × 40 (62 places) | feasible | 0 / -3 / -3 | — | — | 176 / 7,270 | 0 / 94,940 | 512 / 527 / 529 | 1.03 | 801 | oracle |
+| gaps | `auto` | 10 × 40 (62 places) | feasible | 0 / -4 / -3 | — | — | 122 / 4,073 | 0 / 51,594 | 303 / 293 / 293 | 1.03 | 806 | oracle |
+| rolling | `construct` | 10 × 40 (64 places) | feasible | 0 / 0 / -54000015 | — | — | 64 / 690 | — | 47.0 / 48.6 / 45.8 | 1.06 | 615 | oracle |
+| rolling | `local` | 10 × 40 (64 places) | feasible | 0 / 0 / -46800013 | — | — | 178 / 7,752 | 0 / 116,424 | 816 / 902 / 835 | 1.11 | 803 | oracle |
+| rolling | `auto` | 10 × 40 (64 places) | feasible | 0 / 0 / -46800015 | — | — | 190 / 8,473 | 0 / 127,690 | 901 / 903 / 923 | 1.02 | 809 | oracle |
+| days | `construct` | 6 × 21 (21 places) | feasible | 0 / 0 / 0 | — | — | 21 / 126 | — | 5.61 / 5.63 / 5.44 | 1.03 | 489 | oracle |
+| days | `local` | 6 × 21 (21 places) | feasible | 0 / 0 / 0 | — | — | 21 / 126 | 0 / 504 | 5.71 / 6.22 / 5.85 | 1.09 | 531 | oracle |
+| days | `auto` | 6 × 21 (21 places) | feasible | 0 / 0 / 0 | — | — | 42 / 252 | 0 / 1,008 | 8.41 / 8.41 / 9.18 | 1.09 | 632 | oracle |
+| coverage | `construct` | 10 × 40 (108 places) | feasible | 0 / -2 / -8 | — | — | 98 / 1,003 | — | 63.7 / 64.2 / 59.1 | 1.09 | 588 | oracle |
+| coverage | `local` | 10 × 40 (108 places) | feasible | 0 / -3 / -4 | — | — | 332 / 13,309 | 0 / 173,486 | 1006 / 1022 / 992 | 1.03 | 778 | oracle |
+| coverage | `auto` | 10 × 40 (108 places) | feasible | 0 / -2 / -2 | — | — | 293 / 11,547 | 0 / 150,036 | 891 / 931 / 848 | 1.10 | 790 | oracle |
+| fairness | `construct` | 10 × 40 (46 places) | feasible | 0 / 0 / -1 | — | — | 46 / 506 | — | 31.6 / 28.9 / 30.7 | 1.09 | 563 | oracle |
+| fairness | `local` | 10 × 40 (46 places) | feasible | 0 / 0 / -1 | — | — | 92 / 2,868 | 0 / 36,110 | 183 / 188 / 186 | 1.02 | 737 | oracle |
+| fairness | `auto` | 10 × 40 (46 places) | feasible | 0 / 0 / -1 | — | — | 92 / 2,868 | 0 / 36,110 | 223 / 183 / 184 | 1.22 | 751 | oracle |
+| locks | `construct` | 10 × 40 (63 places, 63 held) | unknown | -10 / -338400000 / -67 | — | — | 0 / 0 | — | 2.64 / 2.63 / 2.63 | 1.00 | 323 | oracle |
+| locks | `local` | 10 × 40 (63 places, 63 held) | unknown | -2 / -79200000 / -43 | — | 19 | 90 / 12,267 | 0 / 107,220 | 944 / 891 / 893 | 1.06 | 884 | oracle |
+| locks | `auto` | 10 × 40 (63 places, 63 held) | infeasible | -10 / -338400000 / -67 | -10 / -338400000 / -67 | 0 | 1 / 0 | 0 / 122 | 2.71 / 2.99 / 2.75 | 1.10 | 153 | oracle |
+| repair | `construct` | 10 × 40 (61 places, 58 held) | unknown | -14 / -28800003 / -31 | — | — | 2 / 20 | — | 4.59 / 5.17 / 4.77 | 1.13 | 448 | oracle |
+| repair | `local` | 10 × 40 (61 places, 58 held) | feasible | 0 / -4 / -18 | — | 15 | 120 / 5,768 | 0 / 77,844 | 503 / 524 / 485 | 1.08 | 810 | oracle |
+| repair | `auto` | 10 × 40 (61 places, 58 held) | infeasible | -14 / -28800003 / -31 | -14 / -28800003 / -31 | 0 | 616 / 1,229 | 0 / 9,954 | 81.8 / 81.3 / 81.6 | 1.01 | 602 | oracle |
+| tiny | `exhaustive` | 30 instances | per instance | — | — | — | — | — | 1128 / 1117 / 1139 | 1.02 | 863 | oracle |
+| limit | `exhaustive` | 9 × 5 (5 places) | optimal | 0 / 0 / -1 | 0 / 0 / -1 | — | 100,000 / 199,997 | — | 5591 / 5593 / 5719 | 1.02 | 623 | oracle |
+| roster repair | `local` (maxMoves 20,000) | 50 × 500 (1,500 places, 336 held) | limit | 0 / -1170 / -9 | — | 6 | 361 / 20,000 | 0 / 131,868 | 3138 / 3029 / 3051 | 1.04 | 1034 | engine |
+| dense start | `local` (maxMoves 20,000) | 50 × 500 (1,500 places, 1,250 held) | limit | -5224620278 / -18035040255 / -53 | — | 25 | 16 / 20,000 | 0 / 279,488 | 16943 / 17038 / 17171 | 1.01 | 1755 | engine |
+| large fill | `construct` (maxMoves 20,000) | 200 × 2,000 (6,000 places) | limit | 0 / -5901 / -1 | — | — | 100 / 20,000 | — | 5990 / 6147 / 5900 | 1.04 | 1790 | engine |
+
+`fullFallbacks` is the evaluator's count; `solve` does not report it, so it is per edit only:
+
+| Mode | Assignments | Units | Full scoring ms (1 / 2 / 3) | `apply` ms (1 / 2 / 3) | `whatIf` ms (1 / 2 / 3) | Full ÷ `apply` | `fullFallbacks` | Evaluator live MiB |
+|---|---:|---:|---|---|---|---|---:|---:|
+| base: the eight reference rules (two global) | 5,000 | 4,802 | 62.7 / 64.6 / 61.8 | 3.07 / 2.98 / 3.22 | 3.05 / 3.00 / 3.19 | 20.4× / 21.7× / 19.2× | 0 of 1200 | 6.12 |
+| local: the six reference rules that read only their own row | 5,000 | 4,800 | 62.0 / 62.4 / 62.6 | 2.61 / 2.57 / 2.58 | 2.60 / 2.54 / 2.58 | 23.7× / 24.2× / 24.3× | 0 of 1200 | 6.09 |
+| days: the four day rules over tasks in two zones | 2,811 | 7,500 | 66.7 / 66.3 / 66.1 | 1.74 / 1.69 / 1.73 | 1.72 / 1.70 / 1.73 | 38.4× / 39.3× / 38.2× | 0 of 1200 | 6.14 |
+| wide: the eight reference rules and one that reads the next resource's row | 5,000 | 5,002 | 70.8 / 73.9 / 73.4 | 11.5 / 11.7 / 11.5 | 11.5 / 11.7 / 11.4 | 6.2× / 6.3× / 6.4× | 1196 of 1200 | 6.35 |
+
+<!--/fact-->

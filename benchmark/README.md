@@ -33,6 +33,7 @@ number in a README performance table names the command that produced it.
 | [`flow-dag.js`](./flow-dag.js) | Dag abstraction price vs a hand-written baseline | Benchmarking `@jarenjs/flow` dataflow |
 | [`vector.js`](./vector.js) | k-nearest over a `derive: 'vector'` column every physical way it runs — resident sweep, the shipped plan, its own statement, `ORDER BY` over a UDF, the same query with no column — against **sqlite-vec**, equivalence-gated, with what the column costs to write and to store | Choosing between a vector column, a JSON member and an extension |
 | [`series.js`](./series.js) | The temporal ground and what was built on it: a range, a fixed bucketing, a rolling window and an as-of read over a seeded series, answered by plain references, by `@jarenjs/core/series`, by a generic query document, by stock SQLite under a declared epoch column and by the store's own plan — gated on the committed series corpus and on every route agreeing with the others before a timer starts, with the resident ceiling and the durable loss both published | Deciding what a temporal fast path has to beat, what the kernel costs against the one-pass loops it replaces, and what a declared epoch column buys over the document it came from |
+| [`assign.js`](./assign.js) | The assignment engine (`@jarenjs/core/assign`) on its own terms: the quality corpus and how many of its answers the independent validator agrees with, then per instance class and strategy the score per level, status, bound, churn, nodes, moves, retained heap and latency in three processes each, and per edit the incremental evaluator against the engine's own full scoring; no rival exists and the suite says so | Deciding what a solve or an edit costs at a size, and what a proposal's status and score are worth |
 | [`db.js`](./db.js) | The store and the LINQ front door: documents in SQLite through the pushdown planner against PouchDB/RxDB/lowdb, the pushdown headline, the chain in memory, and what one DEFINITION costs to build through a pen beside the hand-written document | Deciding what pushdown buys, and what writing a document by code costs |
 | [`orm.js`](./orm.js) | Entities and the typed client against Prisma/Drizzle/Kysely over SQLite, on Node and on Bun, with statement counts beside the timings | Comparing the store and its front door with the tools they will be compared to |
 | [`qt3-runner.js`](./qt3-runner.js) | W3C QT3 scorecard through the XQuery front-end | Checking query-engine compliance (see [qt3-README.md](./qt3-README.md)) |
@@ -46,9 +47,9 @@ agree before timing them.
 
 ## How the timed suites are measured
 
-Every suite above except the validator's profiler and the store suites
-(`db.js`, `spatial.js`, `orm.js`, `live.js`, `vector.js`, `series.js`,
-which run their own loops) times its rows through `lib/measure.js`, by the
+Every suite above except the validator's profiler, `assign.js` and the store suites
+(`db.js`, `spatial.js`, `orm.js`, `live.js`, `vector.js`, `series.js`;
+all of these run their own loops) times its rows through `lib/measure.js`, by the
 clock rather than by a call count:
 
 - **Warm-up.** A row first runs blocks of about 10 ms for at least 50 ms
@@ -1183,6 +1184,17 @@ Separate Node processes, identical source rows and queries, five query samples e
 Native build, reload and update costs exceed the reference; source-bound snapshots compress better. Cold tie compatibility deliberately differs from reference reload ordering. These synthetic results qualify the named bounded host, not downstream relevance or universal latency.
 
 <!--/fact-->
+
+## The assignment engine
+
+`npm run benchmark:assign` solves the quality corpus in `test/core/assign/corpus/` and
+holds every answer to the independent validator before it times anything; one
+disagreement exits non-zero and writes nothing. It then times each instance class
+in three processes of its own and the incremental evaluator per edit, and writes
+`benchmark/assign-result.json`. There is no rival library: the one comparison is
+the evaluator against the engine's own full scoring. The tables are derived into
+[`packages/core/docs/ASSIGN.md`](../packages/core/docs/ASSIGN.md) §11 by
+`npm run docs:derive`, which refuses a measurement whose inputs have changed since.
 
 ## Provider execution and complete ingestion
 

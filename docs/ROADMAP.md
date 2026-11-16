@@ -1075,14 +1075,9 @@ what each does is its own documentation's job
 
 ## @jarenjs/core
 
-- [ ] **Assignment engine — benchmarks.** `@jarenjs/core/assign` admits a problem, registers host rules,
-  scores an assignment list exactly (civil-day rules included, `@jarenjs/core/assign/days`), answers edits
-  and what-ifs incrementally (`createEvaluator`), and proposes or repairs with `solve` (`exhaustive` within
-  `SOLVE_LIMITS`, greedy `construct` with an integer `rank` hook, `local` search that repairs the problem's
-  list against its baseline with hard and soft locks and reports churn per resource and per task beside the
-  score, and `auto`; `optimal`/`infeasible` only from a complete exhaustive proof, `limit` when a budget or
-  the signal stopped it). Still open: a published benchmark of scoring and search. `SERIES.md`,
-  `ARCHITECTURE.md` and `CALENDAR.md`'s "a solver's job" lines then point to it.
+- [ ] **`solve` does not report its evaluator's fallbacks.** A rule that reads outside its row makes every
+  preview of `local` and `construct` a full re-evaluation, but `solve`'s `counts` carry no `fullFallbacks`,
+  so a host sees only the time. An additive member on the `local` and `auto` answers would show it.
 - [ ] **Two admissions of a zone provider.** `createRuntime` accepts a `zoneProvider` with `toParts` and
   `toEpoch`; the calendar (and so `civilDays`) needs `candidates` and `toParts`, and spells the option
   `provider`. A runtime record a host built can be refused when handed on to the calendar. One admission

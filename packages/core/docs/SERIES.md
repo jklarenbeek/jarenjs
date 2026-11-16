@@ -104,8 +104,9 @@ to back), keeping every span that still ends inside. `duration` and
 `step` are fixed widths — milliseconds, or a fixed ISO 8601 duration
 (`'PT30M'`); a calendar duration (`P1M`) is refused rather than called
 thirty days. It is enumeration, not scheduling: choosing among the
-answers, weighing preferences and assigning people is a solver's job,
-deliberately not this one.
+answers, weighing preferences and assigning people is the job of the
+assignment engine, [`@jarenjs/core/assign`](ASSIGN.md), under the
+host's own rules, deliberately not this one.
 
 `concurrencyOf(intervals, window, { atLeast? })` is the staffing
 question. It cuts the window into ascending `{ start, end, count }`
@@ -410,6 +411,8 @@ And the seam has a price that this corpus cannot charge it. <!--fact:series.zone
 Named time zones are injected, never bundled — the provider over host
 ICU lives opt-in in `@jarenjs/locales`, not here. Recurrence and calendar
 resolution live in [`@jarenjs/core/calendar`](CALENDAR.md); this kernel
-stays recurrence-free, and any kind of scheduling solver is somebody
-else's layer. This module supplies the algebra those are built from, and
-nothing that needs a clock, a locale or a zone database to be correct.
+stays recurrence-free, and choosing among its answers (scoring and
+searching assignments under the host's rules) is the assignment
+engine's, [`@jarenjs/core/assign`](ASSIGN.md). This module supplies
+the algebra those are built from, and nothing that needs a clock, a
+locale or a zone database to be correct.

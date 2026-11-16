@@ -121,7 +121,8 @@ export const ASSIGN_LIMITS = /* @__PURE__ */ Object.freeze({
  * @typedef {Object} AssignIncompleteResult
  * @property {false} complete
  * @property {'unknown'} verdict
- * @property {{ limit: 'maxUnits' | 'maxMatches' | 'maxWork', rule: string, unit: RuleUnit }} stoppedAt
+ * @property {{ limit: 'maxUnits' | 'maxMatches' | 'maxWork', rule: string, unit: RuleUnit | null }} stoppedAt -
+ *   `unit` is null when the work of a rule's missing-fact unknowns passed `maxWork` (the rule never ran)
  * @property {AssignCounts} counts
  * @property {AssignProvenance} provenance
  */
@@ -500,7 +501,8 @@ export function scoreAssignment(problem, ruleSet, assignments, options = undefin
   const unknowns = [];
   const sums = { hard: 0n, service: 0n, soft: 0n };
   /**
-   * @param {'maxUnits' | 'maxMatches' | 'maxWork'} limit @param {RegisteredRule} rule @param {RuleUnit} unit
+   * @param {'maxUnits' | 'maxMatches' | 'maxWork'} limit @param {RegisteredRule} rule
+   * @param {RuleUnit | null} unit - null for a rule never evaluated because a fact it reads is missing
    * @returns {AssignResult}
    */
   const stop = (limit, rule, unit) => Object.freeze({
@@ -517,6 +519,7 @@ export function scoreAssignment(problem, ruleSet, assignments, options = undefin
       for (const fact of missing) unknowns.push(unknownOf(rule, null, 'missing-fact', fact, NO_SUBJECTS));
       counts.unknowns += missing.length;
       context.work += missing.length;
+      if (context.work > limits.maxWork) return stop('maxWork', rule, null);
       continue;
     }
     const view = new AssignView(context, rule);
