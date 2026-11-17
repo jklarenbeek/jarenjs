@@ -1475,7 +1475,28 @@ export interface OpenStoreOptions {
 }
 
 export declare function openStore(model: unknown, options: OpenStoreOptions): Promise<Store>;
-export declare function normalizeModel(model: unknown): Map<string, unknown>;
+export declare function normalizeModel(model: unknown, expressions?: Record<string, ExpressionFunction>): Map<string, unknown>;
+/** The brand only `prepareModel` gives: a hand-made `{ model }` is not one. */
+declare const preparedModelBrand: unique symbol;
+/**
+ * A model prepared once to open many stores from: `openStore` (and `open`
+ * from `@jarenjs/linq/db`) take it in place of the model document. Frozen;
+ * `model` is a frozen copy of the document it was prepared from.
+ */
+export interface PreparedModel<M = unknown> {
+  readonly model: M;
+  readonly [preparedModelBrand]: true;
+}
+/**
+ * Normalize and check a model once, for every store opened from it. The
+ * same refusals as a plain open (`JD0005`, `JD0004`); `expressions` is part
+ * of the prepared value, and an open whose `expressions` declare a function
+ * the model calls otherwise is `JD0009`. A
+ * value another copy of the package prepared, or a hand-made one, is
+ * refused at open (`JD0005`).
+ */
+export declare function prepareModel<const M>(model: M,
+  options?: { expressions?: Record<string, ExpressionFunction> }): PreparedModel<M>;
 export declare const MODEL_VERSION: string;
 /**
  * The member every collection and entity view of a store carries its own

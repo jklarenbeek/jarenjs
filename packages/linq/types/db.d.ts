@@ -22,7 +22,7 @@ import type {
   Collection, ExecuteOptions, LiveOptions, LiveQuery, LoadExplanation, OpenStoreOptions,
   SavepointController, SaveReport, StoreCapabilities, TransactionStore,
   EntityCursorOptions, QueryCursor, LoadContinuation, Page, IsolationLevel, AllOptions,
-  EntityScope, SequenceResult, ValueOrPromise,
+  EntityScope, SequenceResult, ValueOrPromise, PreparedModel,
 } from '@jarenjs/db';
 import type { JarenValidator } from '@jarenjs/validate';
 import type { Runtime } from '@jarenjs/core/runtime';
@@ -68,6 +68,9 @@ export type ClientOf<M> = MetaOf<M> extends infer E
  * phantom; a JSON model with a named map (`open<EntityMetaMap>(json,
  * options)`) types it from the map; a bare JSON model is the wide map. */
 export function open<M extends { readonly $model: '0.1' }>(model: M, options: OpenOptions): Promise<ClientOf<M>>;
+/** Open from a model `prepareModel` prepared once: the client is typed
+ * from the document it was prepared from, as `open(document)` types it. */
+export function open<M extends { readonly $model: '0.1' }>(model: PreparedModel<M>, options: OpenOptions): Promise<ClientOf<M>>;
 export function open<E extends MetaMap<E> = Record<string, EntityMeta>>(model: object, options: OpenOptions): Promise<Client<E>>;
 
 // ————— the client —————

@@ -1616,6 +1616,26 @@ it needs raw SQL or the raw handle. The rules, in one place:
   nothing. `collection.all()` is every document, always an array —
   `execute('$[*]')` answers a sequence (`undefined`, one bare value, or
   an array).
+- **Many resident stores share one prepared model.** A host that keeps a
+  store open per tenant prepares the model once —
+  `prepareModel(model, { expressions })` — and opens every store from the
+  value it answers: `openStore(prepared, options)` skips the
+  normalization a plain open repeats, and every store opened from it
+  shares that one frozen normalization. The value is frozen and holds a
+  frozen copy of the document as `prepared.model`, so a later change to
+  the caller's document reaches no store, and `compileSchema` is handed
+  the copy's schema objects. Connections, the owner lease, the unit of
+  work and every other part of a store stay per store; the entity
+  mapping is compiled per open, because each open marks it for its own
+  database. A model the plain open refuses is refused by `prepareModel`
+  with the same error; `expressions` are part of the prepared value, so
+  an open whose `expressions` declare a function the model calls
+  otherwise is `JD0009` (a name the model never calls is no
+  disagreement); and a value this copy of the
+  package did not prepare (another copy's, another release's, or a
+  hand-made one) is `JD0005`. The migration entry points (`migrate`,
+  `planMigration`, `planModelMigration`, `adoptMigrationHistory`) take the
+  model document, not a prepared value.
 
 ```js
 import { openStore } from '@jarenjs/db';

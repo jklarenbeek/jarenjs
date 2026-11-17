@@ -69,7 +69,7 @@ import {
   derivedValue, memberAt, storedMemberForm, registerDeriveFunctions,
 } from './derive.js';
 import {
-  normalizeExpression, canonicalExpression, expressionMembers, registerExpressionFunctions,
+  normalizeExpression, canonicalExpression, expressionMembers, registerExpressionFunctions, expressionFunctions,
 } from './expression.js';
 
 /** The model format version this store implements. */
@@ -411,6 +411,145 @@ export function normalizeModel(model, expressions = undefined) {
     });
   }
   return normalized;
+}
+
+/** The value a plain object or array is copied to, frozen, every other
+ * value as it is; a value met twice is copied once.
+ * @param {any} value @param {Map<object, any>} copies @returns {any} */
+function frozenCopy(value, copies) {
+  if (value === null || typeof value !== 'object') return value;
+  const proto = Object.getPrototypeOf(value);
+  if (!Array.isArray(value) && proto !== Object.prototype && proto !== null) return value;
+  let copy = copies.get(value);
+  if (copy !== undefined) return copy;
+  copy = Array.isArray(value) ? [] : Object.create(proto);
+  copies.set(value, copy);
+  for (const key of Object.keys(value)) {
+    Object.defineProperty(copy, key, { value: frozenCopy(value[key], copies), enumerable: true });
+  }
+  return Object.freeze(copy);
+}
+
+/** Freeze every plain object and array a normalized model holds, through
+ * its maps and sets; a function or any other object is the host's and
+ * stays as it is. @param {any} value @param {Set<object>} seen */
+function freezeNormalized(value, seen) {
+  if (value === null || typeof value !== 'object' || seen.has(value)) return;
+  seen.add(value);
+  if (value instanceof Map || value instanceof Set) {
+    for (const entry of value.values()) freezeNormalized(entry, seen);
+    return;
+  }
+  const proto = Object.getPrototypeOf(value);
+  if (!Array.isArray(value) && proto !== Object.prototype && proto !== null) return;
+  for (const key of Object.keys(value)) freezeNormalized(value[key], seen);
+  Object.freeze(value);
+}
+
+/** What each prepared model of THIS copy of the package holds. A value
+ * another copy prepared, or a hand-made one, is not in it.
+ * @type {WeakMap<object, { model: any, collections: Map<string, any>, expressions: Record<string, any> | undefined,
+ *   called: readonly string[] }>} */
+const PREPARED_MODELS = new WeakMap();
+/** The mark every prepared model carries, whichever copy made it. */
+const PREPARED_MARK = Symbol.for('@jarenjs/db prepared model');
+
+/**
+ * Prepare a model once, to open many stores from it: `openStore` (and
+ * `open` from `@jarenjs/linq/db`) take the value this returns in place of
+ * the model document, and skip the normalization every open of a plain
+ * document repeats. The value is frozen and holds a frozen copy of the
+ * document (`model`), so a later change to the caller's document changes
+ * no store opened from it; its normalized collections are shared by every
+ * store opened from it and frozen too. Connections, the owner lease, the
+ * unit of work and everything else a store holds stay per store, and an
+ * open still refuses its own options against the model (`JD0051`,
+ * `JD0060`). A model the plain open refuses is refused here, with the same
+ * error.
+ * @param {any} model - a `jaren-model` document
+ * @param {{ expressions?: Record<string, any> }} [options] - `expressions`
+ *   resolves the model's index-expression functions now, and is part of
+ *   the prepared value: every store opened from it plans and registers
+ *   these, and an open whose `expressions` declare a function the model
+ *   calls otherwise is refused (`JD0009`) rather than planned against a
+ *   mix of the two (a name the model never calls is no disagreement)
+ * @returns {Readonly<{ model: any }>} the prepared model
+ */
+export function prepareModel(model, options = undefined) {
+  readOptions(options, ['expressions'], 'prepareModel()', 'JD0009');
+  const expressions = options?.expressions;
+  if (expressions !== undefined && !isPlainOptions(expressions)) {
+    throw new DbCompileError('JD0009',
+      `prepareModel option 'expressions' is a plain object of declarations, not ${describeValue(expressions)}`);
+  }
+  if (isPreparedModel(model))
+    throw modelError('JD0005', 'the model is prepared already: open from the prepared value', '');
+  // the caller's document is checked as it is, so a refusal points where
+  // a plain open's would; the copy is what every store reads
+  normalizeModel(model, expressions);
+  const document = frozenCopy(model, new Map());
+  const collections = normalizeModel(document, expressions);
+  const { entities } = compileEntityModel(document);
+  freezeNormalized(collections, new Set());
+  const prepared = Object.defineProperty({ model: document }, PREPARED_MARK, { value: MODEL_VERSION });
+  PREPARED_MODELS.set(prepared, { model: document, collections, expressions,
+    called: calledFunctions(collections, entities) });
+  return Object.freeze(prepared);
+}
+
+/** Whether `value` carries the prepared-model mark, from any copy of the
+ * package. @param {any} value */
+function isPreparedModel(value) {
+  return value !== null && typeof value === 'object' && Object.hasOwn(value, PREPARED_MARK);
+}
+
+/**
+ * What a prepared model holds, or `undefined` for a model document. A
+ * value with the mark that this copy did not prepare — another copy's or
+ * another release's, or a hand-made one — is `JD0005`: its normalization
+ * is not one this copy can trust.
+ * @param {any} model
+ */
+function preparedOf(model) {
+  if (!isPreparedModel(model)) return undefined;
+  const prepared = PREPARED_MODELS.get(model);
+  if (prepared === undefined) {
+    throw modelError('JD0005',
+      `the prepared model was not prepared by this copy of @jarenjs/db (it is marked ${describeValue(model[PREPARED_MARK])}): `
+      + 'prepare it again with this copy\'s prepareModel()', '');
+  }
+  return prepared;
+}
+
+/** Every function the model's index expressions call: a collection's,
+ * as normalization resolved it, and an entity's, as its open plans it.
+ * @param {Map<string, any>} collections @param {Map<string, any>} entities @returns {readonly string[]} */
+function calledFunctions(collections, entities) {
+  /** @type {Set<string>} */
+  const called = new Set();
+  for (const collection of collections.values()) {
+    for (const index of collection.indexes) if (index.expression != null) expressionFunctions(index.expression, called);
+  }
+  for (const entity of entities.values()) {
+    for (const index of entity.indexes) {
+      // an entity's expression is checked when an open plans it: one this
+      // walk cannot read is that open's refusal, not this one's
+      if (isJsonObject(index.expression)) {
+        try { expressionFunctions(index.expression, called); }
+        catch { /* refused by the open that plans it */ }
+      }
+    }
+  }
+  return Object.freeze([...called].sort());
+}
+
+/** Whether an open's `expressions` declare each function the prepared
+ * model calls as the prepared ones do: a name the model never calls is
+ * no disagreement, since no open of the document would read it.
+ * @param {Record<string, any>} given @param {{ expressions: Record<string, any> | undefined, called: readonly string[] }} prepared */
+function sameCalledExpressions(given, prepared) {
+  return prepared.called.every((name) => Object.hasOwn(given, name)
+    && Object.hasOwn(prepared.expressions ?? {}, name) && given[name] === /** @type {any} */ (prepared.expressions)[name]);
 }
 
 /**
@@ -2275,6 +2414,11 @@ export function openStore(model, options) {
   let collections;
   let entities;
   let mapping;
+  /** The model document, and the expressions its indexes resolve against:
+   * a prepared model's own. */
+  let modelDocument = model;
+  /** @type {Record<string, any> | undefined} */
+  let expressions = options.expressions;
   /** @type {{ id: string, leaseMs: number } | undefined} */
   let ownerOption;
   try {
@@ -2299,8 +2443,22 @@ export function openStore(model, options) {
     refuseSessionsHere(options);
     if (options.replication !== undefined) readReplicationOptions(options.replication);
     ownerOption = readOwnerOption(options);
-    collections = normalizeModel(model, options.expressions);
-    const compiled = compileEntityModel(model);
+    // a prepared model brings its normalized collections and the
+    // expressions they were resolved against; its entity mapping is
+    // compiled per open, because the open marks it for its own database
+    const prepared = preparedOf(model);
+    if (prepared !== undefined) {
+      if (options.expressions !== undefined && !sameCalledExpressions(options.expressions, prepared)) {
+        throw new DbCompileError('JD0009', "openStore option 'expressions' declares a function the model calls "
+          + `(${prepared.called.join(', ')}) otherwise than the expressions it was prepared with: prepare it with `
+          + 'these, or leave the option out');
+      }
+      modelDocument = prepared.model;
+      expressions = prepared.expressions;
+      collections = prepared.collections;
+    }
+    else collections = normalizeModel(model, expressions);
+    const compiled = compileEntityModel(modelDocument);
     entities = compiled.entities;
     mapping = entities.size > 0 ? compiled.mapping : null;
     if ([...entities.values()].some((e) => e.physical !== null) && (options.capture || options.replication))
@@ -3219,11 +3377,11 @@ export function openStore(model, options) {
         for (const [name, collection] of collections)
           plans.set(name, planCollection(name, collection, dialect,
             { derived: derivedMapping, rtree: rtreeCapable,
-              expressions: options.expressions, registered: registersFunctions }));
+              expressions, registered: registersFunctions }));
         if (mapping !== null) {
           for (const name of Object.keys(mapping.entities))
             entityPlans.set(name, planEntity(name, mapping.entities[name], mapping, dialect,
-              { deferCycles: true, expressions: options.expressions }));
+              { deferCycles: true, expressions }));
           for (const joinName of Object.keys(mapping.joinTables)) {
             entityPlans.set(joinName,
               planJoinTable(joinName, mapping.joinTables[joinName], mapping, dialect));
@@ -3335,7 +3493,7 @@ export function openStore(model, options) {
         chain(requireUtf8Text(), () =>
         chain(acquireOwner(), () =>
         chain(registerExpressionFunctions(connection, expressionNames,
-          options.expressions ?? {}), () =>
+          expressions ?? {}), () =>
         chain(needsDeriveFunctions ? registerDeriveFunctions(connection) : null, () =>
         chain(ensureShape(connection, collections, plans, createsNothing), () =>
         chain(ensureEntityShape(connection, entityPlans, entities, createsNothing), () => {
@@ -5632,7 +5790,7 @@ export function openStore(model, options) {
           if (options.replication !== undefined) {
             replicationEngine = createReplicationEngine({ connection, capture, mapping,
               managedTables: [...captureShapes.keys()],
-              config: options.replication, model: shapeHash(model), now: runtime.now, bracket: firstOpen,
+              config: options.replication, model: shapeHash(modelDocument), now: runtime.now, bracket: firstOpen,
               rows: createLogicalRows({ connection, shapes: captureShapes, capture,
                 collectionCore: coreFor, entityCore: entityCoreFor, captureCascade, recordCascade }),
             });

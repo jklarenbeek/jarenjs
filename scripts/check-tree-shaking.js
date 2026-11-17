@@ -851,7 +851,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,146,800 (measured 1146735): a numeric key's write-boundary CHECK, read at open as the store's own so every pair, ordering, include and continuation compares the key exactly (store 529, ddl 506, emit 149, introspect 114, dialect 71, plan 39, model 13).
 // Raised to 1,146,900 (measured 1146888): a hop's existence test refines its equality correlation by an order or inequality between two columns of one non-null family (plan 147, emit 6).
 // Raised to 1,149,400 (measured 1149355): `$date-format`'s zone operand and its refusals as catalog messages (operators 1681, messages 607, normalize 97, expression 66, civil 16).
-if (clientBytes > 1149400)
+// Raised to 1,151,400 (measured 1151307): handle records built on first read and a model prepared once accepted by the open (open 1158, store 820).
+if (clientBytes > 1151400)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

@@ -794,6 +794,16 @@ what each does is its own documentation's job
   and catalog rows, and on PostgreSQL its rule programs and rewrite rules,
   already come from one read per open. One read of the namespace for each
   per-table read would bound an open of many tables.
+- [ ] **A linq transaction's records grow with the model's names.** A
+  transaction client defines one getter per declared entity and collection
+  name on its two records, so a transaction whose body touches one handle
+  still pays for every name the model declares; a record shared per client
+  until a transaction first reads a handle would make that cost constant.
+- [ ] **A validated linq open takes every entity's store handle.** So that a
+  schema the compiler refuses is refused at open, `open()` builds each
+  entity's store-level handle (and compiles each collection schema) when it
+  opens; a compile-only check of the entity write schemas would keep the
+  refusal without the handles.
 - [ ] **The job tables' and the change log's first-open bracket.** An open
   with `jobs: true` or `capture` creates or verifies its job tables and its
   change log under `BEGIN IMMEDIATE` on every open, so another connection's

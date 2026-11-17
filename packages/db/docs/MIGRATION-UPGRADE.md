@@ -3964,6 +3964,29 @@ plans that rebuilds the table drops the CHECK, which this release's
 - Each such comparison counts one leaf toward the dialect's predicate term bound.
 - No table, column, index or CHECK changes.
 
+## 75. A linq client builds its handles on first read, and a model can be prepared once
+
+- `client.entities` and `client.collections` (from `@jarenjs/linq/db`), and a
+  transaction client's, keep their names, their order and their frozen
+  record, but each member is now a getter that builds its handle on the first
+  read and answers the same object on every later one
+  (`Object.getOwnPropertyDescriptor(client.collections, name)` has a `get`, no
+  `value`). A transaction client's `sql`, `relational`, `jobs`, `sync` and
+  `savepoints` read through to the transaction's store the same way. A
+  transaction whose body touches no handle no longer builds one per declared
+  name, and a client no longer builds every collection's store handle at open.
+- A schema the compiler refuses is still refused at open. The store that open
+  had opened is now closed before the refusal reaches the caller; it was left
+  open. Each distinct collection schema object is compiled once per open, where
+  a schema shared by several collections was compiled once per collection.
+- `prepareModel(model, { expressions })` from `@jarenjs/db` is new: `openStore`
+  and the linq `open` take the frozen value it answers in place of the model
+  document (§ "Many resident stores share one prepared model" in the
+  [README](../README.md)). A store opened from it hands `compileSchema` the
+  schema objects of the prepared copy, not the caller's: a hook that tells
+  schemas apart by identity compares them with `prepared.model`'s.
+- No table, column, index or CHECK changes.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so
