@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->10 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->23 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -255,7 +255,7 @@ included.
 | `./node` | 129 | core 62, db 40, json 21, validate 6 | 6.7 |
 | `./node-pool` | 105 | core 61, db 23, json 21 | 4.8 |
 | `./node-process` | 101 | core 61, json 21, db 19 | 4.8 |
-| `./node-worker` | 101 | core 61, json 21, db 19 | 4.7 |
+| `./node-worker` | 101 | core 61, json 21, db 19 | 4.8 |
 | `./postgres` | 119 | core 62, db 36, json 21 | 5.1 |
 | `./query` | 132 | core 62, db 43, json 21, validate 6 | 7.5 |
 | `./relational` | 122 | core 62, db 33, json 21, validate 6 | 6.0 |
@@ -272,12 +272,12 @@ included.
 <!--fact:closure.linq-->
 | Subpath | Modules | By package | Live heap MiB |
 |---|---:|---|---:|
-| `.` | 93 | core 61, json 21, linq 11 | 4.3 |
+| `.` | 93 | core 61, json 21, linq 11 | 4.4 |
 | `./app` | 24 | linq 16, core 8 | 1.2 |
 | `./authoring` | 15 | core 8, linq 7 | 0.9 |
 | `./charts` | 15 | core 8, linq 7 | 1.0 |
-| `./contract` | 20 | core 10, linq 10 | 1.1 |
-| `./db` | 268 | core 89, db 81, json 36, validate 28, linq 27, formats 7 | 13.6 |
+| `./contract` | 20 | core 10, linq 10 | 1.2 |
+| `./db` | 268 | core 89, db 81, json 36, validate 28, linq 27, formats 7 | 13.7 |
 | `./flow` | 19 | linq 11, core 8 | 1.0 |
 | `./forms` | 21 | linq 13, core 8 | 1.2 |
 | `./formula` | 90 | core 61, json 24, linq 5 | 4.1 |
@@ -320,7 +320,7 @@ included.
 |---|---:|---|---:|
 | `.` | 125 | core 72, validate 27, json 26 | 5.4 |
 | `./load` | 100 | core 63, json 26, validate 11 | 4.4 |
-| `./normalize` | 127 | core 72, validate 29, json 26 | 5.6 |
+| `./normalize` | 127 | core 72, validate 29, json 26 | 5.7 |
 | `./output` | 100 | core 63, json 26, validate 11 | 4.5 |
 | `./query` | 125 | core 72, validate 27, json 26 | 5.4 |
 | `./references` | 24 | core 12, json 6, validate 6 | 1.1 |
@@ -368,7 +368,7 @@ included.
 | `./schedule` | 10 | core 10 | 0.6 |
 | `./schema` | 9 | core 9 | 0.6 |
 | `./search` | 12 | core 12 | 0.6 |
-| `./series` | 18 | core 18 | 0.7 |
+| `./series` | 18 | core 18 | 0.8 |
 | `./stats` | 2 | core 2 | 0.1 |
 | `./string` | 6 | core 6 | 0.3 |
 | `./text` | 17 | core 17 | 0.6 |
