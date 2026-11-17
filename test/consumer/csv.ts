@@ -7,10 +7,13 @@ const streamed: AsyncIterable<string> = stringifyCsvStream([], { ...policy, sign
 createCsvRowFormatter(policy).tail();
 createCsvStreamWriter({ ...policy, onChunk: (text: string) => { void text; } }).end();
 new CsvStreamWriter(policy).write(['=value']);
-void [whole, lines, streamed];
+const everyField: string = stringifyCsv([[1, null]], { ...policy, quoteAll: true });
+void [whole, lines, streamed, everyField];
 // @ts-expect-error explicit policy is boolean
 stringifyCsv([], { neutralizeFormulas: 'true' });
 // @ts-expect-error async entry shares the same policy type
 stringifyCsvStream([], { neutralizeFormulas: 1 });
 // @ts-expect-error incremental entry shares the same policy type
 createCsvStreamWriter({ neutralizeFormulas: 'true' });
+// @ts-expect-error quoting every field is boolean too
+createCsvStreamWriter({ quoteAll: 'yes' });

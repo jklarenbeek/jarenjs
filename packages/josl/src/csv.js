@@ -16,6 +16,9 @@ import { admitOptions, CSV_READ, CSV_DOCUMENT, CSV_WRITE } from './options.js';
  * @property {boolean} [header=true] - Emit headers for object records.
  * @property {boolean} [neutralizeFormulas=false] - Prefix an apostrophe when converted
  * cell text starts with =, +, -, @, tab, CR or LF, including headers and numbers.
+ * @property {boolean} [quoteAll=false] - Quote every written field, headers, numbers,
+ * empty and absent cells included (an absent cell is written as the empty string is);
+ * needs a quote character, so `quote: ''` with it is refused.
  */
 
 //#region reading
@@ -300,7 +303,8 @@ export function formatCsvValue(value) {
  * delimiter, a quote, a newline, edge whitespace a lenient reader
  * might trim, or a leading byte order mark (a reader drops one at the start
  * of a document). Everything else is written bare, which keeps the output
- * both smaller and diff-friendly.
+ * both smaller and diff-friendly. `quoteAll: true` quotes every field
+ * instead, for a host matching an export that does.
  *
  * @param {Array<Array|object>} rows - Records: arrays, or objects keyed by column
  * @param {CsvWriterOptions} [options] - Writer options; the default preserves cell text.
@@ -335,6 +339,10 @@ export function createCsvRowFormatter(options = {}) {
   const newline = options.newline ?? '\r\n';
   const wantHeader = options.header !== false;
   const neutralize = options.neutralizeFormulas === true;
+  const quoteAll = options.quoteAll === true;
+  // quoting every field with quoting disabled would write every field bare
+  if (quoteAll && quote.length === 0)
+    throw new TypeError("options.quote must be a quote character when quoteAll is true; quote '' disables quoting");
   const unsafe = needsQuoteTester(delimiter, quote);
   const escaped = quote + quote;
 
@@ -342,11 +350,13 @@ export function createCsvRowFormatter(options = {}) {
   // cell opens the document is not the formatter's to know (it may format one
   // row at a time, or several documents), so every cell whose own text begins
   // with one is quoted: the mark stays cell text wherever the cell lands.
+  // `quoteAll` quotes the rest too; the neutralizing prefix is cell text, so
+  // it sits inside the quotes.
   const cell = (value) => {
     let s = formatCsvValue(value);
     if (neutralize && s.length > 0 && '=+-@\t\r\n'.includes(s[0]))
       s = "'" + s;
-    if (quote.length === 0 || !(unsafe(s) || s.charCodeAt(0) === 0xFEFF))
+    if (quote.length === 0 || !(quoteAll || unsafe(s) || s.charCodeAt(0) === 0xFEFF))
       return s;
     return quote + (s.includes(quote) ? s.replaceAll(quote, escaped) : s) + quote;
   };

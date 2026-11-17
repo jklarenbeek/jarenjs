@@ -129,7 +129,8 @@ describe('josl: every entry point admits exactly its own table', () => {
   });
 
   it('the CSV writers', async () => {
-    const all = { delimiter: ';', quote: '"', newline: '\n', fields: ['a', 'b'], header: true, neutralizeFormulas: true };
+    const all = { delimiter: ';', quote: '"', newline: '\n', fields: ['a', 'b'], header: true, neutralizeFormulas: true,
+      quoteAll: false };
     const rows = [{ a: '=1', b: 'x;y' }];
     const text = 'a;b\n\'=1;"x;y"\n';
     strictEqual(stringifyCsv(rows, all), text);
@@ -142,7 +143,7 @@ describe('josl: every entry point admits exactly its own table', () => {
     strictEqual(chunks.join(''), text);
     strictEqual(createCsvRowFormatter(all).lines(rows[0]).join(''), text);
     refuses(() => stringifyCsv(rows, { onChunk: () => {} }), "stringifyCsv: unknown option 'onChunk'; the options are "
-      + 'delimiter, quote, newline, fields, header, neutralizeFormulas');
+      + 'delimiter, quote, newline, fields, header, neutralizeFormulas, quoteAll');
     refuses(() => [...stringifyCsvChunks(rows, { newLine: '\n' })], "stringifyCsvChunks: unknown option 'newLine' — did you mean 'newline'?");
     await rejects(drain(stringifyCsvStream(rows, { signal: null, neutralize: true })),
       { message: "stringifyCsvStream: unknown option 'neutralize' — did you mean 'neutralizeFormulas'?" });

@@ -92,6 +92,7 @@ export const CSV_WRITE = table({
   fields: rule((v) => v === null || Array.isArray(v), 'an array of column names'),
   header: BOOLEAN,
   neutralizeFormulas: BOOLEAN,
+  quoteAll: BOOLEAN,
 });
 
 /** `createCsvStreamWriter`: the writer, plus a chunk sink. */

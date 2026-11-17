@@ -316,12 +316,30 @@ and the pull form `stringifyCsvStream` share one row formatter and are
 byte-identical for the same records; the pull form requests a record only
 when its consumer asks for the next line.
 
+`quoteAll: true` quotes every written field instead, as RFC 4180 §2.5
+permits: header names, numbers, booleans, empty strings and absent cells
+(`null`/`undefined`, which are written as `""` exactly as an empty string
+is), doubling the quote character inside as always. A record of no fields
+stays an empty line. Every writer takes it with the same meaning, and the
+default `false` leaves the bytes above unchanged. It needs a quote
+character, so `quoteAll: true` with `quote: ''` is refused with a
+`TypeError`. Reading such a document back gives the same cell text: a
+quoted cell is never trimmed or coerced, so `typed: true` leaves `"1"` the
+string `'1'`, and `""` reads as `''` (as `null` under `emptyAsNull`, and a
+lone `""` line is dropped under `skipEmptyLines` as an empty line is).
+
+```js
+stringifyCsv([{ id: 1, note: 'x,y', none: null }], { quoteAll: true });
+// '"id","note","none"\r\n"1","x,y",""\r\n'
+```
+
 `neutralizeFormulas: true` selects a spreadsheet export transformation in that
 shared formatter. After normal value conversion and before CSV quoting, it
 prefixes one apostrophe (`'`) exactly when the first character is `=`, `+`, `-`,
 `@`, tab (U+0009), CR (U+000D) or LF (U+000A). Headers, including a header-only
 document with explicit fields, follow the same rule. A leading apostrophe is
-left unchanged. Null/undefined and empty cells remain empty. A negative number
+left unchanged. Null/undefined and empty cells remain empty. With `quoteAll`
+the prefix is cell text and sits inside the quotes (`"'=1+2"`). A negative number
 or bigint becomes apostrophe-prefixed text in this mode: `-12` becomes `'-12`.
 The default is lossless with respect to this policy and leaves these prefixes
 unchanged; `formatCsvValue` itself does not apply it.

@@ -40,6 +40,11 @@ export async function qualifyCsvWriters() {
     [[{ '=header': '=a,"b\nc', value: -1 }], { neutralizeFormulas: true }],
     [[], { fields: ['=header', '-header'], neutralizeFormulas: true }],
     [[['=a;b', "'@already"]], { neutralizeFormulas: true, delimiter: ';', quote: "'", newline: '\n' }],
+    [[row], { quoteAll: true }],
+    [[row, [], ['']], { quoteAll: true, neutralizeFormulas: true }],
+    [[{ '=header': '=a,"b\nc', value: -1, absent: null }], { quoteAll: true, neutralizeFormulas: true }],
+    [[], { fields: ['=header', 'plain'], quoteAll: true }],
+    [[['=a;b', "it's", 0]], { quoteAll: true, delimiter: ';', quote: "'", newline: '\n' }],
   ]) {
     const whole = stringifyCsv(rows, options);
     assert.equal([...stringifyCsvChunks(rows, options)].join(''), whole);

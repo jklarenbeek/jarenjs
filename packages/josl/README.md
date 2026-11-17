@@ -442,6 +442,8 @@ an apostrophe on converted cells starting with `=`, `+`, `-`, `@`, tab, CR or LF
 including headers and negative numbers. The default remains unchanged. This
 is an explicit text export policy; see [the format contract](FORMAT.md#csv)
 for exact quoting behavior and spreadsheet qualification limits.
+`quoteAll: true` quotes every field, the header included, for a host matching
+an export that does; absent cells are written as `""`, as empty strings are.
 A cell that begins with U+FEFF is written quoted, wherever it sits, because a
 reader drops a byte order mark at the start of its input and a formatter cannot
 know which cell opens a document; upgrade: such a cell used to be written bare

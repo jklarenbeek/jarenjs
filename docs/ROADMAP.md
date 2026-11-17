@@ -1109,6 +1109,15 @@ what each does is its own documentation's job
   engine, so strict execution refuses them (`JD0010`, 'op') while the residual
   answers.
 
+## @jarenjs/josl
+
+- [ ] **A CSV dialect with `quote: null` does not round-trip.** The writers
+  read `quote: null` as the default `"` and the reader reads it as no quoting,
+  so `parseCsv(stringifyCsv([['x,y']], { quote: null }), { quote: null })`
+  answers `[['"x', 'y"']]`. Both meanings are documented and answer that way
+  today. Wanted: one meaning of `null` on both sides, or a refusal of `null`
+  on the side that cannot honour it.
+
 ## @jarenjs/locales
 
 - [ ] **The uncataloged-text guard trusts a catalog's English.** A literal equal to an
