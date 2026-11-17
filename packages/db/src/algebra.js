@@ -146,11 +146,13 @@ export const PLAN_VERSION = 2;
  *   object and skipped in its array — the engine's own rule.
  *
  * @typedef {{ entity: string, binding: string,
- *   edges: { left: { binding: string, ref: PlanRef }, right: { binding: string, ref: PlanRef } }[],
+ *   edges: { left: { binding: string, ref: PlanRef }, right: { binding: string, ref: PlanRef },
+ *     op?: 'ne' | 'lt' | 'le' | 'gt' | 'ge' }[],
  *   filter: PlanPredicate | null }} PlanHop
  *   A navigation hop of an entity plan: the rows of another entity, found
- *   by column equalities with the rows of the plan's bindings and kept by
- *   `filter` over the hop's own binding. The statement reads it as a
+ *   by column equalities with the rows of the plan's bindings — beside
+ *   which an existence test may refine by a comparison an edge's `op`
+ *   names — and kept by `filter` over the hop's own binding. The statement reads it as a
  *   correlated subselect — `EXISTS` for a `hop` predicate, `COUNT(*)`
  *   for a `hopCount` one, a scalar read for an order key or a projection
  *   leaf — never as a join, so it adds no row to the result.

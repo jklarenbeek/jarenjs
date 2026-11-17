@@ -33,7 +33,9 @@ const explanation = await store.explain(document);
 
 Native correlations require one inner entity root, equality edges to outer
 bindings, a bare inner return or one singular member path of it, and supported
-scalar predicates. Such a hop counts, tests existence or emptiness, takes part
+scalar predicates; a hop tested for existence or emptiness may refine its
+equalities by `$lt`, `$le`, `$gt`, `$ge` or `$ne` between two columns under the
+same family and NULL rule. Such a hop counts, tests existence or emptiness, takes part
 in a comparison, and — where its equalities cover the inner entity's declared
 key — orders rows or fills a projected member; `$some` and `$every` over one
 entity array are one `EXISTS` (MODEL-FORMAT §10.1). A hop counted or tested

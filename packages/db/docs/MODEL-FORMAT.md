@@ -3535,7 +3535,17 @@ is a correlated subselect of the row's own statement:
   the member plans to anywhere else>)`;
 - `$exists` and `$empty` of a hop are `EXISTS` and `NOT EXISTS`; a hop that
   returns a member counts only the rows that carry it, so the emptiness of a
-  member-less author is true, not only that of a missing one;
+  member-less author is true, not only that of a missing one. Beside at
+  least one equality, the correlation of a hop tested this way may also
+  compare two columns by `$lt`, `$le`, `$gt`, `$ge` or `$ne` ("the latest
+  revision at or after the row's") under the same rule — one comparison
+  family, neither column able to read a NULL as a value — compared inside
+  the subselect as a join's refinement compares them: strings by code
+  point, numbers as the doubles the engine holds. A NULL a column holds for
+  an absent member gives the engine no operand and SQL an unknown, so the
+  related row is kept by neither, under `$exists` and `$empty` alike. A
+  correlation by inequalities alone, and one inside a count, a comparison of
+  the hop's member, an order key or a projection leaf, stays in the engine;
 - `$count` of a hop compared with a number is `(SELECT COUNT(*) …) <op> n`,
   a fraction or a magnitude past 64 bits folding as it does for an integer
   column; a count is always present, so against any other scalar only
@@ -3570,8 +3580,9 @@ statement counts or tests the first hop's rows that reach such a row, so a
 join row whose target row is gone is not counted, as the engine does not
 count it. A hop that is none of the above
 stays in the engine, named by `explain()` and refused under `strict`
-(§10.6): a hop out of a hop (but for that count or test), an inner ordering, a correlation by an
-inequality, equalities across comparison families or over members that admit
+(§10.6): a hop out of a hop (but for that count or test), an inner ordering, a correlation by
+inequalities alone or by an inequality anywhere but an existence or emptiness
+test, comparisons across comparison families or over members that admit
 `null` (`entity.hopShape`), and a hop read as a value without the key proof
 (`entity.hopValue`). A hop with no correlation to the row is no hop of it: in
 a `$where` its conjunct belongs to no binding (`entity.conjunctBinding`),
@@ -4114,7 +4125,8 @@ a number appears only where `capabilities.rowEstimates` is filled):
 - a navigation hop out of shape (`entity.hopShape`): a hop out of a hop
   (but for a count or an existence test of one that reaches at most one row,
   §10.1), one with an inner `$orderby`, `$let`, grouping or window, one correlated
-  by an inequality, or with equalities across comparison families or over
+  by inequalities alone or by an inequality anywhere but an existence or
+  emptiness test, or with comparisons across comparison families or over
   members that admit `null` (an uncorrelated hop in a `$where` belongs to
   no binding: `entity.conjunctBinding`); and a hop read as
   a value (`entity.hopValue`) — an order key, a projection leaf — whose

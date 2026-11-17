@@ -738,6 +738,189 @@ describe('correlated hops: the corpus group', () => {
   }
 });
 
+describe('correlated hops: an inequality beside the equality refines the correlation', () => {
+  /** A required member of each comparison family, an optional one, and the controls that stay in the engine:
+   * a member that admits `null`, a boolean, a union of kinds and a string beside an integer. @param {boolean} indexed */
+  const RANGE = (indexed) => {
+    const on = indexed ? { 'x-entity': { index: true } } : {};
+    const properties = {
+      id: { type: 'string', ...key }, period: { type: 'string', ...on }, revision: { type: 'integer', ...on },
+      score: { type: 'number', ...on }, name: { type: 'string', ...on }, opt: { type: 'integer' },
+      maybe: { type: ['integer', 'null'] }, flag: { type: 'boolean' }, rank: { type: ['integer', 'string'] }, code: { type: 'string' },
+      ref: { type: 'string' },
+    };
+    const required = ['id', 'period', 'revision', 'score', 'name', 'flag', 'rank', 'code'];
+    // `Rev` holds an integer key, compared with a plain integer and with another key
+    const rev = { type: 'object', required: ['n', 'period'], properties: { n: { type: 'integer', ...key }, period: { type: 'string', ...on } } };
+    return { $model: '0.1', entities: {
+      Row: { schema: { type: 'object', required, properties } }, Head: { schema: { type: 'object', required, properties } },
+      Rev: { schema: rev } } };
+  };
+  // ties, negatives, fractions, an absent optional member, and strings whose case and accents order differently
+  // by code point than by a locale's collation
+  const RANGE_DOCUMENTS = {
+    Row: [
+      { id: 'r1', period: 'p', revision: 1, score: -1.5, name: 'apple', opt: 3, maybe: 1, flag: true, rank: 1, code: '1' },
+      { id: 'r2', period: 'p', revision: 2, score: 0, name: 'Apple', maybe: null, flag: false, rank: 'b', code: '2' },
+      { id: 'r3', period: 'p', revision: 3, score: 2.25, name: 'äpfel', opt: -1, flag: true, rank: 3, code: '3' },
+      { id: 'r4', period: 'q', revision: -2, score: 0.001, name: 'zebra', opt: -1, maybe: 4, flag: false, rank: 'a', code: '-2' },
+      { id: 'r5', period: 'q', revision: 2, score: 0.5, name: 'Zebra', opt: 2, maybe: 2, flag: true, rank: 2, code: '2' },
+      { id: 'r6', period: 'r', revision: 0, score: 0, name: 'apple', opt: 0, maybe: 0, flag: false, rank: 0, code: '0' },
+    ],
+    Head: [
+      { id: 'h1', period: 'p', revision: 2, score: 0, name: 'apple', opt: 3, maybe: 2, flag: true, rank: 2, code: '2', ref: 'r1' },
+      { id: 'h2', period: 'p', revision: 2, score: -1.5, name: 'Äpfel', maybe: null, flag: true, rank: 'a', code: '2', ref: 'gone' },
+      { id: 'h3', period: 'q', revision: -2, score: 0.5, name: 'zebra', flag: false, rank: 1, code: '-2', ref: 'r4' },
+      { id: 'h4', period: 'q', revision: 5, score: 0.25, name: 'éclair', opt: -5, maybe: 9, flag: false, rank: 'c', code: '5' },
+    ],
+    Rev: [{ n: -3, period: 'p' }, { n: 0, period: 'p' }, { n: 2, period: 'q' }, { n: 5, period: 'q' }, { n: 7, period: 'p' }],
+  };
+  const OPERATORS = ['$lt', '$le', '$gt', '$ge', '$ne'];
+  /** The hop from a row to the heads of its period that `comparison` keeps. @param {any} comparison @param {string} [ret] */
+  const heads = (comparison, ret = '$head.id') => ({ $for: { head: '$.Head[*]' },
+    $where: { $and: [{ $eq: ['$head.period', '$row.period'] }, comparison] }, $return: ret });
+  /** @param {any} where */
+  const rows = (where) => [{ $for: { row: '$.Row[*]' }, $where: where, $return: '$row.id' }];
+  /** Every way a predicate holds the hop: its existence, its absence twice spelled, inside `$or`, and both quantifiers.
+   * @param {any} hop @returns {[string, any][]} */
+  const sites = (hop) => [
+    ['$exists', rows({ $exists: hop })],
+    ['$not $exists', rows({ $not: { $exists: hop } })],
+    ['$empty', rows({ $empty: hop })],
+    ['$or', rows({ $or: [{ $exists: hop }, { $eq: ['$row.id', 'r6'] }] })],
+    ['$some', [{ $some: { row: '$.Row[*]' }, $satisfies: { $exists: hop } }]],
+    ['$every', [{ $every: { row: '$.Row[*]' }, $satisfies: { $not: { $exists: hop } } }]],
+  ];
+  /** @type {[string, any][]} */
+  const NATIVE = [];
+  for (const member of ['revision', 'score', 'name', 'opt']) {
+    for (const op of OPERATORS) {
+      for (const [side, comparison] of /** @type {[string, any][]} */ ([
+        ['head first', { [op]: [`$head.${member}`, `$row.${member}`] }], ['row first', { [op]: [`$row.${member}`, `$head.${member}`] }]])) {
+        for (const [site, document] of sites(heads(comparison))) NATIVE.push([`${site} ${member} ${op} ${side}`, document]);
+      }
+    }
+  }
+  for (const op of OPERATORS) {
+    // a hop tested for existence that returns the row its head names (a join row's target), refined outside
+    const named = { $for: { head: '$.Head[*]' }, $where: { $and: [{ $eq: ['$head.period', '$row.period'] },
+      { [op]: ['$head.revision', '$row.revision'] }] }, $return: { $for: { x: '$.Row[*]' }, $where: { $eq: ['$x.id', '$head.ref'] }, $return: '$x' } };
+    for (const [site, document] of sites(named)) NATIVE.push([`${site} reaching a named row, revision ${op}`, document]);
+    // an integer key against a plain integer, and against another key
+    const keyed = { $for: { v: '$.Rev[*]' }, $where: { $and: [{ $eq: ['$v.period', '$row.period'] }, { [op]: ['$v.n', '$row.revision'] }] }, $return: '$v' };
+    NATIVE.push([`$exists key ${op} integer`, rows({ $exists: keyed })], [`$not $exists key ${op} integer`, rows({ $not: { $exists: keyed } })]);
+    const keys = { $for: { v: '$.Rev[*]' }, $where: { $and: [{ $eq: ['$v.period', '$w.period'] }, { [op]: ['$v.n', '$w.n'] }] }, $return: '$v' };
+    NATIVE.push([`$exists key ${op} key`, [{ $for: { w: '$.Rev[*]' }, $where: { $exists: keys }, $return: '$w.n' }]],
+      [`$not $exists key ${op} key`, [{ $for: { w: '$.Rev[*]' }, $where: { $not: { $exists: keys } }, $return: '$w.n' }]]);
+  }
+  // the hop returning its binding and a member that is not its key, beside a second refinement
+  NATIVE.push(['$exists over the binding', rows({ $exists: heads({ $ge: ['$head.revision', '$row.revision'] }, '$head') })]);
+  NATIVE.push(['$exists of a member, two refinements', rows({ $exists: { $for: { head: '$.Head[*]' }, $where: { $and: [
+    { $eq: ['$head.period', '$row.period'] }, { $ge: ['$head.revision', '$row.revision'] }, { $lt: ['$head.name', '$row.name'] }] },
+  $return: '$head.score' } })]);
+  /** The shapes the engine keeps, each beside the equality: only the refinement decides. @type {[string, any][]} */
+  const CONTROLS = [
+    ...sites(heads({ $ge: ['$head.maybe', '$row.maybe'] })).map(([site, document]) => /** @type {[string, any]} */ ([`${site} over a member that admits null`, document])),
+    ['a boolean', rows({ $exists: heads({ $ne: ['$head.flag', '$row.flag'] }) })],
+    ['a union of kinds', rows({ $exists: heads({ $lt: ['$head.rank', '$row.rank'] }) })],
+    ['a string against an integer', rows({ $not: { $exists: heads({ $lt: ['$head.code', '$row.revision'] }) } })],
+    ['an inequality with no equality beside it', rows({ $exists: { $for: { head: '$.Head[*]' },
+      $where: { $ge: ['$head.revision', '$row.revision'] }, $return: '$head.id' } })],
+    ['a count of the hop', rows({ $ge: [{ $count: heads({ $ge: ['$head.revision', '$row.revision'] }) }, 1] })],
+    ['a comparison of the member the hop returns', rows({ $ge: [heads({ $ge: ['$head.revision', '$row.revision'] }, '$head.score'), 0] })],
+  ];
+  for (const host of HOSTS) {
+    for (const indexed of [true, false]) {
+      const label = `${host.name}, ${indexed ? 'indexed' : 'unindexed'}`;
+      it(`every operator in every hop site is one statement that answers the engine's rows in its order, ${label}`, () =>
+        using(host, RANGE(indexed), RANGE_DOCUMENTS, async (store) => {
+          for (const [name, document] of NATIVE) {
+            const explained = await store.explain(document);
+            assert.equal(explained.mode, 'native', `${name}: ${JSON.stringify(explained.reasons)}`);
+            const expected = compileJsonQuery(document)(structuredClone(RANGE_DOCUMENTS));
+            assert.deepEqual(await store.execute(document, { strict: true }), expected, name);
+            assert.deepEqual(await store.execute(document, { pushdown: false }), expected, `${name}, in the engine`);
+          }
+        }));
+      it(`a refinement outside one non-null family stays in the engine, named, ${label}`, () =>
+        using(host, RANGE(indexed), RANGE_DOCUMENTS, async (store) => {
+          for (const [name, document] of CONTROLS) {
+            const explained = await store.explain(document);
+            assert.equal(explained.mode, 'set', name);
+            assert.equal(reasonOf(explained), 'entity.hopShape', name);
+            await assert.rejects(async () => store.execute(document, { strict: true }), { code: 'JD0010' }, name);
+            let expected;
+            try { expected = compileJsonQuery(document)(structuredClone(RANGE_DOCUMENTS)); }
+            catch (error) { expected = `throws ${/** @type {any} */ (error).code}`; }
+            let actual;
+            try { actual = await store.execute(document); }
+            catch (error) { actual = `throws ${/** @type {any} */ (error).code}`; }
+            assert.deepEqual(actual, expected, name);
+          }
+        }));
+    }
+    it(`the refinement rides the hop's subselect beside the equality, ${host.name}`, () =>
+      using(host, RANGE(true), RANGE_DOCUMENTS, async (store) => {
+        const explained = await store.explain(rows({ $not: { $exists: heads({ $ge: ['$head.revision', '$row.revision'] }) } }));
+        assert.match(explained.sql, /NOT \(?EXISTS \(SELECT 1 FROM .*"h0"\."period" = "t0"\."period" AND .*"h0"\."revision".* >= .*"t0"\."revision"/);
+        const strings = await store.explain(rows({ $exists: heads({ $lt: ['$head.name', '$row.name'] }) }));
+        assert.match(strings.sql, /"h0"\."name".* < .*"t0"\."name"/);
+        // code-point order: `Äpfel` sorts after `apple`, where a locale's collation puts it before
+        assert.deepEqual(await store.execute(rows({ $exists: heads({ $lt: ['$head.name', '$row.name'] }) }), { strict: true }), ['r3']);
+      }));
+  }
+
+  /** Adopted tables: a text column under a locale's collation where PostgreSQL has one (`collate`), a double, and
+   * an optional integer the table holds as a NULL; `maybe` reads its NULL as a present `null`.
+   * @param {string} collate @returns {(kind: 'sqlite' | 'postgres', schema?: string) => any} */
+  const rangeWorld = (collate) => (kind, schema = undefined) => {
+    const table = (/** @type {string} */ name) => (kind === 'postgres' ? `"${schema}"."${name}"` : `"${name}"`);
+    const [int, real, text] = kind === 'postgres' ? ['integer', 'double precision', 'text'] : ['INTEGER', 'REAL', 'TEXT'];
+    const col = (/** @type {string} */ name, /** @type {string} */ codec, /** @type {string} */ policy) => ({ name, codec, null: policy });
+    const columns = { id: col('id', 'integer', 'reject'), period: col('period', 'text', 'reject'), revision: col('revision', 'integer', 'reject'),
+      score: col('score', 'number', 'reject'), name: col('name', 'text', 'reject'), opt: col('opt', 'integer', 'absent'),
+      maybe: col('maybe', 'integer', 'null') };
+    const properties = { id: { type: 'integer', ...key }, period: { type: 'string' }, revision: { type: 'integer' },
+      score: { type: 'number' }, name: { type: 'string' }, opt: { type: 'integer' }, maybe: { type: 'integer' } };
+    const entity = (/** @type {string} */ name) => ({ schema: { type: 'object', properties },
+      physical: { ...(schema === undefined ? {} : { schema }), table: name, columns } });
+    const ddl = (/** @type {string} */ name) => `CREATE TABLE ${table(name)}(id ${int} PRIMARY KEY, period ${text} NOT NULL, `
+      + `revision ${int} NOT NULL, score ${real} NOT NULL, name ${text}${kind === 'postgres' ? collate : ''} NOT NULL, opt ${int}, maybe ${int})`;
+    const statements = `${ddl('r')}; ${ddl('h')};
+      INSERT INTO ${table('r')} VALUES (1, 'p', 1, -1.5, 'apple', 3, 1), (2, 'p', 2, 0, 'Apple', NULL, NULL),
+        (3, 'p', 3, 2.25, 'äpfel', -1, NULL), (4, 'q', -2, 0.001, 'zebra', -1, 4), (5, 'q', 2, 0.5, 'Zebra', 2, 2);
+      INSERT INTO ${table('h')} VALUES (1, 'p', 2, 0, 'apple', 3, 2), (2, 'p', 2, -1.5, 'Äpfel', NULL, NULL),
+        (3, 'q', -2, 0.5, 'zebra', NULL, 3), (4, 'q', 5, 0.25, 'éclair', -5, 9)`;
+    return { model: { $model: '0.1', entities: { R: entity('r'), H: entity('h') } }, statements, entities: ['R', 'H'] };
+  };
+  for (const host of HOSTS) {
+    it(`adopted columns refine by the engine's order, whatever the host collates by, ${host.name}`, async () => {
+      // a locale orders `Äpfel` before `apple`, code points after: the column's own order is not the engine's
+      const icu = host.pg && (await admin.query("SELECT 1 FROM pg_collation WHERE collname = 'und-x-icu'")).rowCount === 1;
+      if (icu) assert.equal((await admin.query(`SELECT '\u00c4pfel' < 'apple' COLLATE "und-x-icu" AS lt`)).rows[0].lt, true);
+      const { store, close } = await openAdopted(await adoptedHost(host), rangeWorld(icu ? ' COLLATE "und-x-icu"' : ''));
+      try {
+        /** @type {[string, any][]} */
+        const queries = [];
+        for (const member of ['id', 'revision', 'score', 'name', 'opt', 'maybe']) {
+          for (const op of OPERATORS) {
+            const hop = { $for: { h: '$.H[*]' }, $where: { $and: [{ $eq: ['$h.period', '$r.period'] }, { [op]: [`$h.${member}`, `$r.${member}`] }] }, $return: '$h.id' };
+            queries.push([`$exists ${member} ${op}`, [{ $for: { r: '$.R[*]' }, $where: { $exists: hop }, $return: '$r.id' }]]);
+            queries.push([`$not $exists ${member} ${op}`, [{ $for: { r: '$.R[*]' }, $where: { $not: { $exists: hop } }, $return: '$r.id' }]]);
+          }
+        }
+        const checked = await checkAdoptedHops(store, ['R', 'H'], queries);
+        assert.deepEqual(checked.problems, []);
+        for (const [name, { mode, reason }] of checked.planned) {
+          if (name.includes('maybe')) assert.deepEqual({ mode, reason }, { mode: 'set', reason: 'entity.hopShape' }, name);
+          else assert.equal(mode, 'native', name);
+        }
+      }
+      finally { await close(); }
+    });
+  }
+});
+
 if (url) {
   describe('correlated hops: the predicate term bound counts a hop\'s inner leaves (PostgreSQL)', () => {
     /** The dialect's bound on the leaf predicates one statement carries. */
@@ -757,6 +940,18 @@ if (url) {
       await assert.rejects(async () => store.execute(bounded(129), { strict: true }), { code: 'JD0010' });
       assert.deepEqual(await store.execute(bounded(129)), await store.execute(bounded(129), { pushdown: false }));
       assert.deepEqual(await store.execute(bounded(128), { strict: true }), [1, 3]);
+    }));
+    it('a refinement of the correlation counts as one inner leaf', () => using(HOSTS[1], MODEL, DOCUMENTS, async (store) => {
+      /** @param {number} count */
+      const refined = (count) => posts({ $where: { $exists: { $for: { r1: '$.User[*]' },
+        $where: { $and: [...inner(count).$and, { $ge: ['$r1.age', '$it.stars'] }] }, $return: '$r1' } } });
+      const within = await store.explain(refined(BOUND - 1));
+      assert.equal(within.mode, 'native', JSON.stringify(within.reasons));
+      const above = await store.explain(refined(BOUND));
+      assert.equal(above.mode, 'set');
+      assert.equal(reasonOf(above), 'predicate.termBound');
+      assert.deepEqual(await store.execute(refined(BOUND)), await store.execute(refined(BOUND), { pushdown: false }));
+      assert.deepEqual(await store.execute(refined(BOUND - 1), { strict: true }), [1]);
     }));
     it('a value leaf counts its filter twice, the statement reads it for the value and for the type', () => using(HOSTS[1], MODEL, DOCUMENTS, async (store) => {
       /** @param {number} count */

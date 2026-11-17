@@ -1845,7 +1845,8 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
   /**
    * The FROM and WHERE of a hop's subselect: the related entity under an
    * alias of its own, the correlation compared as a join compares it (a
-   * text column in code-point order), then the hop's own filter. Called
+   * text column in code-point order) — an equality, or the operator a
+   * refinement carries — then the hop's own filter. Called
    * once for every place the SQL reads the hop, so each reading carries
    * its own parameters, in the order of the text. An edge end whose
    * binding is `null` reads the row the predicate holding the hop is
@@ -1859,7 +1860,7 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
     const side = (/** @type {{ binding: string | null, ref: any }} */ end) => physicalComparable(end.ref,
       `${end.binding === hop.binding ? alias : end.binding === null ? outer
         : related.aliasOf(end.binding)}.${q(end.ref.column)}`, dialect);
-    const conditions = hop.edges.map((/** @type {any} */ edge) => columnPairComparison(dialect, 'eq',
+    const conditions = hop.edges.map((/** @type {any} */ edge) => columnPairComparison(dialect, edge.op ?? 'eq',
       edge.left.ref, side(edge.left), edge.right.ref, side(edge.right), edge.doubles === true, edge.key));
     if (hop.filter !== null) conditions.push(emitPred(alias, `${alias}.${q('doc')}`, hop.filter, related.tableOf(hop.entity)));
     return { alias, sql: `FROM ${related.tableOf(hop.entity)} AS ${alias} WHERE ${conditions.join(' AND ')}` };

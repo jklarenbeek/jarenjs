@@ -720,8 +720,10 @@ what each does is its own documentation's job
   `$mod` raise on a zero divisor, and an operator over an operator is not
   proven), a whole entity binding inside a constructor or a non-singular path
   still needs the engine. So does a navigation hop that is chained, ordered inside, correlated
-  across comparison families or over a column that can hold a `null`, or read
-  as a value without the related entity's key. A hop over a foreign key no
+  across comparison families or over a column that can hold a `null`,
+  correlated by inequalities alone or by an inequality outside an existence or
+  emptiness test (a count, a comparison of its member, an order key or a
+  projection leaf), or read as a value without the related entity's key. A hop over a foreign key no
   property declares stays in the engine although a join reads that key
   (`entity.hopShape`). Windows over such returns are set-residual: source-row
   limits cannot stand in for projected-item limits, and the engine evaluates

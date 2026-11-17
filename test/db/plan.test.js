@@ -1185,6 +1185,15 @@ describe('the predicate term bound', () => {
     assert.strictEqual(predicateTerms(refined.plan), 4, 'one filter and three refinements');
     assert.strictEqual(boundPredicateTerms(refined, 3).mode, 'set');
     assert.strictEqual(boundPredicateTerms(refined, 4), refined);
+    // a hop's existence test refines its correlation the same way: its equality
+    // is no term, each refinement is one beside the filter inside the subselect
+    const hop = planEntityQuery({ $for: { a: '$.Person[*]' }, $where: { $exists: { $for: { b: '$.Pet[*]' },
+      $where: { $and: [{ $eq: ['$b.ownerId', '$a.id'] }, { $lt: ['$b.weight', '$a.age'] }, { $ne: ['$b.weight', '$a.age'] },
+        { $eq: ['$b.kind', 'cat'] }] }, $return: '$b' } }, $return: '$a' }, entities, mapping);
+    assert.strictEqual(hop.mode, 'native');
+    assert.strictEqual(predicateTerms(hop.plan), 3, 'one filter and two refinements');
+    assert.strictEqual(boundPredicateTerms(hop, 2).mode, 'set');
+    assert.strictEqual(boundPredicateTerms(hop, 3), hop);
   });
 
   it('counts the comparison that compiles slowest as four: an inequality or a negation against an external operand on a document member', () => {

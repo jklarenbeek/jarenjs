@@ -3948,6 +3948,22 @@ introspects a table this release creates as its own, except that its
 plans that rebuilds the table drops the CHECK, which this release's
 `planColumnUpgrade` adds again.
 
+## 74. A hop's existence test refines its correlation by an inequality
+
+- An `$exists`, `$empty` or `$not $exists` of a hop whose `$where` sets an
+  equality between the hop and the row beside a comparison `$lt`, `$le`, `$gt`,
+  `$ge` or `$ne` of two columns of one comparison family that admit no null
+  (`head.revision >= row.revision`) ran in the engine (`explain().mode` `set`,
+  `entity.hopShape`) and was refused `JD0010` under `strict`. It is now one
+  statement: the comparison rides the hop's `EXISTS` beside the equality,
+  strings by code point and numbers as the engine's doubles, and answers the
+  engine's rows in its order ([MODEL-FORMAT §10.1](MODEL-FORMAT.md#101-entity-query-documents)).
+- A correlation by inequalities alone, over a column that can hold a `null`
+  or across families, and one inside a count, a comparison of the hop's member,
+  an order key or a projection leaf, runs in the engine as before.
+- Each such comparison counts one leaf toward the dialect's predicate term bound.
+- No table, column, index or CHECK changes.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

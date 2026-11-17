@@ -1594,8 +1594,10 @@ function termsOf(value, negated) {
           value.right.families.includes(family)).length);
       // the rows of a related entity tested or counted: the filter inside
       // the subselect is read for every outer row, and the test itself is
-      // a leaf where the filter holds none
-      case 'hop': return Math.max(1, termsOf(value.hop.filter, false));
+      // a leaf where the filter holds none. A correlation that refines by
+      // order or inequality is a comparison per candidate pair, as a join's is
+      case 'hop': return Math.max(1, termsOf(value.hop.filter, false)
+        + value.hop.edges.filter((/** @type {any} */ edge) => edge.op !== undefined).length);
       case 'hopCount': return 1 + termsOf(value.hop.filter, false);
       case 'in': {
         if (!('ext' in value.operand)) return 1;
@@ -4294,16 +4296,26 @@ export function entityPathRef(node, slot, shape) {
  * row the filter is judged on): a join row whose target row is gone, which a
  * database that did not enforce the foreign key can hold, is not counted,
  * as the engine does not count it.
+ *
+ * With `refines`, for a site that only tests whether the hop yields a row
+ * (an existence or emptiness test), a correlation may also compare by an
+ * order or an inequality (`$lt`, `$le`, `$gt`, `$ge`, `$ne`) beside at least
+ * one equality, under the same proof: two columns of one comparison family
+ * that read no NULL as a `null`, compared as a join's refinement compares
+ * them. A column that holds a NULL for an absent member gives the engine no
+ * operand and SQL an unknown, and either way the related row is not one the
+ * hop keeps. Such an edge carries its `op`; an equality carries none.
  * @param {any} inner - a `flwor` node
  * @param {Map<number, any>} outer - slot → the bindings the hop correlates with
  * @param {Map<string, any>} entities
  * @param {any} mapping
  * @param {boolean} [through] - the site reads the hop's rows only to count or test them
+ * @param {boolean} [refines] - the site only tests the hop's existence: its correlation may also compare by order or inequality
  * @returns {{ hop: { entity: string, binding: string, edges: any[], filter: any },
  *   binding: any, member: any } | null} `member` is the returned path
  *   node, or `null` for the binding itself
  */
-function planHop(inner, outer, entities, mapping, through = false) {
+function planHop(inner, outer, entities, mapping, through = false, refines = false) {
   if (inner?.kind !== 'flwor' || inner.forBindings.length !== 1 || inner.groupby !== null
     || inner.fold !== null || inner.orderby !== null || inner.letBindings.length
     || inner.asChecks !== null || inner.count !== null) return null;
@@ -4323,11 +4335,12 @@ function planHop(inner, outer, entities, mapping, through = false) {
   let filter = null;
   for (const conjunct of conjuncts) {
     if (conjunct === null) continue;
-    const cross = conjunct.kind === 'op' && conjunct.name === '$eq'
-      ? crossBindingComparison(conjunct, scope) : null;
+    const named = conjunct.kind === 'op' && COMPARISONS.has(conjunct.name) ? conjunct.name : null;
+    const cross = named === '$eq' || (refines && named !== null) ? crossBindingComparison(conjunct, scope) : null;
     if (cross !== null && (cross.left.binding === binding || cross.right.binding === binding)) {
       edges.push({ left: { binding: cross.left.binding.name, ref: cross.left.ref },
-        right: { binding: cross.right.binding.name, ref: cross.right.ref }, ...doublesOf(cross) });
+        right: { binding: cross.right.binding.name, ref: cross.right.ref },
+        ...(named === '$eq' ? {} : { op: cross.op }), ...doublesOf(cross) });
       continue;
     }
     const slots = new Set(); collectBindingSlots(conjunct, scope, slots);
@@ -4336,7 +4349,8 @@ function planHop(inner, outer, entities, mapping, through = false) {
     if ('refusal' in planned) return null;
     filter = conjoin(filter, planned.pred);
   }
-  if (!edges.length) return null;
+  // a refinement narrows a correlation, it never makes one
+  if (!edges.some((edge) => edge.op === undefined)) return null;
   if (nested) {
     const reached = planHop(ret, new Map([[binding.slot, binding]]), entities, mapping);
     if (reached === null || reached.member !== null || !hopKeyed(reached.hop, mapping)) return null;
@@ -4350,14 +4364,15 @@ function planHop(inner, outer, entities, mapping, through = false) {
 
 /**
  * Whether a hop reaches at most one row of its entity for each outer row:
- * its equalities cover every column of the entity's declared key.
+ * its equalities cover every column of the entity's declared key (a
+ * refinement, which carries an `op`, proves no row unique).
  * @param {{ entity: string, binding: string, edges: any[] }} hop
  * @param {any} mapping
  * @returns {boolean}
  */
 function hopKeyed(hop, mapping) {
   const keys = mapping.entities[hop.entity].keys;
-  const covered = new Set(hop.edges.flatMap((edge) => [edge.left, edge.right])
+  const covered = new Set(hop.edges.flatMap((edge) => (edge.op === undefined ? [edge.left, edge.right] : []))
     .filter((side) => side.binding === hop.binding).map((side) => canonicalOf(side.ref.segments)));
   return keys.length > 0 && keys.every((key) => covered.has(canonicalOf([{ name: key }])));
 }
@@ -4399,7 +4414,7 @@ function planHopPredicate(node, outerBinding, entities, mapping) {
     || (existence && !isHop(node.args[hopAt]))) return null;
   const counted = isCount(node.args[hopAt]);
   const planned = planHop(counted ? node.args[hopAt].args[0] : node.args[hopAt],
-    new Map([[outerBinding.slot, outerBinding]]), entities, mapping, existence || counted);
+    new Map([[outerBinding.slot, outerBinding]]), entities, mapping, existence || counted, existence);
   if (planned === null) return { refusal: refusal(node.name, ENTITY_REASONS.hopShape) };
   if (existence || counted) {
     const guarded = hopWithPresence(planned);
