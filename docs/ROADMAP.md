@@ -386,6 +386,13 @@ delete it or fix it.
 
 ## @jarenjs/view & @jarenjs/app
 
+- [ ] **Status colours as text on the page ground.** In the light theme `--ok` and
+  `--warn` fall below WCAG AA (4.5:1) against `--bg`, yet both are set as text: the
+  site's `.badge.ok` and the studio's warning notes (`.js-file-warn` and the
+  `--warn-soft` callouts). Wanted: an audit of every place a status colour is ink,
+  then darker text steps (or a `-fg` pair per status) that clear AA in both themes,
+  after which those pairs join DESIGN §1's guarded pairs, which
+  `test/view/tokens.test.js` checks. Changing the token values changes the site's rendering.
 - [ ] **Controlled inputs under `safe: 'interactive'`.** Inputs stay
   attribute-only, so app state cannot reset a field the user edited. Wanted:
   the controlled-value path for `value`/`checked` (not `file`) under the

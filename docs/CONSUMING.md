@@ -536,7 +536,9 @@ Three failure modes account for nearly every broken production image:
 
 For browsers there is nothing special to configure: the compilers use no
 `eval` and no `new Function`, so they run under a strict Content Security
-Policy, and `sideEffects: false` lets bundlers drop what you do not import.
+Policy, and `sideEffects` lets bundlers drop what you do not import: `false`
+for a package of modules only, and `["**/*.css"]` for one that ships a
+stylesheet, so a bare `import '@jarenjs/md/styles/md.css'` is kept.
 
 ## Upgrading a pin
 

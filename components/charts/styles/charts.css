@@ -1,7 +1,8 @@
 /* @jarenjs/charts — component stylesheet.
  *
  * Defines the self-scoped `.chart` class carrying the `--chart-*` token
- * vocabulary (light values plus a `.dark` override) and maps each
+ * vocabulary (light values plus a dark override: `.dark` or
+ * `[data-theme="dark"]`, or the system scheme the host opted into) and maps each
  * `chart-*` shape class to `var(--chart-*)`. The render pass stamps the
  * same variables *inline* on the root `<svg>`, and inline custom
  * properties beat these stylesheet blocks — so for pipeline-rendered
@@ -24,7 +25,7 @@
   --chart-loss: #dc2626;
   --chart-slice-stroke: #ffffff;
 }
-.dark .chart {
+:is(.dark, [data-theme="dark"]) .chart {
   --chart-text: #f4f4f4;
   --chart-muted: #94a3b8;
   --chart-grid: #334155;
@@ -32,6 +33,19 @@
   --chart-win: #4ade80;
   --chart-loss: #f87171;
   --chart-slice-stroke: #11141c;
+}
+/* the same, where the host follows the system colour scheme: the view
+   package's tokens-system.css signals it with --jaren-scheme */
+@container style(--jaren-scheme: dark) {
+  :root .chart {
+    --chart-text: #f4f4f4;
+    --chart-muted: #94a3b8;
+    --chart-grid: #334155;
+    --chart-axis: #64748b;
+    --chart-win: #4ade80;
+    --chart-loss: #f87171;
+    --chart-slice-stroke: #11141c;
+  }
 }
 
 .chart-svg { max-width: 100%; height: auto; }
@@ -76,8 +90,17 @@ rect.chart-candle-down { fill: var(--chart-loss); stroke: none; }
   white-space: nowrap;
   pointer-events: none;
 }
-.dark .chart-tooltip {
+:is(.dark, [data-theme="dark"]) .chart-tooltip {
   border-color: var(--border, #334155);
   background: var(--surface, #11141c);
   color: var(--fg, #f4f4f4);
+}
+/* the same, where the host follows the system colour scheme: the view
+   package's tokens-system.css signals it with --jaren-scheme */
+@container style(--jaren-scheme: dark) {
+  :root .chart-tooltip {
+    border-color: var(--border, #334155);
+    background: var(--surface, #11141c);
+    color: var(--fg, #f4f4f4);
+  }
 }

@@ -1,0 +1,67 @@
+/* The host token vocabulary (docs/DESIGN.md §2): the names a component's
+   `theme: 'host'` links to, light on :root and dark on `.dark` or
+   `[data-theme="dark"]`. Import it, or define these names yourself.
+   Radii, fonts and spacing do not change with the theme, so only the
+   colours are redefined for dark. Following the system colour scheme is
+   opt-in: import tokens-system.css instead of this file.
+
+   The accent family is anchored on the logo's blue (#3b82f6). The CTA
+   accent is one step darker because white text on the logo blue itself
+   falls short of WCAG AA. */
+:root, .light, [data-theme="light"] {
+  --bg: hsl(0 0% 100%);
+  --fg: hsl(224 20% 14%);
+  --muted: hsl(220 12% 45%);
+  --surface: hsl(220 20% 98%);
+  --border: hsl(220 14% 88%);
+  --accent: hsl(221 83% 53%);
+  --accent-fg: hsl(0 0% 100%);
+  --accent-soft: hsl(214 95% 93%);
+  --accent-hover: hsl(221 83% 47%);
+  --ok: hsl(150 65% 34%);
+  --ok-soft: hsl(150 60% 94%);
+  --fail: hsl(0 68% 46%);
+  --fail-soft: hsl(0 80% 96%);
+  --warn: hsl(38 92% 44%);
+  --warn-soft: hsl(48 96% 89%);
+  --code-bg: hsl(224 25% 12%);
+  --code-fg: hsl(210 30% 90%);
+}
+
+:root {
+  --radius: 10px;
+  --radius-sm: 8px;
+  --font: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
+
+  /* 4px-base spacing scale: every padding, margin and gap snaps to a step */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem; /* the page gutter */
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-14: 3.5rem;
+}
+
+.dark, [data-theme="dark"] {
+  --bg: hsl(224 24% 9%);
+  --fg: hsl(214 25% 90%);
+  --muted: hsl(218 12% 62%);
+  --surface: hsl(224 22% 12%);
+  --border: hsl(222 16% 22%);
+  --accent: hsl(213 94% 68%);
+  --accent-fg: hsl(224 47% 8%);
+  --accent-soft: hsl(217 55% 17%);
+  --accent-hover: hsl(213 94% 74%);
+  --ok: hsl(150 60% 55%);
+  --ok-soft: hsl(150 40% 14%);
+  --fail: hsl(0 75% 65%);
+  --fail-soft: hsl(0 40% 15%);
+  --warn: hsl(38 92% 55%);
+  --warn-soft: hsl(40 35% 15%);
+  --code-bg: hsl(224 28% 7%);
+  --code-fg: hsl(210 30% 88%);
+}

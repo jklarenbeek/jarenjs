@@ -275,6 +275,26 @@ The `./helpers` subpath is the single home for the small view-layer helper kerne
 
 Import the whole barrel (`@jarenjs/view/helpers`) or a single module (`@jarenjs/view/helpers/svg`, `@jarenjs/view/helpers/theme`).
 
+### Host tokens — `@jarenjs/view/styles/tokens.css`
+
+The suite's SVG components (`@jarenjs/mermaid`, `@jarenjs/calc`, `@jarenjs/charts`) take `theme: 'host'`, which stamps each colour as a link to a host token with the default palette as its fallback. `@jarenjs/view/styles/tokens.css` defines every one of those names — colours light and dark, the two radii, the `--font` / `--mono` family stacks and the spacing scale — so importing it is all a host needs for the links to resolve. Import it, or define these names yourself ([DESIGN §2](../../docs/DESIGN.md#2-the-site-token-vocabulary-the-host-token-contract) is the list):
+
+```javascript
+import '@jarenjs/view/styles/tokens.css';   // or `@import '@jarenjs/view/styles/tokens.css';` in your stylesheet
+import { createTheme } from '@jarenjs/mermaid';
+
+createTheme('host').cssVars['--mm-node-fill'];  // 'var(--accent-soft, #dbeafe)': the diagram follows --accent-soft
+document.documentElement.classList.add('dark'); // every host-linked SVG turns dark on the spot, no re-render
+```
+
+How dark is selected:
+
+- light on `:root`, and on any `.light` or `[data-theme="light"]` subtree;
+- dark on any `.dark` or `[data-theme="dark"]` element — the file never turns dark on its own;
+- to follow the reader's system scheme, import `@jarenjs/view/styles/tokens-system.css` instead: the same file plus the dark colours under `prefers-color-scheme: dark`, unless the root element carries `.light` or `[data-theme="light"]`.
+
+The family stacks name Inter and JetBrains Mono first; the file loads no fonts, so a host that wants those faces serves them itself. The component stylesheets' own chrome follows the same three selections: their dark rules key on `.dark` or `[data-theme="dark"]`, and `tokens-system.css` reaches them through the `--jaren-scheme` property it sets on the root (read with a container style query; an engine without those keeps that chrome light and the tokens dark).
+
 ## Performance contract
 
 The patcher's first check is `oldVnode === newVnode` — a reference-equal subtree is skipped in O(1), unexamined. This is designed to meet the JSLT engine's structural sharing and its `memo` option (an unchanged input subtree flows to the output by reference; `@jarenjs/app` compiles every view with `memo: true`), so views re-render in time proportional to what changed, not to the size of the page. Vnodes are never mutated or annotated by the renderer: frozen documents, cached documents and shared subtrees are always safe.
@@ -309,6 +329,8 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/view/helpers/url` | JavaScript | declared |
 | `@jarenjs/view/schemas/jaren-vnode-safe.schema.json` | schema | — |
 | `@jarenjs/view/schemas/jaren-vnode.schema.json` | schema | — |
+| `@jarenjs/view/styles/tokens.css` | asset | — |
+| `@jarenjs/view/styles/tokens-system.css` | asset | — |
 | `@jarenjs/view/package.json` | metadata | — |
 <!--/fact-->
 

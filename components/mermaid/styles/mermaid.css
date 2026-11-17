@@ -7,7 +7,8 @@
  *    `@jarenjs/md`'s md.css (centered block, max-width svg) so a mermaid
  *    fence rendered inside a Markdown article sits correctly.
  * 2. It defines a self-scoped `.mermaid` class carrying the `--mm-*`
- *    token vocabulary (light values plus a `.dark` override) and maps
+ *    token vocabulary (light values plus a dark override: `.dark` or
+ *    `[data-theme="dark"]`, or the system scheme the host opted into) and maps
  *    each `mm-*` shape class to `var(--mm-*)`. The render pass stamps
  *    the same variables *inline* on the root `<svg>`, and inline custom
  *    properties beat these stylesheet blocks — so for pipeline-rendered
@@ -145,7 +146,7 @@
 .mermaid .mm-error-source { fill: var(--mm-err-source); }
 
 /* --- dark scheme --------------------------------------------------- */
-.dark .mermaid, .mermaid.dark {
+:is(.dark, [data-theme="dark"]) .mermaid, .mermaid:is(.dark, [data-theme="dark"]) {
   --mm-node-fill: #1f2020;
   --mm-node-stroke: #81B1DB;
   --mm-node-text: #f4f4f4;
@@ -168,4 +169,32 @@
   --mm-err-title: #f5827a;
   --mm-err-text: #f0c9c5;
   --mm-err-source: #8a8a8a;
+}
+/* the same, where the host follows the system colour scheme: the view
+   package's tokens-system.css signals it with --jaren-scheme */
+@container style(--jaren-scheme: dark) {
+  :root .mermaid {
+    --mm-node-fill: #1f2020;
+    --mm-node-stroke: #81B1DB;
+    --mm-node-text: #f4f4f4;
+    --mm-line-color: #cccccc;
+    --mm-edge-label-text: #e0e0e0;
+    --mm-edge-label-bg: #1f2020;
+    --mm-cluster-fill: #2b2b3a;
+    --mm-cluster-stroke: #6f6f9e;
+    --mm-actor-fill: #252526;
+    --mm-actor-stroke: #81B1DB;
+    --mm-actor-text: #f4f4f4;
+    --mm-lifeline: #8a8a8a;
+    --mm-activation-fill: #31313a;
+    --mm-activation-stroke: #8a8a8a;
+    --mm-note-fill: #3b3b26;
+    --mm-note-stroke: #aaaa33;
+    --mm-note-text: #f4f4f4;
+    --mm-err-fill: #2b1b1b;
+    --mm-err-stroke: #e74c3c;
+    --mm-err-title: #f5827a;
+    --mm-err-text: #f0c9c5;
+    --mm-err-source: #8a8a8a;
+  }
 }

@@ -4,8 +4,9 @@
  * Scoped under the `.md` article the vnode emitter produces, plus the
  * `tok-*` token classes of the highlight plugin (docs/PLUGINS.md §6.2)
  * and the mermaid placeholder. Colors come in a light set and a dark
- * override activated by a `.dark` class on any ancestor (the
- * convention the jarenjs website uses); everything sizes in em so the
+ * override activated by a `.dark` class or `[data-theme="dark"]` on any
+ * ancestor (the website uses the class), or by the system scheme the host
+ * opted into; everything sizes in em so the
  * component inherits its host's type scale.
  */
 
@@ -241,7 +242,7 @@
 
 /* --- dark scheme --------------------------------------------------- */
 
-.dark .md, .md.dark {
+:is(.dark, [data-theme="dark"]) .md, .md:is(.dark, [data-theme="dark"]) {
   --md-figure-bg: #171b22;
   --md-rule: #39414e;
   --md-muted: #9aa4b2;
@@ -254,4 +255,22 @@
   --md-tok-pun: #9aa4b2;
   --md-tok-op: #56b6c2;
   --md-tok-lit: #d19a66;
+}
+/* the same, where the host follows the system colour scheme: the view
+   package's tokens-system.css signals it with --jaren-scheme */
+@container style(--jaren-scheme: dark) {
+  :root .md {
+    --md-figure-bg: #171b22;
+    --md-rule: #39414e;
+    --md-muted: #9aa4b2;
+    --md-link: #7aa2ff;
+    --md-code-bg: #1d232c;
+    --md-tok-kw: #79b8ff;
+    --md-tok-str: #98c379;
+    --md-tok-num: #d19a66;
+    --md-tok-com: #7f848e;
+    --md-tok-pun: #9aa4b2;
+    --md-tok-op: #56b6c2;
+    --md-tok-lit: #d19a66;
+  }
 }

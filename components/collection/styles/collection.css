@@ -1,4 +1,4 @@
-.jc-viewport { overflow: auto; position: relative; overscroll-behavior: contain; overflow-anchor: none; touch-action: pan-x pan-y; border: 1px solid var(--border, #999); color: var(--fg, var(--text, #222)); background: var(--surface, #fff); }
+.jc-viewport { overflow: auto; position: relative; overscroll-behavior: contain; overflow-anchor: none; touch-action: pan-x pan-y; border: 1px solid var(--border, #999); color: var(--fg, #222); background: var(--surface, #fff); }
 .jc-viewport:focus-visible { outline: 2px solid var(--accent, #555); outline-offset: 2px; }
 .jc-surface { position: relative; }
 .jc-row { box-sizing: border-box; border-bottom: 1px solid var(--border, #ddd); }

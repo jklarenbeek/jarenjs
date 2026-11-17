@@ -7,7 +7,7 @@
  * ONLY raw-hex family is the kind-badge palette — concrete constants
  * (like the chart palettes), never aliased status tokens, and strictly
  * blue / cyan / slate / green / amber (no purple, no pink). Colours are
- * duplicated for .dark; a theme.js constants↔CSS-fallback sync pair is a
+ * duplicated for dark (`.dark`, `[data-theme="dark"]`, the system scheme); a theme.js constants↔CSS-fallback sync pair is a
  * later concern.
  */
 
@@ -102,11 +102,20 @@
 .js-badge[data-badge="json"]  { background: #f1f5f9; color: #475569; }
 .js-badge[data-badge="model"] { background: #dcfce7; color: #15803d; }
 .js-badge[data-badge="flow"]  { background: #fef3c7; color: #b45309; }
-.dark .js-badge[data-badge="view"]  { background: #1e293b; color: #93c5fd; }
-.dark .js-badge[data-badge="query"] { background: #0c2a33; color: #67e8f9; }
-.dark .js-badge[data-badge="json"]  { background: #1e293b; color: #cbd5e1; }
-.dark .js-badge[data-badge="model"] { background: #0f2a1a; color: #86efac; }
-.dark .js-badge[data-badge="flow"]  { background: #2a2011; color: #fcd34d; }
+:is(.dark, [data-theme="dark"]) .js-badge[data-badge="view"] { background: #1e293b; color: #93c5fd; }
+:is(.dark, [data-theme="dark"]) .js-badge[data-badge="query"] { background: #0c2a33; color: #67e8f9; }
+:is(.dark, [data-theme="dark"]) .js-badge[data-badge="json"] { background: #1e293b; color: #cbd5e1; }
+:is(.dark, [data-theme="dark"]) .js-badge[data-badge="model"] { background: #0f2a1a; color: #86efac; }
+:is(.dark, [data-theme="dark"]) .js-badge[data-badge="flow"] { background: #2a2011; color: #fcd34d; }
+/* the same, where the host follows the system colour scheme: the view
+   package's tokens-system.css signals it with --jaren-scheme */
+@container style(--jaren-scheme: dark) {
+  :root .js-badge[data-badge="view"] { background: #1e293b; color: #93c5fd; }
+  :root .js-badge[data-badge="query"] { background: #0c2a33; color: #67e8f9; }
+  :root .js-badge[data-badge="json"] { background: #1e293b; color: #cbd5e1; }
+  :root .js-badge[data-badge="model"] { background: #0f2a1a; color: #86efac; }
+  :root .js-badge[data-badge="flow"] { background: #2a2011; color: #fcd34d; }
+}
 
 /* ——— editor ——— */
 .js-editor-head {

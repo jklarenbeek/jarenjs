@@ -26,11 +26,18 @@ always the code (`packages/website/src/styles.css` and each component's `theme.j
   accent** (~2.6:1). Any `background: var(--accent)` (or `--calc-accent`) must pair with
   `var(--accent-fg)` (/`--calc-accent-text`) — never a hardcoded `#fff`.
 - The dark accent `#60a5fa` reads 7.2:1 against the dark `--bg` — safe as link/text color.
+- **Guarded pairs** (ink on ground, at least 4.5:1 in both themes, computed from the
+  exported token file by `test/view/tokens.test.js`): `--fg` on `--bg`, `--fg` on
+  `--surface`, `--muted` on `--bg`, `--muted` on `--surface`, `--accent` on `--bg`,
+  `--accent-fg` on `--accent`, `--accent-fg` on `--accent-hover`, `--code-fg` on
+  `--code-bg`. A pair that text is set in enters this list.
 
 ## 2. The site token vocabulary (the "host token contract")
 
-`styles.css` `:root`/`.dark` define the complete vocabulary; everything else derives from
-it. Components may *link* to these names (see §7), so they are a public contract:
+`@jarenjs/view/styles/tokens.css` defines the complete vocabulary, light and dark, and
+the site imports it: `styles.css` defines none of these names again, and everything else
+derives from them. Components may *link* to these names (see §7), so they are a public
+contract — a host imports that file, or defines these names itself:
 
 | Token | Role |
 |---|---|
@@ -41,11 +48,36 @@ it. Components may *link* to these names (see §7), so they are a public contrac
 | `--ok`, `--fail`, `--warn` (+ `--ok-soft`, `--fail-soft`, `--warn-soft`) | semantic status + tints |
 | `--code-bg` / `--code-fg` | code block colors (dark navy in both themes) |
 | `--radius` (10px) / `--radius-sm` (8px) | cards & callouts / controls, inputs, code blocks |
-| `--font` / `--mono` | Inter / JetBrains Mono stacks |
-| `--space-1..14` | the spacing scale (§3) |
+| `--font` / `--mono` | Inter / JetBrains Mono stacks (family names only: the faces are the host's) |
+| `--space-1`, `--space-2`, `--space-3`, `--space-4`, `--space-5`, `--space-6`, `--space-8`, `--space-10`, `--space-14` | the spacing scale (§3) |
+
+Selecting dark, so the file composes with what a host already does:
+
+- `tokens.css` is light on `:root` (and on any `.light` or `[data-theme="light"]`
+  subtree) and dark on any `.dark` or `[data-theme="dark"]` element — the site puts
+  `.dark` on `<html>`. It never turns dark on its own.
+- Following the system colour scheme is opt-in: import
+  `@jarenjs/view/styles/tokens-system.css` instead. It is `tokens.css` plus the same dark
+  colours under `prefers-color-scheme: dark`, unless the root element carries `.light`
+  or `[data-theme="light"]`.
+- A host-linked SVG reads only the tokens, so it follows every selection. A component
+  stylesheet's own chrome (the calc keys, an md article, the studio badges) keys its
+  dark rules on `:is(.dark, [data-theme="dark"])` — the specificity `.dark` had, so the
+  site bridges of §7 still win — and repeats each one under
+  `@container style(--jaren-scheme: dark)`, the signal `tokens-system.css` sets on the
+  root when the system chose dark (and resets on a light subtree). A stylesheet cannot
+  make another stylesheet's selectors match, so the system scheme reaches the
+  components through that inherited property; an engine without style queries keeps the
+  chrome light there and the tokens dark. `test/view/tokens.test.js` holds every dark
+  rule to its twin, declaration for declaration, and refuses a bare `.dark`.
 
 Rules: never hardcode a hex that duplicates a token's meaning; light/dark parity — every
-token defined in `:root` is redefined in `.dark`; new hues enter as tokens or not at all.
+colour token is redefined for dark, while radii, fonts and spacing do not change with the
+theme and are defined once; new hues enter as tokens or not at all.
+`test/view/tokens.test.js` holds the file to this table and to the §1 pairs, and every
+`var(--x)` a component stylesheet reads to a token of this table, the component's own
+prefix, or a listed host seam with a fallback (`--kb-inset`, `--motion-ease-loop`);
+`test/website/tokens.test.js` holds the site to importing it.
 
 ## 3. Spacing, radii, layout
 
@@ -279,7 +311,8 @@ through **host-linked themes**:
   variable as `var(--<host-token>, <concrete fallback>)` — e.g.
   `--mm-node-fill: var(--accent-soft, #dbeafe)`. Inside the site the value tracks the host
   token **live** (light/dark flips need no re-render — memoized vnodes stay valid);
-  standalone, the fallback keeps the default theme.
+  standalone, the fallback keeps the default theme. Any other host gets the same
+  links by importing `@jarenjs/view/styles/tokens.css` (§2) or defining its names.
 - The link tables are each component's `HOST_VARS` (in its `theme.js`), mapping token keys
   to §2 host token names; the component hands that table to `resolveTheme`, which owns the
   reserved `'host'` name so all three components resolve it identically. Generic form:
@@ -293,7 +326,8 @@ through **host-linked themes**:
 
 **HTML-level components** (calc chrome, md articles) are themed by stylesheet custom
 properties, so the host *can* override them — but component CSS loads after site CSS, so a
-site override must win ties with the component's own `.dark .x` block: use the doubled
+site override must win ties with the component's own dark block
+(`:is(.dark, [data-theme="dark"]) .x`, the specificity of `.dark .x`): use the doubled
 selector **`.site .x, .dark .site .x`** (see the `.calc` and `.md` bridges in
 `styles.css`).
 

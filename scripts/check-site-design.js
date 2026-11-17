@@ -38,6 +38,8 @@ export const BANNED_HUES = [
 /** Where a hue may hide: everything the site ships, source and built. */
 const TREES = [
   { dir: 'packages/website/src', patterns: ['**/*.{js,css,html,json,svg}'], required: true },
+  // the host tokens the site imports from the view package
+  { dir: 'packages/view/styles', patterns: ['**/*.css'], required: true },
   { dir: 'packages/website/dist', patterns: ['**/*.{js,css,html,svg}'], required: false },
 ];
 

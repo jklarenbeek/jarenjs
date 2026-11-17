@@ -15,9 +15,10 @@ import { join } from 'node:path';
 
 const ROOT = new URL('../../', import.meta.url).pathname;
 
-/** The site's and every component's stylesheets. */
+/** The site's, the exported host tokens' and every component's stylesheets. */
 const SHEETS = [
   'packages/website/src/styles.css',
+  ...readdirSync(join(ROOT, 'packages/view/styles')).filter((f) => f.endsWith('.css')).map((f) => `packages/view/styles/${f}`),
   ...readdirSync(join(ROOT, 'components')).flatMap((name) => {
     const dir = join(ROOT, 'components', name, 'styles');
     return existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.css')).map((f) => `components/${name}/styles/${f}`) : [];

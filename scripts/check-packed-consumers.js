@@ -37,7 +37,8 @@
  * TypeScript leg the same way. The claim under test is "every explicit
  * JavaScript export key" — wildcard export patterns (`./x/*`) and
  * non-JavaScript subpaths (schemas, package.json) are not generally covered.
- * The JSON package also pins both published JTLT grammar artifacts explicitly.
+ * The JSON package also pins both published JTLT grammar artifacts explicitly,
+ * and every exported stylesheet must resolve to a file in its tarball.
  *
  * Portability: paths derive from `fileURLToPath` (a URL `pathname` is
  * not a Windows filesystem path), npm runs through its own JS
@@ -60,7 +61,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 
 import { runNpm } from './lib/portable.js';
-import { importSubpaths } from './lib/exports.js';
+import { importSubpaths, exportEntries } from './lib/exports.js';
 import { tarExtractArgs } from './lib/tar-extract-args.js';
 import { adoptionRows } from './lib/adoption.js';
 import { writeAdoptionConsumer, qualifyAdoptionRuntime } from './lib/adoption-journey.js';
@@ -647,6 +648,14 @@ try {
       }
     }
     let program = subpaths.map((s) => `await import(${JSON.stringify(s)});`).join('\n') + '\n';
+    // every stylesheet a package exports resolves, through the packed export
+    // map, to a file the tarball carries: a host imports it by that name
+    const sheets = exportEntries(pkg).filter((e) => e.kind === 'asset' && /\.css$/.test(e.target ?? ''));
+    if (sheets.length > 0) {
+      program += "const { existsSync: sheetExists } = await import('node:fs');\nconst { fileURLToPath: sheetPath } = await import('node:url');\n";
+      for (const { subpath } of sheets)
+        program += `if (!sheetExists(sheetPath(import.meta.resolve(${JSON.stringify(subpath)})))) throw new Error(${JSON.stringify(`Packed stylesheet is missing: ${subpath}`)});\n`;
+    }
     if (name === '@jarenjs/josl') {
       writeFileSync(join(consumerDir, 'csv.js'), readFileSync(join(root, 'test/consumer/csv.js')));
       program += "const csv = await import('./csv.js'); csv.qualifyCsvPolicy(); csv.qualifyCsvDialects(); await csv.qualifyCsvWriters();\n";

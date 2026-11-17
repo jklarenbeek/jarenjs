@@ -1,6 +1,7 @@
 /**
  * @jarenjs/calc component stylesheet. `--calc-*` design tokens with a
- * `.dark` override (mirrors mermaid.css). These tokens theme the HTML
+ * dark override on `.dark` or `[data-theme="dark"]`, or the system scheme the
+ * host opted into (mirrors mermaid.css). These tokens theme the HTML
  * chrome (keypad, panels), which hosts may override in their own sheet
  * (higher specificity than the `.dark .calc` block here). The plot SVG
  * carries concrete presentation colors (valid standalone) plus inline
@@ -31,8 +32,8 @@
   font-family: "trebuchet ms", verdana, arial, sans-serif;
 }
 
-.dark .calc,
-.calc.dark {
+:is(.dark, [data-theme="dark"]) .calc,
+.calc:is(.dark, [data-theme="dark"]) {
   --calc-bg: #0f172a;
   --calc-panel: #1e293b;
   --calc-border: #334155;
@@ -47,6 +48,26 @@
   --calc-clear: #7f1d1d;
   --calc-accent: #60a5fa;
   --calc-accent-text: #0b1020;
+}
+/* the same, where the host follows the system colour scheme: the view
+   package's tokens-system.css signals it with --jaren-scheme */
+@container style(--jaren-scheme: dark) {
+  :root .calc {
+    --calc-bg: #0f172a;
+    --calc-panel: #1e293b;
+    --calc-border: #334155;
+    --calc-text: #e2e8f0;
+    --calc-muted: #94a3b8;
+    --calc-key: #1e293b;
+    --calc-key-hover: #334155;
+    --calc-op: #1e3a8a;
+    --calc-fn: #0c4a6e;
+    --calc-equals: #3b82f6;
+    --calc-equals-text: #ffffff;
+    --calc-clear: #7f1d1d;
+    --calc-accent: #60a5fa;
+    --calc-accent-text: #0b1020;
+  }
 }
 
 .calc-modes { display: flex; flex-wrap: wrap; gap: 6px; }

@@ -50,7 +50,7 @@
   overflow: auto;
 }
 :where(.jaren-flow-editor) .flow-log-line {
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace);
+  font-family: var(--mono, 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace);
   font-size: 0.78rem;
   padding-block: 1px;
   border-block-end: 1px solid var(--border, hsl(220 14% 88%));
@@ -79,7 +79,7 @@
 }
 :where(.jaren-flow-editor) .mm-fired .mm-edge-label { fill: var(--accent, hsl(221 83% 53%)); font-weight: 600; }
 :where(.jaren-flow-editor) .mm-run-ok .mm-node-shape { stroke: var(--ok, #16a34a); stroke-width: 2.5; }
-:where(.jaren-flow-editor) .mm-run-error .mm-node-shape { stroke: var(--danger, #dc2626); stroke-width: 2.5; }
+:where(.jaren-flow-editor) .mm-run-error .mm-node-shape { stroke: var(--fail, #dc2626); stroke-width: 2.5; }
 :where(.jaren-flow-editor) .mm-run-aborted .mm-node-shape { opacity: 0.5; }
 @media (prefers-reduced-motion: no-preference) {
   :where(.jaren-flow-editor) .mm-active .mm-node-shape { animation: mm-pulse 1.5s var(--motion-ease-loop, ease-in-out) infinite; }

@@ -1,0 +1,37 @@
+/* The host token vocabulary of tokens.css, following the system colour
+   scheme: dark when the reader's system prefers it, unless the page chose
+   light (`.light` or `[data-theme="light"]` on the root element). Import
+   this file in place of tokens.css. The dark values below are the ones
+   tokens.css gives `.dark`, value for value.
+
+   `--jaren-scheme` tells the component stylesheets which scheme the system
+   selected: they hold their own dark chrome under
+   `@container style(--jaren-scheme: dark)`, since a stylesheet cannot make
+   another stylesheet's `.dark` selectors match. A light subtree resets it. */
+@import './tokens.css';
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not(.light, [data-theme="light"])) {
+    --jaren-scheme: dark;
+    --bg: hsl(224 24% 9%);
+    --fg: hsl(214 25% 90%);
+    --muted: hsl(218 12% 62%);
+    --surface: hsl(224 22% 12%);
+    --border: hsl(222 16% 22%);
+    --accent: hsl(213 94% 68%);
+    --accent-fg: hsl(224 47% 8%);
+    --accent-soft: hsl(217 55% 17%);
+    --accent-hover: hsl(213 94% 74%);
+    --ok: hsl(150 60% 55%);
+    --ok-soft: hsl(150 40% 14%);
+    --fail: hsl(0 75% 65%);
+    --fail-soft: hsl(0 40% 15%);
+    --warn: hsl(38 92% 55%);
+    --warn-soft: hsl(40 35% 15%);
+    --code-bg: hsl(224 28% 7%);
+    --code-fg: hsl(210 30% 88%);
+  }
+  .light, [data-theme="light"] {
+    --jaren-scheme: light;
+  }
+}

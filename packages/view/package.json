@@ -5,7 +5,9 @@
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
-  "sideEffects": false,
+  "sideEffects": [
+    "**/*.css"
+  ],
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
@@ -20,13 +22,16 @@
       "default": "./src/helpers/*.js"
     },
     "./schemas/*": "./schemas/*",
+    "./styles/tokens.css": "./styles/tokens.css",
+    "./styles/tokens-system.css": "./styles/tokens-system.css",
     "./package.json": "./package.json"
   },
   "files": [
     "dist/types/",
     "src/",
     "docs/",
-    "schemas/"
+    "schemas/",
+    "styles/"
   ],
   "description": "The Jaren vnode format: user interfaces as JSON documents, with a keyed DOM patcher and an SSR string renderer",
   "author": "joham",
