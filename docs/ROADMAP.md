@@ -1116,6 +1116,12 @@ what each does is its own documentation's job
   `A.join(P.where(…), …)` is accepted and `A.join(fromAsync(P), …)` is the native spelling; the
   handle could be read as `fromAsync(P)` ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
 
+- [ ] **A linq chain cannot pass a zone provider.** A chain's `dateFormat(pattern, zone)`
+  and a series operator's named `zone` compile only with a zone provider, and no chain or
+  `open()` option carries one, so `toArray()` refuses a named zone (`JQ0003`) while `'UTC'`
+  runs. The same document runs under `compileJsonQuery(doc, { zoneProvider })`. Wanted: the
+  runtime record's zone provider reaching a chain's compile.
+
 ## @jarenjs/josl
 
 - [ ] **A CSV dialect with `quote: null` does not round-trip.** The writers
@@ -1248,13 +1254,6 @@ validated command/receipt transaction with current-authority and snapshot checks
   runs on physical devices, and a manual accessibility pass. Qualified on this
   host: automated synthetic Node/Bun and browser results, which do not prove
   those outcomes.
-- [ ] **A translated saved-formula date cannot be written in a named time
-  zone.** `translateFormulaBody` writes a `toLocaleDateString` or
-  `Intl.DateTimeFormat` date in UTC or a declared fixed offset and names the
-  `time-zone` difference where the original read the host's zone, so a date
-  near midnight in a zone with daylight saving (`Europe/Amsterdam`) differs
-  from the original on some rows. Wanted: a zone provider in the formula
-  compiler's options and a date operator that writes in a named zone.
 
 ## Provider execution and durable domain workflows (cross-package)
 

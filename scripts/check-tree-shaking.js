@@ -289,7 +289,8 @@ if (engineLeak.length > 0)
 // Raised to 46,300 (measured 46221): the captured expression's coded refusal of a member read off a method read without its call, which every pen shares (expression 392) add 392.
 // Raised to 47,500 (measured 47448): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 630, walk 597) add 1227.
 // Raised to 47,600 (measured 47577): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129) add 129.
-if (schemaBytes > 47600)
+// Raised to 47,700 (measured 47615): the builder's date format taking a zone operand, which every pen shares (expression 38).
+if (schemaBytes > 47700)
   throw new Error(`The schema pen bundle grew to ${schemaBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${schemaBytes} byte schema-pen bundle; no chain module, no engine).`);
@@ -388,7 +389,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 251,100 (measured 251016): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
 // Raised to 251,500 (measured 251411): semanticKey's memo of a wholly frozen tree, which the chain carries (object 395) add 395.
 // Raised to 251,600 (measured 251544): an unknown operator's hint falling back to the suite's nearest-name rule over the operators the key extends or abbreviates (normalize 133).
-if (chainBytes > 251600)
+// Raised to 254,100 (measured 254002): `$date-format`'s zone operand, written on a zone provider's wall clock, with its refusals as catalog messages, and the builder's verbatim zone operand (operators 1673, messages 607, normalize 97, expression 66, civil 16).
+if (chainBytes > 254100)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -477,7 +479,8 @@ if (modelEngineLeak.length > 0)
 // Raised to 58,500 (measured 58415): the captured expression's coded refusal of a member read off a method read without its call, which every pen shares (expression 392) add 392.
 // Raised to 59,700 (measured 59645): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 629, walk 597, renames 4) add 1230.
 // Raised to 59,800 (measured 59774): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
-if (modelBytes > 59800)
+// Raised to 59,900 (measured 59812): the builder's date format taking a zone operand, which every pen shares (expression 38).
+if (modelBytes > 59900)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
@@ -847,7 +850,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,145,400 (measured 1145314): introspect()'s triggers option, which reads application triggers back as rules only through the reader @jarenjs/db/trigger-rules passes — the option's check, each trigger row, foreign key and join table handed to the reader, the trigger-rule code and the reason naming the option (introspect 762).
 // Raised to 1,146,800 (measured 1146735): a numeric key's write-boundary CHECK, read at open as the store's own so every pair, ordering, include and continuation compares the key exactly (store 529, ddl 506, emit 149, introspect 114, dialect 71, plan 39, model 13).
 // Raised to 1,146,900 (measured 1146888): a hop's existence test refines its equality correlation by an order or inequality between two columns of one non-null family (plan 147, emit 6).
-if (clientBytes > 1146900)
+// Raised to 1,149,400 (measured 1149355): `$date-format`'s zone operand and its refusals as catalog messages (operators 1681, messages 607, normalize 97, expression 66, civil 16).
+if (clientBytes > 1149400)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
@@ -909,7 +913,8 @@ if (contractPenLeak.length > 0)
 // Raised to 59,800 (measured 59794): the captured expression's coded refusal of a member read off a method read without its call, which every pen shares (expression 392) add 392.
 // Raised to 61,100 (measured 61021): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 630, walk 597) add 1227.
 // Raised to 61,200 (measured 61150): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
-if (contractPenBytes > 61200)
+// Raised to 61,300 (measured 61216): the builder's date format passing a zone operand verbatim, which every pen shares (expression 66).
+if (contractPenBytes > 61300)
   throw new Error(`The contract pen bundle grew to ${contractPenBytes} bytes.`);
 const chainContractLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/contract/') && info.bytesInOutput > 0);
@@ -1112,7 +1117,8 @@ if (formsPenLeak.length > 0)
 // Raised to 50,500 (measured 50491): the captured expression's coded refusal of a member read off a method read without its call, which every pen shares (expression 392) add 392.
 // Raised to 51,800 (measured 51718): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 630, walk 597) add 1227.
 // Raised to 51,900 (measured 51847): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
-if (formsPenBytes > 51900)
+// Raised to 52,000 (measured 51913): the builder's date format passing a zone operand verbatim, which every pen shares (expression 66).
+if (formsPenBytes > 52000)
   throw new Error(`The forms pen bundle grew to ${formsPenBytes} bytes.`);
 const chainFormsLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/forms/') && info.bytesInOutput > 0);

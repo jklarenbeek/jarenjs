@@ -100,12 +100,12 @@ const hasOwn = Object.hasOwn;
  *   registry extends the query vocabulary through `$call`, this one
  *   extends the RFC 9535 grammar the path strings are written in.
  * @property {import('@jarenjs/core/series').ZoneProvider} [zoneProvider]
- *   The two questions a named time zone needs (QUERY-FORMAT.md section
- *   8.13): `toParts(epoch, zone)` and `toEpoch(parts, zone,
- *   disambiguation)`. This package bundles no tzdb;
- *   `createIntlZoneProvider()` of `@jarenjs/locales/intl-zones` answers
- *   them over `Intl`. Without a provider a named zone is refused, never
- *   answered in UTC.
+ *   The two questions a named time zone needs (QUERY-FORMAT.md 8.13 and
+ *   8.16, `$date-format`'s zone and the series `zone`): `toParts(epoch,
+ *   zone)` and `toEpoch(parts, zone, disambiguation)`. This package
+ *   bundles no tzdb; `createIntlZoneProvider()` of
+ *   `@jarenjs/locales/intl-zones` answers them over `Intl`. Without a
+ *   provider a named zone is refused, never answered in UTC.
  * @property {import('@jarenjs/core/dates').DateNames} [dateNames]
  *   The month and weekday names `$date-format` writes `MMMM`, `EEEE`
  *   and `a` with (QUERY-FORMAT.md section 8.13):

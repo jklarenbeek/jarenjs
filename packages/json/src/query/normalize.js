@@ -676,10 +676,11 @@ function argCards(args) {
   return cards;
 }
 
-// The operators that read a calendar boundary, and so may be given a
-// named zone. `$asof` and `$overlaps` are pure instant arithmetic and
-// have no clock to resolve.
-const CLOCK_OPERATORS = new Set(['$time-bucket', '$resample', '$rolling']);
+// The operators that read a wall clock, and so may be given a named
+// zone: the calendar boundaries of the series operators, and the fields
+// `$date-format` writes in a zone. `$asof` and `$overlaps` are pure
+// instant arithmetic and have no clock to resolve.
+const CLOCK_OPERATORS = new Set(['$time-bucket', '$resample', '$rolling', '$date-format']);
 
 // A registry operator call: arity and shape come uniformly from the
 // table's `params` descriptor (JQ0003), the static cardinality from its
@@ -696,8 +697,9 @@ function normalizeOperatorCall(key, entry, arg, docPath, opPath, scope, ctx) {
   // configurable through the compilation's limits (compileOp hands the
   // node through to the entry's compile)
   if (key === '$range' && ctx.limits !== null) node.limits = ctx.limits;
-  // the series operators resolve their wall clock when the query
-  // compiles, and a named zone needs the tzdb this suite does not bundle.
+  // the series operators and a zoned $date-format resolve their wall
+  // clock when the query compiles, and a named zone needs the tzdb this
+  // suite does not bundle.
   // The provider is a compilation capability, like a
   // collation, so it reaches the entry the same way $range's guard does
   if (ctx.zoneProvider !== null && CLOCK_OPERATORS.has(key)) node.zoneProvider = ctx.zoneProvider;
@@ -1396,13 +1398,26 @@ function validateNamedFunctions(value, what) {
 // two-question seam a named zone needs, because this suite bundles no
 // tzdb and a JSON document cannot carry one. Violations are host
 // programming errors (TypeError), like options.extensions.
-function validateZoneProvider(value) {
+export function validateZoneProvider(value) {
   if (value === null || typeof value !== 'object'
     || typeof value.toParts !== 'function' || typeof value.toEpoch !== 'function') {
     throw new TypeError('options.zoneProvider must be an object with'
       + ' toParts(epoch, zone) and toEpoch(parts, zone, disambiguation)');
   }
   return value;
+}
+
+// Whether a zone provider knows a zone: it reads a wall clock there at
+// one instant. A provider whose data does not reach that instant
+// (`JY0024`, a compiled VTIMEZONE's horizon) knows the zone all the same.
+export function zoneKnown(provider, zone) {
+  try {
+    provider.toParts(0, zone);
+    return true;
+  }
+  catch (e) {
+    return e?.code === 'JY0024';
+  }
 }
 
 // Validate the month and weekday names `$date-format` reads

@@ -79,7 +79,10 @@ Two refusals keep those answers honest, both `TypeError`:
   fractional fixed-width amount becomes whole milliseconds — `1.5 day` is
   thirty-six hours, and needs a value with a clock to land on. A
   fractional calendar unit is refused unless it lands on a whole month:
-  half a year is six months, half a month is nothing.
+  half a year is six months, half a month is nothing. The clock a span
+  moves is read to the millisecond, a finer fraction cut (`59.9996` is
+  `59.999`, as JavaScript's `Date` reads it), never rounded into the next
+  second or day.
 
 ## Time-axis ticks — `ticks.js`
 

@@ -20,6 +20,7 @@
  */
 
 import { parseFormulaBody, positionOf, FormulaSyntaxError } from './javascript.js';
+import { validateZoneProvider, zoneKnown } from '../query/normalize.js';
 
 /** The noncharacter the anchor composition marks a text's start with. */
 const START = '\uFFFE';
@@ -67,7 +68,7 @@ const union = (a, b) => new Set([...a, ...b]);
 const intersect = (a, b) => new Set([...a].filter((k) => b.has(k)));
 
 /** The option keys the translator reads. */
-const OPTION_KEYS = new Set(['argument', 'helperObject', 'helpers', 'skip', 'explain', 'explanationMember', 'locales']);
+const OPTION_KEYS = new Set(['argument', 'helperObject', 'helpers', 'skip', 'explain', 'explanationMember', 'locales', 'zoneProvider']);
 
 /**
  * Translate a formula body.
@@ -1443,7 +1444,9 @@ function translateBody(source, opts) {
    * Intl.DateTimeFormat(tag, options).format(new Date(text))`, for a language
    * whose date pictures the host declared: the text's instant (a date alone is
    * midnight UTC, as JavaScript reads it) moved to the wall clock of the zone
-   * the host declared (UTC by default) and written with the picture of the date
+   * the host declared (UTC by default), or of a named zone the call names and
+   * the host's zone provider knows (read there by `$date-format`'s zone
+   * operand), and written with the picture of the date
    * fields the options name. Without a `timeZone` option JavaScript writes the
    * host's own zone, which a formula cannot read: the difference `time-zone`.
    * A call without a literal language tag, or in a language without date
@@ -1471,14 +1474,27 @@ function translateBody(source, opts) {
     if (fields === null) return EMPTY();
     const picture = Object.hasOwn(locale.dates, fields) ? locale.dates[fields] : undefined;
     if (picture === undefined) { reason('locale', optionsNode ?? tagNode, `the date fields '${fields}', which have no picture this translation describes for '${tag}'`); return EMPTY(); }
-    const zone = locale.timeZone ?? 'UTC';
-    const offset = fixedOffset(zone);
+    const declared = locale.timeZone ?? 'UTC';
+    // a call's own timeZone decides the zone JavaScript writes in: a fixed
+    // offset, or a name the zone provider knows; the declared zone (UTC by
+    // default) is only the zone of a call that names none
+    let zone = declared;
     if (o.timeZone === undefined)
-      differ('time-zone', node, `JavaScript writes the date in the host's own time zone, the query in ${zone}, the zone declared for '${tag}': near midnight they write different days`);
-    else if (fixedOffset(o.timeZone) !== offset) {
-      reason('locale', optionsNode, `the time zone '${o.timeZone}', where this translation writes the dates of '${tag}' in ${zone}`);
+      differ('time-zone', node, `JavaScript writes the date in the host's own time zone, the query in ${declared}, the zone declared for '${tag}': near midnight they write different days`);
+    else if (fixedOffset(o.timeZone) !== null)
+      zone = o.timeZone;
+    else if (opts.zoneProvider !== null && typeof o.timeZone === 'string' && o.timeZone !== '') {
+      if (!zoneKnown(opts.zoneProvider, o.timeZone)) {
+        reason('locale', optionsNode, `the time zone '${o.timeZone}', which the zone provider does not know`);
+        return EMPTY();
+      }
+      zone = o.timeZone;
+    }
+    else {
+      reason('locale', optionsNode, `the time zone '${o.timeZone}', where this translation writes the dates of '${tag}' in ${declared}`);
       return EMPTY();
     }
+    const offset = fixedOffset(zone);
     const text = tx(dateNode.args[0], env);
     if (certainType(text) !== 'string' && certainType(text) !== 'unknown') {
       reason('date', dateNode.args[0], 'new Date() of a value that is not text: the translation reads an RFC 3339 text');
@@ -1486,13 +1502,19 @@ function translateBody(source, opts) {
     }
     differ('date-parse', dateNode, "JavaScript also reads dates that are not RFC 3339 (implementation-defined) and null (as 1970-01-01), and writes 'Invalid Date' (Intl.DateTimeFormat throws) for undefined, a leap second or a text it cannot read; the query refuses them, writes nothing for undefined and reads the leap second");
     const write = (/** @type {any} */ z) => ({ '$date-format': [z, str(picture)] });
+    const year0 = { $number: 'a date in the year 0000, which JavaScript writes as the year 1 of the era before' };
     return value(once(text, (d) => once(value({ $if: [{ '$is-date': d }, { $concat: [d, 'T00:00:00Z'] }, d] }, 'string'), (t) => {
+      // a named zone: $date-format reads the instant's wall clock there from the zone provider
+      if (offset === null) {
+        // the zone operand is captured verbatim: no `$` escape
+        const named = { '$date-format': [t, str(picture), zone] };
+        return /y/.test(unquoted(picture)) ? { $if: [{ $eq: [{ '$date-format': [t, 'y', zone] }, '0'] }, year0, named] } : named;
+      }
       // $date-add moves the clock and keeps the text's own offset: the picture writes no offset
       const moved = { '$date-add': [t, { $sub: [offset, { $offset: t }] }, 'minute'] };
       if (!/y/.test(unquoted(picture))) return write(moved);
       // JavaScript writes the year 0000 as the year 1 of the era before it, where the picture would write 0
-      return once(value(moved, 'string'), (z) => ({ $if: [{ $eq: [{ $year: z }, 0] },
-        { $number: 'a date in the year 0000, which JavaScript writes as the year 1 of the era before' }, write(z)] }));
+      return once(value(moved, 'string'), (z) => ({ $if: [{ $eq: [{ $year: z }, 0] }, year0, write(z)] }));
     })), 'string');
   }
 
@@ -2088,6 +2110,7 @@ function readOptions(options) {
     if (!ok) throw new TypeError(`helper '${key}' must be { call: { name, version } } or { native: { params, expression } }`);
     for (const d of h.differences ?? []) if (!d || typeof d.kind !== 'string' || typeof d.note !== 'string') throw new TypeError(`helper '${key}' differences must be { kind, note }`);
   }
+  const zoneProvider = options.zoneProvider === undefined ? null : validateZoneProvider(options.zoneProvider);
   const locales = options.locales ?? {};
   for (const [tag, l] of Object.entries(locales)) {
     if (!l || typeof l.decimalFormat !== 'string' || typeof l.grouping !== 'string' || typeof l.decimal !== 'string'
@@ -2097,8 +2120,12 @@ function readOptions(options) {
     if (dates !== undefined && (dates === null || typeof dates !== 'object' || Array.isArray(dates) || Object.entries(dates).some(([key, picture]) =>
       !(DATE_SKELETON.test(key) || DATE_STYLES.includes(key)) || typeof picture !== 'string' || picture === '' || /X/.test(unquoted(picture)))))
       throw new TypeError(`locale '${tag}' dates must map date fields (a skeleton in the order year, month, weekday, day: yMd, yMMMMd) or a dateStyle to a $date-format picture that writes no offset`);
-    if (l.timeZone !== undefined && fixedOffset(l.timeZone) === null)
-      throw new TypeError(`locale '${tag}' timeZone must be UTC or a fixed offset (+01:00): a formula has no time-zone database to write a date in another zone`);
+    if (l.timeZone !== undefined && fixedOffset(l.timeZone) === null) {
+      if (zoneProvider === null || typeof l.timeZone !== 'string' || l.timeZone === '')
+        throw new TypeError(`locale '${tag}' timeZone must be UTC or a fixed offset (+01:00): a formula has no time-zone database to write a date in another zone`);
+      if (!zoneKnown(zoneProvider, l.timeZone))
+        throw new TypeError(`locale '${tag}' timeZone '${l.timeZone}' is a zone the zone provider does not know`);
+    }
   }
   return {
     argument: /** @type {string} */ (name(options.argument, 'argument', 'row')),
@@ -2108,6 +2135,7 @@ function readOptions(options) {
     explain: name(options.explain, 'explain', 'because'),
     explanationMember: name(options.explanationMember, 'explanationMember', null),
     locales: /** @type {Record<string, any>} */ (locales),
+    zoneProvider,
   };
 }
 
@@ -2209,7 +2237,7 @@ function escapeRegExp(text, inClass = false) {
  * The offset of a time zone, in minutes east of UTC, as JavaScript reads its
  * name (`UTC`, `Etc/UTC` and `GMT` alike, `+01:00` or `+0100`): null for a
  * zone JavaScript refuses or one with a name of its own (`Europe/Amsterdam`),
- * whose offset a formula, which has no time-zone database, cannot know.
+ * whose offset on a given day only a zone provider knows.
  * @param {unknown} zone @returns {number | null}
  */
 function fixedOffset(zone) {
@@ -2250,7 +2278,11 @@ function trim(q, which) {
  *   the languages number and date formatting may name, each with the decimal format registered for it, its currency pictures,
  *   the fewest digits the leftmost group of a grouped number holds (default 1; Spanish 2: 1234, but 12.345),
  *   the `$date-format` picture of each set of date fields it writes (keyed by their CLDR skeleton, `yMd`, or a
- *   `dateStyle`), and the zone its dates are written in (`UTC`, the default, or a fixed offset such as `+01:00`)
+ *   `dateStyle`), and the zone its dates are written in (`UTC`, the default, a fixed offset such as `+01:00`,
+ *   or with `zoneProvider` a named zone it knows)
+ * @property {import('@jarenjs/core/series').ZoneProvider} [zoneProvider] - the time-zone data a date is
+ *   written in a named zone with (`createIntlZoneProvider()` of `@jarenjs/locales/intl-zones`): the provider
+ *   the formula compiles under; a `timeZone` option naming a zone it knows is then exact
  */
 /**
  * @typedef {Object} HelperMapping

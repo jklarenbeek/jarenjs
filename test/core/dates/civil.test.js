@@ -301,3 +301,25 @@ describe('the unit vocabulary', () => {
     assert.strictEqual(fixedUnitMs('year'), 0);
   });
 });
+
+describe('a clock moved by a span cuts a fraction finer than a millisecond', () => {
+  const S = (seconds) => ({ year: 2026, month: 10, day: 31, hours: 22, minutes: 59, seconds, offset: 0 });
+  it('keeps every millisecond of a minute exactly as written', () => {
+    for (let ms = 0; ms < 60000; ms++) {
+      const moved = addToParts({ ...S(ms / 1000), hours: 10, minutes: 0 }, 1, 'minute');
+      assert.deepStrictEqual([moved.hours, moved.minutes, moved.seconds], [10, 1, ms / 1000], `${ms / 1000}`);
+    }
+  });
+
+  it('never rounds a fraction finer than a millisecond into the next one, or the next day', () => {
+    for (const [seconds, expected] of [[59.0004, 59], [59.9999, 59.999], [59.99949, 59.999], [59.9995, 59.999],
+      [0.0004, 0], [59.999999999, 59.999]]) {
+      const moved = addToParts(S(seconds), 60, 'minute');
+      assert.deepStrictEqual([moved.day, moved.hours, moved.minutes, moved.seconds], [31, 23, 59, expected], `${seconds}`);
+    }
+    // the clock alone wraps inside its own day, and the end of a unit is a millisecond before the next
+    assert.strictEqual(addToParts({ ...P('23:59:59.9999Z') }, 1, 'millisecond').seconds, 0);
+    assert.deepStrictEqual(addToParts({ ...P('23:59:58.9999Z') }, 1, 'second'), { ...P('23:59:59.999Z') });
+    assert.strictEqual(endOfParts(P('23:59:59.9999Z'), 'second').seconds, 59.999);
+  });
+});

@@ -533,6 +533,9 @@ export const CATALOGS = deepFreeze({
     "query/series-zone-provider": [
       "zone"
     ],
+    "query/date-zone-unknown": [
+      "zone"
+    ],
     "query/series-calendar": [
       "detail"
     ],
@@ -636,6 +639,27 @@ export const CATALOGS = deepFreeze({
     ],
     "query/no-time-component": [
       "value"
+    ],
+    "query/date-zone-instant": [
+      "value",
+      "zone"
+    ],
+    "query/date-zone-wall": [
+      "value",
+      "zone"
+    ],
+    "query/date-zone-wall-detail": [
+      "detail",
+      "value",
+      "zone"
+    ],
+    "query/date-zone-range": [
+      "value",
+      "zone"
+    ],
+    "query/date-zone-offset": [
+      "value",
+      "zone"
     ],
     "query/calendar-unit": [
       "got"

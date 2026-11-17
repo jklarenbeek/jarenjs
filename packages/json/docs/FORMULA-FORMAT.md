@@ -79,15 +79,22 @@ dimension through which a unit word and its table could come from different
 releases.
 
 Formula compiler options are a plain, closed object: `schemas`, `helpers`,
-`compileTypeTest`, `limits`, `cacheSize`, `packs`, `dateNames` and
-`decimalFormats`. Unknown members refuse with `TypeError`, including a
+`compileTypeTest`, `limits`, `cacheSize`, `packs`, `dateNames`,
+`decimalFormats` and `zoneProvider`. Unknown members refuse with `TypeError`, including a
 misspelled limit that would otherwise be ignored. This also applies to
 `compileFormula` and `resolveFormulaMigration`.
 
 `createFormulaCompiler` retains a bounded compilation cache (default 128
 profiles): its collision-free key includes the complete profile, helper function
 identity/version/cost, the pack registry, the locale data, schema contents,
-type-test function identity and limits. The key keeps member order, because the
+type-test function identity, limits and, when one is given, the zone provider's
+identity: the `{ name, revision }` it declares (`createIntlZoneProvider({ revision })`
+of `@jarenjs/locales/intl-zones` declares `intl` and the revision passed), or
+the provider object itself, within that compiler, when it declares none. Two
+providers whose zone data carries different revisions never share a compiled
+entry; `createIntlZoneProvider()` without a `revision` declares `unrecorded`,
+so name the tzdata a host runs to keep two hosts' entries apart. A compiler
+without a provider keeps every key it had. The key keeps member order, because the
 expression's `$let` binds in key order and an object constructor emits its
 members in key order: two profiles differing only in member order no longer
 share a compiled entry (the second compiled to the first one's closure, answering
@@ -275,7 +282,8 @@ reads and calls:
 | `skip` | `'SKIP'` | the skip sentinel: returning it, or `undefined`, skips the row, and so does `x ?? SKIP`, `x \|\| SKIP` or `x && SKIP` on that side; the sentinel anywhere else (kept in a name, in an array) is the reason `skip-value` |
 | `explain` | `'because'` | `explain(value, text)` returns an explanation, its text `String(text ?? '')` |
 | `explanationMember` | none | a returned object literal with this one member is an explanation, its value the text |
-| `locales` | none | the languages number and date formatting may name: `{decimalFormat, grouping, decimal, currencies, nan, minimumGroupingDigits, dates, timeZone}`, the decimal format registered under `decimalFormat`, each currency's picture, and the fewest digits the leftmost group of a grouped number holds (default 1; `compileNumberLocale(pack).minimumGroupingDigits` of `@jarenjs/locales`, 2 for Spanish, which writes 1234 but 12.345): a value whose rounded integer part has fewer digits than a group and that many is written without grouping separators; `dates`, the picture of each set of date fields, and `timeZone`, the zone dates are written in (below) |
+| `locales` | none | the languages number and date formatting may name: `{decimalFormat, grouping, decimal, currencies, nan, minimumGroupingDigits, dates, timeZone}`, the decimal format registered under `decimalFormat`, each currency's picture, and the fewest digits the leftmost group of a grouped number holds (default 1; `compileNumberLocale(pack).minimumGroupingDigits` of `@jarenjs/locales`, 2 for Spanish, which writes 1234 but 12.345): a value whose rounded integer part has fewer digits than a group and that many is written without grouping separators; `dates`, the picture of each set of date fields, and `timeZone`, the zone dates are written in: UTC, a fixed offset, or with `zoneProvider` a named zone it knows (below) |
+| `zoneProvider` | none | the time-zone data a date is written in a named zone with (`createIntlZoneProvider()` of `@jarenjs/locales/intl-zones`, or the host's own `toParts` / `toEpoch`): the same provider the formula compiles under (`options.formula.zoneProvider`), which `$date-format`'s zone operand reads |
 
 Using the skip sentinel or an explanation makes the formula an outcome-mode one.
 `options.formula`, when given, is the `FormulaOptions` each translation must
@@ -322,7 +330,7 @@ present is named where it matters:
 | `prototype-key` | a constant table indexed by a key JavaScript finds on `Object.prototype` (`constructor`), or an array read at an index of unknown type, where JavaScript also reads a key the array has (`length`, `map`) |
 | `clock` | `Date.now()` is `$context.now`: the host evaluates with `context.now` (epoch milliseconds) |
 | `date-parse` | `new Date(text)` also reads dates that are not RFC 3339 (implementation-defined) and null (as 1970-01-01), and reads undefined, a leap second (`23:59:60`) and a text it cannot read as an invalid date (`getTime()` is NaN, `toLocaleDateString` writes `Invalid Date`, `Intl.DateTimeFormat` throws): the query refuses them, reads nothing for undefined and reads the leap second; `getTime()` cuts a fraction finer than a millisecond, which the query's `$epoch` rounds to the nearest |
-| `time-zone` | a date written without a `timeZone` option: JavaScript writes it in the host's own time zone, the query in the zone declared for the language (UTC by default); near midnight they write different days |
+| `time-zone` | a date written without a `timeZone` option: JavaScript writes it in the host's own time zone, the query in the zone declared for the language (UTC by default, a fixed offset, or a named zone the `zoneProvider` knows); near midnight they write different days. A `timeZone` option is exact: a fixed offset in any spelling JavaScript reads as one, or with a `zoneProvider` a named zone it knows |
 | `regex-subset` | a regular expression rewritten to an I-Regexp that cannot say the same (`\b`) |
 | `regex-coercion` | a regular expression's test of a value that may be undefined: JavaScript tests the text `"undefined"`, the query tests nothing |
 | `case-fold` | a case-insensitive test: JavaScript folds case by its own table (the dotted and dotless i, the final sigma, the Kelvin sign), the query lower-cases the text |
@@ -384,21 +392,36 @@ ICU's); a translation that needs them does not compile without them, the reason
 `compile` under `options.formula`. `timeZone` is the zone the dates are written
 in: `UTC`, the default, or a fixed offset (`+01:00`), in any spelling JavaScript
 reads as one (`Etc/UTC`, `+0100`). A zone with a name of its own
-(`Europe/Amsterdam`) is refused, as a malformed declaration is, with a
-`TypeError`: a formula has no time-zone database to know its offset on a given
-day.
+(`Europe/Amsterdam`) needs the time-zone data a formula does not carry: with
+the `zoneProvider` option it is written in that zone, its offset on each day the
+provider's, and without one it is refused, as a malformed declaration is, with
+a `TypeError`. So is a named zone the provider does not know, the message
+naming it.
 
 The original wrote its date in a zone too, and without a `timeZone` option that
 zone is the host's own, which no formula can read: `2026-10-31T23:30:00Z` is
 31 October in UTC and 1 November in Amsterdam, and a date alone (`2026-10-31`,
 midnight UTC as JavaScript reads it) is the day before anywhere west of UTC.
 Such a translation writes the date in the declared zone and names the
-difference `time-zone` at the call: it is never exact. Where a `timeZone` option names the
-declared zone, in any spelling JavaScript reads as the same offset, it is
-exact; another zone is the reason `locale`. The text is read as `$date-add`
+difference `time-zone` at the call: it is never exact. A `timeZone` option
+decides the zone the original wrote in, and the declared zone is only the zone
+of a call that names none: a fixed offset (`UTC`, `+05:30`, in any spelling
+JavaScript reads as one) is written in that offset and is exact, whatever the
+language declares. *Upgrade: a fixed offset other than the declared one used to
+be the reason `locale`; a call whose offset is the declared one translates as
+it did.* A named zone
+(`{ timeZone: 'Europe/Amsterdam' }`) is exact with the `zoneProvider` option
+when the provider knows it, whatever zone the language declares: the query
+writes the date in that zone with `$date-format`'s zone operand (QUERY-FORMAT
+§8.13), the day of an instant near midnight and on the nights the clock
+changes being the provider's, as JavaScript's is its own zone data's. A name
+the provider does not know is the reason `locale`, naming it, and without a
+provider every named zone is the reason `locale`, as before. The formula
+compiles under the same provider (`options.formula.zoneProvider`); without
+it the named zone does not compile (`JQ0003`), the reason `compile`. The text is read as `$date-add`
 reads it (a date alone as midnight UTC, a date-time at its own offset, a
 fraction of a second cut, never rounded into the next second), moved to the
-declared zone's clock and written with the picture. A date the move takes past
+clock of the zone it is written in and written with the picture. A date the move takes past
 9999 or before 0000 refuses the row, and so does a date in the year 0000 where
 the picture writes a year: JavaScript writes that year, the year 1 before the
 era, as 1, without the era. An option no picture writes (`era`, a time field,
@@ -506,6 +529,7 @@ against the JavaScript it replaces:
 | `x.toLocaleString('nl-NL', {maximumFractionDigits: 1})` | `{"$format-number": [x, "#.##0,#", "nl"]}` |
 | `x.toLocaleString('nl-NL', {style: 'currency', currency: 'EUR'})` | `{"$format-number": [x, "€ #.##0,00;€ -#.##0,00", "nl"]}`, the space a no-break space, and `€ NaN` for NaN as ICU writes it |
 | `new Date(x).toLocaleDateString('nl-NL')`, `{yMd: 'd-M-y'}` declared, in UTC | `{"$date-format": [{"$date-add": [t, {"$sub": [0, {"$offset": t}]}, "minute"]}, "d-M-y"]}`, `t` the text with `T00:00:00Z` added to a date alone; a date in the year 0000 refuses the row |
+| `new Date(x).toLocaleDateString('nl-NL', {timeZone: 'Europe/Amsterdam'})`, with a `zoneProvider` | `{"$date-format": [t, "d-M-y", "Europe/Amsterdam"]}`, `t` as above; a date in the year 0000 there refuses the row |
 
 The two rounding spellings are not interchangeable. `Math.round(x * 100) / 100`
 rounds the product, which binary multiplication has already rounded, so

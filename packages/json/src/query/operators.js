@@ -98,7 +98,7 @@ import {
   itemRef,
 } from './runtime.js';
 import {
-  CARD_ZERO, CARD_ONE, CARD_OPT, CARD_MANY, joinCard, sumCard,
+  CARD_ZERO, CARD_ONE, CARD_OPT, CARD_MANY, joinCard, sumCard, zoneKnown,
 } from './normalize.js';
 import { compileExistsTest } from './compile.js';
 import {
@@ -2292,26 +2292,28 @@ export const OPERATORS = Object.freeze({
   },
 
   '$date-format': { // an LDML pattern, compiled once when it is literal
-    params: ARGS_2,
+    // a date, a pattern, and the zone captured verbatim, as a series
+    // spec's zone is: data the query compiles against, never evaluated
+    params: Object.freeze({ kinds: Object.freeze(['expr', 'expr', 'raw']), min: 2 }),
     result: resultEmptyPropagates,
     compile: (gets, args, docPath, node) => {
       const dateGet = gets[0];
       const datePath = args[0].docPath;
       const patternNode = args[1];
+      const names = node.dateNames;
+      // a third operand names the zone whose wall clock the instant is
+      // written on; without it the value is written in its own offset
+      const zone = gets.length === 3 ? dateZone(args[2], node.zoneProvider ?? null) : null;
       // the common case is a literal pattern: compile it at query
       // compile time, so a bad one is a compile error, not a surprise
-      const names = node.dateNames;
       if (patternNode.kind === 'literal' && typeof patternNode.value === 'string') {
-        let format;
-        try {
-          format = compileDateFormat(patternNode.value, names);
-        }
-        catch (e) {
-          // a literal pattern is authored, not data: reject the document
-          if (e instanceof TypeError && typeof e.token === 'string')
-            throw queryCompileError('JQ0003', 'query/date-names', { token: e.token }, docPath, { cause: e });
-          throw queryCompileError('JQ0003', 'query/date-pattern',
-            { detail: e instanceof Error ? e.message : 'invalid' }, docPath, { cause: e });
+        const format = literalDateFormat(patternNode.value, names, docPath);
+        if (zone !== null) {
+          const offsetWritten = writesOffset(patternNode.value);
+          return (f) => {
+            const v = dateGet(f);
+            return v === EMPTY ? EMPTY : renderDate(format, zonedParts(v, zone, offsetWritten, datePath), v, datePath);
+          };
         }
         return (f) => {
           const v = dateGet(f);
@@ -2332,20 +2334,12 @@ export const OPERATORS = Object.freeze({
         if (typeof pattern !== 'string')
           throw runtimeError('JQ2001', 'query/expected-date-pattern', { got: itemRef(pattern) }, patternPath);
         if (pattern !== lastPattern) {
+          lastPattern = null;
+          lastFormat = dynamicDateFormat(pattern, names, patternPath);
           lastPattern = pattern;
-          try {
-            lastFormat = compileDateFormat(pattern, names);
-          }
-          catch (e) {
-            lastFormat = null;
-            lastPattern = null;
-            if (e instanceof TypeError && typeof e.token === 'string')
-              throw runtimeError('JQ2001', 'query/date-names', { token: e.token }, patternPath);
-            throw runtimeError('JQ2001', 'query/date-pattern',
-              { detail: e instanceof Error ? e.message : 'invalid' }, patternPath);
-          }
         }
-        return renderDate(lastFormat, dateParts(v, datePath), v, datePath);
+        const parts = zone === null ? dateParts(v, datePath) : zonedParts(v, zone, writesOffset(pattern), datePath);
+        return renderDate(lastFormat, parts, v, datePath);
       };
     },
   },
@@ -2693,6 +2687,84 @@ function renderDate(format, parts, value, docPath) {
         { value: String(value) }, docPath);
     throw e;
   }
+}
+
+// A literal pattern is authored, not data: a bad one rejects the document.
+function literalDateFormat(pattern, names, docPath) {
+  try {
+    return compileDateFormat(pattern, names);
+  }
+  catch (e) {
+    if (e instanceof TypeError && typeof e.token === 'string')
+      throw queryCompileError('JQ0003', 'query/date-names', { token: e.token }, docPath, { cause: e });
+    throw queryCompileError('JQ0003', 'query/date-pattern',
+      { detail: e instanceof Error ? e.message : 'invalid' }, docPath, { cause: e });
+  }
+}
+
+// A computed pattern is data: a bad one refuses the row.
+function dynamicDateFormat(pattern, names, patternPath) {
+  try {
+    return compileDateFormat(pattern, names);
+  }
+  catch (e) {
+    if (e instanceof TypeError && typeof e.token === 'string')
+      throw runtimeError('JQ2001', 'query/date-names', { token: e.token }, patternPath);
+    throw runtimeError('JQ2001', 'query/date-pattern',
+      { detail: e instanceof Error ? e.message : 'invalid' }, patternPath);
+  }
+}
+
+// Whether a pattern writes an offset (an `X` outside its quoted literals).
+const writesOffset = (pattern) => pattern.replace(/'[^']*'?/g, '').includes('X');
+
+// The zone a `$date-format` writes in, resolved when the query compiles:
+// a name captured verbatim, `UTC` needing nothing and any other name the
+// injected provider's (this suite bundles no tzdb, and a named zone is
+// never answered in UTC).
+function dateZone(arg, provider) {
+  if (typeof arg.value !== 'string')
+    throw queryCompileError('JQ0003', 'query/series-zone', { got: itemRef(arg.value) }, arg.docPath);
+  const zone = arg.value;
+  if (zone === 'UTC')
+    return { zone, partsAt: (epoch) => partsFromEpoch(epoch, 0) };
+  if (provider === null)
+    throw queryCompileError('JQ0003', 'query/series-zone-provider', { zone }, arg.docPath);
+  if (!zoneKnown(provider, zone))
+    throw queryCompileError('JQ0003', 'query/date-zone-unknown', { zone }, arg.docPath);
+  return { zone, partsAt: (epoch) => provider.toParts(epoch, zone) };
+}
+
+// The wall clock of a date-time's instant in a zone: the provider's
+// fields at the whole second, the value's own fraction kept as written
+// (never rounded into the next second), and the offset in force where it
+// is a whole number of minutes. A value without an instant (a date
+// alone, a time alone), a wall clock outside 0000-9999 and a provider
+// that answers no wall clock refuse the row.
+function zonedParts(v, clock, offsetWritten, docPath) {
+  const parts = dateParts(v, docPath);
+  if (parts.year < 0 || parts.hours < 0 || parts.offset === null)
+    throw runtimeError('JQ2001', 'query/date-zone-instant', { value: v, zone: clock.zone }, docPath);
+  const second = mathf64_floor(parts.seconds);
+  const epoch = epochOfRFC3339Parts({ ...parts, seconds: second });
+  let wall;
+  try {
+    wall = clock.partsAt(epoch);
+  }
+  catch (e) {
+    throw runtimeError('JQ2001', 'query/date-zone-wall-detail', { zone: clock.zone, value: v, detail: e instanceof Error ? e.message : String(e) }, docPath);
+  }
+  if (wall === null || typeof wall !== 'object' || ![wall.year, wall.month, wall.day, wall.hours, wall.minutes].every(Number.isInteger) || !Number.isFinite(wall.seconds))
+    throw runtimeError('JQ2001', 'query/date-zone-wall', { zone: clock.zone, value: v }, docPath);
+  if (wall.year < 0 || wall.year > 9999)
+    throw runtimeError('JQ2001', 'query/date-zone-range', { value: v, zone: clock.zone }, docPath);
+  const seconds = mathf64_floor(wall.seconds);
+  const offset = (epochOfRFC3339Parts({ year: wall.year, month: wall.month, day: wall.day, hours: wall.hours, minutes: wall.minutes, seconds, offset: 0 }) - epoch) / 60000;
+  const whole = Number.isInteger(offset);
+  if (!whole && offsetWritten)
+    throw runtimeError('JQ2001', 'query/date-zone-offset', { zone: clock.zone, value: v }, docPath);
+  return { year: wall.year, month: wall.month, day: wall.day, hours: wall.hours, minutes: wall.minutes,
+    seconds: seconds + (parts.seconds - second), offset: whole ? offset : null };
 }
 
 //#endregion

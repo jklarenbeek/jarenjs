@@ -106,7 +106,7 @@ export function credit(value, fallback, name) {
 }
 
 /** Host settings consumed by the reusable formula compiler, before any profile compiles. */
-export const FORMULA_OPTIONS = Object.freeze(['schemas', 'helpers', 'compileTypeTest', 'limits', 'cacheSize', 'packs', 'dateNames', 'decimalFormats']);
+export const FORMULA_OPTIONS = Object.freeze(['schemas', 'helpers', 'compileTypeTest', 'limits', 'cacheSize', 'packs', 'dateNames', 'decimalFormats', 'zoneProvider']);
 
 /** One closed host-options boundary for formula compiler, batch, parity and migration.
  * @param {any} options @param {readonly string[]} known @param {string} name */

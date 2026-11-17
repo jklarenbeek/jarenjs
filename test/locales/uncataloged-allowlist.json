@@ -1534,6 +1534,7 @@
     ["', which may hold an array the row or another name holds too: JavaScript changes that array in place", "developer-facing"],
     ["', which no picture writes", "developer-facing"],
     ["', which the translation cannot tell is an array", "developer-facing"],
+    ["', which the zone provider does not know", "developer-facing"],
     ["': near midnight they write different days", "developer-facing"],
     ["() in a language with its own case rules, or with a tag JavaScript refuses", "developer-facing"],
     ["() is not translated", "developer-facing"],

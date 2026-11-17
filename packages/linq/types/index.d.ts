@@ -139,8 +139,10 @@ export interface DateMethods {
   dateSub(amount: number | NumberExpr, unit: DateUnit): DateTimeExpr;
   /** Whole units from this value to another; negative when it precedes. */
   dateDiff(to: string | DateTimeExpr, unit: DateUnit): NumberExpr;
-  /** Render through a Unicode LDML pattern (`yyyy-MM-dd`). */
-  dateFormat(pattern: string): StringExpr;
+  /** Render through a Unicode LDML pattern (`yyyy-MM-dd`); with a zone
+   * (`'UTC'`, or a name the compilation's `zoneProvider` knows), the
+   * instant on that zone's wall clock. */
+  dateFormat(pattern: string, zone?: string): StringExpr;
   /** The instant labelling the bucket this one falls in (`$time-bucket`). */
   timeBucket(every: string | number, origin?: string | number | null,
     context?: CalendarContext): NumberExpr;

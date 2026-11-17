@@ -262,9 +262,16 @@ function clockFromDayMs(rest) {
   return { hours, minutes, seconds: rest / 1000 };
 }
 
-/** Milliseconds since midnight for a parts record that carries a clock. */
+/**
+ * Milliseconds since midnight for a parts record that carries a clock. A
+ * fraction finer than a millisecond is cut, as JavaScript's Date reads
+ * `.9999` as `.999`, never rounded into the next millisecond (and from
+ * there the next second, or day). The seconds are first read to the
+ * nanosecond, the nine digits the parser keeps, so a millisecond the
+ * binary value sits just below (`59.999` is 59.99899…) is not cut away.
+ */
 function dayMsOf(parts) {
-  return parts.hours * 3600000 + parts.minutes * 60000 + Math.round(parts.seconds * 1000);
+  return parts.hours * 3600000 + parts.minutes * 60000 + Math.floor(Math.round(parts.seconds * 1e9) / 1e6);
 }
 
 //#endregion

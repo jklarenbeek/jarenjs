@@ -1564,7 +1564,12 @@ A **fraction** is a quantity only where the unit converts exactly.
 `[date, 1.5, "day"]` and `[date, "P1.5D"]` are thirty-six hours, applied as
 whole milliseconds — so both need a value with a clock to land on. Half a
 month is not a length and is `JQ2001`; half a *year* is six months exactly,
-and applies.
+and applies. A clock moved by a span of hours, minutes, seconds or
+milliseconds (or a fraction of a day) is read to the millisecond, a finer
+fraction cut as JavaScript's `Date` cuts it: `["…T23:59:59.9996Z", 1,
+"minute"]` is `…T00:00:59.999Z` of the next day. *Upgrade: the fraction used
+to round, which carried that value to `…T00:01:00Z`, and a date a second
+before midnight into the next day.*
 
 `$date-format` renders a value through a **Unicode LDML** pattern
 (`yyyy-MM-dd`, not moment's `YYYY-MM-DD`); a literal pattern compiles once
@@ -1575,6 +1580,25 @@ axis and the Gantt take — `compileDateLocale(nl).names` from
 `@jarenjs/locales` renders `"d MMMM yyyy"` as `27 september 2026`. Without
 the option such a token is `JQ0003` for a literal pattern and `JQ2001` for
 one computed at runtime, the message naming the option.
+
+A third operand writes the value's *instant* on the wall clock of a zone:
+`{"$date-format": ["$.at", "d-M-y HH:mm", "Europe/Amsterdam"]}` writes
+`2026-10-31T23:30:00Z` as `1-11-2026 00:30`. The zone is a name, captured
+verbatim as a series spec's `zone` is (never evaluated, so `"$.zone"` is a name
+no provider knows, and an expression is `JQ0003`).
+`"UTC"` needs nothing; any other name is answered by the compilation's
+`zoneProvider` (§8.16, the zone seam), and is `JQ0003` without one, or when the provider
+does not know it, the message naming the zone. The fields are the
+provider's for the instant, so a 23- or 25-hour day needs no rule of its
+own: an instant in the repeated hour writes its own wall time and, with
+`XXX`, its own offset (`02:30 +02:00`, then `02:30 +01:00`). The fraction
+is the value's own, never rounded into the next second, and a leap second
+(`23:59:60`) is the instant after it, as `$epoch` reads it. The value must
+name an instant, a `date-time` with its offset (a `full-date` or a
+`full-time` is `JQ2001`), and so is a wall clock past 9999 or before 0000,
+an offset a pattern writes that is not a whole number of minutes (a local
+mean time of the nineteenth century), and a provider that answers no wall
+clock.
 
 | Operator | Definition |
 |---|---|
@@ -1589,7 +1613,7 @@ one computed at runtime, the message naming the option.
 | `$date-add` `$date-sub` | `[date, duration]` or `[date, amount, unit]` → a value of the same lexical form; a fraction that has no exact conversion, or a unit the value has no half for, is `JQ2001` |
 | `$start-of` `$end-of` | `[date, unit]` → the unit's first / last instant, in the same lexical form; a sub-day unit on a `full-date`, or `week` and coarser on a `full-time`, is `JQ2001` |
 | `$date-diff` | `[from, to, unit]` → whole units, negative when `to` precedes `from`; a value with no date half is `JQ2001` for every unit |
-| `$date-format` | `[date, pattern]` → the value rendered through an LDML pattern; a token that reads a half the value has not got (`yyyy` of a `full-time`, `HH` of a `full-date`) is `JQ2001`, where it used to be written as a sentinel |
+| `$date-format` | `[date, pattern]` → the value rendered through an LDML pattern; a token that reads a half the value has not got (`yyyy` of a `full-time`, `HH` of a `full-date`) is `JQ2001`, where it used to be written as a sentinel; `[date, pattern, zone]` → the instant rendered on the zone's wall clock |
 
 Every operator that *produces* a date produces it in the same canonical
 spelling, so one query can never emit two forms of one instant: a fractional

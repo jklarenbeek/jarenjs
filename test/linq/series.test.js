@@ -24,6 +24,7 @@ import * as assert from 'node:assert';
 
 import { from } from '@jarenjs/linq';
 import { compileJsonQuery } from '@jarenjs/json/query';
+import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
 import { sectionOf } from '../format-sections.js';
 
 // `ms` rather than `at`, deliberately: `at(index)` is path navigation on
@@ -109,6 +110,21 @@ describe('the date family lowers to §8.13, one method per operator', () => {
       { '$date-diff': ['$it.on', '2026-06-01', 'month'] });
     assert.deepStrictEqual(emitted((e) => e.on.dateFormat('yyyy-MM-dd')),
       { '$date-format': ['$it.on', 'yyyy-MM-dd'] });
+    assert.deepStrictEqual(emitted((e) => e.on.dateFormat('yyyy-MM-dd', 'Europe/Amsterdam')),
+      { '$date-format': ['$it.on', 'yyyy-MM-dd', 'Europe/Amsterdam'] });
+    // the zone is captured verbatim by the query, so the builder never escapes it
+    assert.deepStrictEqual(emitted((e) => e.on.dateFormat('y', '$zone')), { '$date-format': ['$it.on', 'y', '$zone'] });
+  });
+
+  it("writes a date on a zone's wall clock, and its document answers it under a zone provider", () => {
+    // UTC needs no provider: the chain and its document agree
+    const doc = agrees(EVENTS.slice(0, 2), (e) => e.on.dateFormat('yyyy-MM-dd HH:mm', 'UTC'));
+    assert.deepStrictEqual(from(EVENTS.slice(1, 2)).select((e) => e.on.dateFormat('yyyy-MM-dd HH:mm', 'UTC')).toArray(), ['2026-02-14 22:15']);
+    assert.deepStrictEqual(doc.$return, { '$date-format': ['$it.on', 'yyyy-MM-dd HH:mm', 'UTC'] });
+    // a named zone's document compiles under the provider the host injects
+    const named = from([]).select((e) => e.on.dateFormat('yyyy-MM-dd HH:mm', 'Europe/Amsterdam')).toDocument();
+    const answer = compileJsonQuery(named, { zoneProvider: createIntlZoneProvider() })([{ on: '2026-10-31T23:30:00Z' }]);
+    assert.deepStrictEqual(answer, '2026-11-01 00:30');
   });
 
   it('answers what its own document answers, for every method', () => {

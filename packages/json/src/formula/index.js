@@ -3,7 +3,7 @@
 import { createBoundedCache } from '@jarenjs/core/cache';
 import { semanticKey } from '@jarenjs/core/object';
 import { compileJsonQuery } from '../query/index.js';
-import { validateDateNames, validateDecimalFormats } from '../query/normalize.js';
+import { validateDateNames, validateDecimalFormats, validateZoneProvider } from '../query/normalize.js';
 import { canonicalizeJson } from '../canonical.js';
 import { FormulaError, causeCode, causePath, causeMessage, formulaMessage, snapshot, credit, FORMULA_OPTIONS, checkFormulaOptions } from './shared.js';
 
@@ -25,6 +25,11 @@ export { formulaMessagesEn } from './messages.js';
  *   from `@jarenjs/locales`).
  * @property {Record<string, object>} [decimalFormats] - The decimal formats
  *   `$format-number` and `$quantity` name (`compileNumberLocale(pack).decimalFormat`).
+ * @property {import('@jarenjs/core/series').ZoneProvider} [zoneProvider] - The
+ *   time-zone data a named zone is read with (`$date-format`'s zone, the
+ *   series operators' `zone`): `createIntlZoneProvider()` of
+ *   `@jarenjs/locales/intl-zones`, or a provider of the host's own. Its
+ *   `identity` (`{ name, revision }`) is part of each compiled formula's key.
  */
 
 /** Validate a versioned profile; compilation checks the expression and capabilities. */
@@ -88,6 +93,21 @@ function fields(root, formulaId) {
   return snapshot({ source: [...source].sort(), computed: [...computed].sort(), all });
 }
 
+/**
+ * The part of a compiled formula's key a zone provider adds: the identity it
+ * declares (`{ name, revision }`, as `@jarenjs/core/calendar` records it), or
+ * its object within this compiler when it declares none.
+ * @param {any} provider @param {(value: any) => number} identity
+ */
+function zoneIdentity(provider, identity) {
+  const declared = provider.identity;
+  if (declared === undefined) return ['zones', identity(provider)];
+  if (declared === null || typeof declared !== 'object' || typeof declared.name !== 'string' || declared.name === ''
+    || typeof declared.revision !== 'string' || declared.revision === '')
+    throw new TypeError("options.zoneProvider.identity must be { name, revision } with non-empty strings");
+  return ['zones', declared.name, declared.revision];
+}
+
 /** Validate an explicit outcome without interpreting ordinary object values. */
 function outcome(value, doc) {
   const keys = { value: ['kind', 'value'], skip: ['kind'], explanation: ['kind', 'text', 'value'], error: ['kind', 'message'] };
@@ -111,6 +131,7 @@ export function createFormulaCompiler(options = {}) {
   // malformed one is the host's TypeError, never every document's error
   if (options.dateNames !== undefined) validateDateNames(options.dateNames);
   if (options.decimalFormats !== undefined) validateDecimalFormats(options.decimalFormats);
+  if (options.zoneProvider !== undefined) validateZoneProvider(options.zoneProvider);
   if (options.packs !== undefined && (typeof options.packs?.packs !== 'function' || typeof options.packs?.forPacks !== 'function'))
     throw new TypeError('options.packs must be an operator pack registry - createJsltRegistry() with its packs - not a list of packs');
   const cache = createBoundedCache(credit(options.cacheSize, 128, 'cacheSize'));
@@ -120,6 +141,10 @@ export function createFormulaCompiler(options = {}) {
     if (!identities.has(fn)) identities.set(fn, ++nextIdentity);
     return identities.get(fn);
   }
+  // the zone data joins the key only when the host gives one, so every
+  // other key stays as it was: the identity the provider declares (its
+  // tz data's revision) and, for one that declares none, its object
+  const zoneKey = options.zoneProvider === undefined ? [] : [zoneIdentity(options.zoneProvider, identity)];
   function compile(value) {
     const doc = formulaDocument(value);
     const functions = Object.create(null);
@@ -158,7 +183,7 @@ export function createFormulaCompiler(options = {}) {
     // ordered: the expression is a query document, whose `$let` binds in
     // key order and whose object constructors emit members in key order
     const key = semanticKey([doc, capabilityKeys, schemas, options.compileTypeTest ? identity(options.compileTypeTest) : null, options.limits ?? {},
-      options.dateNames ?? null, options.decimalFormats ?? null], { ordered: true });
+      options.dateNames ?? null, options.decimalFormats ?? null, ...zoneKey], { ordered: true });
     const cached = cache.get(key);
     if (cached) return cached;
     const tests = {};
@@ -173,7 +198,7 @@ export function createFormulaCompiler(options = {}) {
     try {
       query = compileJsonQuery(doc.expression, { functions: { ...packOptions.functions, ...functions },
         extensions: packOptions.extensions, compileTypeTest: options.compileTypeTest,
-        dateNames: options.dateNames, decimalFormats: options.decimalFormats,
+        dateNames: options.dateNames, decimalFormats: options.decimalFormats, zoneProvider: options.zoneProvider,
         externals: [...Object.keys(doc.bindings ?? {}), 'computed', 'context'], analysis: true,
         limits: options.limits ?? { steps: 10000, depth: 64, resultItems: 10000, sequenceItems: 10000 } });
     }

@@ -539,7 +539,8 @@ const fanned = (op, name) => function (/** @type {any} */ record, /** @type {any
 };
 
 /**
- * `$date-add` / `$date-sub`: `[date, duration]` or `[date, amount, unit]`.
+ * `$date-add` / `$date-sub`: `[date, duration]` or `[date, amount, unit]`;
+ * `$date-format`'s `[date, pattern]`.
  * @param {any} record
  * @param {any} amount - an ISO 8601 duration, or a number of units
  * @param {any} [unit] - the calendar unit, when `amount` is a number
@@ -648,7 +649,15 @@ const METHODS = {
   isDate: /* @__PURE__ */ unary('$is-date'), isTime: /* @__PURE__ */ unary('$is-time'),
   isDatetime: /* @__PURE__ */ unary('$is-datetime'), isDuration: /* @__PURE__ */ unary('$is-duration'),
   startOf: /* @__PURE__ */ binary('$start-of'), endOf: /* @__PURE__ */ binary('$end-of'),
-  dateFormat: /* @__PURE__ */ binary('$date-format'),
+  // a zone writes the instant on that zone's wall clock: a literal name,
+  // `UTC` needing nothing and any other the compilation's zoneProvider
+  dateFormat(record, pattern, zone) {
+    const args = shiftArgs(record, pattern);
+    // the zone is data the query captures verbatim: never `$`-escaped
+    if (zone !== undefined)
+      args.push(zone);
+    return makeExpr({ '$date-format': args }, record.epoch, false);
+  },
   dateAdd(record, amount, unit) {
     return makeExpr({ '$date-add': shiftArgs(record, amount, unit) }, record.epoch, false);
   },

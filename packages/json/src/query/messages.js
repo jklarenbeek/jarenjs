@@ -147,6 +147,7 @@ export const queryMessagesEn = Object.freeze({
   'query/series-member-singular': "'{member}' is a singular path — one name or index per segment, no wildcard, descendant or filter",
   'query/series-zone': "'zone' is an IANA zone name, got {got}",
   'query/series-zone-provider': "the zone '{zone}' needs a time-zone provider: this suite bundles no tzdb, so a named zone is compiled with options.zoneProvider (toParts / toEpoch). 'UTC' and a numeric 'offset' need none",
+  'query/date-zone-unknown': "the zone provider does not know the zone '{zone}'",
   'query/series-calendar': 'the calendar context: {detail}',
 
   // JQ2001–JQ2012: evaluation
@@ -191,6 +192,11 @@ export const queryMessagesEn = Object.freeze({
   'query/expected-datetime': 'expected an RFC 3339 date, time, or date-time string, got {got}',
   'query/no-date-component': "'{value}' carries no date component",
   'query/no-time-component': "'{value}' carries no time component",
+  'query/date-zone-instant': "'{value}' names no instant to write in the zone '{zone}': a date-time with its offset does",
+  'query/date-zone-wall': "the zone provider gave no wall clock in '{zone}' for '{value}'",
+  'query/date-zone-wall-detail': "the zone provider gave no wall clock in '{zone}' for '{value}': {detail}",
+  'query/date-zone-range': "'{value}' falls past 9999 or before 0000 in the zone '{zone}'",
+  'query/date-zone-offset': "the offset of '{zone}' at '{value}' is not a whole number of minutes, which no RFC 3339 offset writes",
   'query/calendar-unit': "expected a calendar unit ('year', 'month', 'day', ...), got {got}",
   'query/expected-duration': 'expected an ISO 8601 duration, got {got}',
   'query/expected-units': 'expected a number of units, got {got}',
