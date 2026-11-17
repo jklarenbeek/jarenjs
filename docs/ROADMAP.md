@@ -1111,6 +1111,11 @@ what each does is its own documentation's job
   engine, so strict execution refuses them (`JD0010`, 'op') while the residual
   answers.
 
+- [ ] **A join's inner side refuses the entity handle it accepts once filtered.** `A.join(P, …)`
+  is `JL0005` ("join takes another async sequence over a provider … as its inner side") while
+  `A.join(P.where(…), …)` is accepted and `A.join(fromAsync(P), …)` is the native spelling; the
+  handle could be read as `fromAsync(P)` ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
+
 ## @jarenjs/josl
 
 - [ ] **A CSV dialect with `quote: null` does not round-trip.** The writers

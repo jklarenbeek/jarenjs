@@ -938,9 +938,9 @@ deliberate decision, not a gap:
 Here: the document and its grammar, `compileContract`, `contract.match`,
 `describe()`, the `JC0001–JC0022` compile errors; the HTTP server binding
 (`serveHttp`, the `JC2001–JC2016` wire taxonomy with its English catalog,
-the exact request bytes for `identify` under `identifyBody`,
-`fetch` and `node` adapters, the ledger interface with `createMemoryLedger`
-and the `idempotencyLedgerModel`/`commandLifecycleFsm` documents); the HTTP
+the exact request bytes for `identify` under `identifyBody`, a closed
+query under `closedQuery`, `fetch` and `node` adapters, the ledger
+interface with `createMemoryLedger` and the `idempotencyLedgerModel`/`commandLifecycleFsm` documents); the HTTP
 client (`openHttpClient`, the outcomes with the `JC2050–JC2058` client
 codes, the client half of idempotency, retry, `negotiate`, and `bytes`
 for the opaque operations — a live response stream and a streamed

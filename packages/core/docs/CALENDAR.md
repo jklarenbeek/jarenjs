@@ -94,6 +94,29 @@ change, an ambiguous one the offset from after it). The seam's
 `disambiguation` names (`'earlier'`) are not policies here and are
 refused (`JY0005`).
 
+**Defaults to override for PostgreSQL time-rule parity.** A host that
+must answer as a PostgreSQL `timestamptz` reading does passes `later`
+wherever a default would choose otherwise; the two rules agree on a gap
+(Amsterdam's 02:30 on 2026-03-29 is `01:30Z` under both, and in
+PostgreSQL) and differ on a fold (2026-10-25 02:30 is `00:30Z` under
+`rfc5545`, `01:30Z` under `later` and in PostgreSQL). Zones and policies
+are never assumed where resolution has to choose: `resolveLocal` refuses
+`JY0006` without a `policy`, whether or not the time is in a gap, and so
+does `evaluateAvailability` given a `zone` and a floating or date layer
+(a layer of instants needs none). The defaults that do choose:
+`compileRecurrence` defaults `policy` to `rfc5545`, for a zoned rule and
+a floating one alike, so a zoned rule that must read folds as PostgreSQL
+does compiles with `policy: 'later'`; `jobs.schedule`'s `policy` defaults
+to the rule's own (`@jarenjs/db` JOBS-FORMAT §11), which binds a date or
+floating series under `rfc5545` unless it is given, and a utc or zoned
+series refuses any policy but its rule's (`JD0013`) — so the rule carries
+the override; `todayIn(zone, { provider })` without a `runtime` reads
+the platform clock, not the database's (PostgreSQL's `now()` is the
+transaction's start), so pass a runtime whose `now()` is the instant the
+answer must agree with; and the iCal writer's DTSTAMP is the runtime's
+`now()` floored to the second, the platform clock when no runtime is
+given (`@jarenjs/josl` ICAL.md).
+
 ## `resolveLocal(parts, zone, { provider, policy })`
 
 Returns `{ instant, resolution }`, where `resolution` is

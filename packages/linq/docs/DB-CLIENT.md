@@ -1007,6 +1007,134 @@ federation (`federate()`, [QUERY-PEN §12.1](QUERY-PEN.md#121-the-federation-bou
 gives several sources one scope, so a join between them is one document
 there, run in fetch order; outside it the join is `JL0005`.
 
+**Joins that run in the database, and the ones that don't.** Whether a
+join is one statement is decided by the shape of the chain, and
+`explain()` says which before anything runs (the example below, and the
+JSON after it, which is what it exports):
+
+- **Join the entity sets first, filter after.** `A.join(fromAsync(P), …)`
+  followed by `where` is one `JOIN` statement (`mode: 'native'`); the
+  inner side is a sequence over the set, and the handle itself there is
+  `JL0005` (`join takes another async sequence over a provider (with no
+  mapAsync) as its inner side`). A `where` on either side *before* the
+  join makes that side a chain rather than an entity set, and the join
+  runs in the engine over both reads (`mode: 'set'`, `streaming:
+  'buffered'`), with the reason `bindings must each range over one
+  declared entity array ($.Entity[*])` — the same rows, fetched whole.
+- **An `or` whose every leaf belongs to one side is native.** An `or`
+  with a leaf that compares the two sides with each other keeps the
+  whole `$where` in the engine, named `a conjunct must belong to one
+  binding (or be the single join equality, or a comparison between
+  mapped columns of one comparison family that the engine and the
+  database decide alike)`; the same comparison as a conjunct of its own
+  beside the join equality is native, as that reason says.
+- **`strict: true` requires the statement.** `execute(doc, { strict:
+  true })` answers `JD0010` instead of running a plan in the engine —
+  and a strict JQL document has two root limits of its own: a `$for`
+  that ranges over an entity and a collection together, and a top-level
+  `$exists`, are `JD0010`, while a strict `$count` over the same binding
+  answers.
+- **Two collections join only inside a federation.** A collection is not
+  an entity set: `assignments.join(fromAsync(permissions), …)` is
+  `JL0005` as it is built (`join's other side must derive from the same
+  source, or from two providers sharing one scope`).
+  `federate({ sources, maxRows, maxBytes })` gives them one scope, and
+  the join runs there in fetch order under those bounds (a `maxRows`
+  that is not a positive integer is `JL0005`).
+
+A navigation hop's existence or emptiness test is a correlated subselect
+rather than a join: it is native when an equality correlates it, an
+inequality beside the equality included, under the conditions
+MODEL-FORMAT §10.1 lists (comparisons within one comparison family, over
+members that admit no `null`; pinned by
+`test/db/correlated-hops.test.js`); correlated by inequalities alone it
+stays in the engine (`entity.hopShape`). `test/linq/db-client-joins.test.js`
+runs the example and holds its export to the JSON after it.
+
+```js
+import { fromAsync, federate } from '@jarenjs/linq';
+import { open } from '@jarenjs/linq/db';
+import * as m from '@jarenjs/linq/model';
+import { nodeDriver } from '@jarenjs/db/node';
+
+const Assignment = m.object({ id: m.string().key(), employee: m.string(), position: m.string(), level: m.integer() });
+const Permission = m.object({ id: m.string().key(), position: m.string(), permission: m.string(), minLevel: m.integer() });
+const model = m.defineModel({
+  entities: { Assignment, Permission },
+  collections: {
+    assignments: m.collection(m.object({ id: m.string(), employee: m.string(), position: m.string() }), { key: (row) => row.id }),
+    permissions: m.collection(m.object({ id: m.string(), position: m.string(), permission: m.string() }), { key: (row) => row.id }),
+  },
+});
+const client = await open(model, { driver: nodeDriver(), path: ':memory:' });
+const A = client.entities.Assignment, P = client.entities.Permission;
+const assignments = client.collections.assignments, permissions = client.collections.permissions;
+await A.create({ id: 'a1', employee: 'ann', position: 'clerk', level: 2 });
+await A.create({ id: 'a2', employee: 'bob', position: 'clerk', level: 1 });
+await P.create({ id: 'p1', position: 'clerk', permission: 'orders.read', minLevel: 1 });
+await P.create({ id: 'p2', position: 'clerk', permission: 'orders.approve', minLevel: 2 });
+await assignments.insert({ id: 'a1', employee: 'ann', position: 'clerk' });
+await permissions.insert({ id: 'p2', position: 'clerk', permission: 'orders.approve' });
+
+const pair = (a, p) => ({ employee: a.employee, permission: p.permission, level: a.level, minLevel: p.minLevel });
+const joined = () => A.join(fromAsync(P), (a) => a.position, (p) => p.position, pair);
+// what explain() says, and what the chain answers
+const plan = async (chain) => { const { mode, streaming, sql, reasons } = await A.explain(chain);
+  return { mode, streaming, join: sql !== null && sql.includes(' JOIN '), reasons: reasons.map((r) => r.reason) }; };
+const refusal = (build) => { try { build(); return null; } catch (e) { return { code: e.code, reason: e.reason }; } };
+const strict = async (doc) => { try { return await A.execute(doc, { strict: true }); } catch (e) { return e.code; } };
+
+// 1. the entity sets joined first, filtered after; then each side filtered before the join
+const joinFirst = joined().where((r) => r.employee.eq('ann')).where((r) => r.permission.eq('orders.approve'));
+const innerFirst = A.join(P.where((p) => p.permission.eq('orders.approve')), (a) => a.position, (p) => p.position, pair)
+  .where((r) => r.employee.eq('ann'));
+const outerFirst = A.where((a) => a.employee.eq('ann')).join(fromAsync(P), (a) => a.position, (p) => p.position, pair)
+  .where((r) => r.permission.eq('orders.approve'));
+// 2. an or over one side's leaves, an or with a leaf comparing the sides, that comparison alone
+const eitherSide = joined().where((r) => r.employee.eq('bob').or(r.permission.eq('orders.approve')));
+const acrossOr = joined().where((r) => r.level.ge(r.minLevel).or(r.employee.eq('bob')));
+const across = joined().where((r) => r.level.ge(r.minLevel));
+// 3. strict JQL: a plan in the engine, an entity root beside a collection root, a top-level $exists
+const all = { $for: { a: '$.Assignment[*]' }, $return: '$a.id' };
+const mixed = { $count: { $for: { a: '$.Assignment[*]', p: '$.permissions[*]' }, $where: { $eq: ['$a.position', '$p.position'] }, $return: '$a.id' } };
+const acrossDoc = { $count: { $for: { a: '$.Assignment[*]', p: '$.Permission[*]' },
+  $where: { $and: [{ $eq: ['$a.position', '$p.position'] }, { $or: [{ $ge: ['$a.level', '$p.minLevel'] }, { $eq: ['$a.employee', 'bob'] }] }] },
+  $return: '$a.id' } };
+// 4. two collections: refused as a join, answered inside a federation
+const fed = federate({ sources: { a: assignments, p: permissions }, maxRows: 1000, maxBytes: 1 << 20 });
+
+export const joins = {
+  joinFirst: { plan: await plan(joinFirst), rows: await joinFirst.toArray() },
+  handleAsInner: refusal(() => A.join(P, (a) => a.position, (p) => p.position, pair)),
+  innerFirst: { plan: await plan(innerFirst), rows: await innerFirst.toArray() },
+  outerFirst: { plan: await plan(outerFirst), rows: await outerFirst.toArray() },
+  eitherSide: (await plan(eitherSide)).mode,
+  acrossOr: { plan: await plan(acrossOr), count: await acrossOr.count() },
+  across: { plan: await plan(across), count: await across.count() },
+  strict: { acrossOr: await strict(acrossDoc), mixedRoots: await strict(mixed), topLevelExists: await strict({ $exists: all }), count: await strict({ $count: all }) },
+  collections: [refusal(() => assignments.join(fromAsync(permissions), (a) => a.position, (p) => p.position, pair)),
+    refusal(() => federate({ sources: { a: assignments, p: permissions }, maxRows: 0, maxBytes: 1 << 20 }))],
+  federated: await fromAsync(fed.source('a')).join(fromAsync(fed.source('p')), (a) => a.position, (p) => p.position,
+    (a, p) => ({ employee: a.employee, permission: p.permission })).toArray(),
+};
+await client.close();
+```
+
+```json
+{
+  "joinFirst": {"plan": {"mode": "native", "streaming": "row", "join": true, "reasons": []}, "rows": [{"employee": "ann", "permission": "orders.approve", "level": 2, "minLevel": 2}]},
+  "handleAsInner": {"code": "JL0005", "reason": "join takes another async sequence over a provider (with no mapAsync) as its inner side"},
+  "innerFirst": {"plan": {"mode": "set", "streaming": "buffered", "join": false, "reasons": ["bindings must each range over one declared entity array ($.Entity[*])"]}, "rows": [{"employee": "ann", "permission": "orders.approve", "level": 2, "minLevel": 2}]},
+  "outerFirst": {"plan": {"mode": "set", "streaming": "buffered", "join": false, "reasons": ["bindings must each range over one declared entity array ($.Entity[*])"]}, "rows": [{"employee": "ann", "permission": "orders.approve", "level": 2, "minLevel": 2}]},
+  "eitherSide": "native",
+  "acrossOr": {"plan": {"mode": "set", "streaming": "buffered", "join": false, "reasons": ["a conjunct must belong to one binding (or be the single join equality, or a comparison between mapped columns of one comparison family that the engine and the database decide alike)"]}, "count": 4},
+  "across": {"plan": {"mode": "native", "streaming": "row", "join": true, "reasons": []}, "count": 3},
+  "strict": {"acrossOr": "JD0010", "mixedRoots": "JD0010", "topLevelExists": "JD0010", "count": 2},
+  "collections": [{"code": "JL0005", "reason": "join's other side must derive from the same source, or from two providers sharing one scope (one store's entity sets) — a query document reads one input"}, {"code": "JL0005", "reason": "federate() needs a positive integer maxRows — a federated fetch holds rows in memory, and a bound is what makes that finite"}],
+  "federated": [{"employee": "ann", "permission": "orders.approve"}]
+}
+```
+
 **A join row carries its two keys and nothing else.** The join table is a
 root (§2.8), so a question about the pairs — filtered, counted, joined to
 either entity — is one document; but the model declares no column on a

@@ -338,7 +338,12 @@ any on the path (`JC2050`).
 Unconstrained schemas and any other `anyOf`/`oneOf` union do not imply a
 codec — declare a top-level `type` to choose one. Malformed JSON or multiple occurrences of a JSON member are `JC2012`;
 a well-formed value of the wrong type is `JC2006`. Undeclared query keys
-are ignored. Scalar query members remain last-wins.
+are ignored. Scalar query members remain last-wins. A host that guards the
+raw request target — a signature over the URL, parameter-smuggling
+hardening — closes the query instead: `serveHttp`'s `closedQuery` option
+(§7.6) answers an undeclared key, and a member repeated with another
+value, `JC2006`, where the open query would ignore `?admin=1` the signer
+covered and read `?id=1&id=2` as `2`.
 
 The compiled operation carries
 `input.transport = { normalize, members: { path, query, header, repeated }, queryJson, schemas, required }`
@@ -790,7 +795,10 @@ is `JC2008`.
    (`URLSearchParams` semantics — `+` is a space; `queryJson` members
    decode one JSON value, scalar members are last-wins; an **undeclared
    query key is ignored, never merged**; malformed encoding/JSON or a
-   repeated JSON member is `JC2012`), declared header members (by their
+   repeated JSON member is `JC2012`; on a closed query — `closedQuery`,
+   §7.6 — an undeclared key, or a member repeated with another value, is
+   then `JC2006`),
+   declared header members (by their
    lowercased name; §7.4), then the scalar transport normalizer (JSON
    members excluded), then the body,
    **never coerced**: `http.body` names a member → the parsed value is
@@ -958,7 +966,7 @@ below; `HTTP_ERRORS` (`@jarenjs/contract/http`) is the same table as data,
 | `JC2003` | 413 | `contract/body-too-large` | no | `content-length` or read length > `policy.limits.maxBodyBytes` |
 | `JC2004` | 415 | `contract/unsupported-media` | no | a body-carrying operation with a non-empty body whose `content-type` is not the declared media (parameters ignored, `+json` accepted for JSON), or whose `content-encoding` names a coding other than `identity` — the binding decodes none |
 | `JC2005` | 400 | `contract/malformed-json` | no | body present and not valid JSON, or not valid UTF-8 |
-| `JC2006` | 400 | `contract/invalid-input` | no | the reassembled input fails the operation's input validator; also a non-object body under `body:"*"` (`path: ""`), and a body the canonicalizer refuses (a lone surrogate; keyword `canonical`) |
+| `JC2006` | 400 | `contract/invalid-input` | no | the reassembled input fails the operation's input validator; also a non-object body under `body:"*"` (`path: ""`), a body the canonicalizer refuses (a lone surrogate; keyword `canonical`), and on a closed query (`closedQuery`, §7.6) a key no query member declares (keyword `undeclared`) or a member repeated with another value (keyword `repeated`), `path` the pointer of the key's name |
 | `JC2007` | 400 | `contract/idempotency-key-required` | no | `policy.idempotency: "required"` and no (or an empty) `idempotency-key` header |
 | `JC2008` | 500 | `contract/handler-failed` | no | the handler threw a non-declared error, rejected, answered an undeclared code or a hostile value, or the binding itself faulted; `onError(err, ctx)` sees the cause |
 | `JC2009` | 409 | `contract/idempotency-conflict` | see §8 | the ledger says `in-progress` (retryable, `retry-after: 1`) or `mismatch` (not retryable, `details: [{ "kind": "mismatch" }]`) |
@@ -1107,7 +1115,7 @@ is a closed set: an unknown option (`precondition` for `preconditions`,
 which used to serve a stale `If-Match` with 200) is `JC1001`, naming the
 nearest one. `trace` (default the runtime record's `uuid`,
 `crypto.randomUUID` with no record) generates the server trace; `scope(ctx, input)` derives the idempotency scope (§8);
-`partial` allows missing handlers; `identifyBody` hands `identify` the exact request bytes (§7.7); `head`, `partial` and `identifyBody` must be booleans when given. HTTP options are plain or null-prototype records. `validateOutput` is `"always" |
+`partial` allows missing handlers; `identifyBody` hands `identify` the exact request bytes (§7.7); `head`, `partial` and `identifyBody` must be booleans when given. `closedQuery` closes the query (§4.1): `true` for every operation, or a list of operation ids for those (each an operation of the contract, named once; `JC1001` otherwise); default `false`, the open query. A closed operation answers `JC2006` — after the request is identified, and after a malformed query or a repeated JSON member has answered `JC2012` — for every query key no query member declares (a key naming a path, header or body member included; an empty pair such as a trailing `&` is no key) and for every member the query carries again with a different decoded value (a repeat of the same value reads alike whichever occurrence a reader takes, and passes: `?id=1&id=%31` is `{ id: "1" }`; `?limit=1&limit=01` is refused, two spellings), each name listed once in query order (`details` per `policy.errors.details`). The client writes each declared query member at most once and no other key, so every call and subscription it sends reads the same on a closed server. HTTP options are plain or null-prototype records. `validateOutput` is `"always" |
 "never"`; `preconditions` maps operation ids to pre-handler tag
 resolvers (§7.5); `errorBody(wire, ctx)` and `onError(err, ctx)` are the
 two host hooks (`ctx` is `null` before an operation is matched);
@@ -1201,6 +1209,98 @@ A signature mismatch is the operation's own answer: declare it
 fault (`JC2008`), as is a code the operation does not declare.
 `hmacSha256Matches` (§21) compares a presented signature in constant
 time.
+
+**A signed request, worked.** The pieces above together, as one server
+that verifies a caller's HMAC: `identifyBody` hands `identify` the exact
+bytes — a leading UTF-8 BOM included, which the JSON parse after it
+strips — and `meta.url` the target with its query; `closedQuery` (§7.6)
+refuses a query key the signature covered but no member declares, and a
+member sent again with another value, where the open query would
+ignore the one and read the last of the other; a header sent twice reaches `identify` as an
+array (the `node` adapter's `headersDistinct`, §9), which is never a
+signature. The `dispatch` requests below spell the headers as that
+adapter hands them, and the JSON after the example is what it exports
+(a `jsonc` fence: an answer, not a contract document).
+
+```js
+import { createHash, createHmac } from 'node:crypto';
+import { compileContract } from '@jarenjs/contract';
+import { serveHttp } from '@jarenjs/contract/http';
+import { hmacSha256Matches } from '@jarenjs/contract/auth-node';
+
+const contract = compileContract({
+  $contract: '0.1', id: 'accounts', version: '1',
+  operations: {
+    'entry.post': {
+      kind: 'command',
+      input: {
+        type: 'object', required: ['account', 'amount'],
+        properties: { account: { type: 'string' }, dry: { type: 'boolean' }, amount: { type: 'integer' } },
+      },
+      output: { type: 'object', required: ['by', 'amount'], properties: { by: { type: 'string' }, amount: { type: 'integer' }, dry: { type: 'boolean' } } },
+      errors: { unauthorized: { status: 401 } },
+      http: { method: 'POST', path: '/accounts/{account}/entries', in: { dry: 'query' } },
+    },
+  },
+});
+
+const keys = { shop: Buffer.from('a shared secret of 32 bytes or more') };   // from the host's secret store
+// what both servers sign: method, target (query included), timestamp, the SHA-256 of the exact body bytes
+const target = (url) => { const u = new URL(url, 'http://host'); return u.pathname + u.search; };
+const parts = (method, url, stamp, bytes) => [method, '\n', target(url), '\n', stamp, '\n', createHash('sha256').update(bytes).digest('hex')];
+
+const seen = [];   // what identify was handed, per request
+const server = serveHttp(contract, {
+  'entry.post': (input, ctx) => ({ by: ctx.host.caller, ...input }),
+}, {
+  identifyBody: true,   // meta.body: the exact request bytes, read before identify
+  closedQuery: true,    // a key the signer covered but no member declares is refused, not ignored
+  identify: (meta) => {
+    seen.push({ url: meta.url, bom: meta.body[0] === 0xef && meta.body[1] === 0xbb && meta.body[2] === 0xbf });
+    const caller = meta.headers['x-caller'], stamp = meta.headers['x-timestamp'], signature = meta.headers['x-signature'];
+    // a header sent twice arrives as an array (the node adapter's headersDistinct): never a signature
+    if (typeof caller !== 'string' || !Object.hasOwn(keys, caller) || typeof stamp !== 'string' || typeof signature !== 'string'
+      || !hmacSha256Matches(keys[caller], parts(meta.method, meta.url, stamp, meta.body), Buffer.from(signature, 'hex'))) {
+      return meta.fail('unauthorized');
+    }
+    return { host: { caller } };
+  },
+});
+
+// the other server signs the bytes it sends: a UTF-8 BOM, then the JSON
+const send = (url, headers = {}) => {
+  const body = new Uint8Array([0xef, 0xbb, 0xbf, ...Buffer.from('{"amount":250}')]);
+  const stamp = '1767225600000';
+  const signature = createHmac('sha256', keys.shop).update(parts('POST', url, stamp, body).join('')).digest('hex');
+  return server.dispatch({
+    method: 'POST', url, body,
+    headers: { 'content-type': 'application/json', 'x-caller': 'shop', 'x-timestamp': stamp, 'x-signature': signature, ...headers },
+  });
+};
+
+// what each request answers: the status, then the body or the wire error's code and details
+const answer = async (response) => {
+  const body = JSON.parse(response.body);
+  return response.status === 200 ? { status: 200, body } : { status: response.status, code: body.code, details: body.details };
+};
+export const signedRequests = {
+  posted: await answer(await send('/accounts/acc-1/entries?dry=true')),
+  identified: seen[0],   // the target with its query, and the BOM still in the signed bytes
+  smuggled: await answer(await send('/accounts/acc-1/entries?dry=true&admin=1')),   // a valid signature over an undeclared key
+  doubled: await answer(await send('/accounts/acc-1/entries?dry=false&dry=true')),   // one member, two values
+  twice: await answer(await send('/accounts/acc-1/entries', { 'x-signature': ['00', '11'] })),   // two signature lines
+};
+```
+
+```jsonc
+{
+  "posted": { "status": 200, "body": { "by": "shop", "account": "acc-1", "dry": true, "amount": 250 } },
+  "identified": { "url": "/accounts/acc-1/entries?dry=true", "bom": true },
+  "smuggled": { "status": 400, "code": "JC2006", "details": [{ "path": "/admin", "keyword": "undeclared" }] },
+  "doubled": { "status": 400, "code": "JC2006", "details": [{ "path": "/dry", "keyword": "repeated" }] },
+  "twice": { "status": 401, "code": "unauthorized" }
+}
+```
 
 **Order.** (1) the request shape, the route and the trace — and, under
 `identifyBody`, the body limit and the read; (2)

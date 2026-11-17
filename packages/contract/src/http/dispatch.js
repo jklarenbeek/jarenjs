@@ -41,7 +41,7 @@ import { timerMs } from '../timer.js';
 import {
   HTTP_ERRORS, JSON_CONTENT_TYPE, JSON_MEDIA, isFieldValue,
   renderMessage, declaredMessage, headerValue, contentLength, mediaMatches, exceedsBytes,
-  entityTagMatches, formatEntityTag, decodeQuery, projectValidationDetails, errorResponse, verdict,
+  entityTagMatches, formatEntityTag, decodeQuery, closedQueryViolations, projectValidationDetails, errorResponse, verdict,
 } from './wire.js';
 
 /**
@@ -141,6 +141,7 @@ import {
  * @property {readonly string[]} pathMembers
  * @property {ReadonlySet<string>} queryMembers
  * @property {ReadonlySet<string>} queryJson - JSON-encoded query members
+ * @property {boolean} closedQuery - refuse an undeclared query key, or a member repeated with another value (`JC2006`)
  * @property {readonly string[]} headerMembers - member names
  * @property {readonly string[]} headerNames - the lowercase header of each
  * @property {readonly boolean[]} headerArray - array-typed, per header member
@@ -798,6 +799,14 @@ function afterIdentity(server, request, route, trace, hit, isHead, method, path,
   }
   if (!decodeQuery(query, route.queryMembers, input, route.queryJson)) {
     return refuse(server, 'JC2012', trace, {}, undefined, null, null);
+  }
+  if (route.closedQuery) {
+    // the closed query: a key no member declares, or a member sent again with another value,
+    // is refused where the open query ignores it or reads the last one
+    const violations = closedQueryViolations(query, route.queryMembers);
+    if (violations.length > 0) {
+      return refuse(server, 'JC2006', trace, { op: op.id }, projectValidationDetails(route.details, violations), null, null);
+    }
   }
   /** @type {Record<string, string>} */
   let ctxHeaders = NO_HEADERS;

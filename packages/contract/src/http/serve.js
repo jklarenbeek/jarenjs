@@ -61,6 +61,11 @@ export { HTTP_ERRORS, WELL_KNOWN_PATH, BodyLimitError, BodyEncodingError, readBo
  * @property {boolean} [head] - answer HEAD for GET operations by running the handler and dropping the body; default true
  * @property {'always' | 'never'} [validateOutput] - `'never'` is a declared downgrade, reported in `capabilities.validatedOutput`
  * @property {Record<string, import('./dispatch.js').TagResolver>} [preconditions]
+ * @property {boolean | readonly string[]} [closedQuery] - refuse (`JC2006`) a
+ *   query key no member declares and a member the query repeats with another
+ *   value, where the default ignores the one and reads the last of the other
+ *   (a repeat of the same value passes): `true` for every
+ *   operation, a list of operation ids for those; default `false`
  *   - operation id → the CURRENT entity-tag resolver, making `If-Match`/
  *   `If-None-Match` a PRE-handler decision for that operation: a stale
  *   precondition refuses `JC2014` with zero handler invocations, a
@@ -141,7 +146,7 @@ export { HTTP_ERRORS, WELL_KNOWN_PATH, BodyLimitError, BodyEncodingError, readBo
 
 /** Every option `serveHttp` reads — a CLOSED set (`JC1001`, nearest name). */
 const HTTP_OPTIONS = Object.freeze(['partial', 'ledger', 'preconditions', 'validateOutput', 'head', 'wellKnown',
-  'trace', 'scope', 'errorBody', 'onError', 'now', 'catalog', 'runtime', 'streamLimits', 'identify', 'acquire', 'identifyBody']);
+  'trace', 'scope', 'errorBody', 'onError', 'now', 'catalog', 'runtime', 'streamLimits', 'identify', 'acquire', 'identifyBody', 'closedQuery']);
 
 /**
  * @param {string} code
@@ -162,13 +167,38 @@ function headerNameOf(member) {
 }
 
 /**
+ * The `closedQuery` option: `false` (absent), `true` for every operation,
+ * or the set of the operation ids a list names — each an operation of the
+ * contract, named once (`JC1001` otherwise).
+ * @param {Contract} contract
+ * @param {unknown} value
+ * @returns {boolean | ReadonlySet<string>}
+ */
+function admitClosedQuery(contract, value) {
+  if (value === undefined || value === false) return false;
+  if (value === true) return true;
+  if (!Array.isArray(value)) throw host('JC1001', 'options.closedQuery must be a boolean or a list of operation ids');
+  const ids = new Set();
+  for (let i = 0; i < value.length; i++) {
+    const id = value[i];
+    if (typeof id !== 'string' || !Object.hasOwn(contract.operations, id)) {
+      throw host('JC1001', `closedQuery names ${JSON.stringify(id)}, which is not an operation of the contract`);
+    }
+    if (ids.has(id)) throw host('JC1001', `closedQuery names '${id}' twice`);
+    ids.add(id);
+  }
+  return ids;
+}
+
+/**
  * Prepare one operation for the pipeline.
  * @param {CompiledOperation} op
  * @param {Handler | null} handler
  * @param {import('./dispatch.js').TagResolver | null} tag
+ * @param {boolean} closedQuery - refuse an undeclared query key, or a member repeated with another value
  * @returns {Route}
  */
-function prepare(op, handler, tag) {
+function prepare(op, handler, tag, closedQuery) {
   const http = op.http;
   const input = op.input;
   const transport = input === null ? null : input.transport;
@@ -216,6 +246,7 @@ function prepare(op, handler, tag) {
     pathMembers,
     queryMembers,
     queryJson: new Set(transport === null ? [] : transport.queryJson),
+    closedQuery,
     headerMembers,
     headerNames,
     headerArray,
@@ -287,6 +318,7 @@ export function serveHttp(contract, handlers, options = {}) {
       }
     }
   }
+  const closedQuery = admitClosedQuery(contract, options.closedQuery);
   /** @type {Map<string, Route>} */
   const routes = new Map();
   for (let i = 0; i < contract.ids.length; i++) {
@@ -299,7 +331,8 @@ export function serveHttp(contract, handlers, options = {}) {
     if (op.policy.idempotency !== 'none' && ledger === null) {
       throw host('JC1003', `operation '${id}' declares policy.idempotency '${op.policy.idempotency}' and no ledger was given — this binding cannot carry idempotency without one`);
     }
-    routes.set(id, prepare(op, handler, preconditions !== null && Object.hasOwn(preconditions, id) ? preconditions[id] : null));
+    routes.set(id, prepare(op, handler, preconditions !== null && Object.hasOwn(preconditions, id) ? preconditions[id] : null,
+      closedQuery === true || (closedQuery !== false && closedQuery.has(id))));
   }
 
   const validateOutput = admitServeOptions(options, ['trace', 'scope', 'errorBody', 'onError', 'now'], (reason) => host('JC1001', reason));

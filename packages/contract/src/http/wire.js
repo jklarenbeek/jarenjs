@@ -406,6 +406,43 @@ export function decodeQuery(query, declared, out, json) {
   return true;
 }
 
+/**
+ * What a closed query refuses (`serveHttp`'s `closedQuery`): every key
+ * no query member declares, and every declared member the query carries
+ * again with a different value (a repeat of the same decoded value reads
+ * alike whichever occurrence a reader takes, and passes), in query
+ * order, each name once — as validation records (`instancePath` the
+ * RFC 6901 pointer of the name, `keyword` `undeclared` or `repeated`)
+ * for the `JC2006` answer. Read only after `decodeQuery` accepted the
+ * query, so a malformed query and a repeated JSON member stay `JC2012`.
+ * @param {string} query - the part after `?`, possibly empty
+ * @param {ReadonlySet<string>} declared - the query member names
+ * @returns {{ instancePath: string, keyword: 'undeclared' | 'repeated' }[]} empty when nothing is refused
+ */
+export function closedQueryViolations(query, declared) {
+  /** @type {{ instancePath: string, keyword: 'undeclared' | 'repeated' }[]} */
+  const out = [];
+  if (query.length === 0) return out;
+  /** @type {Map<string, string>} the first value of each declared member */
+  const first = new Map();
+  const named = new Set();
+  for (const [name, value] of new URLSearchParams(query)) {
+    const undeclared = !declared.has(name);
+    if (!undeclared) {
+      const was = first.get(name);
+      if (was === undefined) {
+        first.set(name, value);
+        continue;
+      }
+      if (was === value) continue;
+    }
+    if (named.has(name)) continue;
+    named.add(name);
+    out.push({ instancePath: '/' + name.replaceAll('~', '~0').replaceAll('/', '~1'), keyword: undeclared ? 'undeclared' : 'repeated' });
+  }
+  return out;
+}
+
 //#endregion
 
 //#region validation
