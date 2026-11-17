@@ -352,7 +352,7 @@ export function postgresChecks(rows) {
   return rows.map((row) => ({ name: String(row.name), sql: String(row.expression ?? ''),
     ...(row.validated === undefined || row.validated === null ? {} : { validated: Number(row.validated) === 1 }),
     conforming: readsConforming(row),
-    ...guardOf(sqlTokens(String(row.expression ?? ''))),
+    ...(guardOf(sqlTokens(String(row.expression ?? ''))) ?? keyGuardOf(sqlTokens(String(row.expression ?? '')))),
     ...(row.unsafe_collation ? null : enumOf(sqlTokens(String(row.expression ?? '')), postgresCast)) }));
 }
 
@@ -385,11 +385,41 @@ function guardOf(tokens) {
   return { column: column.value, guard: 'not-nan', ...(type[0] === 'NUMERIC' ? { notNaN: true } : {}) };
 }
 
+/** The key CHECK a store gives a PostgreSQL `numeric` column holding a key
+ * (`dialect.keyCheck`), as 16, 17 and 18 deparse it, its column spelled `k`. */
+const KEY_CHECK = /* @__PURE__ */ sqlTokens('CASE WHEN ((abs(k) >= (\'9007199254740992\'::bigint)::numeric) OR (k = trunc(k))) THEN true '
+  + 'WHEN (abs(k) < ((5)::numeric * power((10)::numeric, (\'-324\'::integer)::numeric))) THEN false '
+  + 'ELSE (k = (((k)::double precision)::text)::numeric) END');
+
+/** The guard the store's own key CHECK ({@link KEY_CHECK}) holds its column
+ * to: `shortest-digits`, only digits whose exact comparison is the double's
+ * (also `keyCheck: true`, the store's own spelling, which `introspect()`
+ * reads as declaring nothing beyond the column's type). `null` for any
+ * other text, the same CHECK over two columns among it.
+ * @param {{ kind: string, value: string }[]} tokens
+ * @returns {{ column: string, guard: 'shortest-digits', keyCheck: true } | null} */
+function keyGuardOf(tokens) {
+  if (tokens.length !== KEY_CHECK.length) return null;
+  /** @type {string | undefined} */
+  let column;
+  for (let at = 0; at < tokens.length; at++) {
+    const want = KEY_CHECK[at], token = tokens[at];
+    if (want.kind === 'word' && want.value === 'k') {
+      if (token.kind !== 'identifier' && token.kind !== 'word') return null;
+      if (column !== undefined && token.value !== column) return null;
+      column = token.value;
+    }
+    else if (token.kind !== want.kind || token.value !== want.value) return null;
+  }
+  return column === undefined ? null : { column, guard: 'shortest-digits', keyCheck: true };
+}
+
 /**
  * The guards the recognised CHECKs of one table hold each column to: the
  * one reading every reader of a column's guards shares. `not-nan` where a
  * CHECK refuses a `'NaN'` ({@link guardOf}) or admits a complete enum of
- * finite numbers alone (`enumOf`), which admits no NaN. A CHECK added `NOT
+ * finite numbers alone (`enumOf`), which admits no NaN; `shortest-digits`
+ * where it is the store's key CHECK ({@link keyGuardOf}). A CHECK added `NOT
  * VALID` holds nothing for the rows already there, and guards nothing.
  * Whether a table holds the store's OWN CHECK is another question, which
  * `notNaN` answers.

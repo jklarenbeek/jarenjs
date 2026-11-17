@@ -919,6 +919,10 @@ function deriveEntity(dialect, table, report, edges, expressions) {
     // the CHECK a store gives a number column on an engine whose number type holds
     // a NaN: the column's own, which declares nothing beyond its type
     if (check.notNaN === true && check.validated !== false && (property?.type === 'number' || property?.type === 'integer')) continue;
+    // and the one it gives a number column holding a key (its own or a reference's):
+    // the key's, which declares nothing beyond the key
+    if (check.keyCheck === true && check.validated !== false && (property?.type === 'number' || property?.type === 'integer')
+      && (primaryKey.has(check.column) || fkByColumn.has(check.column))) continue;
     const family = property?.type === 'integer' ? 'number'
       : property?.type === 'string' ? 'string' : property?.type;
     if (check.values === undefined || property === undefined

@@ -4216,7 +4216,8 @@ export function entityShape(entity, entityMapping) {
       // database-allocated key takes (`bigserial`) rather than as its storage
       holdsKey: column.key === true || keyHolding.has(column.name),
       // one the open read as held by its storage, which holds a writer's digits
-      ...(column.keyDigits === true ? { keyDigits: true } : {}),
+      // (all of them, or under the key's CHECK those at or past 2^53)
+      ...(column.keyDigits === undefined ? {} : { keyDigits: column.keyDigits }),
       // a column that holds no NULL: one the catalog declares NOT NULL (read
       // at the open of an adopted table or view), else a key of a table (a
       // join table's two sides among them), which its primary key keeps from NULL
@@ -4229,7 +4230,7 @@ export function entityShape(entity, entityMapping) {
     const fkCanonical = canonicalOf([{ name: fk.column }]);
     if (!flavors.has(fkCanonical))
       flavors.set(fkCanonical, { column: fk.column, flavor: 'entity-column', storage: fk.referencesType, foreignKey: true, holdsKey: true,
-        ...(fk.keyDigits === true ? { keyDigits: true } : {}) });
+        ...(fk.keyDigits === undefined ? {} : { keyDigits: fk.keyDigits }) });
   }
   return {
     collection: entity.name,
@@ -4747,7 +4748,7 @@ export function planEntityPredicate(node, slot, shape) {
       flavor: flavored.flavor, storage: flavored.storage, format: flavored.format,
       codec: flavored.codec, codecColumn: flavored.codecColumn, nullPolicy: flavored.nullPolicy,
       ...(flavored.holdsKey === true ? { holdsKey: true } : {}),
-      ...(flavored.keyDigits === true ? { keyDigits: true } : {}) };
+      ...(flavored.keyDigits === undefined ? {} : { keyDigits: flavored.keyDigits }) };
     if (flavored.codec === 'integer' && pred.p === 'cmp' && typeof pred.operand.lit === 'number') {
       // an integer column takes no fraction, infinity or 64-bit overflow as a
       // value of its own type (PostgreSQL refuses the statement), and holds

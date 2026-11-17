@@ -201,8 +201,8 @@ describe('a column holding a key, PostgreSQL', { skip: skipFor('postgres') }, ()
         'A ORDER BY "r"."kId" ASC NULLS FIRST, "r"."rid" LIMIT 3',
         'K ORDER BY "r"."id" ASC LIMIT 4',
         'K WHERE ("r"."id" > $1) ORDER BY "r"."id" ASC LIMIT 4',
-        // the key the caller writes is a `numeric`, which holds a writer's digits: a literal is its double's interval
-        'K WHERE ("r"."id" IS NOT NULL AND "r"."id" >= $1 AND "r"."id" <= $2) ORDER BY "r"."rid"']);
+        // the key the caller writes is a `numeric` its CHECK holds to its double's digits: a literal compares exactly
+        'K WHERE ("r"."id" IS NOT NULL AND "r"."id" = $1) ORDER BY "r"."rid"']);
       const include = seen[3];
       assert.match(include.text, /WHERE "r_as"\."kId" = "r"\."id" ORDER BY "r_as"\."kId" ASC NULLS FIRST, "r_as"\."aid" ASC, "r_as"\."rid"/);
       const client = await pool.connect();
@@ -223,7 +223,7 @@ describe('a column holding a key, PostgreSQL', { skip: skipFor('postgres') }, ()
 });
 
 describe('a number key and a reference to one, PostgreSQL', { skip: skipFor('postgres') }, () => {
-  it('order as the doubles they hold, as before', async () => {
+  it('order as the doubles they hold in a table an earlier release created, as before', async () => {
     const model = { $model: '0.1', entities: {
       N: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'number', 'x-entity': { key: true } }, tag: { type: 'string' } } } },
       R: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', 'x-entity': { key: true } }, nId: { type: 'number' },
@@ -233,6 +233,8 @@ describe('a number key and a reference to one, PostgreSQL', { skip: skipFor('pos
       await store.entity('N').create({ id: 1, tag: 'x' });
       await store.entity('N').create({ id: 2, tag: 'y' });
       await store.entity('R').create({ id: 'r', nId: 1 });
+      // a table without the key's CHECK, as an earlier release created it
+      await pool.query(`ALTER TABLE "${schema}"."N" DROP CONSTRAINT "N_id_check1"; ALTER TABLE "${schema}"."R" DROP CONSTRAINT "R_nId_check1"`);
       // another writer re-keys 2 by digits below 1 that round to it, and references it
       await pool.query(`SET search_path TO "${schema}"; UPDATE "N" SET id = 0.99999999999999999999 WHERE id = 2;
         INSERT INTO "R" (id, "nId", doc) VALUES ('s', 0.99999999999999999999, '{}'::jsonb); RESET search_path`);

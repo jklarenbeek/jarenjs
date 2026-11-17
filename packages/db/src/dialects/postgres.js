@@ -1037,6 +1037,13 @@ export function postgresDialect(options = undefined) {
     // `numeric` holds 'NaN', which no JSON number is: it orders above every
     // number and equals itself, where the engine refuses the row (`JD2003`)
     numberCheck: (columnSql) => `${columnSql} <> 'NaN'`,
+    // a `numeric` holding a key holds only what a double compares as: an
+    // integer below 2^53 is one exactly, a fraction must be its double's
+    // shortest digits (the text the store writes), a nonzero value below the
+    // least double reads as no double; past 2^53 a writer's digits stay its own
+    keyCheck: (columnSql) => `CASE WHEN abs(${columnSql}) >= 9007199254740992 OR ${columnSql} = trunc(${columnSql}) THEN true `
+      + `WHEN abs(${columnSql}) < 5 * power(10::numeric, -324) THEN false `
+      + `ELSE ${columnSql} = ${columnSql}::float8::text::numeric END`,
     // and so do the float types a physical mapping or another writer's table declares
     holdsNaN: postgresHoldsNaN,
     readGenerated: (rows) => rows.map((row) => ({

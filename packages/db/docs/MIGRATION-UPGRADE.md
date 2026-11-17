@@ -3915,6 +3915,39 @@ know as the engine's. Its rows, jobs and queue answer as before, but:
 Before going back, unschedule what you need to keep elsewhere and drop the
 table and its index; the jobs schedules fired stay ordinary jobs.
 
+## 73. A PostgreSQL key column holds only its double's digits
+
+- On PostgreSQL every `numeric` column of an entity or a join table the store
+  creates that holds a key — a key the caller writes (an `integer` key without
+  `default: 'auto'`, a `number` key), a column referencing one, a join table's
+  side — carries a second CHECK beside its `NaN` CHECK: below 2^53 only the
+  digits whose exact comparison is the double's
+  ([POSTGRESQL](POSTGRESQL.md)). Another writer's `UPDATE … SET pid =
+  6.00000000000000000001` fails `23514`; a statement of the store's own that
+  would write such a key is refused `JD2005` (`class: 'constraint'`).
+- Under the CHECK every comparison of the key is exact and the engine's: a
+  literal, a literal list and an external list compare by equality again (a
+  lookup an equality over the key's index), and a join, a hop, an ordering, a
+  load's include and a page's continuation answer as the engine. A literal or
+  a literal list holding a number at or past 2^53 still compares by its
+  double's interval.
+- The open reads the key columns' CHECKs from the catalog: one statement more
+  per table that has a key column held `numeric`.
+- A table an earlier release created has no such CHECK and answers as before;
+  `planColumnUpgrade` adds it, refused `JD0023` naming the rows another writer
+  spelled otherwise ([MIGRATION-FORMAT §3](MIGRATION-FORMAT.md)), and a model
+  migration that rebuilds such a table first fails `JD0023` naming the CHECK
+  its copy breaks, with nothing changed.
+- SQLite is unchanged, and so is a key the database allocates (`bigserial`,
+  its references `bigint`).
+
+**Downgrade.** The previous release opens, reads, queries, plans, migrates and
+introspects a table this release creates as its own, except that its
+`introspect()` reports each such CHECK on an entity's column as
+`unmapped-constraint` (its derived model is unchanged); a model migration it
+plans that rebuilds the table drops the CHECK, which this release's
+`planColumnUpgrade` adds again.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

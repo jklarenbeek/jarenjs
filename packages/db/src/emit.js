@@ -248,16 +248,25 @@ function decimalMembership(dialect, param, value, list, seek) {
  * and a safe integer's interval holds no integer but itself; such a column
  * keeps the exact comparison, which the server types from the column, and
  * its index order ({@link entityOrderRead} orders every other one by the
- * double), unless the open read it as held by its storage (`keyDigits`: a
- * `numeric`, where another writer may have spelled a key by any digits).
- * Its comparison with a literal or a list is then every other number
- * column's; its order, and its comparison with another column, stay the
- * key's.
+ * double), unless the open read it as held by its storage without the key's
+ * CHECK (`keyDigits`: a `numeric` an earlier release created, where another
+ * writer may have spelled a key by any digits; under the CHECK it holds only
+ * digits whose exact comparison is the double's). Its comparison with a
+ * literal or a list is then every other number column's; its order, and its
+ * comparison with another column, stay the key's. Under the CHECK
+ * (`keyDigits: 'unsafe'`) only a literal or a literal list holding a number
+ * at or past 2^53, whose digits the CHECK leaves the writer's, compares so.
  * @param {any} dialect @param {any} ref - the column's ref
+ * @param {readonly number[]} [numbers] - the literals it is compared with, where the statement holds them
  * @returns {boolean}
  */
-const decimalColumn = (dialect, ref) => dialect.decimalDigits && ref.codec === undefined && (ref.holdsKey !== true || ref.keyDigits === true)
+const decimalColumn = (dialect, ref, numbers) => dialect.decimalDigits && ref.codec === undefined
+  && (ref.holdsKey !== true || ref.keyDigits === true || ref.keyDigits === 'unsafe' && numbers !== undefined && numbers.some(pastSafeDigits))
   && (ref.storage === 'number' || ref.storage === 'integer');
+
+/** A number at or past 2^53 in magnitude, where a key's CHECK leaves a writer's digits its own (`keyDigits: 'unsafe'`).
+ * @param {number} value @returns {boolean} */
+const pastSafeDigits = (value) => Math.abs(value) >= 2 ** 53;
 
 /**
  * The member a comparison reads: as the double the engine holds where the
@@ -1724,7 +1733,8 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       // column holds no string or number
       const kind = pred.ref.storage === 'string' ? 'text' : pred.ref.storage === 'boolean' ? null : 'number';
       if (kind === null) return dialect.booleanLiteral(false);
-      if (decimalColumn(dialect, pred.ref)) {
+      if (decimalColumn(dialect, pred.ref, 'ext' in pred.operand ? undefined
+        : pred.operand.list.filter((/** @type {any} */ value) => typeof value === 'number'))) {
         // a number column holds the decimal digits a writer spelled, as a
         // document member does; it seeks where the caller names its table
         const list = 'ext' in pred.operand ? { external: pred.operand.ext }
@@ -1800,7 +1810,7 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       : pred.ref.storage === 'boolean' ? 'boolean' : 'number';
     if (storageKind === 'boolean' || litKind === 'other' || storageKind !== litKind)
       return pred.op === 'ne' ? present : dialect.booleanLiteral(false);
-    if (decimalColumn(dialect, pred.ref)) {
+    if (decimalColumn(dialect, pred.ref, [lit])) {
       // a number column the store made holds the decimal digits a writer
       // spelled, as a document member does (only a mapped column, which
       // carries a codec, reads a NULL as a present null)

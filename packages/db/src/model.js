@@ -1005,7 +1005,7 @@ export function joinTableRoots(entities, mapping) {
       const referenced = entities.get(side.entity).properties.get(side.referencesKey);
       properties.set(side.column, { name: side.column, type: referenced.type, key: true });
       schemaProperties[side.column] = { type: referenced.type };
-      columns.push({ name: side.column, storage: referenced.type, source: 'column', ...(side.keyDigits === true ? { keyDigits: true } : {}) });
+      columns.push({ name: side.column, storage: referenced.type, source: 'column', ...(side.keyDigits === undefined ? {} : { keyDigits: side.keyDigits }) });
     }
     roots.set(name, {
       name,

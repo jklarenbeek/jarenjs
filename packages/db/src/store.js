@@ -34,7 +34,8 @@ import { chain, toPromise, isThenable, attempt, abortReason, createStatementOwne
 import { createSessionRouter } from './sessions.js';
 import { isPlainOptions, refuseUnknownMembers, refuseUnknownModelMembers, readOptions, readControls, refuseYieldEvery } from './options.js';
 import { canonicalKeyText, namesNoNumber, noNumberKeyReason, numericKeyValue } from './key-text.js';
-import { planCollection, planEntity, planJoinTable, refuseNameCollisions, verifyShape, compileIndexPath, canonicalOf, creationOrder } from './ddl.js';
+import { planCollection, planEntity, planJoinTable, refuseNameCollisions, verifyShape, compileIndexPath, canonicalOf, creationOrder, holdsKeyDigits } from './ddl.js';
+import { guardsByColumn } from './dialects/check-read.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine, refuseNonDocument, refuseOpaqueValues, refuseOpaqueExternals, liveComparedExternals, profileComparedExternals } from './query.js';
 import { sqliteDatabasePath } from './migration-target.js';
@@ -671,10 +672,14 @@ function recordKeyConstraint(plan, row) {
  * Mark on the mapping each key, and each column referencing one, that the
  * open read as held by the store's own number storage on an engine that
  * holds a number by the digits a writer spelled (PostgreSQL's `numeric`)
- * — not as the allocation a database-allocated key takes (`bigint`), which
- * holds an integer and nothing between two: such a column (`keyDigits`)
- * compares as every other number column does, against the interval of
- * decimals that round to a double, and as a double beside another column.
+ * without the key's CHECK (`keyChecked`: a table an earlier release created,
+ * before its upgrade) — not as the allocation a database-allocated key takes
+ * (`bigint`), which holds an integer and nothing between two, nor under the
+ * CHECK, which holds only digits whose exact comparison is the double's below
+ * 2^53: such a column (`keyDigits: true`) compares with a number as every
+ * other number column does, against the interval of decimals that round to
+ * a double, and one under the CHECK (`keyDigits: 'unsafe'`) so with a
+ * literal at or past 2^53 alone.
  * A table the open read no type of (a physical layout's) is left as it is.
  * @param {any} mapping - `explainMapping(model)`, or null
  * @param {Map<string, any>} entityPlans - each table's plan, its `heldTypes` read by the open
@@ -682,21 +687,28 @@ function recordKeyConstraint(plan, row) {
  */
 function markKeyDigits(mapping, entityPlans, dialect) {
   if (mapping === null || !dialect.decimalDigits) return;
-  /** @param {any} plan @param {string} column @param {string} storage */
-  const digits = (plan, column, storage) => (storage === 'integer' || storage === 'number')
-    && plan?.heldTypes?.get(column) === dialect.comparableColumnType(dialect.typeFor(storage, 'generated'));
+  /** The mark of a column holding a key, or `undefined`. @param {any} plan @param {string} column @param {string} storage */
+  const digits = (plan, column, storage) => (!holdsKeyDigits({ storage })
+    || plan?.heldTypes?.get(column) !== dialect.comparableColumnType(dialect.typeFor(storage, 'generated')) ? undefined
+    : plan.keyChecked?.has(column) === true ? 'unsafe' : true);
   for (const [name, entityMapping] of Object.entries(mapping.entities)) {
     const plan = entityPlans.get(name);
     const holding = keyHoldingColumns(entityMapping);
-    for (const column of entityMapping.columns)
-      if (column.codec === undefined && holding.has(column.name) && digits(plan, column.name, column.storage)) column.keyDigits = true;
-    for (const fk of entityMapping.foreignKeys)
-      if (digits(plan, fk.column, fk.referencesType)) fk.keyDigits = true;
+    for (const column of entityMapping.columns) {
+      const mark = holdsKeyDigits(column) && holding.has(column.name) ? digits(plan, column.name, column.storage) : undefined;
+      if (mark !== undefined) column.keyDigits = mark;
+    }
+    for (const fk of entityMapping.foreignKeys) {
+      const mark = digits(plan, fk.column, fk.referencesType);
+      if (mark !== undefined) fk.keyDigits = mark;
+    }
   }
   for (const [name, join] of Object.entries(mapping.joinTables))
-    for (const side of [join.left, join.right])
-      if (digits(entityPlans.get(name), side.column, mapping.entities[side.entity].columns
-        .find((/** @type {any} */ column) => column.name === side.referencesKey)?.storage)) side.keyDigits = true;
+    for (const side of [join.left, join.right]) {
+      const mark = digits(entityPlans.get(name), side.column, mapping.entities[side.entity].columns
+        .find((/** @type {any} */ column) => column.name === side.referencesKey)?.storage);
+      if (mark !== undefined) side.keyDigits = mark;
+    }
 }
 
 /**
@@ -985,12 +997,15 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
               // a table this open created holds each column as the plan declares it
               plan.heldTypes = new Map(plan.expected.columns.map((/** @type {any} */ column) =>
                 [column.name, dialect.comparableColumnType(column.type)]));
+              // and each key CHECK it plans
+              plan.keyChecked = new Set((plan.keyChecks ?? []).map((/** @type {any} */ check) => check.column));
               recordKeyConstraint(plan, made);
               return step(i + 1);
             }));
           }
           recordKeyConstraint(plan, row);
           return chain(verifyShape(connection, plan, name, docPath, 'entity', undefined, programs), () =>
+            chain(readKeyChecks(connection, plan), () =>
             chain(connection.prepare(dialect.introspect.foreignKeyList(name)), (fkStatement) =>
               chain(fkStatement.all([]), (fkRows) => {
                 // the whole TUPLE, not the count: a key that changed
@@ -1024,11 +1039,32 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
                     docPath);
                 }
                 return step(i + 1);
-              })));
+              }))));
         }));
     };
     return step(0);
   });
+}
+
+/**
+ * Record on a verified table's plan the columns holding a key that the
+ * catalog holds the key's CHECK on, validated (`keyChecked`, read through
+ * `check-read.js` `guardsByColumn`): only a column the open read as the
+ * store's number storage needs it, so a table without one reads no catalog.
+ * @param {any} connection @param {any} plan
+ * @returns {any} value-or-promise
+ */
+function readKeyChecks(connection, plan) {
+  const dialect = connection.dialect;
+  const numeric = dialect.comparableColumnType(dialect.typeFor('number', 'generated'));
+  const wanted = (plan.keyChecks ?? []).filter((/** @type {any} */ check) => plan.heldTypes?.get(check.column) === numeric);
+  plan.keyChecked = new Set();
+  if (wanted.length === 0) return null;
+  return chain(connection.prepare(dialect.introspect.checks(plan.table)), (statement) => chain(statement.all([]), (rows) => {
+    const guards = guardsByColumn(dialect.readChecks(rows));
+    for (const { column } of wanted) if (guards.get(column)?.has('shortest-digits')) plan.keyChecked.add(column);
+    return null;
+  }));
 }
 
 /**

@@ -1,22 +1,25 @@
 //@ts-check
 /**
- * @file An entity's key, and a column referencing one, compared with a
- * number as the engine reads it whatever digits another writer spelled it
- * by. PostgreSQL holds an `integer` or `number` key the caller writes as a
- * `numeric`, where another writer may re-key a row `6.00000000000000000001`,
- * which the engine reads as 6: a literal, a literal list and an external
- * list then compare with it as with every other number column, against the
- * interval of decimals that round to the number's double, and still seek its
- * index. Two such columns (a join, a hop's correlation, two references in one
- * row), and such a column beside a non-key number column, still compare the
- * key exactly — a listed loss. A key the database allocates (`bigserial`, its
+ * @file An entity's key, and a column referencing one, compared as the
+ * engine reads it whatever digits another writer spelled it by. PostgreSQL
+ * holds an `integer` or `number` key the caller writes as a `numeric`, where
+ * another writer could re-key a row `6.00000000000000000001`, which the engine
+ * reads as 6. A table the store creates holds each such column to its
+ * double's digits below 2^53 by a CHECK, so every shape compares the key
+ * exactly and as the engine, through its index; a literal past 2^53 compares
+ * by its double's interval. A table an earlier release created, without the
+ * CHECK, compares a literal, a literal list and an external list by the
+ * interval and two such columns exactly — a listed loss — until
+ * `planColumnUpgrade` adds the CHECK, refused `JD0023` naming the rows another
+ * writer spelled otherwise. A key the database allocates (`bigserial`, its
  * references `bigint`) holds integers alone and compares exactly, as before,
  * and so does a key the open reads as held so. PostgreSQL where JAREN_PG_URL
  * names a server; SQLite always.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { openStore } from '@jarenjs/db';
+import { openStore, planColumnUpgrade, migrate } from '@jarenjs/db';
+import { relational, sql as q } from '@jarenjs/db/relational';
 import { skipFor, withPostgres, withStore } from './store-core-engines.js';
 
 const W = '6.00000000000000000001';
@@ -144,22 +147,35 @@ async function fill(store, pool, schema, rekey) {
 }
 
 /**
- * Open `model(createAuto)` to create the tables, then `model(openAuto)` over them.
- * @param {boolean} createAuto @param {boolean} openAuto
- * @param {(store: any, pg: { pool: any, schema: string }) => Promise<void>} fn
+ * Drop every key CHECK of a schema's tables, leaving them as an earlier release created them.
+ * @param {any} pool @param {string} schema @returns {Promise<string[]>} the dropped constraints, `<table>.<name>`
  */
-const reopened = (createAuto, openAuto, fn) => withPostgres(async (pg) => {
+async function dropKeyChecks(pool, schema) {
+  const { rows } = await pool.query('SELECT t.relname AS t, c.conname AS c FROM pg_catalog.pg_constraint c JOIN pg_catalog.pg_class t ON t.oid = c.conrelid '
+    + 'JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace WHERE n.nspname = $1 AND c.contype = \'c\' AND pg_catalog.pg_get_expr(c.conbin, c.conrelid) LIKE \'%trunc%\' ORDER BY 1, 2', [schema]);
+  for (const row of rows) await pool.query(`ALTER TABLE "${schema}"."${row.t}" DROP CONSTRAINT "${row.c}"`);
+  return rows.map((/** @type {any} */ row) => `${row.t}.${row.c}`);
+}
+
+/**
+ * Open `model(createAuto)` to create the tables, then `model(openAuto)` over
+ * them — where `earlier`, once their key CHECKs are dropped.
+ * @param {boolean} createAuto @param {boolean} openAuto @param {boolean} earlier
+ * @param {(store: any, pg: { pool: any, schema: string, driver: () => any }) => Promise<void>} fn
+ */
+const reopened = (createAuto, openAuto, earlier, fn) => withPostgres(async (pg) => {
   await (await openStore(model(createAuto), { driver: pg.driver() })).close();
+  if (earlier) await dropKeyChecks(pg.pool, pg.schema);
   const store = await openStore(model(openAuto), { driver: pg.driver() });
   try { await fn(store, pg); }
   finally { await store.close(); }
 });
 
-describe('an entity key another writer spelled, PostgreSQL', { skip: skipFor('postgres') }, () => {
+describe('an entity key another writer spelled in a table an earlier release created, PostgreSQL', { skip: skipFor('postgres') }, () => {
   for (const [title, createAuto, openAuto] of /** @type {[string, boolean, boolean][]} */ ([
     ['a key the caller writes', false, false], ['a key the model allocates over a table that holds it as numeric', false, true]])) {
     it(`compares ${title} with a number as the engine reads it, and with another column exactly`, async () => {
-      await reopened(createAuto, openAuto, async (store, { pool, schema }) => {
+      await reopened(createAuto, openAuto, true, async (store, { pool, schema }) => {
         await fill(store, pool, schema, true);
         for (const [name, query, externals, expected] of SHAPES.filter(([name]) => withNumber(name))) {
           const options = externals === undefined ? {} : { externals };
@@ -181,7 +197,7 @@ describe('an entity key another writer spelled, PostgreSQL', { skip: skipFor('po
   for (const [title, createAuto, openAuto] of /** @type {[string, boolean, boolean][]} */ ([
     ['a key the database allocates', true, true], ['a key the caller writes over a table that holds it as bigint', true, false]])) {
     it(`compares ${title} exactly, as stored`, async () => {
-      await reopened(createAuto, openAuto, async (store, { pool, schema }) => {
+      await reopened(createAuto, openAuto, false, async (store, { pool, schema }) => {
         await fill(store, pool, schema, false);
         const sql = async (/** @type {any} */ query, /** @type {any} */ externals = undefined) =>
           (await store.explain(query, externals === undefined ? {} : { externals })).sql;
@@ -196,8 +212,8 @@ describe('an entity key another writer spelled, PostgreSQL', { skip: skipFor('po
     });
   }
 
-  it('still seeks the key\'s index, and the reference\'s, through every comparison that did', async () => {
-    await reopened(false, false, async (store, { pool, schema }) => {
+  for (const earlier of [true, false]) it(`still seeks the key's index, and the reference's, through every comparison that did${earlier ? '' : ', under the key\'s CHECK'}`, async () => {
+    await reopened(false, false, earlier, async (store, { pool, schema }) => {
       const s = `"${schema}"`;
       await pool.query(`INSERT INTO ${s}."Post" (pid, score, name, doc) SELECT g, g, 'p' || g, '{}'::jsonb FROM generate_series(1, 20000) g;`
         + `INSERT INTO ${s}."N" (id, name, doc) SELECT g, 'n' || g, '{}'::jsonb FROM generate_series(1, 20000) g;`
@@ -244,6 +260,219 @@ describe('an entity key another writer spelled, PostgreSQL', { skip: skipFor('po
         for (const plan of plans) assert.match(narrative, plan, `${JSON.stringify(query.$where)}: ${narrative}`);
         assert.doesNotMatch(narrative, /Hash Join|Merge Join/, JSON.stringify(query.$where));
         assert.deepEqual(await store.execute(query, options), expected, JSON.stringify(query.$where));
+      }
+    });
+  });
+});
+
+/** The columns holding a key, as each model creates them on PostgreSQL: `<table>.<column>` of every key CHECK. */
+const KEY_CHECKED = {
+  caller: ['Comment.postId', 'Comment.replyTo', 'Kid.postRef', 'N.id', 'Post.pid', 'Post_Tag.Post_key', 'Post_Tag.Tag_key', 'Tag.tid'],
+  allocated: ['N.id', 'Post_Tag.Tag_key', 'Tag.tid'],
+};
+/** Every key CHECK of a schema's tables, `<table>.<column>`. @param {any} pool @param {string} schema */
+const keyChecked = async (pool, schema) => (await pool.query('SELECT t.relname AS t, a.attname AS c FROM pg_catalog.pg_constraint c '
+  + 'JOIN pg_catalog.pg_class t ON t.oid = c.conrelid JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace '
+  + 'JOIN pg_catalog.pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1] '
+  + 'WHERE n.nspname = $1 AND c.contype = \'c\' AND pg_catalog.pg_get_expr(c.conbin, c.conrelid) LIKE \'%trunc%\' ORDER BY 1, 2', [schema]))
+  .rows.map((/** @type {any} */ row) => `${row.t}.${row.c}`);
+
+describe('an entity key under its CHECK, PostgreSQL', { skip: skipFor('postgres') }, () => {
+  it('holds every column holding a key to its double\'s digits, and refuses another writer\'s other digits', async () => {
+    for (const [auto, expected] of /** @type {[boolean, string[]][]} */ ([[false, KEY_CHECKED.caller], [true, KEY_CHECKED.allocated]])) {
+      await withPostgres(async ({ pool, schema, driver }) => {
+        const store = await openStore(model(auto), { driver: driver() });
+        try {
+          await fill(store, pool, schema, false);
+          // a string key, a non-key number column and a key the database allocates carry none
+          assert.deepEqual(await keyChecked(pool, schema), expected);
+          if (auto) return;
+          const s = `"${schema}"`;
+          for (const [table, column] of [['Post', 'pid'], ['Comment', 'postId'], ['Comment', 'replyTo'], ['N', 'id'], ['Post_Tag', 'Post_key'], ['Kid', 'postRef']]) {
+            for (const digits of [W, '6.9999999999999999999', '1e-400'])
+              await assert.rejects(pool.query(`UPDATE ${s}."${table}" SET "${column}" = ${digits} WHERE "${column}" = 7`), { code: '23514' }, `${table}.${column} ${digits}`);
+          }
+          // the double's own digits, another spelling of them, and a value at or past 2^53 or a NaN-free infinity stay writable
+          await pool.query(`INSERT INTO ${s}."N" (id, name, doc) VALUES (0.30000000000000004, 'a', '{}'), (0.300000000000000040, 'b', '{}') ON CONFLICT DO NOTHING;`
+            + `INSERT INTO ${s}."N" (id, name, doc) VALUES (5e-324, 'c', '{}'), (-5e-324, 'd', '{}'), (9007199254740993, 'e', '{}'), ('Infinity', 'f', '{}')`);
+          await assert.rejects(pool.query(`INSERT INTO ${s}."N" (id, name, doc) VALUES (4.9e-324, 'g', '{}')`), { code: '23514' });
+          // the store's own statement that would write such a key is refused as a constraint failure
+          const connection = await driver().open();
+          try {
+            await assert.rejects(relational(connection).execute({ op: 'update', table: 'Post', set: { pid: q.binary('+', q.column('pid'), q.param('d')) },
+              where: q.binary('=', q.column('pid'), q.param('p')) }, { externals: { d: 1e-20, p: 8 } }),
+            (/** @type {any} */ error) => error.code === 'JD2005' && error.class === 'constraint');
+          }
+          finally { await connection.close(); }
+        }
+        finally { await store.close(); }
+      });
+    }
+  });
+
+  it('holds a composite key\'s number member so too, and compares it exactly', async () => {
+    const composite = { $model: '0.1', entities: { R: { schema: { type: 'object', required: ['a', 'b'], properties: {
+      a: { type: 'integer', 'x-entity': { key: true } }, b: { type: 'string', 'x-entity': { key: true } }, v: { type: 'number' } } } } } };
+    await withPostgres(async ({ pool, schema, driver }) => {
+      const store = await openStore(composite, { driver: driver() });
+      try {
+        await store.entity('R').create({ a: 6, b: 'x', v: 1 });
+        await store.saveChanges();
+        assert.deepEqual(await keyChecked(pool, schema), ['R.a']);
+        await assert.rejects(pool.query(`UPDATE "${schema}"."R" SET a = ${W}`), { code: '23514' });
+        assert.match((await store.explain({ $for: { r: '$.R[*]' }, $where: { $eq: ['$r.a', 6] }, $return: '$r.b' })).sql, /"t0"\."a" = \$1/);
+      }
+      finally { await store.close(); }
+    });
+  });
+
+  it('compares the key exactly in every shape, as the engine, and a literal past 2^53 by its double\'s interval', async () => {
+    await reopened(false, false, false, async (store, { pool, schema }) => {
+      await fill(store, pool, schema, false);
+      // another writer spells number 0.5's double by other digits it equals
+      await pool.query(`UPDATE "${schema}"."N" SET id = 0.50000000000000000000 WHERE id = 0.5`);
+      const sql = async (/** @type {any} */ query, /** @type {any} */ externals = undefined) =>
+        (await store.explain(query, externals === undefined ? {} : { externals })).sql;
+      assert.match(await sql(P({ $eq: ['$p.pid', 6] })), /WHERE \("t0"\."pid" IS NOT NULL AND "t0"\."pid" = \$1\)/);
+      assert.match(await sql(C({ $eq: ['$c.postId', { $seq: [6] }] })), /"t0"\."postId" IN \(SELECT \(i\.e #>> '\{\}'\)::numeric/);
+      assert.match(await sql(P({ $eq: ['$p.pid', '$ids[*]'] }), { ids: [6] }), /"t0"\."pid" IN \(SELECT \(i\.e #>> '\{\}'\)::numeric/);
+      assert.match(await sql(P({ $eq: ['$p.pid', 2 ** 53] })), /"t0"\."pid" >= \$1 AND "t0"\."pid" <= \$2/);
+      assert.match(await sql(P({ $eq: ['$p.pid', { $seq: [6, 2 ** 60] }] })), /"interval_row"\."pid" >= \("interval_edge"\.e ->> 0\)::numeric/);
+      assert.match(await sql({ $for: { p: '$.Post[*]' }, $orderby: ['$p.pid'], $return: '$p.name' }), /ORDER BY "t0"\."pid" ASC, "t0"\."rid"/);
+      await pairsCompareExactly(store);
+      for (const [name, query, externals] of SHAPES) {
+        const options = externals === undefined ? {} : { externals };
+        assert.equal((await store.explain(query, options)).mode, 'native', name);
+        assert.deepEqual(await store.execute(query, options), await store.execute(query, { ...options, pushdown: false }), name);
+      }
+      assert.deepEqual(await store.execute({ $for: { n: '$.N[*]' }, $where: { $eq: ['$n.id', 0.5] }, $return: '$n.name' }), 'n0.5');
+      const first = await store.entity('Post').page({ orderBy: ['$it.pid'] }, { limit: 2 });
+      const next = await store.entity('Post').page({ orderBy: ['$it.pid'] }, { limit: 2, after: first.continuation });
+      assert.deepEqual([...first.items, ...next.items].map((/** @type {any} */ post) => post.name), ['p5', 'p6', 'p7', 'p8']);
+      const loaded = await store.entity('Post').asNoTracking().load({ where: { $eq: ['$it.pid', 6] }, include: { kids: true } });
+      assert.deepEqual(loaded.map((/** @type {any} */ post) => [post.name, post.kids.map((/** @type {any} */ kid) => kid.kid)]), [['p6', ['k1']]]);
+    });
+  });
+
+  it('opens a table an earlier release created as before, refuses its upgrade naming the rows another writer spelled otherwise, and adds the CHECK once none is', async () => {
+    await withPostgres(async ({ pool, schema, driver }) => {
+      const s = `"${schema}"`;
+      const created = await openStore(model(false), { driver: driver() });
+      try { await fill(created, pool, schema, false); }
+      finally { await created.close(); }
+      const fresh = await (async () => { const store = await openStore(model(false), { driver: driver() }); try { return await store.introspect(); } finally { await store.close(); } })();
+      assert.deepEqual(fresh.report.filter((/** @type {any} */ row) => row.code === 'unmapped-constraint'), []);
+      assert.equal((await dropKeyChecks(pool, schema)).length, KEY_CHECKED.caller.length);
+      // another writer re-keys post 7 and every row naming it, and spells two numbers by digits no double has
+      const client = await pool.connect();
+      try {
+        await client.query(`SET search_path TO ${s}`);
+        await client.query('BEGIN');
+        await client.query('SET CONSTRAINTS ALL DEFERRED');
+        for (const [table, column] of [['Post', 'pid'], ['Comment', 'postId'], ['Comment', 'replyTo'], ['Post_Tag', 'Post_key'], ['Kid', 'postRef']])
+          await client.query(`UPDATE "${table}" SET "${column}" = ${W} WHERE "${column}" = 7`);
+        await client.query('UPDATE "N" SET id = 8.00000000000000000001 WHERE id = 7');
+        await client.query('INSERT INTO "N" (id, name, doc) VALUES (1e-400, \'tiny\', \'{}\')');
+        await client.query('COMMIT');
+      }
+      finally {
+        await client.query('RESET search_path');
+        client.release();
+      }
+      const upgradeOf = async () => {
+        const connection = await driver().open();
+        try { return await planColumnUpgrade(connection, model(false)); }
+        finally { await connection.close(); }
+      };
+      // the earlier table opens, introspects and answers as before: a literal by the interval, a pair exactly
+      const earlier = await openStore(model(false), { driver: driver() });
+      try {
+        assert.deepEqual((await earlier.introspect()).model, fresh.model);
+        assert.match((await earlier.explain(P({ $eq: ['$p.pid', 6] }))).sql, /"t0"\."pid" >= \$1 AND "t0"\."pid" <= \$2/);
+        assert.deepEqual(await earlier.execute(P({ $eq: ['$p.pid', 6] })), ['p6', 'p7']);
+      }
+      finally { await earlier.close(); }
+      await assert.rejects(upgradeOf(), (/** @type {any} */ error) => error.code === 'JD0023' && error.class === 'constraint'
+        && error.table === 'Post' && JSON.stringify(error.columns) === '["pid"]' && JSON.stringify(error.rows) === `[["${W}"]]`
+        && /SET "pid" = round\("pid", 323\)::float8::text::numeric WHERE NOT \(CASE WHEN abs\("pid"\)/.test(error.message)
+        && /as a key of its own with the rows referencing it/.test(error.message));
+      // re-spelled as its double, post 7 would be post 6: the host gives it its key back, with the rows naming it
+      await pool.query(`SET search_path TO ${s}; BEGIN; SET CONSTRAINTS ALL DEFERRED; UPDATE "Post" SET pid = 7 WHERE pid = ${W}; `
+        + `UPDATE "Comment" SET "postId" = 7 WHERE "postId" = ${W}; UPDATE "Comment" SET "replyTo" = 7 WHERE "replyTo" = ${W}; `
+        + `UPDATE "Post_Tag" SET "Post_key" = 7 WHERE "Post_key" = ${W}; UPDATE "Kid" SET "postRef" = 7 WHERE "postRef" = ${W}; COMMIT; RESET search_path`);
+      // a value below the least double is named, not raised as the cast's range error
+      /** @type {any} */
+      let refused;
+      await assert.rejects(upgradeOf(), (/** @type {any} */ error) => { refused = error; return error.code === 'JD0023' && error.table === 'N'; });
+      assert.deepEqual(refused.rows.map((/** @type {string[]} */ row) => (row[0].length > 30 ? `${row[0].slice(0, 6)}…${row[0].slice(-3)}` : row[0])),
+        ['0.0000…001', '8.00000000000000000001']);
+      // the statement the refusal names writes each as the number it reads as
+      await pool.query(`SET search_path TO ${s}; ${/\((UPDATE .*?)\) or, where/.exec(refused.message)?.[1]}; RESET search_path`);
+      assert.deepEqual((await pool.query(`SELECT id::text AS id, name FROM ${s}."N" ORDER BY id`)).rows.map((/** @type {any} */ row) => `${row.name}=${row.id}`),
+        ['tiny=0', 'n0.5=0.5', 'n5=5', 'n6=6', 'n7=8']);
+      const { migration, report } = await upgradeOf();
+      // each column once, in the order the tables are planned
+      assert.deepEqual(report.upgraded, ['Post.pid', 'Comment.postId', 'Comment.replyTo', 'Tag.tid', 'Kid.postRef', 'N.id', 'Post_Tag.Post_key', 'Post_Tag.Tag_key']);
+      assert.ok(migration.steps.every((/** @type {any} */ step) => /^ALTER TABLE "\w+" ADD CHECK \(CASE WHEN abs\(/.test(step.sql)), JSON.stringify(migration.steps));
+      assert.deepEqual((await migrate({ driver: driver() }, [migration], { baseline: model(false), model: model(false), shadow: false })).applied, [migration.id]);
+      assert.deepEqual(await keyChecked(pool, schema), KEY_CHECKED.caller);
+      assert.deepEqual((await upgradeOf()).migration.steps, []);
+      const upgraded = await openStore(model(false), { driver: driver() });
+      try {
+        assert.match((await upgraded.explain(P({ $eq: ['$p.pid', 6] }))).sql, /"t0"\."pid" = \$1/);
+        assert.deepEqual(await upgraded.execute(P({ $eq: ['$p.pid', 7] })), 'p7');
+        await assert.rejects(pool.query(`UPDATE ${s}."Post" SET pid = ${W} WHERE pid = 7`), { code: '23514' });
+      }
+      finally { await upgraded.close(); }
+    });
+  });
+
+  it('reads a key CHECK added NOT VALID as no CHECK, and the upgrade adds one that is', async () => {
+    await withPostgres(async ({ pool, schema, driver }) => {
+      await (await openStore(model(false), { driver: driver() })).close();
+      await dropKeyChecks(pool, schema);
+      const check = 'CASE WHEN abs(pid) >= 9007199254740992 OR pid = trunc(pid) THEN true WHEN abs(pid) < 5 * power(10::numeric, -324) THEN false '
+        + 'ELSE pid = pid::float8::text::numeric END';
+      await pool.query(`ALTER TABLE "${schema}"."Post" ADD CHECK (${check}) NOT VALID`);
+      const store = await openStore(model(false), { driver: driver() });
+      try { assert.match((await store.explain(P({ $eq: ['$p.pid', 6] }))).sql, /"t0"\."pid" >= \$1 AND "t0"\."pid" <= \$2/); }
+      finally { await store.close(); }
+      // a column without either CHECK gains both, and is named once
+      await pool.query(`ALTER TABLE "${schema}"."Post" DROP CONSTRAINT "Post_pid_check"`);
+      const connection = await driver().open();
+      try {
+        const { migration, report } = await planColumnUpgrade(connection, model(false));
+        assert.deepEqual(report.upgraded.filter((/** @type {string} */ name) => name === 'Post.pid'), ['Post.pid']);
+        assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.sql).filter((/** @type {string} */ text) => text.startsWith('ALTER TABLE "Post"')),
+          ['ALTER TABLE "Post" ADD CHECK ("pid" <> \'NaN\')', `ALTER TABLE "Post" ADD CHECK (${check.replaceAll('pid', '"pid"')})`]);
+      }
+      finally { await connection.close(); }
+      await pool.query(`ALTER TABLE "${schema}"."Post" VALIDATE CONSTRAINT "Post_pid_check1"`);
+      const validated = await openStore(model(false), { driver: driver() });
+      try { assert.match((await validated.explain(P({ $eq: ['$p.pid', 6] }))).sql, /"t0"\."pid" = \$1/); }
+      finally { await validated.close(); }
+    });
+  });
+
+  it('opens the model introspect() reads back over the tables, and refuses a fractional key a session at extra_float_digits 0 writes', async () => {
+    await withPostgres(async ({ pool, schema, driver }) => {
+      const store = await openStore(model(false), { driver: driver() });
+      await fill(store, pool, schema, false);
+      const { model: derived, report } = await store.introspect();
+      await store.close();
+      assert.deepEqual(report.filter((/** @type {any} */ row) => row.code === 'unmapped-constraint' || row.code === 'unguarded-number'), []);
+      const reopenedStore = await openStore(derived, { driver: driver() });
+      try { assert.match((await reopenedStore.explain({ $for: { p: '$.Post[*]' }, $where: { $eq: ['$p.pid', 6] }, $return: '$p.name' })).sql, /"t0"\."pid" = \$1/); }
+      finally { await reopenedStore.close(); }
+      const client = await pool.connect();
+      try {
+        await client.query(`SET search_path TO "${schema}"; SET extra_float_digits = 0`);
+        await assert.rejects(client.query('INSERT INTO "N" (id, name, doc) VALUES (0.30000000000000004, \'x\', \'{}\')'), { code: '23514' });
+        await client.query('INSERT INTO "N" (id, name, doc) VALUES (9, \'y\', \'{}\'), (0.25, \'z\', \'{}\')');
+      }
+      finally {
+        await client.query('RESET extra_float_digits; RESET search_path');
+        client.release();
       }
     });
   });

@@ -768,10 +768,15 @@ entity's key, and a column referencing one, keep the exact comparison where
 the open reads it as the allocation a database-allocated key takes
 (`bigserial`, `bigint`), whose type reads no fractional edge, and an integer
 column holds no integer in a safe integer's interval but the integer itself;
-one the open reads as `numeric` (`keyDigits`, which the store marks on the
-mapping from the types it read or created) holds a writer's digits and compares
-with a literal or a list as every other number column does, but with another
-column, and in an ordering, as a key. An
+one the open reads as `numeric` holds a writer's digits unless the catalog
+holds the key's CHECK on it (`dialect.keyCheck`, which a table the store
+creates carries and `planColumnUpgrade` adds: below 2^53 only the digits
+whose exact comparison is the double's), so it too compares exactly in every
+shape, and with a literal or a literal list at or past 2^53 as every other
+number column does (`keyDigits: 'unsafe'`). Without the CHECK (`keyDigits:
+true`, which the store marks on the mapping from the types and CHECKs it
+read or created) it compares with a literal or a list as every other number
+column does, but with another column, and in an ordering, as a key. An
 infinity, which a store profile predicate binds where a
 query's own runs in the engine, is the interval of decimals at and past the
 midpoint between the largest double and 2^1024 (a tie that rounds to the
@@ -886,8 +891,9 @@ decimals that round to one double lie within 5·10^-16 of either's magnitude,
 plus 10^-323), so either column's index still finds the other's rows. Two key
 columns — a key and a reference to one — compare exactly, through the key's
 index: either may be the `bigint` a database-allocated key takes, and one the
-open reads as `numeric` compares so too, a listed loss for a key another
-writer re-keyed by other digits.
+open reads as `numeric` compares so too — the engine's comparison under the
+key's CHECK below 2^53, and a listed loss for a key another writer re-keyed
+by other digits in a table without it, or at or past 2^53.
 
 **A member's column answers every kind, or its own.** A member the schema
 lets hold more than one type besides `null` (`['string', 'number']`) has, on

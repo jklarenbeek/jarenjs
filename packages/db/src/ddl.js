@@ -2093,6 +2093,43 @@ export function numberCheckOf(dialect, columnName, type) {
 }
 
 /**
+ * Whether a column holds a key by the number storage of the engine that holds
+ * the digits a writer spelled: a key of storage `integer` or `number` the
+ * caller writes, read through no codec — a reference to such a key shares its
+ * storage. The one reading the key's CHECK ({@link keyCheckOf}) and the open's
+ * mark of a column without it (`store.js` `markKeyDigits`) share.
+ * @param {{ storage?: string, codec?: unknown } | undefined} keyColumn - the key's mapping column
+ * @returns {boolean}
+ */
+export const holdsKeyDigits = (keyColumn) => keyColumn !== undefined && keyColumn.codec === undefined
+  && (keyColumn.storage === 'integer' || keyColumn.storage === 'number');
+
+/**
+ * The CHECK a column holding a key carries beside its number CHECK, on an
+ * engine that holds a number by the digits a writer spelled
+ * (`dialect.keyCheck`, PostgreSQL's `numeric`): only digits whose exact
+ * comparison is the double's, so the store compares, orders and pages the
+ * key exactly and as the engine does; `undefined` for a column held in
+ * another type (a key the database allocates) or on another engine.
+ * @param {any} dialect @param {string} columnName @param {string} type - the column's declared type
+ * @param {{ storage?: string, codec?: unknown } | undefined} keyColumn - the key it holds (its own, or the one it references)
+ * @returns {string | undefined}
+ */
+export function keyCheckOf(dialect, columnName, type, keyColumn) {
+  return dialect.keyCheck !== undefined && holdsKeyDigits(keyColumn)
+    && type === dialect.typeFor(/** @type {string} */ (keyColumn?.storage), 'generated')
+    ? dialect.keyCheck(dialect.quoteIdentifier(columnName)) : undefined;
+}
+
+/**
+ * The planned columns holding a key with its CHECK (`keyCheckOf`), each with that CHECK.
+ * @param {{ name: string, keyCheck?: string }[]} columns
+ * @returns {{ column: string, check: string }[]}
+ */
+const keyChecksOf = (columns) => columns.flatMap((column) => (column.keyCheck === undefined ? []
+  : [{ column: column.name, check: column.keyCheck }]));
+
+/**
  * The planned columns whose CHECK is a number column's own (`numberCheckOf`),
  * each with that CHECK.
  * @param {{ name: string, type: string, check?: string }[]} columns @param {any} dialect
@@ -2188,6 +2225,7 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
   for (const column of entityMapping.columns) {
     if (fkNames.has(column.name)) continue;
     const type = column.key ? keyHolding(column.name, column, false) : storageType(column.storage);
+    const keyCheck = column.key ? keyCheckOf(dialect, column.name, type, column) : undefined;
     columns.push({
       name: column.name,
       type,
@@ -2195,14 +2233,18 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
       notNull: column.key && !singleKey,
       // an enum's list admits no NaN, so it is the column's whole CHECK
       check: column.check !== undefined ? renderCheck(column.name, column.check) : numberCheckOf(dialect, column.name, type),
+      ...(keyCheck === undefined ? {} : { keyCheck }),
     });
   }
   for (const fk of entityMapping.foreignKeys) {
-    const type = keyHolding(fk.column, entities.entities[fk.references].columns.find((/** @type {any} */ column) => column.key), true);
+    const referenced = entities.entities[fk.references].columns.find((/** @type {any} */ column) => column.key);
+    const type = keyHolding(fk.column, referenced, true);
+    const keyCheck = keyCheckOf(dialect, fk.column, type, referenced);
     columns.push({
       name: fk.column,
       type,
       check: numberCheckOf(dialect, fk.column, type),
+      ...(keyCheck === undefined ? {} : { keyCheck }),
       references: { table: fk.references, column: fk.referencesKey, onDelete: fk.onDelete },
     });
   }
@@ -2296,6 +2338,8 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
     expectedForeignKeys: expectedForeignKeysOf(columns),
     /** The number columns' own CHECKs (`numberCheckOf`), and the key columns that name a row. */
     numberChecks: numberChecksOf(columns, dialect),
+    /** The CHECKs of the columns holding a key (`keyCheckOf`). */
+    keyChecks: keyChecksOf(columns),
     keys: [...entityMapping.keys],
     /** The statements that add the cycle's foreign keys, run after every table of the cycle exists. */
     deferredForeignKeys: columns.filter((column) => deferred.has(column.name))
@@ -2404,7 +2448,7 @@ function rulePrograms(name, entityMapping, entities, dialect, declared, readable
  * @param {any} dialect
  * @returns {{ table: string, createSql: string[], expected: any,
  *   objects: { name: string, what: string, docPath: string }[],
- *   numberChecks: { column: string, check: string }[], keys: string[] }}
+ *   numberChecks: { column: string, check: string }[], keyChecks: { column: string, check: string }[], keys: string[] }}
  */
 export function planJoinTable(tableName, join, entities, dialect) {
   // the join table and its columns are named from the two entities
@@ -2416,13 +2460,15 @@ export function planJoinTable(tableName, join, entities, dialect) {
   const legacyTypes = new Map();
   /** The endpoint column referencing `side`'s key (see `keyColumnType`). @param {any} side */
   const endpoint = (side) => {
-    const { type, legacyType } = keyColumnType(
-      entities.entities[side.entity].columns.find((/** @type {any} */ column) => column.key), dialect, true);
+    const referenced = entities.entities[side.entity].columns.find((/** @type {any} */ column) => column.key);
+    const { type, legacyType } = keyColumnType(referenced, dialect, true);
     if (legacyType !== undefined) legacyTypes.set(side.column, legacyType);
+    const keyCheck = keyCheckOf(dialect, side.column, type, referenced);
     return {
       name: side.column,
       type,
       check: numberCheckOf(dialect, side.column, type),
+      ...(keyCheck === undefined ? {} : { keyCheck }),
       references: { table: side.entity, column: side.referencesKey, onDelete: 'cascade' },
     };
   };
@@ -2447,6 +2493,7 @@ export function planJoinTable(tableName, join, entities, dialect) {
     objects,
     expectedForeignKeys: expectedForeignKeysOf(columns),
     numberChecks: numberChecksOf(columns, dialect),
+    keyChecks: keyChecksOf(columns),
     keys: [join.left.column, join.right.column],
     expected: {
       columns: expectedColumnsOf(columns, legacyTypes, dialect),

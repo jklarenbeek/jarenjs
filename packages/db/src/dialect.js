@@ -276,6 +276,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   physicalDifferent?: (codec: string, left: string, right: string) => string,
  *   numberCast?: (sql: string) => string,
  *   numberCheck?: (columnSql: string) => string,
+ *   keyCheck?: (columnSql: string) => string,
  *   holdsNaN?: (type: string) => boolean,
  *   numberRead?: (sql: string) => string,
  *   doubleRead?: (sql: string) => string,
@@ -296,7 +297,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   qualifyPhysicalColumn?: (column: any, actual: any, kind: string, database?: any, catalogColumn?: any) => void,
  *   invariantTriggers?: (mapping: any, all: any, dialect: any, spelling?: number) => any[],
  *   readChecks?: (rows: any[]) => { name: string, sql?: string, validated?: boolean, conforming?: boolean,
- *     column?: string, values?: any[], notNaN?: boolean, guard?: string }[],
+ *     column?: string, values?: any[], notNaN?: boolean, keyCheck?: boolean, guard?: string }[],
  *   introspect: { version: () => string, compileOptions: () => string,
  *     pragma: (name: string) => string,
  *     tableExists: () => string, columns: (table: string) => string,
@@ -556,10 +557,11 @@ export function createDialect(spec) {
      * everything unmapped. One generator, both document kinds.
      * @param {{ table: string, columns: {
      *   name: string, type: string, notNull?: boolean,
-     *   primaryKey?: boolean, check?: string,
+     *   primaryKey?: boolean, check?: string, keyCheck?: string,
      *   references?: { table: string, column: string,
      *     onDelete: 'cascade' | 'restrict' | 'setNull' } }[],
-     *   compositeKey?: string[] }} shape
+     *   compositeKey?: string[] }} shape - `keyCheck`, a column holding a
+     *   key's second CHECK beside its own (`ddl.js` `keyCheckOf`)
      * @returns {string}
      */
     createRelationalTable({ table, columns, compositeKey }) {
@@ -568,6 +570,7 @@ export function createDialect(spec) {
         if (column.primaryKey === true) sql += ' PRIMARY KEY';
         if (column.notNull === true) sql += ' NOT NULL';
         if (column.check !== undefined) sql += ` CHECK (${column.check})`;
+        if (column.keyCheck !== undefined) sql += ` CHECK (${column.keyCheck})`;
         if (column.references !== undefined) {
           sql += referenceSql(column.references);
         }
@@ -1102,6 +1105,15 @@ export function createDialect(spec) {
      * a NaN as NULL).
      */
     numberCheck: spec.numberCheck,
+    /**
+     * The CHECK a number column holding a key carries (a key the caller
+     * writes, a reference to one, a join table's side) where the engine
+     * holds a number by the digits a writer spelled (`decimalDigits`): only
+     * the digits whose exact comparison is the double's, so a join, an order
+     * and a page over the column compare as the engine; `undefined` where
+     * the engine holds the double itself.
+     */
+    keyCheck: spec.keyCheck,
     /**
      * Whether a column of a native type can hold the value `numberCheck`
      * refuses (PostgreSQL's `numeric` and float types); `undefined` where no

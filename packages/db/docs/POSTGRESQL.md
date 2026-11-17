@@ -395,7 +395,11 @@ the key exactly with the shortest decimal of the column's double (its
 the key that its index serves and a hash join can hash, beside a range of the
 column around the key that the column's own index serves; that text is the
 shortest round trip only at PostgreSQL's default `extra_float_digits` (1),
-which every `double precision` the driver reads relies on too. A literal
+which every `double precision` the driver reads relies on too, and so does a
+key's CHECK (below): a session at `extra_float_digits` 0 or below cannot
+write or update a row whose fractional key needs 16 or 17 digits
+(`0.30000000000000004`), and `planColumnUpgrade` run there names such rows as
+spelled otherwise, while an integer key is unaffected. A literal
 infinity (`$lt: ['$it.n', Infinity]`, a JavaScript host's), alone or in a
 literal list, compares with the decimals at and past the one that rounds to it,
 as an external infinity does.
@@ -434,27 +438,52 @@ is the statement that guards it, the table named in the driver's schema
 reads the column as guarded and the row is gone. A `kind: "view"` layout holds
 no CHECK, so its number columns stay unguarded and the CHECK belongs on the
 table under it.
-An entity's key, and a column referencing one (a join table's two among
-them), compared with a number, compare as the open reads the column held. A
-key the caller writes is a `numeric` (an `integer` key without `default:
-'auto'`, a `number` key), where another writer may re-key a row
-`6.00000000000000000001`, which the engine reads as 6: such a column compares
-with a literal, a literal list or an external list (in a query, a hop's filter
-or a load's `where`) as every other number column does, by the interval of
-decimals that round to the number's double, which its index still serves (a
-lookup is a range of two edges over the key's index where it was an
-equality). Compared with another column (a join, a hop's correlation, two
-references in one row, a non-key number column), it still compares exactly as
-above, so a row another writer re-keyed by other digits is dropped there where
-the engine keeps it; an ordering, a load's include and a page's continuation
-read it bare too. A store that upgrades to this release answers a key's
-comparison with a number differently only where another writer spelled a key
-by digits other than the ones the store writes: it now keeps the rows the
-engine keeps. A key the database allocates is a `bigserial`
-(a column referencing it a `bigint`), which reads no fractional edge and holds
-no integer in a safe integer's interval but the integer itself: it keeps the
-exact comparison, and so does a key the model leaves to the caller in a table
-a database created while the model allocated it, which the open reads as
+An entity's key the caller writes (an `integer` key without `default:
+'auto'`, a `number` key), and a column referencing one (a join table's two
+among them, and a reference no property declares, which has its foreign key
+too), is a `numeric`, where another writer could spell a key by digits the
+engine reads otherwise (`6.00000000000000000001` reads as 6). Beside its
+`NaN` CHECK, each such column of a table the store creates carries
+`CHECK (CASE WHEN abs(k) >= 9007199254740992 OR k = trunc(k) THEN true WHEN
+abs(k) < 5 * power(10::numeric, -324) THEN false ELSE k =
+k::float8::text::numeric END)`: an integer below 2^53 in magnitude is a
+double exactly, a fraction is held only by its double's shortest digits (the
+text the store writes), and a nonzero value below the least double (`1e-400`)
+is refused. Another writer's `UPDATE … SET pid = 6.00000000000000000001` fails
+`23514`, and a statement of the store's own that would write such a key (a
+relational `set` of `pid + 1e-20`) is refused `JD2005` with `class:
+'constraint'`. Such a key compares exactly in every shape — with a literal, a
+literal list or an external list, with another column in a join, a hop's
+correlation or one row, in an ordering, a load's include and a page's keyset
+continuation — which is the engine's comparison of the doubles and what the
+key's index serves: a lookup is an equality over the index, and a join of
+every row hashes. The CHECK leaves the digits of a value at or past 2^53 the
+writer's own: JavaScript writes such an integer by digits PostgreSQL's
+shortest text of the double does not always share (`999359725292056000`
+against `9.993597252920561e+17`), so constraining them would refuse the
+store's own writes. A literal or a literal list holding a number at or past
+2^53 therefore still compares by the interval of decimals that round to it,
+while a pair, an ordering and an external list compare such a key exactly, so
+there a key another writer spelled by other digits is dropped where the engine
+keeps it. `NaN` and the infinities pass this CHECK (the `NaN` CHECK refuses
+`NaN`). Its fraction arm reads the `float8` text (see `extra_float_digits`
+above). `introspect()` reads the CHECK as the store's own. A table an earlier
+release created has no such CHECK: its open reads which key columns the
+catalog holds it on, validated, and a column without it compares with a
+literal, a literal list or an external list (in a query, a hop's filter or a
+load's `where`) by the interval of decimals that round to the number's double,
+which its index still serves (a lookup is a range of two edges over the
+index), and with another column, in an ordering, an include and a continuation
+exactly, so a row another writer re-keyed by other digits is dropped there
+where the engine keeps it. `planColumnUpgrade` adds the CHECK (refused
+`JD0023` naming the rows another writer spelled otherwise, with the statement
+that re-spells them, MIGRATION-FORMAT §3); the next open reads the column as
+exact. A table the store maps but did not create (a physical mapping) carries
+whatever CHECKs the application gave it and is read as before. A key the
+database allocates is a `bigserial` (a column referencing it a `bigint`),
+which holds integers alone: it carries no such CHECK and keeps the exact
+comparison, and so does a key the model leaves to the caller in a table a
+database created while the model allocated it, which the open reads as
 `bigint`.
 
 A collection member the schema types `number` or `integer` is read typed: its

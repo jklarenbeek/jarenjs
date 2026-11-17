@@ -487,7 +487,21 @@ that rebuilds exactly the ones that differ:
   'constraint'`) before any step, naming `table`, `columns` and the `rows` by
   their key read as text (`[['b']]`); write a number or NULL in its place and
   plan again. A migration that rebuilds such a table before the upgrade fails
-  `JD0023` naming the CHECK its copy breaks, with nothing changed.
+  `JD0023` naming the CHECK its copy breaks, with nothing changed;
+- on PostgreSQL, a `numeric` column holding a key (a key the caller writes, a
+  reference to one, a join table's side) without the CHECK a fresh store gives
+  it beside its `NaN` CHECK ([POSTGRESQL](POSTGRESQL.md)), which holds a key
+  below 2^53 to its double's digits, so every comparison, order and page of
+  the key is exact and the engine's: another writer could re-key a row
+  `6.00000000000000000001`, which the engine reads as 6. The link adds the
+  CHECK and changes nothing else; `report.upgraded` names the column once,
+  whether it gains this CHECK or both (`Post.pid`). Where the table holds a
+  row whose key column another writer spelled otherwise, the plan refuses
+  `JD0023` (`class: 'constraint'`) before any step, naming `table`, `columns`
+  and the `rows` by their key read as text (`[['6.00000000000000000001']]`),
+  with the statement that writes each as the number it reads as; where that
+  number keys another row, give the row a key of its own, with the rows
+  referencing it, and plan again.
 
 The steps are the ones a model change plans for the same column: drop the
 indexes over it (and the CHECK that reads it), drop the column, add it as a fresh

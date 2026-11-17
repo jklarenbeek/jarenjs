@@ -1407,7 +1407,10 @@ export const planModelMigration = planMigration;
  * member of several kinds; and a number column of an entity or a join table
  * without the CHECK a fresh store gives it (`ddl.js` `numberCheckOf`) gets it,
  * refused `JD0023` naming the rows while one holds the value the CHECK refuses
- * ({@link refuseStoredNaN}). Where such an index is unique and the table holds
+ * ({@link refuseStoredNaN}); and so does a number column holding a key (its
+ * own, a reference's, a join table's side) without the key's CHECK (`ddl.js`
+ * `keyCheckOf`), refused `JD0023` naming the rows another writer spelled
+ * otherwise than the double's digits ({@link refuseStoredKeyDigits}). Where such an index is unique and the table holds
  * documents that duplicate one another at its kind (an earlier release's
  * unique index keyed the member's first kind alone), the plan refuses
  * `JD0023` (`class: 'constraint'`) naming them, before any step. Every
@@ -1465,9 +1468,14 @@ export function planColumnUpgrade(connection, model, options = undefined) {
         upgraded.push(`${table}.${index}`);
         steps.push({ kind: 'ddl', sql, note: `create the ${kind} index '${index}' beside '${of}' on '${table}', as a fresh store creates it` });
       }
-      for (const { table, column, sql } of unchecked) {
+      for (const { table, column, sql } of unchecked.nan) {
         upgraded.push(`${table}.${column}`);
         steps.push({ kind: 'ddl', sql, note: `refuse a NaN in the number column '${column}' of '${table}', as a fresh store creates it` });
+      }
+      for (const { table, column, sql } of unchecked.key) {
+        // a column without either CHECK is named once
+        if (!upgraded.includes(`${table}.${column}`)) upgraded.push(`${table}.${column}`);
+        steps.push({ kind: 'ddl', sql, note: `hold the key column '${column}' of '${table}' to the digits of a double, as a fresh store creates it` });
       }
       const created = new Set(steps.map((step) => step.sql));
       const unique = collections.flatMap(({ plan }) => (plan.kindIndexes ?? [])
@@ -1479,7 +1487,8 @@ export function planColumnUpgrade(connection, model, options = undefined) {
       return chain(named !== null ? named : unusedMigrationId(connection, `upgrade-${to.slice(0, 8)}`), (id) => {
         const migration = { $migration: MIGRATION_VERSION, id, from: to, to, identity, steps };
         return chain(refuseDuplicates(connection, unique), () =>
-          chain(refuseStoredNaN(connection, unchecked), () => ({ migration, report: { upgraded } })));
+          chain(refuseStoredNaN(connection, unchecked.nan), () =>
+          chain(refuseStoredKeyDigits(connection, unchecked.key), () => ({ migration, report: { upgraded } }))));
       });
     }))));
 }
@@ -1752,36 +1761,44 @@ function entityPlansOf(model, dialect) {
 
 /**
  * The number columns of entity and join tables the database holds without the
- * CHECK a fresh store gives them (`ddl.js` `numberCheckOf`), which no earlier
- * release created: each with its table's key columns and the statement that
- * adds the CHECK. A column the table holds in another type (a key an earlier
- * release declared `bigint`) holds no NaN and needs none; a table the database
- * does not hold has nothing to upgrade.
+ * CHECKs a fresh store gives them, which no earlier release created: `nan`,
+ * the number column's own (`ddl.js` `numberCheckOf`), and `key`, a column
+ * holding a key's (`ddl.js` `keyCheckOf`) — each with its table's key columns,
+ * the CHECK, and the statement that adds it. A column the table holds in
+ * another type (a key an earlier release declared `bigint`) holds neither a
+ * NaN nor a writer's digits and needs none; a CHECK added `NOT VALID` holds
+ * nothing for the rows already there; a table the database does not hold has
+ * nothing to upgrade.
  * @param {any} connection
  * @param {any[]} plans - from `planEntity` and `planJoinTable`
- * @returns {any} value-or-promise of `{ table: string, column: string, keys: string[], sql: string }[]`
+ * @returns {any} value-or-promise of `{ nan: Missing[], key: Missing[] }`, each
+ *   `Missing` `{ table: string, column: string, keys: string[], check: string, sql: string }`
  */
 function missingNumberChecks(connection, plans) {
   const dialect = connection.dialect;
-  /** @type {{ table: string, column: string, keys: string[], sql: string }[]} */
-  const missing = [];
+  /** @type {{ nan: { table: string, column: string, keys: string[], check: string, sql: string }[], key: { table: string, column: string, keys: string[], check: string, sql: string }[] }} */
+  const missing = { nan: [], key: [] };
   const numeric = dialect.typeFor('number', 'generated');
   const next = (/** @type {number} */ i) => {
     if (i >= plans.length) return missing;
     const plan = plans[i];
-    if ((plan.numberChecks ?? []).length === 0) return next(i + 1);
+    if ((plan.numberChecks ?? []).length === 0 && (plan.keyChecks ?? []).length === 0) return next(i + 1);
     return chain(connection.prepare(dialect.introspect.tableExists()), (exists) =>
       chain(exists.get([plan.table]), (row) => (row === undefined ? next(i + 1)
         : chain(connection.prepare(dialect.introspect.columns(plan.table)), (columns) => chain(columns.all([]), (columnRows) =>
           chain(connection.prepare(dialect.introspect.checks(plan.table)), (checks) => chain(checks.all([]), (checkRows) => {
-            const held = new Set(dialect.readChecks(checkRows)
-              .filter((/** @type {any} */ check) => check.notNaN === true && check.validated !== false)
-              .map((/** @type {any} */ check) => check.column));
-            for (const { column, check } of plan.numberChecks) {
-              const typed = columnRows.find((/** @type {any} */ candidate) => String(candidate.name) === column);
-              if (typed === undefined || String(typed.type) !== numeric || held.has(column)) continue;
-              missing.push({ table: plan.table, column, keys: plan.keys, sql: dialect.ddl.addCheck({ table: plan.table, sql: check }) });
-            }
+            const read = dialect.readChecks(checkRows).filter((/** @type {any} */ check) => check.validated !== false);
+            /** @param {'nan' | 'key'} kind @param {{ column: string, check: string }[]} planned @param {(check: any) => boolean} own */
+            const unheld = (kind, planned, own) => {
+              const held = new Set(read.filter(own).map((/** @type {any} */ check) => check.column));
+              for (const { column, check } of planned) {
+                const typed = columnRows.find((/** @type {any} */ candidate) => String(candidate.name) === column);
+                if (typed === undefined || String(typed.type) !== numeric || held.has(column)) continue;
+                missing[kind].push({ table: plan.table, column, keys: plan.keys, check, sql: dialect.ddl.addCheck({ table: plan.table, sql: check }) });
+              }
+            };
+            unheld('nan', plan.numberChecks ?? [], (check) => check.notNaN === true);
+            unheld('key', plan.keyChecks ?? [], (check) => check.keyCheck === true);
             return next(i + 1);
           })))))));
   };
@@ -1800,8 +1817,7 @@ function missingNumberChecks(connection, plans) {
  * @returns {any} value-or-promise
  */
 function refuseStoredNaN(connection, unchecked) {
-  const dialect = connection.dialect;
-  const q = dialect.quoteIdentifier;
+  const q = connection.dialect.quoteIdentifier;
   const tables = [...new Set(unchecked.map((entry) => entry.table))];
   const next = (/** @type {number} */ i) => {
     if (i >= tables.length) return null;
@@ -1809,12 +1825,9 @@ function refuseStoredNaN(connection, unchecked) {
     const entries = unchecked.filter((entry) => entry.table === table);
     const columns = entries.map((entry) => entry.column);
     const keys = entries[0].keys;
-    const sql = `SELECT ${keys.map((key, at) => `CAST(${q(key)} AS TEXT) AS ${q(`k${at}`)}`).join(', ')} FROM ${q(table)} `
-      + `WHERE ${columns.map((column) => `${q(column)} = 'NaN'`).join(' OR ')} `
-      + `ORDER BY ${keys.map((_key, at) => q(`k${at}`)).join(', ')} LIMIT ${DUPLICATES_NAMED + 1}`;
-    return chain(connection.prepare(sql), (statement) => chain(statement.all([]), (rows) => {
+    return chain(rowsNamedWhere(connection, table, keys, columns.map((column) => `${q(column)} = 'NaN'`).join(' OR ')), (rows) => {
       if (rows.length === 0) return next(i + 1);
-      const named = rows.slice(0, DUPLICATES_NAMED).map((row) => keys.map((_key, at) => String(row[`k${at}`])));
+      const named = rows.slice(0, DUPLICATES_NAMED);
       throw Object.assign(refuse('JD0023', `the number column${columns.length === 1 ? '' : 's'} `
         + `${columns.map((column) => `'${column}'`).join(', ')} of '${table}' refuse${columns.length === 1 ? 's' : ''} the numeric 'NaN', `
         + 'which no JSON number is, but the table holds rows another writer stored it in under an earlier release: '
@@ -1822,7 +1835,62 @@ function refuseStoredNaN(connection, unchecked) {
         + `— write a number or NULL in its place (UPDATE ${q(table)} SET ${q(columns[0])} = NULL WHERE ${q(columns[0])} = 'NaN'), `
         + 'then plan the upgrade again'),
       { class: 'constraint', retryable: false, table, columns, rows: named });
-    }));
+    });
+  };
+  return next(0);
+}
+
+/**
+ * The rows of a table a condition holds for, named by their key columns read
+ * as text (a key column may be the value the condition finds), in key order:
+ * as many as a refusal names, and one more to say there are more.
+ * @param {any} connection @param {string} table @param {string[]} keys
+ * @param {string} where - the condition, over the table's columns
+ * @returns {any} value-or-promise of `string[][]`, each row's key parts
+ */
+function rowsNamedWhere(connection, table, keys, where) {
+  const q = connection.dialect.quoteIdentifier;
+  const sql = `SELECT ${keys.map((key, at) => `CAST(${q(key)} AS TEXT) AS ${q(`k${at}`)}`).join(', ')} FROM ${q(table)} `
+    + `WHERE ${where} ORDER BY ${keys.map((_key, at) => q(`k${at}`)).join(', ')} LIMIT ${DUPLICATES_NAMED + 1}`;
+  return chain(connection.prepare(sql), (statement) => chain(statement.all([]), (rows) =>
+    rows.map((/** @type {any} */ row) => keys.map((_key, at) => String(row[`k${at}`])))));
+}
+
+/**
+ * Refuse, before any step runs, a link that adds a key's CHECK
+ * ({@link missingNumberChecks}) to a table holding a row whose key column
+ * another writer spelled under an earlier release by digits that are not the
+ * double's (`6.00000000000000000001`, which a comparison reads as itself and
+ * the engine as 6): the CHECK could not be added. `JD0023` (`class:
+ * 'constraint'`) names the table, the columns and the rows by their key, read
+ * as text, so the host can write each as the number it reads as first — or,
+ * where that number keys another row, as a key of its own, with the rows
+ * referencing it. The CHECK itself is the condition that finds them; it
+ * never casts a value the double cannot hold.
+ * @param {any} connection
+ * @param {{ table: string, column: string, keys: string[], check: string }[]} unchecked
+ * @returns {any} value-or-promise
+ */
+function refuseStoredKeyDigits(connection, unchecked) {
+  const q = connection.dialect.quoteIdentifier;
+  const tables = [...new Set(unchecked.map((entry) => entry.table))];
+  const next = (/** @type {number} */ i) => {
+    if (i >= tables.length) return null;
+    const table = tables[i];
+    const entries = unchecked.filter((entry) => entry.table === table);
+    const columns = entries.map((entry) => entry.column);
+    return chain(rowsNamedWhere(connection, table, entries[0].keys, entries.map((entry) => `NOT (${entry.check})`).join(' OR ')), (rows) => {
+      if (rows.length === 0) return next(i + 1);
+      const named = rows.slice(0, DUPLICATES_NAMED);
+      throw Object.assign(refuse('JD0023', `the key column${columns.length === 1 ? '' : 's'} `
+        + `${columns.map((column) => `'${column}'`).join(', ')} of '${table}' hold${columns.length === 1 ? 's' : ''} a number below 2^53 by its double's digits, `
+        + 'which every comparison reads as the engine does, but the table holds rows another writer spelled otherwise under an earlier release: '
+        + `${named.map((key) => key.map((part) => JSON.stringify(part)).join(', ')).join('; ')}${rows.length > DUPLICATES_NAMED ? ', and more' : ''} `
+        + `— write each as the number it reads as (UPDATE ${q(table)} SET ${q(columns[0])} = round(${q(columns[0])}, 323)::float8::text::numeric `
+        + `WHERE NOT (${entries[0].check})) or, where that number keys another row, as a key of its own with the rows referencing it, `
+        + 'then plan the upgrade again'),
+      { class: 'constraint', retryable: false, table, columns, rows: named });
+    });
   };
   return next(0);
 }

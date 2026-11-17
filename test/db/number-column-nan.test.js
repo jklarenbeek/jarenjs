@@ -31,13 +31,18 @@ const MODEL = { $model: '0.1', entities: {
     items: { 'x-entity': { relation: { to: 'E', many: true, via: 'nid', onDelete: 'setNull' } } },
     tags: { 'x-entity': { relation: { to: 'T', many: true } } } } } },
   T: { schema: { type: 'object', required: ['k'], properties: { k: { type: 'integer', 'x-entity': { key: true } } } } } } };
+/** The CHECK a column holding a key carries beside its own, as the server deparses it. @param {string} c - the column as deparsed */
+const keyCheck = (c) => `CHECK (\nCASE\n    WHEN ((abs(${c}) >= ('9007199254740992'::bigint)::numeric) OR (${c} = trunc(${c}))) THEN true\n`
+  + `    WHEN (abs(${c}) < ((5)::numeric * power((10)::numeric, ('-324'::integer)::numeric))) THEN false\n`
+  + `    ELSE (${c} = (((${c})::double precision)::text)::numeric)\nEND)`;
 /** Every CHECK a fresh store creates, as the server deparses it. */
 const CHECKS = ['E.E_a_check: CHECK ((a <> \'NaN\'::numeric))', 'E.E_at_check: CHECK ((at <> \'NaN\'::numeric))',
   'E.E_c_check: CHECK ((c <> \'NaN\'::numeric))', 'E.E_e_check: CHECK ((e = ANY (ARRAY[(1)::numeric, (5)::numeric])))',
-  'E.E_i_check: CHECK ((i <> \'NaN\'::numeric))', 'E.E_nid_check: CHECK ((nid <> \'NaN\'::numeric))',
-  'N.N_id_check: CHECK ((id <> \'NaN\'::numeric))', 'N.N_y_check: CHECK ((y <> \'NaN\'::numeric))',
-  'N_T.N_T_N_key_check: CHECK (("N_key" <> \'NaN\'::numeric))', 'N_T.N_T_T_key_check: CHECK (("T_key" <> \'NaN\'::numeric))',
-  'T.T_k_check: CHECK ((k <> \'NaN\'::numeric))'];
+  'E.E_i_check: CHECK ((i <> \'NaN\'::numeric))', 'E.E_nid_check: CHECK ((nid <> \'NaN\'::numeric))', `E.E_nid_check1: ${keyCheck('nid')}`,
+  'N.N_id_check: CHECK ((id <> \'NaN\'::numeric))', `N.N_id_check1: ${keyCheck('id')}`, 'N.N_y_check: CHECK ((y <> \'NaN\'::numeric))',
+  'N_T.N_T_N_key_check: CHECK (("N_key" <> \'NaN\'::numeric))', `N_T.N_T_N_key_check1: ${keyCheck('"N_key"')}`,
+  'N_T.N_T_T_key_check: CHECK (("T_key" <> \'NaN\'::numeric))', `N_T.N_T_T_key_check1: ${keyCheck('"T_key"')}`,
+  'T.T_k_check: CHECK ((k <> \'NaN\'::numeric))', `T.T_k_check1: ${keyCheck('k')}`];
 /** Each number column a writer beside the store could set, by table. */
 const COLUMNS = [['E', 'a'], ['E', 'c'], ['E', 'i'], ['E', 'e'], ['E', 'at'], ['E', 'nid'], ['N', 'id'], ['N', 'y'], ['N_T', 'N_key'], ['N_T', 'T_key'], ['T', 'k']];
 

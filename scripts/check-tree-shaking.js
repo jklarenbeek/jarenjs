@@ -845,7 +845,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,143,500 (measured 1143393): a bare collection root's count planned as the native COUNT(*) its explain reports (plan 141).
 // Raised to 1,144,600 (measured 1144552): the validator's string length unit (grapheme, code point or UTF-16 unit) chosen by one option (string ~566, index 273, schema 214, tools 111).
 // Raised to 1,145,400 (measured 1145314): introspect()'s triggers option, which reads application triggers back as rules only through the reader @jarenjs/db/trigger-rules passes — the option's check, each trigger row, foreign key and join table handed to the reader, the trigger-rule code and the reason naming the option (introspect 762).
-if (clientBytes > 1145400)
+// Raised to 1,146,800 (measured 1146735): a numeric key's write-boundary CHECK, read at open as the store's own so every pair, ordering, include and continuation compares the key exactly (store 529, ddl 506, emit 149, introspect 114, dialect 71, plan 39, model 13).
+if (clientBytes > 1146800)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

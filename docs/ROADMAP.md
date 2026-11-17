@@ -978,25 +978,32 @@ what each does is its own documentation's job
   Scan`), so an `$orderby` sorts every matching row however few a page or a
   narrow `$where` returns. Wanted: an index whose null placement the order
   reads, or an order whose null placement the index provides.
-- [ ] **On PostgreSQL an entity's `numeric` key compares exactly with
-  another column, and orders, includes and pages exactly.** A key the caller
-  writes, and a column referencing one, is a `numeric`, where another writer
-  may re-key a row `6.00000000000000000001`, which the engine reads as 6. A
-  literal, a literal list and an external list compare with it by the interval
-  of decimals that round to the number's double, but two such columns (a
-  join, a hop's correlation, two references in one row) and such a column
-  beside a non-key number column compare the key exactly, so the re-keyed row
-  is dropped where the engine keeps it; an ordering over an `integer` key reads
-  it bare (the re-keyed row orders after the row keyed 6, where the engine
-  ties them and its next term decides), a load's include pairs a reference
-  with a key by `=`, and a page's keyset continuation compares the key bare.
-  Reading the pairs as the doubles answers as the engine, but a join of every
-  row then merges or loops where the exact keys' equality hashed (measured on
-  PostgreSQL 17 only), and beside a non-key number column the doubles'
-  equality must be kept from the planner's hash to keep the key's index.
-  Wanted: a pair comparison the planner estimates as an equality and the
-  key's index serves, measured; the double's order, include and continuation
-  for such a key, measured against the index order they would cost.
+- [ ] **On PostgreSQL a `numeric` key without the store's key CHECK, or at
+  or past 2^53, compares exactly with another column, and orders, includes
+  and pages exactly.** A table the store creates holds a key the caller
+  writes, and a column referencing one, to its double's digits below 2^53, so
+  every comparison there is exact and the engine's. A table an earlier release
+  created holds a writer's digits until `planColumnUpgrade` adds the CHECK: a
+  literal, a literal list and an external list compare with its key by the
+  interval of decimals that round to the number's double, but a join, a hop's
+  correlation, two references in one row and a key beside a non-key number
+  column compare the key exactly, so a row re-keyed `6.00000000000000000001`
+  is dropped where the engine keeps it, and an ordering, a load's include and
+  a keyset continuation read it bare. A physical mapping's `numeric` key is
+  compared exactly in every shape, a literal included. At or past 2^53 the
+  CHECK leaves a writer's digits their own (JavaScript's digits there are not
+  always PostgreSQL's shortest), so a pair, an ordering and an external list
+  compare such a key exactly where another writer may have spelled it
+  otherwise. Wanted: a physical mapping's key qualified by its CHECKs at open,
+  or documented as the mapping's loss; an external list's element at or past
+  2^53 read by its interval.
+- [ ] **The key CHECK after a column's default changes.** Gaining or dropping
+  `default: 'auto'` on a PostgreSQL `numeric` key leaves its key CHECK in the
+  form the server rewrote, which the open no longer recognises as the store's
+  own: answers stay correct (the table reads as one without the CHECK), but
+  `introspect()` reports the CHECK and the exact paths are lost. Wanted: a
+  named key CHECK recognised by name and meaning, with the upgrade that names
+  the CHECKs earlier releases wrote.
 - [ ] **On PostgreSQL an entity's ordering over a column that may hold NULL
   never reads an index.** A term over a reference or an indexed column is `ASC
   NULLS FIRST` (descending `DESC NULLS LAST`), the engine's empty-first
