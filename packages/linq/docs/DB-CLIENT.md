@@ -1311,10 +1311,10 @@ never builds one; the migration between two of them is
 
 ## 7. Cost
 
-`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->1,149,355<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->1,151,307<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.db.kb-->1149<!--/fact--> kB) beside the other subpath prices in
+(<!--fact:bundle.db.kb-->1151<!--/fact--> kB) beside the other subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 It is by far the largest of them, and the reason is §1.1's edge rather
