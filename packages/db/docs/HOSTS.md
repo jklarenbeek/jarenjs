@@ -235,9 +235,16 @@ open never takes or checks it, and asking one to is refused (`JD0009`); a
 pool's readers need none, because its writer holds it.
 
 **Platforms.** The SQLite lease uses nothing but SQLite's own locking and one
-row, so it should be portable, but it is qualified on Linux only and is not yet
-qualified on Windows: SQLite's file locking, process termination and path case
-there are unverified.
+row, so it should be portable, but it is qualified on Linux only. It is not yet
+qualified on Windows or on macOS (arm64 or x64): SQLite's file locking, process
+termination and path case there are unverified. The lease is the row in the
+file, so a second owner that names the same file by another path (relative, a
+symbolic link, redundant `.` and `..` segments, a doubled separator, or other
+case on a case-insensitive file system) is refused like the first; the test
+runs each spelling the host allows. A hard link is different under WAL: SQLite
+derives the WAL file's name from the path, so a second path through a hard link
+is refused as a disk I/O error (`JD0002`), not by the lease, and leaves a second
+WAL file beside it.
 
 ## Node workers
 

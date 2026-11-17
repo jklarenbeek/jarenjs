@@ -204,6 +204,43 @@ describe('the owner lease in one process', () => {
     finally { cleanup(); }
   });
 
+  it('the lease belongs to the file, not to the path that names it: every other spelling of the path is refused by name', async () => {
+    const { dbPath, cleanup } = tempDbPath();
+    const dir = path.dirname(dbPath);
+    const base = path.basename(dbPath);
+    fs.mkdirSync(path.join(dir, 'sub'), { recursive: true });
+    /** @type {Record<string, string>} */
+    const spellings = {
+      relative: path.relative(process.cwd(), dbPath),
+      'redundant segments': `${dir}${path.sep}.${path.sep}sub${path.sep}..${path.sep}${base}`,
+      'doubled separator': `${dir}${path.sep}${path.sep}${base}`,
+    };
+    const alias = path.join(dir, `alias-${base}`);
+    try {
+      fs.symlinkSync(dbPath, alias);
+      spellings['symbolic link'] = alias;
+    }
+    catch (error) {
+      // A host that may not create symbolic links (Windows without the privilege) skips this spelling only.
+      if (/** @type {any} */ (error).code !== 'EPERM') throw error;
+    }
+    const upper = path.join(dir, base.toUpperCase());
+    const first = await openOwner(dbPath, 'first');
+    try {
+      // On a case-insensitive file system (Windows, macOS by default) a path in other case is the same file.
+      if (upper !== dbPath && fs.existsSync(upper)) spellings['other case'] = upper;
+      for (const [spelling, other] of Object.entries(spellings)) {
+        await assert.rejects(openOwner(other, 'second'), ownedBy('first'), `${spelling}: ${other}`);
+      }
+    }
+    finally { await first.close(); }
+    try {
+      const second = await openOwner(spellings['symbolic link'] ?? spellings.relative, 'second');
+      await second.close();
+    }
+    finally { cleanup(); }
+  });
+
   it('the owner table belongs to the engine: introspection and the model never see it', async () => {
     const { dbPath, cleanup } = tempDbPath();
     try {

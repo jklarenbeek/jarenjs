@@ -1384,6 +1384,12 @@ entry remains pending until its actual host and operator evidence exists.
   Windows and macOS need the same run (`node benchmark/adoption-resources.js`)
   on a machine of that system: their allocators, file and socket handles and
   process teardown differ in ways a Linux run cannot show.
+- [ ] **The SQLite owner lease on macOS.** [HOSTS.md](../packages/db/docs/HOSTS.md)
+  qualifies the lease on Linux only. macOS arm64 and x64 need a run of
+  `test/db/owner-lease.test.js` on each: APFS locking, process termination and
+  its case-insensitive default (the path-spelling case adds the other-case path
+  there), recorded with the operating system, architecture, Node and SQLite
+  versions of each result. One platform does not qualify another.
 - [ ] **Combined resources on the standalone executables, and the peak inside a
   call.** The live set and remaining handles are measured on the Node and Bun
   source hosts only; the relocated standalone executables
@@ -1407,7 +1413,8 @@ machine — the opt-in workflow or a local one — and its result recorded here.
   and hold no handle; the owner lease (`test/db/owner-lease.test.js`: a second
   process refused while the first holds it, a killed holder's lease expiring
   though its handle may outlive it, `close()` releasing at once, a read-only
-  open never refused, the renewal on a 3 s wall clock with 150 ms margins);
+  open never refused, the renewal on a 3 s wall clock with 150 ms margins, the
+  same file named by another path spelling, path case included);
   two worker-thread stores racing `BEGIN IMMEDIATE` on one file
   (`test/db/collection-expect.test.js`, 300 rounds under the 5 s busy timeout)
   and a second `DatabaseSync` holding a writer while a store refuses options;
