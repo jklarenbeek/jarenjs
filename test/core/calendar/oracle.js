@@ -172,6 +172,7 @@ export function oracleDayStart(table, days, policy) {
 /**
  * A zone provider answering from a table by arithmetic alone, for zones
  * the host's data need not have (a gap or fold placed across midnight).
+ * It lists its changes (`offsetChanges`), as a provider may.
  * @param {string} name - the one zone it knows
  * @param {{ initial: number, changes: Change[] }} table
  */
@@ -195,6 +196,10 @@ export function tableProvider(name, table) {
         + Math.round((parts.seconds ?? 0) * 1000);
       const found = oracleClassify(table, wall);
       return found.offsets ? { candidates: found.candidates, offsets: found.offsets } : { candidates: found.candidates };
+    },
+    offsetChanges(/** @type {number} */ from, /** @type {number} */ to, /** @type {string} */ zone) {
+      known(zone);
+      return table.changes.filter((change) => change.at >= from && change.at <= to);
     },
     identity: Object.freeze({ name: 'table', revision: 'synthetic' }),
   };

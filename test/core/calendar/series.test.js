@@ -137,7 +137,8 @@ describe('precedence: union with RDATEs, minus EXDATEs, then overrides', () => {
       ['2026-03-29T02:15:00', '2026-03-29T01:15:00.000Z', undefined],
       ['2026-03-30T02:30:00', '2026-03-30T10:00:00.000Z', true],
     ]);
-    refuses(() => defineSeries({ uid: 'z', base, rdates: [zonedValue('2026-03-29', '02:15', 'Europe/Berlin')] }), 'JY0013', '/rdates/0/zone');
+    // an RDATE in another zone is read at its instant (series-foreign.test.js)
+    assert.strictEqual(defineSeries({ uid: 'z', base, rdates: [zonedValue('2026-03-29', '02:15', 'Europe/Berlin')] }).rdates.length, 1);
     refuses(() => expandSeries(series, { horizon: [0, 1] }), 'JY0004', '/provider');
   });
 });

@@ -367,7 +367,10 @@ function ruleOnsets(observance, low, high, budget) {
  * - The provider answers `toParts`, `toEpoch` and `candidates` exactly as
  *   the Intl provider shapes them (frozen, a fold's and a gap's `offsets`
  *   either side) for the definition's TZID alone; another name is a
- *   `TypeError`, as an unknown zone is.
+ *   `TypeError`, as an unknown zone is. It also lists its changes:
+ *   `offsetChanges(from, to, zone)` answers every change with
+ *   `from <= at <= to`, which a sub-daily expansion reads to pass a
+ *   wall-clock hour with no change in one step.
  * - Outside `horizon` (narrowed by the earliest onset, by `until` and by a limit) every call
  *   refuses with `JY0024`; a wall clock within a day of either end is
  *   outside too, since its instants could lie past it.
@@ -664,10 +667,26 @@ function zoneProvider(tzid, transitions, initial, low, end, about) {
     return { year, month, day, hours, minutes, seconds, offset: offset / MINUTE };
   }
 
+  /**
+   * Every change of offset with `from <= at <= to`, as `{ at, before, after }`.
+   * @param {number} from
+   * @param {number} to
+   * @param {string} zone
+   */
+  function offsetChanges(from, to, zone) {
+    known(zone);
+    if (typeof from !== 'number' || typeof to !== 'number' || !Number.isFinite(from) || !Number.isFinite(to))
+      throw new TypeError('a span of changes is two finite numbers of epoch milliseconds');
+    if (from < low || to >= end)
+      throw outside(`the span ${new Date(from).toISOString()} to ${new Date(to).toISOString()}`);
+    return Object.freeze(transitions.filter((change) => change.at >= from && change.at <= to));
+  }
+
   return Object.freeze({
     toParts,
     toEpoch,
     candidates,
+    offsetChanges,
     identity: Object.freeze({ name: tzid, revision: about.revision }),
     tzid,
     horizon: Object.freeze({ start: low, end }),

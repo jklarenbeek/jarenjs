@@ -12,7 +12,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  CalendarError, RESOLUTION_POLICIES, VTIMEZONE_LIMITS, classifyLocal, compileVtimezone, isZone, resolveLocal, todayIn, vtimezoneFor,
+  CalendarError, RESOLUTION_POLICIES, VTIMEZONE_LIMITS, classifyLocal, compileRecurrence, compileVtimezone, expandRecurrence, isZone, resolveLocal,
+  todayIn, vtimezoneFor,
 } from '@jarenjs/core/calendar';
 import { createRuntime } from '@jarenjs/core/runtime';
 import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
@@ -369,5 +370,24 @@ describe('compileVtimezone: an observance of a sub-daily frequency', () => {
     const zone = compileVtimezone(/** @type {any} */ (definition), { horizon: [Date.UTC(2026, 0, 1), Date.UTC(2027, 0, 1)], limits: { maxTransitions: 50 } });
     assert.deepStrictEqual([zone.complete, zone.status, zone.stoppedAt], [false, 'incomplete', { limit: 'maxTransitions' }]);
     assert.ok(zone.transitions.length <= 50);
+  });
+
+  it('a compiled zone lists its changes, and a MINUTELY walk reads the same through it with or without that list', () => {
+    const zone = compileVtimezone(NEW_YORK, { horizon: HORIZON });
+    const name = zone.tzid;
+    const changes = zone.offsetChanges(Date.UTC(2026, 0, 1), Date.UTC(2027, 0, 1), name);
+    assert.deepStrictEqual(changes.map((change) => new Date(change.at).toISOString()), ['2026-03-08T07:00:00.000Z', '2026-11-01T06:00:00.000Z']);
+    assert.deepStrictEqual(zone.offsetChanges(Date.parse('2026-03-08T07:00:00Z'), Date.parse('2026-03-08T07:00:00Z'), name).length, 1);
+    assert.throws(() => zone.offsetChanges(0, 1, 'Elsewhere'), TypeError);
+    assert.throws(() => zone.offsetChanges(/** @type {any} */ ('0'), 1, name), TypeError);
+    assert.throws(() => zone.offsetChanges(Date.UTC(1990, 0, 1), Date.UTC(2026, 0, 1), name), refusal('JY0024'));
+    const { offsetChanges, ...bare } = zone;
+    assert.strictEqual(typeof offsetChanges, 'function');
+    const rule = compileRecurrence({ dtstart: { kind: 'zoned', date: '2026-03-07', time: '00:00:00', zone: name }, rrule: 'FREQ=MINUTELY;INTERVAL=7' });
+    const horizon = [Date.parse('2026-03-08T07:30:00Z'), Date.parse('2026-03-08T09:00:00Z')];
+    const listed = expandRecurrence(rule, { horizon, zoneProvider: zone });
+    const asked = expandRecurrence(rule, { horizon, zoneProvider: bare });
+    assert.deepStrictEqual(listed.occurrences, asked.occurrences);
+    assert.ok(listed.counts.providerCalls < asked.counts.providerCalls, `${listed.counts.providerCalls} < ${asked.counts.providerCalls}`);
   });
 });

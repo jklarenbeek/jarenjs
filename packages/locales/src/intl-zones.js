@@ -232,6 +232,11 @@ function probe(format, parts) {
  * Parts that are not a real civil date and time of day are a `TypeError`,
  * never a gap.
  *
+ * It carries no `offsetChanges` (the seam's optional list of a zone's
+ * changes): ICU answers offsets at instants, not its list of changes,
+ * and no scan of instants can see a change and its undoing between two
+ * of them, so this provider makes no promise it cannot keep.
+ *
  * `identity` is `{ name: 'intl', revision }`: the revision is the one
  * the caller passed (the tzdata version its hosts run, say) or
  * `'unrecorded'` - the provider never reads or invents one.

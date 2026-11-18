@@ -1113,17 +1113,54 @@ export function placeZoned(resolver, budget, id, at, wall, endWall, length, low,
 }
 
 /**
- * For a SECONDLY or MINUTELY zoned walk: a test that answers, for a wall
- * clock before the horizon, the wall clock to go on from (every time
- * before it starts before `before`), so it needs no provider call of its
- * own; `false` for one that must be resolved, and `undefined` when the
- * budget ran out. Each wall-clock hour is asked once (two clock readings,
- * its end shared with the next hour's start); an hour whose start and end
- * exist and lie one hour apart in instants is read at one offset, so a
- * time in it starts at its start's instant plus its distance from it.
- * Asking stops at the first time that does not start before `before`. A
- * zone whose offset changes inside one wall-clock hour and changes back
- * by the same amount before it ends would be read as unchanged.
+ * Whether a provider lists its offset changes: `offsetChanges(from, to,
+ * zone)`, every change with `from <= at <= to` as `{ at, before, after }`
+ * (an instant, then minutes east). The member is optional; a provider
+ * that carries it promises the list is whole.
+ * @param {any} provider
+ * @returns {boolean}
+ */
+const listsChanges = (provider) => typeof provider?.offsetChanges === 'function';
+
+/**
+ * Whether a provider names no change of offset in `[from, to]`, charging
+ * one provider call; `undefined` when the budget has none left.
+ * @param {Resolver} resolver
+ * @param {Budget} budget
+ * @param {number} from
+ * @param {number} to
+ * @returns {boolean | undefined}
+ * @throws {CalendarError} `JY0004` for an answer that is not a list of changes
+ */
+function noChangeIn(resolver, budget, from, to) {
+  if (!reserveCall(budget))
+    return undefined;
+  let answer;
+  try {
+    answer = resolver.provider.offsetChanges(from, to, resolver.zone);
+  }
+  catch (error) {
+    if (error instanceof CalendarError)
+      throw error;
+    throw new CalendarError('JY0004', `the provider's offsetChanges(from, to, '${resolver.zone}') threw`, '/provider', error);
+  }
+  if (!Array.isArray(answer) || answer.some((change) => change === null || typeof change !== 'object' || !Number.isFinite(change.at)))
+    throw new CalendarError('JY0004', `the provider's offsetChanges(from, to, '${resolver.zone}') answered no list of { at, before, after }`, '/provider');
+  return !answer.some((change) => change.at >= from && change.at <= to);
+}
+
+/**
+ * For a SECONDLY or MINUTELY zoned walk whose provider lists its offset
+ * changes: a test that answers, for a wall clock before the horizon, the
+ * wall clock to go on from (every time before it starts before
+ * `before`), so it needs no provider call of its own; `false` for one
+ * that must be resolved, and `undefined` when the budget ran out. Each
+ * wall-clock hour is asked once: its start and end resolved (the end
+ * shared with the next hour's start) and the provider's changes between
+ * their instants. An hour whose start and end exist, with no change
+ * between them, has one offset throughout, so a time in it starts at
+ * its start's instant plus its distance from it, exactly. Asking stops
+ * at the first time that does not start before `before`.
  * @param {Resolver} resolver
  * @param {Budget} budget
  * @param {number} before - an instant
@@ -1146,8 +1183,13 @@ function beforeHorizon(resolver, budget, before) {
       if (first === undefined || end === undefined)
         return undefined;
       hour = start;
-      at = first.resolution.kind === 'exists' && end.resolution.kind === 'exists' && end.instant - first.instant === HOUR
-        ? first.instant : undefined;
+      at = undefined;
+      if (first.resolution.kind === 'exists' && end.resolution.kind === 'exists') {
+        const clean = noChangeIn(resolver, budget, first.instant, end.instant);
+        if (clean === undefined)
+          return undefined;
+        at = clean ? first.instant : undefined;
+      }
     }
     if (at === undefined || at + (wall - start) >= before) {
       skipping = false;
@@ -1221,7 +1263,8 @@ export function expandPlan(plan, low, high, budget, resolver, stopAfter) {
     let shift = 0;
     const bound = (length.days * 2 * DAY) + exact;
     const reach = sub ? bound + DAY : length.days * DAY + exact + MARGIN;
-    const skip = sub && plan.unit < HOUR ? beforeHorizon(resolver, budget, low - bound) : undefined;
+    // without the provider's list of changes every time before the horizon is resolved
+    const skip = sub && plan.unit < HOUR && listsChanges(resolver.provider) ? beforeHorizon(resolver, budget, low - bound) : undefined;
     reason = walk(plan, low - reach, high + MARGIN, budget, (wall) => {
       if (wall > settle)
         return 'stopped';

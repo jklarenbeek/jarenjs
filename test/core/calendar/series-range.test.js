@@ -36,6 +36,23 @@ const rows = (expansion) => expansion.occurrences.map((/** @type {any} */ o) => 
 
 const daily = compileRecurrence({ dtstart: f('2026-01-05', '09:00'), duration: 'PT1H', rrule: 'FREQ=DAILY;COUNT=10' });
 
+/**
+ * Under every maxOccurrences from 1 past the whole answer's length, the
+ * answer is its first that many, complete only when nothing is left.
+ * @param {any} series
+ * @param {any} options
+ * @param {import('@jarenjs/core/calendar').SeriesExpansion} whole
+ */
+function everyCap(series, options, whole) {
+  const n = whole.occurrences.length;
+  const ids = whole.occurrences.map((o) => o.recurrenceId);
+  for (let cap = 1; cap <= n + 2; cap += cap < 40 ? 1 : 7) {
+    const got = expandSeries(series, { ...options, limits: { ...options.limits, maxOccurrences: cap } });
+    assert.deepStrictEqual(got.occurrences.map((o) => o.recurrenceId), ids.slice(0, cap), `maxOccurrences ${cap}`);
+    assert.strictEqual(got.complete, cap >= n, `maxOccurrences ${cap} of ${n}`);
+  }
+}
+
 describe('RANGE=THISANDFUTURE', () => {
   it('§3.8.4.4: an instance rescheduled two hours later reschedules every later one by the same time difference', () => {
     const base = compileRecurrence({ dtstart: utc('1996-01-18T12:00:00Z'), duration: 'PT1H', rrule: 'FREQ=DAILY;COUNT=5' });
@@ -90,6 +107,31 @@ describe('RANGE=THISANDFUTURE', () => {
       '2026-01-11T09:00:2026-01-11T08:00-09:00*',
       '2026-01-12T09:00:2026-01-12T08:00-09:00*',
     ]);
+  });
+
+  it('each run of the rule is read over the horizon moved back by its own distance, never the ranges\' sum', () => {
+    const rule = compileRecurrence({ dtstart: f('2026-01-05', '09:00'), rrule: 'FREQ=DAILY' });
+    const series = defineSeries({ uid: 'w', base: rule, overrides: [
+      { recurrenceId: '2026-01-07T09:00:00', range: 'THISANDFUTURE', status: 'moved', start: f('2026-01-12', '09:00') },
+      { recurrenceId: '2026-01-10T09:00:00', range: 'THISANDFUTURE', status: 'moved', start: f('2026-01-10', '08:00') },
+    ] });
+    const got = expandSeries(series, { horizon: [f('2026-01-01', '00:00'), f('2026-02-01', '00:00')] });
+    const ids = got.occurrences.map((o) => o.recurrenceId.slice(5, 10));
+    assert.deepStrictEqual([ids.length, ids.at(-1), ids.slice(0, 6)], [27, '01-31', ['01-05', '01-06', '01-10', '01-11', '01-12', '01-07']]);
+  });
+
+  it('a run whose slots all lie outside the horizon is not read: what a range before the horizon costs is its own slot\'s check', () => {
+    const z = (/** @type {string} */ date, /** @type {string} */ time) => ({ kind: /** @type {const} */ ('zoned'), date, time, zone: 'Europe/Amsterdam' });
+    const base = compileRecurrence({ dtstart: z('2026-01-01', '09:00:00'), dtend: z('2026-01-01', '10:00:00'), rrule: 'FREQ=DAILY' });
+    const late = { recurrenceId: '2026-01-10T09:00:00', range: /** @type {const} */ ('THISANDFUTURE'), status: /** @type {const} */ ('moved'),
+      start: z('2026-01-10', '11:00:00') };
+    const early = { recurrenceId: '2026-01-05T09:00:00', range: /** @type {const} */ ('THISANDFUTURE'), status: /** @type {const} */ ('moved'),
+      start: z('2026-01-05', '10:00:00') };
+    const options = { horizon: [at('2026-02-01T00:00:00Z'), at('2026-02-03T00:00:00Z')], zoneProvider: amsterdam };
+    const one = expandSeries(defineSeries({ uid: 'c', base, overrides: [late] }), options);
+    const two = expandSeries(defineSeries({ uid: 'c', base, overrides: [early, late] }), options);
+    assert.deepStrictEqual(two.occurrences, one.occurrences);
+    assert.strictEqual(two.counts.providerCalls, one.counts.providerCalls);
   });
 
   it('a one-slot override still wins for its slot, keeps the range\'s length, and can bring back a cancelled slot', () => {
@@ -163,23 +205,26 @@ describe('RANGE=THISANDFUTURE', () => {
       ['2026-03-04T09:00:2026-01-20T09:00', '2026-03-05T09:00:2026-01-21T09:00', '2026-03-06T09:00:2026-01-22T09:00']);
   });
 
-  it('a backward range under a small maxOccurrences keeps a prefix of the whole answer, and says it is incomplete', () => {
+  it('a backward range under any maxOccurrences: exactly that many, the whole answer\'s first, incomplete while some are left', () => {
     const rule = compileRecurrence({ dtstart: f('2026-01-01', '09:00'), rrule: 'FREQ=DAILY' });
     const series = defineSeries({ uid: 'a', base: rule, overrides: [
       { recurrenceId: '2026-01-20T09:00:00', range: 'THISANDFUTURE', status: 'moved', start: f('2026-01-10', '21:00') },
     ] });
-    const horizon = [f('2026-01-01', '00:00'), f('2026-03-01', '00:00')];
-    const whole = expandSeries(series, { horizon });
+    const options = { horizon: [f('2026-01-01', '00:00'), f('2026-03-01', '00:00')] };
+    const whole = expandSeries(series, options);
     assert.strictEqual(whole.status, 'complete');
-    for (const maxOccurrences of [5, 12, 25]) {
-      const cut = expandSeries(series, { horizon, limits: { maxOccurrences } });
-      assert.deepStrictEqual([cut.complete, cut.stoppedAt], [false, { limit: 'maxOccurrences' }], `${maxOccurrences}`);
-      assert.ok(cut.occurrences.length <= maxOccurrences);
-      assert.deepStrictEqual(rows(cut), rows(whole).slice(0, cut.occurrences.length), `${maxOccurrences}`);
-    }
+    everyCap(series, options, whole);
+    // and with several ranges, an EXDATE and one-slot overrides beside them
+    const busy = defineSeries({ uid: 'b', base: rule, exdates: [f('2026-01-25', '09:00')], overrides: [
+      { recurrenceId: '2026-01-05T09:00:00', range: 'THISANDFUTURE', status: 'moved', start: f('2026-01-07', '09:00') },
+      { recurrenceId: '2026-01-15T09:00:00', range: 'THISANDFUTURE', status: 'moved', start: f('2026-01-03', '12:00') },
+      { recurrenceId: '2026-01-28T09:00:00', status: 'moved', start: f('2026-01-02', '07:00') },
+      { recurrenceId: '2026-02-10T09:00:00', range: 'THISANDFUTURE', status: 'cancelled' },
+    ] });
+    everyCap(busy, options, expandSeries(busy, options));
   });
 
-  it('a zoned backward range under a small maxOccurrences: a run cut before its own slots keeps the answer a prefix', () => {
+  it('a zoned backward range under any maxOccurrences: exactly that many, the whole answer\'s first', () => {
     const base = compileRecurrence({ dtstart: { kind: 'zoned', date: '2026-02-01', time: '00:00:00', zone: 'Europe/Amsterdam' }, rrule: 'FREQ=HOURLY' });
     const series = defineSeries({ uid: 'h', base, overrides: [{ recurrenceId: '2026-02-01T10:00:00', range: 'THISANDFUTURE', status: 'moved',
       start: { kind: 'zoned', date: '2026-02-01', time: '01:00:00', zone: 'Europe/Amsterdam' } }] });
@@ -188,15 +233,9 @@ describe('RANGE=THISANDFUTURE', () => {
     assert.strictEqual(whole.status, 'complete');
     assert.deepStrictEqual(whole.occurrences.slice(0, 5).map((o) => o.recurrenceId.slice(11, 13)), ['00', '01', '10', '02', '11']);
     assert.ok(whole.occurrences.length > 200 && whole.occurrences.length < 400, `${whole.occurrences.length}`);
-    for (const maxOccurrences of [5, 30, 60]) {
-      const cut = expandSeries(series, { ...options, limits: { maxOccurrences } });
-      assert.deepStrictEqual([cut.complete, cut.stoppedAt], [false, { limit: 'maxOccurrences' }], `${maxOccurrences}`);
-      assert.deepStrictEqual(cut.occurrences.map((o) => o.recurrenceId), whole.occurrences.slice(0, cut.occurrences.length).map((o) => o.recurrenceId));
-    }
-    // a run stopped at its cap cuts the answer where an unread slot could start (two days early for a zone) ...
-    assert.ok(expandSeries(series, { ...options, limits: { maxOccurrences: 60 } }).occurrences.length > 0);
-    // ... and leaves it complete when no unread slot can reach the horizon
-    const roomy = expandSeries(series, { ...options, limits: { maxOccurrences: 290 } });
+    everyCap(series, options, whole);
+    // a run stopped at its cap whose unread slots cannot reach the horizon leaves the answer complete
+    const roomy = expandSeries(series, { ...options, limits: { maxOccurrences: whole.occurrences.length + 64 } });
     assert.deepStrictEqual([roomy.status, roomy.occurrences.length], ['complete', whole.occurrences.length]);
   });
 

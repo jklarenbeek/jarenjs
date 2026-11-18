@@ -184,6 +184,43 @@ describe('zoned sub-daily rules step the wall clock and resolve each time under 
   });
 });
 
+describe('a change of offset and back inside one wall-clock hour', () => {
+  // a made-up zone: at 01:30Z the clock moves back from 02:30 (+01:00) to 02:10 (+00:40), and at 01:40Z on from 02:20
+  // (+00:40) to 02:40 (+01:00). The hour 02:00-03:00 starts at 01:00Z and ends at 02:00Z, one hour apart, yet holds both
+  // changes: 02:10-02:20 happen twice, 02:30-02:40 never (read with +00:40, they start at 01:50Z-01:59Z).
+  const table = { initial: 60, changes: [{ at: at('2026-03-01T01:30:00Z'), before: 60, after: 40 }, { at: at('2026-03-01T01:40:00Z'), before: 40, after: 60 }] };
+  const listing = tableProvider('Test/Excursion', table);
+  const { offsetChanges, ...bare } = listing;
+  const rule = compileRecurrence({ dtstart: zoned('Test/Excursion', '2026-02-28', '00:00:00'), rrule: 'FREQ=MINUTELY' });
+  const over = (/** @type {string} */ low, /** @type {any} */ provider) => expandRecurrence(rule, {
+    horizon: [at(low), at('2026-03-01T02:10:00Z')], zoneProvider: provider, limits: { maxProviderCalls: 1000000 } });
+
+  it('is read time by time: what each time resolves to, whatever the hour\'s ends say', () => {
+    assert.strictEqual(typeof offsetChanges, 'function');
+    // the whole answer, each time resolved through the provider (the horizon starts long before the hour)
+    const whole = rows(over('2026-03-01T00:00:00Z', listing));
+    const want = whole.filter((row) => at(`${row.slice(-16)}:00Z`) >= at('2026-03-01T01:45:00Z'));
+    // read at the hour's one offset, 02:30-02:39 would start at 01:30Z-01:39Z and be passed over
+    for (const minute of ['30', '35', '39'])
+      assert.ok(want.includes(`2026-03-01T02:${minute} 2026-03-01T02:${Number(minute) + 20} 2026-03-01T01:${Number(minute) + 20}`), minute);
+    for (const provider of [listing, bare])
+      assert.deepStrictEqual(rows(over('2026-03-01T01:45:00Z', provider)), want, provider === bare ? 'without offsetChanges' : 'with offsetChanges');
+  });
+
+  it('a provider without offsetChanges is asked about every time of the day before the horizon; one with it, about hours', () => {
+    const listed = over('2026-03-01T01:45:00Z', listing).counts.providerCalls;
+    const asked = over('2026-03-01T01:45:00Z', bare).counts.providerCalls;
+    assert.ok(listed < 150 && asked > 1440, `${listed} and ${asked} provider calls`);
+  });
+
+  it('a malformed list of changes is the provider\'s fault (JY0004)', () => {
+    const broken = { ...bare, offsetChanges: () => [{ at: 'soon' }] };
+    assert.throws(() => over('2026-03-01T01:45:00Z', broken), (/** @type {any} */ error) => error.code === 'JY0004');
+    const throwing = { ...bare, offsetChanges: () => { throw new Error('no data'); } };
+    assert.throws(() => over('2026-03-01T01:45:00Z', throwing), (/** @type {any} */ error) => error.code === 'JY0004' && error.cause?.message === 'no data');
+  });
+});
+
 describe('floating and utc sub-daily rules', () => {
   it('a floating rule steps a wall clock that has no gap; a utc rule steps instants', () => {
     const floating = expandRecurrence(compileRecurrence({ dtstart: floatingValue('2026-03-29', '00:00'), rrule: 'FREQ=HOURLY;COUNT=4' }),
@@ -250,7 +287,7 @@ describe('a sub-daily rule stays under its limits', () => {
           { horizon, zoneProvider: providerOf(zone) });
         assert.strictEqual(got.status, 'complete', rrule);
         assert.deepStrictEqual(got.occurrences.map((o) => o.recurrenceId.slice(11)), ids, `${zone} ${low} ${rrule}`);
-        assert.ok(got.counts.providerCalls < 80, `${zone} ${low} ${rrule}: ${got.counts.providerCalls} provider calls`);
+        assert.ok(got.counts.providerCalls < 120, `${zone} ${low} ${rrule}: ${got.counts.providerCalls} provider calls`);
       }
     }
   });

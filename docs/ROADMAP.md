@@ -1142,16 +1142,12 @@ what each does is its own documentation's job
 
 ## @jarenjs/core
 
-- [ ] **`@jarenjs/core/calendar` reads a zoned series' RDATE and EXDATE in its own zone only, and no store has a
-  temporal column kind.** A zoned series' RDATE or EXDATE must name the series' own zone. No store has a temporal column
-  kind: a caller stores the JSON forms (`@jarenjs/core/schemas/calendar/temporal.schema.json`,
-  `…/rrule.schema.json`) and binds floating occurrences with `bindFloating`.
-- [ ] **A zoned SECONDLY or MINUTELY expansion reads a clean wall-clock hour before its horizon at one offset.** It asks
-  the provider about each hour's start and end, not each time, so a zone whose offset changes inside one wall-clock hour
-  and changes back by the same amount before it ends is read as unchanged.
-- [ ] **A zoned series whose range override moves slots back can answer fewer than `maxOccurrences`.** When a run of the
-  rule stops at its cap, the answer is cut two days of instants before where an unread slot could start; it is
-  incomplete and a prefix of the whole answer, but can hold fewer occurrences than the limit allows.
+- [ ] **No store has a temporal column kind.** A caller stores the JSON forms
+  (`@jarenjs/core/schemas/calendar/temporal.schema.json`, `…/rrule.schema.json`) and binds floating occurrences with
+  `bindFloating`.
+- [ ] **A zoned SECONDLY expansion through the Intl provider asks it about every time of the day before its horizon.**
+  ICU exposes no list of offset changes, so `createIntlZoneProvider` carries no `offsetChanges`, and up to 86400
+  provider calls precede the first occurrence (a compiled VTIMEZONE lists its changes and needs none of them).
 - [ ] **`@jarenjs/josl/ical` writes no VTIMEZONE by RRULE and reads no VAVAILABILITY or scheduling
   method.** Events, recurring series and free/busy spans are written by kind; under `zones: 'utc'` a
   zoned time is written as the UTC instant `toUtc` answers, and a zoned recurring series as its

@@ -25,12 +25,13 @@ const provider = createIntlZoneProvider({ revision: '2026e' }); // the tzdata yo
 ## The provider seam
 
 A provider is the `ZoneProvider` of `@jarenjs/core/series` — `toParts`
-and `toEpoch` — plus two optional members this layer reads:
+and `toEpoch` — plus three optional members this layer reads:
 
 | Member | Answers |
 |---|---|
 | `candidates(parts, zone)` | `{ candidates, offsets? }`: the instants that carry the wall clock, ascending, each `{ instant, offsetMinutes }` with the offset in force there. One is a time that exists, two a fold; none is a gap, and then `offsets: { before, after }` are the offsets in force either side of the change. A fold carries `offsets` too. |
 | `identity` | `{ name, revision }`: which zone data answers, recorded on every resolution |
+| `offsetChanges(from, to, zone)` | every change of offset with `from <= at <= to` (epoch milliseconds), as `[{ at, before, after }]` with the offsets in minutes east. A provider that carries it promises the list is whole; a zoned SECONDLY or MINUTELY expansion reads it to pass a wall-clock hour with no change in one step. A compiled zone definition carries it; the Intl provider does not, since the host's ICU exposes offsets at instants, not its list of changes |
 
 `createIntlZoneProvider({ zones, revision })` implements both from the
 probe `toEpoch` already runs, so the two cannot disagree; `toEpoch`
@@ -582,17 +583,21 @@ as any zoned time does:
   generated times a day forward, onto the next day's own times.
 
 A zoned sub-daily walk starts one day of wall clock before the horizon
-(no offset is a day or more). A SECONDLY or MINUTELY walk asks the
-provider about each wall-clock hour before the horizon once (its start
-and end, the end shared with the next hour) instead of about every time
-in it: in an hour whose start and end exist and lie an hour apart, a
-time starts at the hour's instant plus its distance from the hour, and
-one that starts before the horizon is passed without a call of its own.
-This reads a zone whose offset changes inside one wall-clock hour and
-changes back by the same amount before that hour ends as unchanged.
-Once it has enough occurrences and has resolved a time a gap moved, a
-sub-daily walk goes on only as far past it as that gap moved it, not
-three days.
+(no offset is a day or more) and resolves each generated time there,
+one provider call each, so its answer is what the provider answers for
+every time. With a provider that lists its changes (`offsetChanges`), a
+SECONDLY or MINUTELY walk asks about each wall-clock hour before the
+horizon instead: its start and end (the end shared with the next hour)
+and the changes between their instants. An hour whose start and end
+exist with no change between them has one offset throughout, so each
+time in it starts at the hour's instant plus its distance from it, and
+one that starts before the horizon needs no call of its own; any other
+hour, such as one where the offset changes and changes back, is
+resolved time by time. Without the list, a zoned SECONDLY walk spends
+up to a day of provider calls (86400) before the horizon: raise
+`maxProviderCalls`, or use a provider that lists its changes. Once it
+has enough occurrences and has resolved a time a gap moved, a sub-daily
+walk goes on only as far past it as that gap moved it, not three days.
 
 **MONTHLY and YEARLY.** A period is a month or a year. With BYWEEKNO it
 is the run of weeks the year numbers, from its week 1 to the next year's
@@ -674,15 +679,38 @@ reads one recurring series and freezes it:
 
 - **`base`** is a compiled recurrence, or `null`.
 - **`rdates`** are values of the base's kind, or periods
-  `{ start, end }`.
-- **`exdates`** are values of the base's kind.
+  `{ start, end }`. A zoned series also takes zoned values in another
+  zone and utc values (RFC 5545 lets each RDATE carry its own TZID).
+- **`exdates`** are values of the base's kind; a zoned series also
+  takes zoned values in another zone and utc values.
 - **`overrides`** are
   `{ recurrenceId, status: 'moved' | 'cancelled', start?, end?, payload?, range? }`,
   one per recurrenceId. A moved override names its new `start`, and its
   `end` or the slot's own length. `payload` is carried on the moved
   occurrence and never read.
 
-All values share one kind, and a zoned series one zone.
+All values share one kind and, apart from those RDATEs and EXDATEs, a
+zoned series one zone.
+
+**RDATEs and EXDATEs in another zone or utc.** Each is read at its
+instant, in its own zone under the series' policy (under `reject` a time
+in its own zone's gap or fold refuses the expansion wherever it falls):
+
+- An RDATE adds the slot the series' wall clock names at that instant:
+  its `recurrenceId` and `start` are that wall clock, a period's end is
+  its own instant, and without one the slot takes the series' length
+  from that wall clock. One that names a slot the rule makes is that
+  slot once; an RDATE in the series' own zone wins over one elsewhere
+  naming the same slot. An RDATE whose wall clock the series reads as
+  another instant (the second pass of a repeated hour under `rfc5545`,
+  the first under `later`) is refused (`JY0013`): its `recurrenceId`
+  would name the other.
+- An EXDATE removes every slot that starts at its instant: RFC 5545
+  §3.8.5.1 builds the set from the RRULE and RDATE starts, "and then
+  excluding any start DATE-TIME values specified by EXDATE". The start
+  is the slot's own, before any override, so a time a gap moved and the
+  time it moved onto (two slots at one instant) both go. An EXDATE in
+  the series' own zone still names one slot, by its wall clock.
 
 `expandSeries(series, { horizon, limits?, zoneProvider?, runtime? })` reads its
 options as `expandRecurrence` does. It also takes a list of series of
@@ -729,10 +757,15 @@ ordered by `recurrenceId`:
 
 A range whose distance is negative can move slots from past the horizon
 into it, and one whose distance is positive slots from before it; the
-rule is expanded over the horizon moved back by each range's distance,
-once per range. When such an expansion stops at `maxOccurrences`, the
-answer keeps only the slots before the earliest start a slot it did not
-reach could take, and is incomplete.
+rule is read over the horizon moved back by each range's distance, once
+per range, each read asked for a capped number of slots. A read stopped
+at its cap leaves later slots unread, none starting before the last one
+it read (for a zoned series, before it less two days: an offset's change
+and a gap's). When such a start could fall among the first
+`maxOccurrences` of the answer, that read is repeated with twice the
+cap. So the answer holds `maxOccurrences` slots when that many exist,
+the whole answer's first, and is incomplete exactly when slots are left
+in the horizon.
 
 **Overrides and the horizon.** An override is looked up by its slot.
 The engine does not walk the whole series to find it. A slot outside the
@@ -1009,7 +1042,8 @@ after daylight time ends.
 
 The answer is a provider for the definition's TZID alone, with
 `toParts`, `toEpoch` and `candidates` shaped exactly as the Intl
-provider shapes them. Its `identity` is `{ name: tzid, revision }`,
+provider shapes them, and `offsetChanges(from, to, zone)`, its changes
+in that span (outside its horizon `JY0024`). Its `identity` is `{ name: tzid, revision }`,
 and the revision is a hash of the definition. It also carries what it
 was compiled over:
 
@@ -1121,8 +1155,6 @@ finite instant, is the runtime's own `TypeError`.
 
 ## Not here
 
-- **Series.** An RDATE or EXDATE of a zoned series names the series'
-  zone, never another zone or a utc value.
 - **Availability.** VAVAILABILITY is not read or written; a layer is
   the caller's own JSON. Availability is evaluated, never stored.
 - **Storage.** No temporal value is stored by a database here; a caller
