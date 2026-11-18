@@ -39,8 +39,10 @@ function keysOf(mode) {
 
 /**
  * The keypad token a physical key stands for in `mode`, or `null` when the
- * mode's keypad has no such key (a mode without a keypad takes none). In the
- * programmer mode a letter `a`-`f` is its hex digit and `%` is `mod`.
+ * mode's keypad has no such key (a mode without a keypad takes none). `,`
+ * and `.` are both the point. In the programmer mode a letter `a`-`f` is its
+ * hex digit and `%` is `mod`; in the scientific mode `;` separates a
+ * function's arguments.
  * @param {string} key a `KeyboardEvent.key`
  * @param {string} mode
  * @returns {string | null}
@@ -57,6 +59,9 @@ export function calcKeyOf(key, mode) {
     if (/^[a-f]$/i.test(token)) token = token.toUpperCase();
     else if (token === '%') token = 'mod';
   }
+  // the scientific functions take two arguments (`log(8; 2)`): `;` separates
+  // them, since `,` is the point for a reader whose decimal sign it is
+  if (mode === 'scientific' && token === ';') return ',';
   return keys.has(token) ? token : null;
 }
 

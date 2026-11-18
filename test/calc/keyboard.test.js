@@ -9,6 +9,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 
 import { createCalcComponent, calcKeyOf, bindCalcKeyboard } from '@jarenjs/calc/component';
+import { createStubHost, fire } from '../view/dom.stub.js';
 
 /**
  * A DOM-shaped stand-in: an element inside or outside the keypad region, a
@@ -56,6 +57,8 @@ describe('#calc keyboard: the key a physical key stands for', () => {
     assert.equal(calcKeyOf('e', 'scientific'), 'e');
     assert.equal(calcKeyOf('!', 'scientific'), '!');
     assert.equal(calcKeyOf('!', 'standard'), null, 'standard has no factorial key');
+    assert.equal(calcKeyOf(';', 'scientific'), ',', 'the argument separator');
+    assert.equal(calcKeyOf(';', 'standard'), null);
   });
   it('a letter a-f is a hex digit and % is mod in the programmer mode', () => {
     assert.equal(calcKeyOf('c', 'programmer'), 'C');
@@ -168,5 +171,22 @@ describe('#calc keyboard: the host listener', () => {
       assert.deepEqual([doc.listeners.keydown.length, doc.listeners.pointerdown.length], [0, 0]);
     }
     finally { app.destroy(); }
+  });
+});
+
+describe('#calc keyboard: the standalone app', () => {
+  it('a mounted app binds the keyboard on its node and unbinds it on destroy', () => {
+    const { container } = createStubHost();
+    const app = createCalcComponent({ fetch: async () => ({ ok: false, status: 503 }) }).createApp({ node: container, schedule: (/** @type {any} */ f) => f() });
+    const inPad = element(true);
+    for (const key of ['7', '*', '6', 'Enter']) fire(container, 'keydown', { key, target: inPad, preventDefault() {} });
+    assert.equal(app.getState().calc.ans, 42);
+    assert.deepEqual([container.listeners.get('keydown')?.size, container.listeners.get('pointerdown')?.size], [1, 1]);
+    app.destroy();
+    assert.deepEqual([container.listeners.get('keydown')?.size ?? 0, container.listeners.get('pointerdown')?.size ?? 0], [0, 0]);
+  });
+  it('a headless app binds nothing', () => {
+    const app = createCalcComponent({ fetch: async () => ({ ok: false, status: 503 }) }).createApp({ schedule: (/** @type {any} */ f) => f() });
+    app.destroy();
   });
 });

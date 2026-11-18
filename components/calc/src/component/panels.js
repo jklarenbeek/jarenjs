@@ -59,6 +59,24 @@ function roundTo(value, decimals) {
 }
 
 /**
+ * The financial inputs after the unknown changes to `next`: the answer the
+ * panel showed for the old unknown (rounded as its field showed it) written
+ * into that field, so it holds the value the reader saw rather than the
+ * stale one beneath it. Values with no solution keep the field as it was.
+ * @param {any} fin the `$.calc.fin` inputs
+ * @param {unknown} next the new unknown
+ * @returns {any}
+ */
+export function carrySolved(fin, next) {
+  const previous = fin.solveFor;
+  const carried = { ...fin, solveFor: next };
+  if (previous === next || !Object.hasOwn(SOLVED_DECIMALS, previous)) return carried;
+  const solved = solveTvm({ ...fin });
+  if (Number.isFinite(solved)) carried[previous] = roundTo(solved, SOLVED_DECIMALS[/** @type {keyof typeof SOLVED_DECIMALS} */ (previous)]);
+  return carried;
+}
+
+/**
  * The parameters of an example's explanation: its amounts and its yearly
  * rate and length, as the text shows them.
  * @param {typeof FINANCIAL_EXAMPLES[number]} example

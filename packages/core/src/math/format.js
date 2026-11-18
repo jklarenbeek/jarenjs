@@ -295,7 +295,48 @@ function toEngineering(value, precision) {
 }
 
 /**
+ * The `notation: 'auto'` text of a finite value: positional for
+ * human-scale magnitudes, exponential from `1e21` up and below `1e-6`.
+ * With `precision`, `precision` significant digits in either notation, and
+ * neither pads: an exponential mantissa has no trailing zeros
+ * (`9.99e+22`, not `9.990000000000e+22`), and a value whose rounding drops
+ * digits left of the point is exponential rather than showing the dropped
+ * digits as zeros (`1234567890123456` at 12 is `1.23456789012e+15`, not
+ * `1234567890120000`); a whole number its precision holds stays positional.
+ * @param {number} value
+ * @param {number | undefined} precision
+ * @returns {string}
+ */
+function autoNotation(value, precision) {
+  const abs = Math.abs(value);
+  const exponential = value !== 0 && (abs >= 1e21 || abs < 1e-6);
+  if (precision === undefined) return exponential ? value.toExponential() : String(value);
+  const rounded = Number(value.toPrecision(precision));
+  if (exponential || (Math.abs(rounded) >= 10 ** precision && rounded !== value)) {
+    return trimMantissa(value.toExponential(Math.max(0, precision - 1)));
+  }
+  return String(rounded);
+}
+
+/**
+ * An exponential rendering without the zeros padding its mantissa:
+ * `1.2300e+5` is `1.23e+5`, `1.000e+5` is `1e+5`.
+ * @param {string} text
+ * @returns {string}
+ */
+function trimMantissa(text) {
+  const at = text.indexOf('e');
+  const mantissa = text.slice(0, at);
+  return (mantissa.includes('.') ? mantissa.replace(/0+$/, '').replace(/\.$/, '') : mantissa) + text.slice(at);
+}
+
+/**
  * Format a number for display.
+ *
+ * Under `notation: 'auto'` (the default) `precision` is significant digits
+ * in both notations, with no padding zeros and no rounded-away digits shown
+ * as zeros (see `autoNotation`); under `'sci'`, `'eng'` and `'fixed'` it is
+ * the digits after the point.
  *
  * `notation: 'auto'` (the default) is NOT a drop-in for a fixed-unit
  * readout: the auto branch escapes to exponential once
@@ -347,17 +388,7 @@ export function formatNumber(value, opts = {}) {
     out = toEngineering(value, opts.precision ?? 3);
   }
   else {
-    // auto: plain decimal for human-scale magnitudes, else scientific.
-    const abs = Math.abs(value);
-    if (value !== 0 && (abs >= 1e21 || abs < 1e-6)) {
-      out = opts.precision !== undefined ? value.toExponential(opts.precision) : value.toExponential();
-    }
-    else if (opts.precision !== undefined) {
-      out = String(Number(value.toPrecision(opts.precision)));
-    }
-    else {
-      out = String(value);
-    }
+    out = autoNotation(value, opts.precision);
   }
 
   if (sep || decimal !== '.' || chars) {

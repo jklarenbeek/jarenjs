@@ -1182,6 +1182,7 @@ export const ko = {
   'calc/key/mem-add': '결과를 메모리에 더하기',
   'calc/key/mem-clear': '메모리 지우기',
   'calc/programmer/note': '정수 연산: 각 결과는 0 쪽으로 버림되고 선택한 워드 크기로 감깁니다. 한 식 안에서는 ÷가 정확한 분수를 유지하므로 7 ÷ 2 × 2 = 7입니다.',
+  'calc/programmer/shift-note': '시프트 횟수는 JavaScript처럼 워드 크기로 나눈 나머지로 처리됩니다: {bits}비트에서 1 « {bits}은 1이고 1 « {next}은 2입니다.',
   'calc/plot/expr': '그릴 x의 함수',
   'calc/financial/no-solution': '이 값으로는 해가 없습니다: 받는 돈과 내는 돈의 부호가 반대인지 확인하세요.',
   'calc/financial/intro': '화폐의 시간 가치: 오늘의 금액은 그동안 이자를 벌 수 있으므로 나중의 같은 금액보다 가치가 큽니다.',

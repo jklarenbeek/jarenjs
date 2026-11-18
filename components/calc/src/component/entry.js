@@ -129,6 +129,27 @@ export function untokenize(tokens) {
 }
 
 /**
+ * An entry as the display shows it to a reader whose decimal separator is
+ * `symbols.decimal`: each number's point in that separator, and, where the
+ * decimal separator is the comma, `;` between a function's arguments, as a
+ * spreadsheet writes them (`max(1,5;2)`). The entry itself keeps the
+ * engine's `.` and `,`.
+ * @param {string} entry
+ * @param {{ decimal: string }} symbols
+ * @returns {string}
+ */
+export function localizeEntry(entry, symbols) {
+  if (symbols.decimal === '.') return entry;
+  const separator = symbols.decimal === ',' ? ';' : ',';
+  return untokenize(tokenize(entry).map((token) => {
+    const raw = token.raw ?? token.s;
+    if (token.t === 'num') return { ...token, raw: raw.replace('.', symbols.decimal) };
+    if (token.t === 'comma') return { ...token, raw: raw.replace(',', separator) };
+    return token;
+  }));
+}
+
+/**
  * A number token with `tail` appended (or, with `drop`, its last character
  * removed), its spelling before it kept.
  * @param {Token} token @param {string} tail @param {boolean} [drop]
@@ -248,8 +269,9 @@ function edit(tokens, k, programmer) {
   if (BINARY.has(k)) return withOperator(tokens, k);
   if (POSTFIX.has(k)) return complete(last) ? [...tokens, { t: 'post', s: k }] : null;
   if (k === ')') return complete(last) && depthOf(tokens) > 0 ? [...tokens, { t: 'close', s: ')' }] : null;
-  // an argument separator, inside a call after a complete argument (`max(1,2`)
-  if (k === ',') return complete(last) && inCall(tokens) ? [...tokens, { t: 'comma', s: ',' }] : null;
+  // an argument separator, inside a call after a complete argument
+  // (`max(1,2`); `;` writes it too, as a comma-decimal reader sees it
+  if (k === ',' || k === ';') return complete(last) && inCall(tokens) ? [...tokens, { t: 'comma', s: ',' }] : null;
   if (k === '(') return withOperand(tokens, { t: 'open', s: '(' });
   if (k === '~') return withOperand(tokens, { t: 'unary', s: '~' });
   if (PREFIXES.has(k)) return last !== undefined && last.t === 'num' ? null : withOperand(tokens, { t: 'num', s: k });

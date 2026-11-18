@@ -2,44 +2,21 @@
 /**
  * @file The calculator's number text: a result as a reader reads it on the
  * display, the tape and the converter. A safe integer (below 2^53, where
- * every whole number is exact) shows every digit it has; any other finite value shows `digits` significant
- * digits, in positional notation from 10^-6 up to 10^digits and in
- * exponent notation outside it, with no zeros padding the mantissa
- * (`9.99e+22`, never `9.990000000000e+22`) and none trailing a fraction.
+ * every whole number is exact) shows every digit it has; any other finite
+ * value shows `digits` significant digits, positional for human-scale
+ * magnitudes and exponential where rounding would drop digits left of the
+ * point, with no zeros padding the mantissa (`9.99e+22`).
  * `group` separates the thousands of the whole part with commas, as the
- * financial panel's amounts are.
+ * financial panel's amounts are. The digits are core's `formatNumber`; this
+ * module chooses the precision and the reader's separators.
  */
 
-/**
- * Drop the zeros that pad a fraction or a mantissa: `1.2300` → `1.23`,
- * `9.9900e+22` → `9.99e+22`, `2.000` → `2`.
- * @param {string} text a positional or exponent rendering
- * @returns {string}
- */
-function trimZeros(text) {
-  const at = text.indexOf('e');
-  const mantissa = at < 0 ? text : text.slice(0, at);
-  const exponent = at < 0 ? '' : text.slice(at);
-  const trimmed = mantissa.includes('.') ? mantissa.replace(/0+$/, '').replace(/\.$/, '') : mantissa;
-  return trimmed + exponent;
-}
+import { formatNumber } from '@jarenjs/core/math';
 
 /**
- * Separate the thousands of the whole part of a positional rendering.
- * @param {string} text
- * @returns {string}
- */
-function groupThousands(text) {
-  const sign = text.startsWith('-') ? '-' : '';
-  const body = sign === '' ? text : text.slice(1);
-  const dot = body.indexOf('.');
-  const whole = dot < 0 ? body : body.slice(0, dot);
-  const fraction = dot < 0 ? '' : body.slice(dot);
-  return sign + whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + fraction;
-}
-
-/**
- * A finite or non-finite number as the display shows it.
+ * A finite or non-finite number as the display shows it, through core's
+ * `formatNumber` (`notation: 'auto'`): `digits` significant digits, and a
+ * safe integer with every digit it has.
  * @param {number | bigint | string} value a `Number`; any other value reads
  *   as the `Number` it converts to
  * @param {{ digits?: number, group?: boolean }} [options] significant digits
@@ -48,36 +25,25 @@ function groupThousands(text) {
  * @returns {string}
  */
 export function formatSignificant(value, options = {}) {
-  const digits = options.digits ?? 12;
   // a host may patch a string into the slice: it reads as the Number it spells
-  if (typeof value !== 'number') value = Number(value);
-  if (Number.isNaN(value)) return 'NaN';
-  if (value === Infinity) return '∞';
-  if (value === -Infinity) return '-∞';
-  if (value === 0) return '0';
-  let text;
-  if (Number.isSafeInteger(value)) text = String(value);
-  else {
-    const rounded = Number(value.toPrecision(digits));
-    const magnitude = Math.abs(rounded);
-    text = magnitude >= 1e-6 && magnitude < 10 ** digits
-      ? trimZeros(rounded.toFixed(Math.max(0, digits - 1 - Math.floor(Math.log10(magnitude)))))
-      : trimZeros(value.toExponential(digits - 1));
-  }
-  return options.group === true && !text.includes('e') ? groupThousands(text) : text;
+  const number = typeof value === 'number' ? value : Number(value);
+  const digits = options.digits ?? 12;
+  const precision = Number.isSafeInteger(number) ? Math.max(digits, String(Math.abs(number)).length) : digits;
+  return formatNumber(number, { notation: 'auto', precision, group: options.group === true });
 }
 
 /**
  * A number with exactly `decimals` fraction digits and grouped thousands,
- * an amount of money in its currency's minor units (`92.59`, `13,736`).
+ * an amount of money in its currency's minor units (`92.59`, `13,736`),
+ * through core's `formatNumber` (`notation: 'fixed'`); a zero that rounded
+ * from below shows no sign.
  * @param {number} value
  * @param {number} decimals
  * @returns {string}
  */
 export function formatFixed(value, decimals) {
-  if (!Number.isFinite(value)) return formatSignificant(value);
-  const text = value.toFixed(decimals);
-  return groupThousands(/^-0(\.0*)?$/.test(text) ? text.slice(1) : text);
+  const text = formatNumber(value, { notation: 'fixed', precision: decimals, group: true });
+  return /^-0(\.0*)?$/.test(text) ? text.slice(1) : text;
 }
 
 /**

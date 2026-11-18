@@ -1182,6 +1182,7 @@ export const zhTW = {
   'calc/key/mem-add': '將結果加入記憶',
   'calc/key/mem-clear': '清除記憶',
   'calc/programmer/note': '整數運算：每個結果都向零截斷，並回繞到所選的字組大小。在同一個運算式中，÷ 保留精確的分數，所以 7 ÷ 2 × 2 = 7。',
+  'calc/programmer/shift-note': '位移量會像 JavaScript 一樣對字組大小取模：在 {bits} 位元下，1 « {bits} 為 1，1 « {next} 為 2。',
   'calc/plot/expr': '要繪製的 x 函數',
   'calc/financial/no-solution': '這些數值沒有解：請確認收到的錢與付出的錢符號相反。',
   'calc/financial/intro': '貨幣的時間價值：今天的一筆錢比日後同樣的金額更有價值，因為這段期間可以賺取利息。',

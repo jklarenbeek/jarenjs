@@ -182,7 +182,9 @@ The financial panel explains itself: what time value of money is, what each
 of N, I/Y, PV, PMT and FV means (I/Y is the rate per period: 6% a year paid
 monthly is 0.5), the sign convention (money received is positive, money paid
 negative, so a 200,000 loan's payment is negative), and the formula it
-solves. The unknown's field is read-only and shows the answer, and four
+solves. The unknown's field is read-only and shows the answer; choosing
+another unknown writes that answer (rounded as the field showed it) into the
+field that was the unknown, so no field is left at a stale value. Four
 worked examples (`FINANCIAL_EXAMPLES`: a mortgage payment, a savings goal, a
 loan's payoff time, an implied return) fill the five values in one click
 (`calc/fin-example`). Values with no solution say so instead of `NaN`. `financial` holds **no formulas** (it orchestrates
@@ -224,14 +226,24 @@ exported as `pressKeys`, `keyChange`, `applyChange`, `previewOf`):
 - The result line shows twelve significant digits with no zeros padding the
   mantissa (`9.99e+22`), a safe integer in full, and grouped thousands
   (`2,000`); the committed entry is the same value ungrouped, a literal the
-  parser reads back. The converter shows eight significant digits and a
+  parser reads back. The converter shows ten significant digits and a
   currency in its minor units (two decimals, none for the yen, eight for a
-  crypto asset).
+  crypto asset). The digits are core's `formatNumber` (`notation: 'auto'`).
+- Results, the entry and the tape read in the reader's separators (the
+  `number/decimal-separator` and `number/grouping-separator` entries of the
+  catalog passed as `messages`): German shows `3.703,5` for `3703.5`. Where
+  the decimal separator is the comma the entry shows `;` between a function's
+  arguments, as a spreadsheet does (`max(1;0,5)`); the stored entry stays
+  expression text (`.` the point, `,` between arguments). On input `.` and
+  `,` are both the point, and `;` (or `,` in a key run) writes the argument
+  separator.
 
 In the programmer mode each result is truncated toward zero and wrapped to
 the selected word size when it is shown and committed; inside one expression
-`+ − ×` are exact and `÷` keeps the exact fraction (`7 ÷ 2 × 2` is `7`). The
-page says so under the four-base view.
+`+ − ×` are exact and `÷` keeps the exact fraction (`7 ÷ 2 × 2` is `7`). A
+shift count is taken modulo the word size, as JavaScript's `<<` takes it: at
+8 bits `1 « 8` is `1` and `1 « 9` is `2` (and `1 « 7` the top bit). The page
+says both under the four-base view.
 
 `bindCalcKeyboard(root, app)` (from `@jarenjs/calc/component`) is the host
 listener that types into the keypad while focus is inside it (`.calc-pad`,
@@ -241,7 +253,10 @@ programmer mode `a`–`f` as hex digits, `%` as `mod` and `<`/`>` as the
 shifts. It suppresses the browser default of exactly the keys it takes, so
 Enter on a focused keypad button evaluates once, and leaves Tab, Space and
 every Ctrl/Meta/Alt shortcut alone; focus in a financial, converter or plot
-field never types into the calculator.
+field never types into the calculator. `createCalcComponent().createApp({
+node })` binds it on `node` itself and unbinds it on `app.destroy()`; a host
+composing the component into its own app (the website) binds it once on the
+document.
 
 ## Plotting
 

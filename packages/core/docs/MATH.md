@@ -99,6 +99,19 @@ group, radix, decimal, decimalFormat })` and radix-aware
 prefixes, grouping separators and scientific notation; returns `NaN` on
 failure). Radix I/O delegates to `word.js`.
 
+Under `notation: 'auto'`, `precision` is significant digits in both of its
+notations, and neither pads: an exponential mantissa carries no trailing
+zeros (`formatNumber(9.99e22, { precision: 12 })` is `9.99e+22`), and a value
+whose rounding drops digits left of the point is written exponentially rather
+than with the dropped digits as zeros (`1234567890123456` at precision 12 is
+`1.23456789012e+15`); a whole number the precision holds (`1e15`, or
+`1234567890123456` at 16) stays positional. *Upgrade: the exponential branch
+wrote `precision` digits after the point (`9.990000000000e+22`, one digit
+more than the positional branch, zeros included), and a large value rounded
+positionally (`1234567890120000`, grouped `1,234,567,890,120,000`); both
+answers changed. `'sci'`, `'eng'` and `'fixed'` are unchanged: their
+`precision` is the digits after the point.*
+
 **A language's numbers.** Without `decimalFormat`, `parseNumber` reads
 English: `.` is the decimal point and every `,`, `_` and space is dropped as
 grouping wherever it stands, so decimal-comma text misreads (`'3,45'` is

@@ -185,9 +185,17 @@ describe('#calc entry: results in the reader\'s separators', () => {
     const english = contributeCalcViewModel({ calc });
     assert.deepEqual([english.display.result, english.tape[0].result], ['3,703.5', '3,703.5']);
     const german = contributeCalcViewModel({ calc }, { messages: compileMessageCatalog(de) });
-    assert.deepEqual([german.display.result, german.tape[0].result, german.display.entry], ['3.703,5', '3.703,5', '3703.5']);
+    assert.deepEqual([german.display.result, german.tape[0].result, german.display.entry, german.tape[0].expr], ['3.703,5', '3.703,5', '3703,5', '1234,5*3']);
+    assert.equal(calc.entry, '3703.5', 'the stored entry stays expression text');
     const french = contributeCalcViewModel({ calc: { ...calc, mode: 'financial' } }, { messages: compileMessageCatalog(fr) });
     assert.equal(french.financial.result, '-1\u202f199,10');
+  });
+  it('separates a function\'s arguments with ; where the point is a comma, and reads , . and ; as typed', () => {
+    const calc = pressKeys({ ...calcInitialState(), mode: 'scientific' }, 'max(', '1', ',', '.', '5', ';', '2');
+    assert.equal(calc.entry, 'max(1,0.5,2');
+    const german = contributeCalcViewModel({ calc }, { messages: compileMessageCatalog(de) });
+    assert.deepEqual([german.display.entry, german.display.result], ['max(1;0,5;2', '2']);
+    assert.equal(contributeCalcViewModel({ calc }).display.entry, 'max(1,0.5,2');
   });
 });
 
@@ -196,6 +204,25 @@ describe('#calc entry: programmer', () => {
     const labels = MODE_BY_ID.programmer.keypad.flat().filter((/** @type {any} */ key) => key.label === 'C');
     assert.equal(labels.length, 1);
     assert.equal(labels[0].k, 'C');
+  });
+  it('a shift count is taken modulo the word size at every word size, and the page says so', () => {
+    for (const bits of [8, 16, 32, 64]) {
+      const at = (/** @type {string[]} */ keys) => run('programmer', keys, (app) => app.dispatch('calc/word', { bits })).result;
+      const digits = (/** @type {number} */ n) => [...String(n)];
+      assert.equal(at(['1', '«', ...digits(bits), '=']), '1', `${bits}: 1 « ${bits}`);
+      assert.equal(at(['1', '«', ...digits(bits + 1), '=']), '2', `${bits}: 1 « ${bits + 1}`);
+      assert.equal(at(['1', '«', ...digits(bits - 1), '=']), String(2n ** BigInt(bits - 1)), `${bits}: the top bit`);
+      assert.equal(at(['2', '»', ...digits(bits + 1), '=']), '1', `${bits}: 2 » ${bits + 1}`);
+      const { app } = calculator();
+      try {
+        app.dispatch('calc/mode', { mode: 'programmer' });
+        app.dispatch('calc/word', { bits });
+        assert.equal(contributeCalcViewModel(app.getState()).bases.shiftNote,
+          `A shift count is taken modulo the word size, as in JavaScript: at ${bits}-bit, 1 « ${bits} is 1 and 1 « ${bits + 1} is 2.`);
+        assert.match(renderToString(app.getVnode()), /A shift count is taken modulo the word size/);
+      }
+      finally { app.destroy(); }
+    }
   });
   it('mod, xor, &, |, « and » are binary operators', () => {
     assert.equal(run('programmer', ['7', 'mod', '3', '=']).result, '1');

@@ -1184,6 +1184,7 @@ export const de = {
   'calc/key/mem-add': 'Ergebnis zum Speicher addieren',
   'calc/key/mem-clear': 'Speicher löschen',
   'calc/programmer/note': 'Ganzzahlarithmetik: jedes Ergebnis wird in Richtung null abgeschnitten und auf die gewählte Wortbreite umgebrochen. Innerhalb eines Ausdrucks behält ÷ den exakten Bruch, also 7 ÷ 2 × 2 = 7.',
+  'calc/programmer/shift-note': 'Eine Schiebeweite wird modulo der Wortbreite genommen, wie in JavaScript: bei {bits} Bit ist 1 « {bits} gleich 1 und 1 « {next} gleich 2.',
   'calc/plot/expr': 'Zu zeichnende Funktion von x',
   'calc/financial/no-solution': 'Keine Lösung für diese Werte: prüfen Sie, ob das Geld, das Sie erhalten, und das Geld, das Sie zahlen, entgegengesetzte Vorzeichen haben.',
   'calc/financial/intro': 'Zeitwert des Geldes: ein Betrag heute ist mehr wert als derselbe Betrag später, weil er in der Zwischenzeit Zinsen bringen kann.',

@@ -1182,6 +1182,7 @@ export const es = {
   'calc/key/mem-add': 'Sumar el resultado a la memoria',
   'calc/key/mem-clear': 'Borrar la memoria',
   'calc/programmer/note': 'Aritmética entera: cada resultado se trunca hacia cero y se ajusta al tamaño de palabra elegido. Dentro de una expresión ÷ conserva la fracción exacta, así que 7 ÷ 2 × 2 = 7.',
+  'calc/programmer/shift-note': 'El número de posiciones de un desplazamiento se toma módulo el tamaño de palabra, como en JavaScript: con {bits} bits, 1 « {bits} es 1 y 1 « {next} es 2.',
   'calc/plot/expr': 'Función de x que se va a trazar',
   'calc/financial/no-solution': 'No hay solución para estos valores: compruebe que el dinero que recibe y el dinero que paga tengan signos opuestos.',
   'calc/financial/intro': 'Valor temporal del dinero: una cantidad hoy vale más que la misma cantidad más adelante, porque entretanto puede generar intereses.',

@@ -1183,6 +1183,7 @@ export const nl = {
   'calc/key/mem-add': 'Uitkomst bij het geheugen optellen',
   'calc/key/mem-clear': 'Geheugen wissen',
   'calc/programmer/note': 'Rekenen met gehele getallen: elke uitkomst wordt naar nul afgekapt en naar de gekozen woordgrootte omgeslagen. Binnen één uitdrukking houdt ÷ de exacte breuk, dus 7 ÷ 2 × 2 = 7.',
+  'calc/programmer/shift-note': 'Een schuifafstand wordt modulo de woordgrootte genomen, zoals in JavaScript: bij {bits} bit is 1 « {bits} gelijk aan 1 en 1 « {next} gelijk aan 2.',
   'calc/plot/expr': 'Te tekenen functie van x',
   'calc/financial/no-solution': 'Geen oplossing voor deze waarden: controleer of het geld dat u ontvangt en het geld dat u betaalt tegengestelde tekens hebben.',
   'calc/financial/intro': 'Tijdswaarde van geld: een bedrag vandaag is meer waard dan hetzelfde bedrag later, omdat het in de tussentijd rente kan opbrengen.',

@@ -90,6 +90,7 @@ export const calcMessagesEn = /*#__PURE__*/ Object.freeze({
   'calc/word/unsigned': 'unsigned',
   'calc/word/bits': '{bits}-bit',
   'calc/programmer/note': 'Whole-number arithmetic: each result is truncated toward zero and wrapped to the selected word size. Inside one expression ÷ keeps the exact fraction, so 7 ÷ 2 × 2 = 7.',
+  'calc/programmer/shift-note': 'A shift count is taken modulo the word size, as in JavaScript: at {bits}-bit, 1 « {bits} is 1 and 1 « {next} is 2.',
   'calc/plot/expr': 'Function of x to plot',
   'calc/financial/result': 'Result ({solveFor}): ',
   'calc/financial/no-solution': 'No solution for these values: check that the money you receive and the money you pay have opposite signs.',

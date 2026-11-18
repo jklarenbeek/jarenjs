@@ -1181,6 +1181,7 @@ export const tr = {
   'calc/key/mem-add': 'Sonucu belleğe ekle',
   'calc/key/mem-clear': 'Belleği temizle',
   'calc/programmer/note': 'Tam sayı aritmetiği: her sonuç sıfıra doğru kesilir ve seçilen sözcük boyutuna sarılır. Tek bir ifade içinde ÷ tam kesri korur, yani 7 ÷ 2 × 2 = 7.',
+  'calc/programmer/shift-note': 'Kaydırma miktarı, JavaScript\'teki gibi sözcük boyutuna göre mod alınır: {bits} bitte 1 « {bits} 1\'dir ve 1 « {next} 2\'dir.',
   'calc/plot/expr': 'Çizilecek x fonksiyonu',
   'calc/financial/no-solution': 'Bu değerler için çözüm yok: aldığınız para ile ödediğiniz paranın zıt işaretli olduğunu denetleyin.',
   'calc/financial/intro': 'Paranın zaman değeri: bugünkü bir tutar, aynı tutarın sonraki hâlinden daha değerlidir, çünkü arada faiz kazanabilir.',

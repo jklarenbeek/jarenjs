@@ -75,6 +75,29 @@ describe('#calc financial: worked examples', () => {
     finally { app.destroy(); }
   });
 
+  it('carries the answer into the old unknown\'s field when Solve for changes', () => {
+    const app = calculator();
+    try {
+      const html = renderToString(app.getVnode());
+      assert.match(html, /<select[^>]*>/);
+      const choose = (/** @type {string} */ unknown) => app.dispatch('calc-form/json', { pointer: '/solveFor', element: false },
+        { target: { value: JSON.stringify(unknown) } }, ['formJsonValue']);
+      choose('nper');
+      assert.deepEqual(app.getState().calc.fin, { nper: 360, rate: 0.5, pv: 200000, pmt: -1199.1, fv: 0, solveFor: 'nper' });
+      const fields = contributeCalcViewModel(app.getState()).financial.form.children;
+      assert.equal(fields.find((/** @type {any} */ f) => f.key === 'pmt').readOnly, false);
+      assert.equal(fields.find((/** @type {any} */ f) => f.key === 'pmt').value, -1199.1, 'the payment the panel showed, not a stale 0');
+      // the payment rounded to cents pays the loan in 360 months, to two decimals
+      assert.equal(contributeCalcViewModel(app.getState()).financial.result, money(TVM.nper({ i: 0.005, pmt: -1199.1, pv: 200000, fv: 0 })));
+      choose('nper');
+      assert.equal(app.getState().calc.fin.solveFor, 'nper', 'choosing the same unknown changes nothing');
+      // any other field still writes as the form writes it
+      app.dispatch('calc-form/json', { pointer: '/fv', element: false }, { target: { value: '5' } }, ['formJsonValue']);
+      assert.equal(app.getState().calc.fin.fv, 5);
+    }
+    finally { app.destroy(); }
+  });
+
   it('says when the values have no solution', () => {
     const app = calculator();
     try {

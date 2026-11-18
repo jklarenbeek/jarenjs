@@ -64,17 +64,15 @@ export function convertValue(dimension, value, from, to, rates) {
 }
 
 /**
- * Format a converter result: eight significant digits, thousands grouped,
- * a dash for a conversion with no value. Eight, because a few of core's
- * factors (the US fluid ounce, tablespoon and teaspoon, the knot) are held
- * to nine or ten digits, and between two of them a ninth digit already
- * shows their rounding as a wrong answer (1 fl oz = 6.00000001 tsp).
+ * Format a converter result: ten significant digits, thousands grouped, a
+ * dash for a conversion with no value. Every core factor is its exact
+ * definition, so ten digits show no rounding (1 fl oz = 6 tsp).
  * @param {number} value
  * @returns {string}
  */
 export function format(value) {
   if (!Number.isFinite(value)) return '—';
-  return formatSignificant(value, { digits: 8, group: true });
+  return formatSignificant(value, { digits: 10, group: true });
 }
 
 export const converterMode = {

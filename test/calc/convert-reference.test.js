@@ -43,11 +43,10 @@ const BASE = {
 };
 
 /**
- * The units core holds with a factor rounded to nine or ten significant
- * digits rather than its exact definition: they agree to the tolerance
- * named here and no closer.
+ * Every factor is exact, so a conversion agrees with the definition to the
+ * rounding of the reference arithmetic here (a few units in the last place).
  */
-const ROUNDED = { floz: 5e-9, tbsp: 5e-9, tsp: 5e-9, knot: 1e-9, hp: 1e-12 };
+const TOLERANCE = 1e-14;
 
 /** Relative closeness. */
 function near(/** @type {number} */ got, /** @type {number} */ want, /** @type {number} */ tolerance, /** @type {string} */ what) {
@@ -66,21 +65,23 @@ describe('#calc converter against reference definitions', () => {
       const { base, ...units } = table;
       assert.deepEqual(ids.sort(), Object.keys(units).sort(), `${dimension} units`);
       for (const [from, size] of Object.entries(units)) {
-        const tolerance = Math.max(1e-12, ROUNDED[/** @type {keyof typeof ROUNDED} */ (from)] ?? 0, ROUNDED[/** @type {keyof typeof ROUNDED} */ (base)] ?? 0);
+        const tolerance = TOLERANCE;
         near(convertValue(dimension, 3, from, base), 3 * size / /** @type {any} */ (units)[base], tolerance, `3 ${from} → ${base}`);
         near(convertValue(dimension, convertValue(dimension, 7.25, from, base), base, from), 7.25, 1e-12, `${from} round trip`);
         for (const [to, other] of Object.entries(units)) {
-          const pair = Math.max(1e-12, ROUNDED[/** @type {keyof typeof ROUNDED} */ (from)] ?? 0, ROUNDED[/** @type {keyof typeof ROUNDED} */ (to)] ?? 0);
+          const pair = TOLERANCE;
           near(convertValue(dimension, 2, from, to), 2 * size / other, pair, `2 ${from} → ${to}`);
         }
       }
     });
   }
 
-  it('shows a rounded factor at a precision it holds: 1 gal is 128 fl oz', async () => {
+  it('shows ten digits of an exact factor: 1 gal is 128 fl oz, 1 fl oz is 6 tsp', async () => {
     const { converterMode } = await import('@jarenjs/calc/component').then(() => import('../../components/calc/src/modes/converter.js'));
     assert.equal(converterMode.format(convertValue('volume', 1, 'gal', 'floz')), '128');
     assert.equal(converterMode.format(convertValue('volume', 1, 'floz', 'tsp')), '6');
+    assert.equal(converterMode.format(convertValue('volume', 1, 'tbsp', 'ml')), '14.78676478');
+    assert.equal(converterMode.format(convertValue('power', 1, 'hp', 'w')), '745.6998716');
     assert.equal(converterMode.format(convertValue('speed', 1, 'knot', 'kmh')), '1.852');
   });
 
@@ -98,7 +99,7 @@ describe('#calc converter against reference definitions', () => {
       ['time', 1, 'week', 'h', 168], ['time', 1, 'year', 'day', 365.25], ['time', 1, 'h', 'ms', 3.6e6],
       ['power', 1, 'kw', 'w', 1000], ['frequency', 2.4, 'ghz', 'mhz', 2400], ['area', 1, 'ha', 'm2', 1e4],
     ])) {
-      const tolerance = Math.max(1e-12, ROUNDED[/** @type {keyof typeof ROUNDED} */ (from)] ?? 0, ROUNDED[/** @type {keyof typeof ROUNDED} */ (to)] ?? 0);
+      const tolerance = TOLERANCE;
       near(convertValue(dimension, value, from, to), want, tolerance, `${value} ${from} → ${to}`);
     }
   });

@@ -166,13 +166,13 @@ describe('#calc fuel economy: the component', function () {
     app.dispatch('calc/conv-dim', null, { target: { value: 'fuel' } });
     assert.deepEqual(app.getState().calc.conv, { dimension: 'fuel', from: 'l100km', to: 'mpgus', value: 100 });
     const vm = contributeCalcViewModel(app.getState()).converter;
-    assert.equal(vm.result, '2.3521458');
+    assert.equal(vm.result, '2.352145833');
     assert.equal(vm.isCurrency, false);
     assert.deepEqual(vm.unitsFrom.map((unit) => unit.symbol), ['L/100km', 'mpg (US)', 'mpg (UK)', 'km/L']);
     app.dispatch('calc/conv-from', null, { target: { value: 'mpgus' } });
     app.dispatch('calc/conv-to', null, { target: { value: 'l100km' } });
     app.dispatch('calc/conv-value', null, { target: { value: '30' } });
-    assert.equal(contributeCalcViewModel(app.getState()).converter.result, '7.8404861');
+    assert.equal(contributeCalcViewModel(app.getState()).converter.result, '7.840486111');
     app.destroy();
   });
 

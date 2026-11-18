@@ -54,6 +54,35 @@ describe('#number format/parse', function () {
   });
 });
 
+describe('#number format: auto notation with a precision', function () {
+  it('writes precision significant digits in both notations, with no padding zeros', () => {
+    assert.equal(formatNumber(9.99e22, { precision: 12 }), '9.99e+22');
+    assert.equal(formatNumber(1e22, { precision: 12 }), '1e+22');
+    assert.equal(formatNumber(1e-7, { precision: 12 }), '1e-7');
+    assert.equal(formatNumber(2.5e-9, { precision: 3 }), '2.5e-9');
+    assert.equal(formatNumber(1 / 3e30, { precision: 4 }), '3.333e-31');
+    assert.equal(formatNumber(0.1 + 0.2, { precision: 12 }), '0.3');
+    assert.equal(formatNumber(1 / 3, { precision: 8 }), '0.33333333');
+  });
+  it('never shows a digit its rounding dropped as a zero', () => {
+    assert.equal(formatNumber(1234567890123456, { precision: 12 }), '1.23456789012e+15');
+    assert.equal(formatNumber(1234567890123456, { precision: 12, group: true }), '1.23456789012e+15');
+    assert.equal(formatNumber(123.456, { precision: 2 }), '1.2e+2');
+    assert.equal(formatNumber(-1234567, { precision: 3 }), '-1.23e+6');
+    assert.equal(formatNumber(999999999999.5, { precision: 12 }), '1e+12');
+  });
+  it('keeps a whole number its precision holds positional', () => {
+    assert.equal(formatNumber(1234567890123456, { precision: 16, group: true }), '1,234,567,890,123,456');
+    assert.equal(formatNumber(1e15, { precision: 12 }), '1000000000000000');
+    assert.equal(formatNumber(120, { precision: 2 }), '120');
+    assert.equal(formatNumber(123456789.123, { precision: 12, group: true }), '123,456,789.123');
+  });
+  it('without a precision writes the shortest text, as before', () => {
+    assert.equal(formatNumber(1234567890123456), '1234567890123456');
+    assert.equal(formatNumber(9.99e22), '9.99e+22');
+  });
+});
+
 describe('#number format/parse under a decimal format record', function () {
   // the members `compileNumberLocale(pack).decimalFormat` of @jarenjs/locales carries
   const NL = Object.freeze({ decimalSeparator: ',', groupingSeparator: '.', minusSign: '-', zeroDigit: '0',

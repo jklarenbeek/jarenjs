@@ -33,6 +33,7 @@ export const CALCULATOR_RULES = [
           ['div', { class: 'calc-baserow' }, ['span', { class: 'calc-baselabel' }, 'OCT'], ['span', { class: 'calc-baseval' }, '$.bases.views.oct']],
           ['div', { class: 'calc-baserow' }, ['span', { class: 'calc-baselabel' }, 'BIN'], ['span', { class: 'calc-baseval' }, '$.bases.views.bin']],
           ['div', { class: 'calc-wordopts' }, [{ $apply: '$.bases.wordOptions[*]' }]],
+          ['p', { class: 'calc-note' }, '$.bases.shiftNote'],
           ['p', { class: 'calc-note' }, '$.bases.note'],
         ]] },
 

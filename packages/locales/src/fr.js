@@ -1184,6 +1184,7 @@ export const fr = {
   'calc/key/mem-add': 'Ajouter le résultat à la mémoire',
   'calc/key/mem-clear': 'Effacer la mémoire',
   'calc/programmer/note': 'Arithmétique entière : chaque résultat est tronqué vers zéro et ramené à la taille de mot choisie. Dans une même expression, ÷ garde la fraction exacte, donc 7 ÷ 2 × 2 = 7.',
+  'calc/programmer/shift-note': 'Un décalage est pris modulo la taille de mot, comme en JavaScript : sur {bits} bits, 1 « {bits} vaut 1 et 1 « {next} vaut 2.',
   'calc/plot/expr': 'Fonction de x à tracer',
   'calc/financial/no-solution': 'Pas de solution pour ces valeurs : vérifiez que l\'argent reçu et l\'argent payé ont des signes opposés.',
   'calc/financial/intro': 'Valeur temporelle de l\'argent : une somme aujourd\'hui vaut plus que la même somme plus tard, car elle peut rapporter des intérêts entre-temps.',

@@ -67,7 +67,9 @@ constant-vs-variable factors.
   The financial panel's form actions are **namespaced** — `createFormView`
   and `createFormActions` are both handed a `FORM_ACTIONS` map of
   `calc-form/*` names (`calc-form/input`, `calc-form/check`,
-  `calc-form/number`, `calc-form/add`, `calc-form/remove`) — so an
+  `calc-form/number`, `calc-form/json`, `calc-form/add`, `calc-form/remove`;
+  `calc-form/json` also carries the answer into the old unknown's field when
+  Solve for changes, through the `calc-solve-for` effect) — so an
   embedding host that also runs `@jarenjs/forms` (e.g. the site's schema
   playground, which spreads its own `createFormActions`) never collides on
   the default action names.

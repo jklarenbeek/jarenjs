@@ -29,13 +29,14 @@ import { calcToVnode, MODE_BY_ID, MODES, converterDimensions, unitOptions } from
 import { fit, toNumber } from '../exact.js';
 import { BASES, WORD_SIZES, viewsOf } from '../modes/programmer.js';
 import {
-  keyChange, changesOf, previewOf, previewValue, scopeOf, scopeValue, exactText,
+  keyChange, changesOf, localizeEntry, previewOf, previewValue, scopeOf, scopeValue, exactText,
 } from './entry.js';
 import { createRatesLayer, FALLBACK_RATES } from './rates/index.js';
 import { CALCULATOR_RULES } from './rules.js';
-import { financialView, converterView } from './panels.js';
+import { financialView, converterView, carrySolved } from './panels.js';
 import { localizeNumber, numberSymbols } from '../format.js';
 import { calcText } from '../messages.js';
+import { bindCalcKeyboard } from './keyboard.js';
 
 /** The message id of each mode's tab label, by mode id. */
 const MODE_LABELS = Object.freeze({
@@ -49,8 +50,11 @@ const MODE_LABELS = Object.freeze({
  */
 export const FORM_ACTIONS = {
   input: 'calc-form/input', check: 'calc-form/check', number: 'calc-form/number',
-  add: 'calc-form/add', remove: 'calc-form/remove',
+  json: 'calc-form/json', add: 'calc-form/add', remove: 'calc-form/remove',
 };
+
+/** The financial form's own write actions (the select's JSON write is wrapped below). */
+const FIN_FORM_ACTIONS = createFormActions({ dataPointer: '/calc/fin', actions: FORM_ACTIONS });
 
 /** The financial form's view rules (mode 'calculator'), reusable by the site. */
 export const calcFormViewRules = createFormView({ root: '$.ui.calculator.financial.form', actions: FORM_ACTIONS })
@@ -234,7 +238,8 @@ export const calcActions = {
       { op: 'replace', path: '/calc/conv/to', value: '$.calc.conv.from' },
     ],
   },
-  // a worked example fills the five values and the unknown in one transition
+  // a worked example (or a change of the unknown) writes the five values and
+  // the unknown in one transition
   'calc/fin-example': { patch: [{ op: 'replace', path: '/calc/fin', value: '$payload' }] },
   'calc/rates-refresh': { effects: [{ run: 'rates-fetch', with: { force: true } }] },
   // a fetched table is live: it replaces the fallback and says so
@@ -247,7 +252,14 @@ export const calcActions = {
   },
   'calc/rates-err': { patch: [{ op: 'replace', path: '/calc/rates/status', value: 'error' }] },
   // the financial panel writes through the (namespaced) @jarenjs/forms actions
-  ...createFormActions({ dataPointer: '/calc/fin', actions: FORM_ACTIONS }),
+  ...FIN_FORM_ACTIONS,
+  // changing the unknown carries the answer the panel showed into the field
+  // that was the unknown, so no field is left at an editable stale value
+  [FORM_ACTIONS.json]: { $if: [
+    { $eq: ['$payload.pointer', '/solveFor'] },
+    { effects: [{ run: 'calc-solve-for', with: { fin: '$.calc.fin', solveFor: '$event.formJsonValue' } }] },
+    FIN_FORM_ACTIONS[FORM_ACTIONS.json],
+  ] },
 };
 
 /** All calculator view rules (the calculator UI + the financial form). */
@@ -259,8 +271,9 @@ export { calcKeyOf, bindCalcKeyboard } from './keyboard.js';
 export { formatCurrency, formatInstant } from './panels.js';
 
 /**
- * The `calc-press` (every key and backspace), `calc-eval` (=) and
- * `calc-mem-add` (M+) JS effect handlers.
+ * The `calc-press` (every key and backspace), `calc-eval` (=),
+ * `calc-solve-for` (the financial unknown changes) and `calc-mem-add` (M+)
+ * JS effect handlers.
  */
 export const calcEditEffects = {
   /**
@@ -286,6 +299,14 @@ export const calcEditEffects = {
   'calc-eval': (props, dispatch) => {
     const change = keyChange(props ?? {}, 'equals');
     if (change !== null) dispatch(change.kind === 'commit' ? 'calc/commit' : 'calc/entry', change);
+  },
+  /**
+   * `{ fin, solveFor }`: the five values with the answer the panel showed
+   * written into the field that was the unknown, and the new unknown.
+   * @param {any} props @param {(name: string, payload?: any) => void} dispatch
+   */
+  'calc-solve-for': (props, dispatch) => {
+    dispatch('calc/fin-example', carrySolved(props?.fin ?? {}, props?.solveFor));
   },
   'calc-mem-add': (props, dispatch) => {
     const scope = scopeOf(props);
@@ -323,10 +344,11 @@ export function contributeCalcViewModel(state, options = {}) {
   // the display: the entry, its live preview (never a diagnostic while it
   // is typed) and the message the last `=` left
   const error = typeof calc.error === 'string' && calc.error !== '' ? t(calc.error, calc.errorParams ?? {}) : null;
-  // results read in the reader's separators; the entry is expression text
+  // results and the entry read in the reader's separators (the entry is
+  // stored as expression text: `.` the point, `,` between arguments)
   const symbols = numberSymbols(messages);
   const display = {
-    entry: calc.entry === '' ? '0' : calc.entry,
+    entry: calc.entry === '' ? '0' : localizeEntry(calc.entry, symbols),
     result: localizeNumber(previewOf(calc), symbols),
     error,
   };
@@ -342,6 +364,7 @@ export function contributeCalcViewModel(state, options = {}) {
     signLabel: t(calc.signed ? 'calc/word/signed' : 'calc/word/unsigned'),
     views: viewsOf(pv, calc.wordBits, calc.signed),
     note: t('calc/programmer/note'),
+    shiftNote: t('calc/programmer/shift-note', { bits: calc.wordBits, next: calc.wordBits + 1 }),
   };
 
   // the plot belongs to the scientific mode: the standard mode is the
@@ -373,7 +396,7 @@ export function contributeCalcViewModel(state, options = {}) {
     displayLabel: t('calc/display/label'),
     keyboardHint: t('calc/keyboard/hint'),
     keypad,
-    tape: keypad === null ? [] : calc.tape.map((row, i) => ({ key: 'tape' + i, expr: row.expr, result: localizeNumber(String(row.result), symbols) })),
+    tape: keypad === null ? [] : calc.tape.map((row, i) => ({ key: 'tape' + i, expr: localizeEntry(String(row.expr), symbols), result: localizeNumber(String(row.result), symbols) })),
     memory: scope.memory,
     memoryLabels: { add: t('calc/key/mem-add'), clear: t('calc/key/mem-clear') },
     angle: { mode: calc.angleMode, options: ['rad', 'deg', 'grad'].map((a) => ({ id: a, label: a, active: a === calc.angleMode, on: { click: { action: 'calc/angle', with: { mode: a } } } })) },
@@ -412,6 +435,8 @@ export function createCalcComponent(options = {}) {
 
     /**
      * A standalone app document + running app (headless if `node` omitted).
+     * Mounted into a `node`, it binds the keyboard there
+     * (`bindCalcKeyboard(node, app)`) and unbinds it on `app.destroy()`.
      * @param {any} [appOptions]
      */
     createApp(appOptions = {}) {
@@ -431,7 +456,7 @@ export function createCalcComponent(options = {}) {
         actions: calcActions,
         subs: [rates.subEntry],
       };
-      return appCreateApp(appDoc, {
+      const app = appCreateApp(appDoc, {
         ...appOptions,
         // the financial panel's selects carry their values as JSON text
         eventFields: { ...formEventFields(), ...(appOptions.eventFields ?? {}) },
@@ -439,6 +464,18 @@ export function createCalcComponent(options = {}) {
         subs: { ...rates.subs, ...(appOptions.subs ?? {}) },
         viewModel: (state) => ({ ...state, ui: { calculator: contributeCalcViewModel(state, { messages: options.messages }) } }),
       });
+      // a mounted calculator takes the keyboard while its keypad has focus,
+      // until the app is destroyed
+      const node = appOptions.node;
+      if (node != null && typeof node.addEventListener === 'function') {
+        const unbind = bindCalcKeyboard(node, app);
+        const destroy = app.destroy;
+        app.destroy = () => {
+          unbind();
+          destroy();
+        };
+      }
+      return app;
     },
   };
 }

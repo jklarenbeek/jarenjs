@@ -1179,6 +1179,7 @@ export const ja = {
   'calc/key/mem-add': '結果をメモリーに加算',
   'calc/key/mem-clear': 'メモリーをクリア',
   'calc/programmer/note': '整数演算：各結果はゼロ方向に切り捨てられ、選んだワードサイズに折り返されます。1 つの式の中では ÷ は正確な分数を保つので、7 ÷ 2 × 2 = 7 です。',
+  'calc/programmer/shift-note': 'シフト量は JavaScript と同じくワードサイズを法として扱われます：{bits} ビットでは 1 « {bits} は 1、1 « {next} は 2 です。',
   'calc/plot/expr': '描画する x の関数',
   'calc/financial/no-solution': 'この値では解がありません：受け取るお金と支払うお金の符号が逆になっているか確認してください。',
   'calc/financial/intro': 'お金の時間価値：今日の金額は、その間に利息を生めるため、後の同じ金額より価値があります。',

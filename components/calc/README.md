@@ -48,7 +48,9 @@ Typing goes through the component's entry editor: an incomplete expression
 shows a live preview and never a diagnostic, `=` closes the parentheses the
 function keys opened, a result continues with an operator (`ans +`) and a
 digit starts anew, and `a + b%` adds b percent of a. `bindCalcKeyboard(document,
-app)` lets the keyboard type into the keypad while it has focus. The financial
+app)` lets the keyboard type into the keypad while it has focus; the
+standalone `createApp({ node })` binds it on its node and unbinds it on
+`destroy()`. The financial
 panel explains time value of money, each field and the sign convention, and
 offers four worked examples; the converter names each unit select and says
 where its rates came from and when. `docs/CALC-FORMAT.md` has the rules.
