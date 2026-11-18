@@ -44,7 +44,7 @@ import { modelIdentity, migrationIdentity } from './migration-identity.js';
 import { migrationChecksum, historyStatements, readMigrationHistory, checkHistoryObservation, checkAppliedRows,
   historyHeader, identityRows, checkHistoryIdentity, checkHistoryChain, writeIdentityRows } from './migration-history.js';
 export { HISTORY_TABLE, ENGINE_TABLES };
-import { DOC_COLUMN, planCollection, withoutContainerKeys, verifyShape, legacyColumnTypes, earlierIndexesHeld, planEntity, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder, kindIndexSql, kindIndexTerms, kindIndexDropSql, numberCheckOf, planInvariants, MANAGED_SQL_OPTIONS } from './ddl.js';
+import { DOC_COLUMN, planCollection, withoutContainerKeys, verifyShape, legacyColumnTypes, earlierIndexesHeld, planEntity as planEntityTable, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder, kindIndexSql, kindIndexTerms, kindIndexDropSql, numberCheckOf, planInvariants, MANAGED_SQL_OPTIONS } from './ddl.js';
 import { normalizeEntities as normalizeModelEntities, explainMapping as explainModelMapping, asHistory } from './model.js';
 import { storeTemporals } from './temporals.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
@@ -89,6 +89,15 @@ let planningSeam;
 const planning = () => (planningSeam ??= Object.freeze({ temporals: storeTemporals() }));
 /** @param {any} model @returns {Map<string, any>} */
 const normalizeEntities = (model) => normalizeModelEntities(model, planning());
+/**
+ * An entity's table as a migration plans it: with the temporal seam's hooks
+ * always, as its model is normalized with them.
+ * @param {string} name @param {any} entityMapping @param {any} mapping @param {any} dialect
+ * @param {{ deferCycles?: boolean, expressions?: Record<string, any> }} [options]
+ * @returns {any}
+ */
+const planEntity = (name, entityMapping, mapping, dialect, options = {}) =>
+  planEntityTable(name, entityMapping, mapping, dialect, { ...options, temporalHooks: TEMPORAL_HOOKS });
 /** @param {any} model @returns {any} */
 const explainMapping = (model) => explainModelMapping(model, planning());
 
@@ -444,8 +453,11 @@ function documentWriter(connection, table, step, stepEntity, options, use) {
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   if (stepEntity !== null) {
-    const core = entityCore(connection, stepEntity.entity, stepEntity.mapping, null, options.runtime);
-    const columns = entityColumnsOf(stepEntity.mapping);
+    const core = entityCore(connection, stepEntity.entity, stepEntity.mapping, null, options.runtime, undefined, true,
+      options.zoneProvider ?? options.runtime?.zoneProvider ?? null);
+    // a zoned member's key and stamp are written with every document that
+    // replaces it (absent without a zone provider: a candidate the engine decides)
+    const columns = [...entityColumnsOf(stepEntity.mapping), ...TEMPORAL_HOOKS.zonedColumnsOf(stepEntity.mapping.temporals ?? [])];
     const assignments = [
       ...columns.map((column, i) => `${q(column)} = ${dialect.parameterRef(i + 1, 'v')}`),
       `${q('doc')} = ${dialect.jsonEncode(dialect.parameterRef(columns.length + 1, 'doc'))}`,
@@ -848,8 +860,9 @@ function intervalPreconditionsOf(migration, dialect, mapping) {
   const declares = Object.values(toModel.collections ?? {})
     .some((/** @type {any} */ collection) => (Array.isArray(collection?.intervals) && collection.intervals.length > 0)
       || (Array.isArray(collection?.temporals) && collection.temporals.length > 0));
-  if (!declares) return [];
   const fromModel = JSON.parse(identity.from);
+  const entityChecks = entityTemporalPreconditionsOf(fromModel, toModel, dialect, renamesOf(migration.steps));
+  if (!declares) return entityChecks;
   const fromCollections = Object.keys(fromModel.collections ?? {}).length === 0
     ? new Map() : normalizeModel(fromModel, mapping.expressions);
   const toCollections = normalizeModel(toModel, mapping.expressions);
@@ -885,6 +898,39 @@ function intervalPreconditionsOf(migration, dialect, mapping) {
           + `WHERE NOT COALESCE(${refused}, ${dialect.booleanLiteral(true)}) ORDER BY ${dialect.rowIdentity()} ${dialect.limitClause(10)}` });
     }
   }
+  return [...checks, ...entityChecks];
+}
+
+/**
+ * The rows of an entity table each calendar member a link declares, or
+ * declares otherwise, would refuse (`x-entity.temporal`): those whose member
+ * is no value of its kind's shape, counted as a collection's are, before any
+ * step runs. Read only where the target model declares one.
+ * @param {any} fromModel @param {any} toModel @param {any} dialect
+ * @param {(name: string) => string} renamed - the target name a from-side table is renamed to
+ * @returns {{ collection: string, interval: string, what: string, kind: string, table: string, sql: string }[]}
+ */
+function entityTemporalPreconditionsOf(fromModel, toModel, dialect, renamed) {
+  const declares = Object.values(toModel.entities ?? {}).some((/** @type {any} */ entity) =>
+    Object.values(entity?.schema?.properties ?? {}).some((/** @type {any} */ property) => property?.['x-entity']?.temporal !== undefined));
+  if (!declares || fromModel.entities === undefined) return [];
+  const from = asHistory(() => explainMapping(fromModel)).entities;
+  const to = explainMapping(toModel);
+  const q = dialect.quoteIdentifier;
+  const checks = [];
+  for (const table of Object.keys(from)) {
+    const name = renamed(table);
+    const target = to.entities[name];
+    if (target?.temporals === undefined || target.document === false) continue;
+    const plan = planEntity(name, target, to, dialect);
+    for (const temporal of plan.temporals) {
+      const before = (from[table].temporals ?? []).find((/** @type {any} */ declared) => declared.name === temporal.name);
+      if (before !== undefined && before.kind === temporal.kind) continue;
+      checks.push({ collection: name, interval: temporal.name, what: `${temporal.kind} member`, kind: 'entity', table,
+        sql: `SELECT ${q(target.keys[0])} AS ${q('k')}, count(*) OVER () AS ${q('n')} FROM ${q(table)} `
+          + `WHERE NOT COALESCE(${temporal.shapeSql}, ${dialect.booleanLiteral(true)}) ORDER BY ${dialect.rowIdentity()} ${dialect.limitClause(10)}` });
+    }
+  }
   return checks;
 }
 
@@ -903,7 +949,7 @@ function intervalPreconditions(connection, migration, options) {
   return sequentially(checks, (check) => chain(useStatementOnce(connection, check.sql, (statement) => statement.all([])), (rows) => {
     if (rows.length === 0) return;
     const keys = rows.map((/** @type {any} */ row) => `'${String(row.k)}'`).join(', ');
-    throw refuse('JD0021', `collection '${check.collection}': ${Number(rows[0].n)} stored document(s) violate ${check.what ?? 'interval'} `
+    throw refuse('JD0021', `${check.kind ?? 'collection'} '${check.collection}': ${Number(rows[0].n)} stored document(s) violate ${check.what ?? 'interval'} `
       + `'${check.interval}' (first keys: ${keys}) — repair them before declaring it`);
   }));
 }
@@ -2514,8 +2560,14 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
       .filter((columnName) => !toHeld.has(columnName));
     const keysEqual = JSON.stringify(fm.keys) === JSON.stringify(tm.keys);
 
+    // a declared calendar member (`x-entity.temporal`) declared, dropped or
+    // declared otherwise: its CHECK is added or dropped with its key
+    // columns, which every engine does by rebuilding an entity's table
+    const temporalFacts = (/** @type {any} */ mapping) => JSON.stringify((mapping.temporals ?? [])
+      .map((/** @type {any} */ temporal) => [temporal.name, temporal.kind, temporal.policy ?? null]).sort());
     const needsRebuild = !keysEqual || !fksEqual || changedColumns.length > 0
-      || addedColumns.some((columnName) => toColumns.get(columnName).check !== undefined);
+      || addedColumns.some((columnName) => toColumns.get(columnName).check !== undefined)
+      || temporalFacts(fm) !== temporalFacts(tm);
 
     // a single key that gains or drops the database's allocation (an integer
     // declared `default: "auto"`, or retyped into one): where the engine's
@@ -3371,6 +3423,18 @@ function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report, expre
   }
   targets.push(q('doc'));
   sources.push(docExpr);
+  // a zoned member declared alike on both sides keeps the key and stamp its
+  // rows were written with; one declared anew arrives unkeyed (a candidate the
+  // engine decides, as a row another provider keyed)
+  const zonedOf = (/** @type {any} */ mapping) => TEMPORAL_HOOKS.zonedColumnsOf(mapping.temporals ?? []);
+  const keptZoned = new Set(zonedOf(fm));
+  const zoned = zonedOf(tm);
+  for (let at = 0; at < zoned.length; at += 2) {
+    // a key is the instant under the policy its stamp column is named after
+    if (!keptZoned.has(zoned[at + 1])) continue;
+    targets.push(q(zoned[at]), q(zoned[at + 1]));
+    sources.push(q(zoned[at]), q(zoned[at + 1]));
+  }
   create.splice(1, 0, ...retypeChecks);
   if (dialect.name === 'postgres') {
     // writers wait from the first statement on: nothing committed after the

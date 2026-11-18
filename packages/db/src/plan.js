@@ -4259,12 +4259,28 @@ export function entityShape(entity, entityMapping) {
       flavors.set(fkCanonical, { column: fk.column, flavor: 'entity-column', storage: fk.referencesType, foreignKey: true, holdsKey: true,
         ...(fk.keyDigits === undefined ? {} : { keyDigits: fk.keyDigits }) });
   }
+  // a declared calendar member (`x-entity.temporal`) compares by its key as a
+  // collection's does, through the seam's planner; a date's and a date
+  // range's members ARE their keys, each a text column the member's text is
+  const temporals = (entityMapping.temporals ?? []).map((/** @type {any} */ temporal) => ({ ...temporal,
+    ...(entity.temporalHooks?.temporalColumns(temporal) ?? {}) }));
+  for (const temporal of temporals) {
+    const members = temporal.kind === 'date' ? [['date', temporal.key]]
+      : temporal.kind === 'date-range' ? [['start', temporal.key], ['end', temporal.end]] : [];
+    for (const [member, column] of members)
+      flavors.set(canonicalOf([...temporal.segments, { name: member }]), { column, flavor: 'entity-column', storage: 'string' });
+  }
   return {
     collection: entity.name,
     schema: entity.schema,
     columnByCanonical: new Map(),
     entityFlavors: flavors,
     columnOnly: entityMapping.document === false,
+    ...(temporals.length === 0 ? {} : { temporals, temporalPlanner: entity.temporalHooks.planner,
+      // a zoned key only narrows the rows the engine decides, and an entity
+      // query has no narrowed fetch (a conjunct it pushes is the answer):
+      // a zoned comparison, read beside no stamp, is the engine's
+      zoneStamp: null }),
   };
 }
 
@@ -5244,6 +5260,20 @@ function planEntityQueryCore(document, entities, mapping, operators) {
         }
       }
       else if (key.kind === 'path') binding = byName.get(key.rootSlot);
+      // the key of a declared calendar member (`$instant` of a utc one,
+      // `$wall` of a floating one) is its key column, ordered as the
+      // engine orders the value; a zoned key is the engine's to order
+      const keyed = key.kind === 'op' ? temporalOrderKey(key, bindings) : null;
+      if (keyed !== null && !keyed.exact) {
+        orderPushed = false;
+        reasons.push(refusal('$orderby', keyed.binding.shape.temporalPlanner.zonedOrder));
+        break;
+      }
+      if (keyed !== null) {
+        terms.push({ binding: keyed.binding, ref: { ...keyed.ref, flavor: 'entity-column', storage: 'string' }, hop: null,
+          desc: spec.desc === true, emptyGreatest: spec.emptyGreatest === true });
+        continue;
+      }
       const ref = binding === undefined ? null : entityPathRef(key, key.rootSlot, binding.shape);
       // a boolean orders in SQL and is `JQ2005` in the engine on either
       // flavor, and so does a member of two types; a document path that
@@ -5336,6 +5366,20 @@ function planEntityQueryCore(document, entities, mapping, operators) {
       },
     },
   };
+}
+
+/**
+ * The key an ordering expression over a binding's declared calendar member
+ * reads (`temporal.js`'s planner), with the binding, or `null`.
+ * @param {any} key - the ordering key's node @param {any[]} bindings
+ * @returns {{ binding: any, ref: any, exact: boolean } | null}
+ */
+function temporalOrderKey(key, bindings) {
+  for (const binding of bindings) {
+    const keyed = binding.shape.temporalPlanner?.key(key, binding.slot, binding.shape) ?? null;
+    if (keyed !== null) return { binding, ref: keyed.ref, exact: keyed.exact };
+  }
+  return null;
 }
 
 /**

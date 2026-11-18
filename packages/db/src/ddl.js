@@ -1920,6 +1920,10 @@ function verifyIntervalChecks(connection, plan, disagree) {
       for (const temporal of temporals)
         plan.temporalHooks.verifyCheck(temporal, stored.get(temporal.constraint), dialect, readsConforming, disagree);
       for (const name of stored.keys()) {
+        // an entity table's columns carry CHECKs of their own (an enum's, a
+        // number's, a key's), verified with the columns: a member names its
+        // CHECK `<name>_temporal`, and only such a name is a member's
+        if (plan.columnChecks === true && !name.endsWith('_temporal')) continue;
         if (!intervals.some((interval) => interval.constraint === name)
           && !temporals.some((/** @type {any} */ temporal) => temporal.constraint === name))
           disagree(`the database has the CHECK '${name}', which the model does not declare`);
@@ -2175,11 +2179,13 @@ const numberChecksOf = (columns, dialect) => columns.flatMap((column) => {
  * @param {any} entities - the full `explainMapping` result (key types
  *   come from the referenced entity's columns)
  * @param {any} dialect
- * @param {{ deferCycles?: boolean, expressions?: Record<string, any> }} [options] - `deferCycles`: on a dialect
+ * @param {{ deferCycles?: boolean, expressions?: Record<string, any>, temporalHooks?: any }} [options] - `deferCycles`: on a dialect
  *   that alters a table in place, leave the foreign keys that close a cycle
  *   out of the table and plan them as `deferredForeignKeys`, statements to
  *   run once every table of the cycle exists; `expressions`, the host's
- *   declared index functions an expression index calls (`openStore`'s)
+ *   declared index functions an expression index calls (`openStore`'s);
+ *   `temporalHooks`, the temporal seam's (`@jarenjs/db/temporals`), which
+ *   plan the key columns and CHECK of each declared calendar member
  * @returns {{ table: string, createSql: string[], expected: any,
  *   columnNames: Set<string>, objects?: { name: string, what: string, docPath: string }[],
  *   programs?: any[], conditionColumns?: { name: string, physical: string, codec: string }[],
@@ -2225,6 +2231,28 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
   }
   for (const column of [...entityMapping.indexes.map((/** @type {any} */ index) => index.property), ...viaColumns])
     refuseLongName(dialect, `${name}_${column}`, `the index over '${column}'`, memberPath(column));
+  // the declared calendar members (`x-entity.temporal`): each one's key
+  // columns, generated over the document as a collection's are (a zoned
+  // one's key and stamp written by the store), and its CHECK — planned by
+  // the seam, the one implementation both document kinds share
+  const declaredTemporals = entityMapping.temporals ?? [];
+  if (declaredTemporals.length > 0 && options.temporalHooks === undefined) {
+    throw new DbCompileError('JD0017', "a temporal member is keyed by the temporal seam: open the store with temporals: storeTemporals() "
+      + "from '@jarenjs/db/temporals'", declaredTemporals[0].docPath);
+  }
+  /** @type {any[]} */
+  const generated = [];
+  const temporalPlan = declaredTemporals.length === 0 ? null : options.temporalHooks.planCollection({ temporals: declaredTemporals }, dialect,
+    { docColumn: DOC_COLUMN, taken: new Set(), generated, derived: [], columnByCanonical: new Map(), safeIntegerColumns: new Set(), refuseLongName });
+  for (const column of generated) {
+    const holder = taken.get(compare(column.name));
+    const at = `${entityPath}/schema/properties/${column.temporal}`;
+    if (holder !== undefined) {
+      throw new DbCompileError('JD0004', `the key column of the temporal member '${column.temporal}' would be named '${column.name}', `
+        + `the name of ${holder.what} — two columns of one table cannot share a name: rename the member`, at);
+    }
+    taken.set(compare(column.name), { name: column.name, what: `the key column of the temporal member '${column.temporal}'` });
+  }
   const storageType = (storage) => dialect.typeFor(storage, 'generated');
   /** @type {Map<string, string>} */
   const legacyTypes = new Map();
@@ -2285,6 +2313,8 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
     columns: deferred.size === 0 ? columns
       : columns.map((column) => (deferred.has(column.name) ? { ...column, references: undefined } : column)),
     compositeKey: singleKey ? undefined : entityMapping.keys,
+    ...(temporalPlan === null ? {} : { generated,
+      checks: temporalPlan.temporals.map((/** @type {any} */ temporal) => ({ name: temporal.constraint, sql: temporal.sql })) }),
   })];
   // one index per column, keyed by its name: a declared `index`/`unique`
   // on a foreign-key column and the key's own index are ONE index —
@@ -2304,13 +2334,25 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
   // the table, the relations the engine gives it, and every index: one namespace
   const objects = [{ name, what: `the table for entity '${name}'`, docPath: entityPath, rename: 'the entity' },
     ...ownObjects(dialect, name, columns, entityPath)];
+  // a calendar member's `index`/`unique` flag: over its key columns, in the
+  // order a collection's index over the member keys them (a zoned key takes
+  // no unique index: `JD0004`), named as a column's flag index is
+  for (const temporal of declaredTemporals) {
+    if (temporal.unique !== true && temporal.index !== true) continue;
+    const at = `${entityPath}/schema/properties/${temporal.name}`;
+    refuseLongName(dialect, `${name}_${temporal.name}`, `the index over '${temporal.name}'`, at);
+    indexUnique.set(temporal.name, temporal.unique === true);
+  }
   for (const [column, unique] of indexUnique) {
     const indexName = `${name}_${column}`;
+    const temporal = declaredTemporals.find((/** @type {any} */ declared) => declared.name === column);
+    const indexed = temporal === undefined ? [column] : /** @type {string[]} */ (temporalPlan?.indexColumns(temporal.canonical,
+      { name: indexName, unique, docPath: `${entityPath}/schema/properties/${column}/x-entity` }));
     objects.push({ name: indexName, what: `the index over '${column}'`, docPath: memberPath(column), rename: `the member '${column}'` });
     createSql.push(dialect.ddl.createIndex({
-      name: indexName, table: name, columns: [column], unique,
+      name: indexName, table: name, columns: indexed, unique,
     }));
-    expectedIndexes.push({ name: indexName, unique, columns: [column] });
+    expectedIndexes.push({ name: indexName, unique, columns: indexed });
   }
   // the entity-level indexes: composite, unique or partial, over the columns
   // the table maps; a condition reads them as their columns hold them
@@ -2379,8 +2421,15 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
       : rulePrograms(name, entityMapping, entities, dialect, columns, conditionColumns, spelling)),
     /** The members an index condition may read, by their columns. */
     conditionColumns,
+    // the declared calendar members: each one's kind, key columns and CHECK,
+    // read and verified as a collection's are; the CHECKs every other column
+    // carries are the table's own, which no member declares by name
+    ...(temporalPlan === null ? {} : { temporals: temporalPlan.temporals, temporalHooks: options.temporalHooks,
+      generated, docColumn: DOC_COLUMN, columnChecks: true }),
     expected: {
-      columns: expectedColumnsOf(columns, legacyTypes, dialect),
+      columns: [...expectedColumnsOf(columns, legacyTypes, dialect),
+        ...generated.map((column) => ({ name: column.name, type: column.type, generated: column.stored !== true }))]
+        .sort((a, b) => (a.name < b.name ? -1 : 1)),
       indexes: expectedIndexes.sort((a, b) => (a.name < b.name ? -1 : 1)),
     },
   };
@@ -2576,7 +2625,7 @@ export function planInvariants(model, options) {
   if (typeof dialect.invariantTriggers !== 'function') throw new DbCompileError('JD0005', 'this dialect cannot lower database invariants');
   const items = Object.entries(mapping.entities).flatMap(([name, entity]) => (entity.document === false
     ? dialect.invariantTriggers(entity, mapping, dialect)
-    : planEntity(name, entity, mapping, dialect, { expressions: options.expressions }).programs ?? []));
+    : planEntity(name, entity, mapping, dialect, { expressions: options.expressions, temporalHooks: options.temporals?.hooks }).programs ?? []));
   /** @type {Map<string, string>} */
   const owners = new Map();
   for (const item of items) {

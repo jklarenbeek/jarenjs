@@ -31,7 +31,7 @@ import { memberNames, modelPath } from './model-path.js';
 import { expressionMembers, expressionShape } from './expression.js';
 
 /** The closed `x-entity` vocabulary; anything else is `JD0030`. */
-const ENTITY_MEMBERS = new Set(['key', 'unique', 'index', 'default', 'column', 'relation', 'version']);
+const ENTITY_MEMBERS = new Set(['key', 'unique', 'index', 'default', 'column', 'relation', 'version', 'temporal']);
 /** The `x-entity` members that are flags. */
 const BOOLEAN_MEMBERS = ['key', 'unique', 'index', 'version'];
 /** The closed members of an entity declaration (MODEL-FORMAT §9); `x-rename`
@@ -129,6 +129,25 @@ function effectiveSchema(node, root, anchors, docPath) {
 }
 
 /**
+ * A property's `x-entity.temporal` (MODEL-FORMAT §9.3), normalized by the
+ * temporal seam as a collection's `temporals[]` entry naming the property:
+ * the seam is required (`JD0017`), and it holds the rest of the block to
+ * the member's rules.
+ * @param {string} name @param {any} block - the property's `x-entity`
+ * @param {any} effective - the property's effective schema
+ * @param {string} propertyPath @param {any} hooks - the seam's, or `null`
+ * @returns {any}
+ */
+function entityTemporal(name, block, effective, propertyPath, hooks) {
+  const at = `${propertyPath}/x-entity/temporal`;
+  if (hooks === null) {
+    throw modelError("a temporal member is keyed by the temporal seam: open the store with temporals: storeTemporals() "
+      + "from '@jarenjs/db/temporals'", at, 'JD0017');
+  }
+  return hooks.normalizeEntity(name, block, effective, propertyPath);
+}
+
+/**
  * Normalize one property's `x-entity` block against the closed set.
  * @param {any} block
  * @param {string} docPath
@@ -142,7 +161,7 @@ function normalizeEntityBlock(block, docPath) {
     if (!ENTITY_MEMBERS.has(member)) {
       throw new DbCompileError('JD0030',
         `unknown x-entity member '${member}' — the vocabulary is closed `
-        + '(key, unique, index, default, column, relation, version) because a silently '
+        + '(key, unique, index, default, column, relation, version, temporal) because a silently '
         + 'ignored mapping directive loses data',
         `${docPath}/${member}`);
     }
@@ -349,6 +368,10 @@ function entityQueryOptions(options, owner) {
   return { calendar: options.temporals.calendar };
 }
 
+/** The hooks of the temporal seam an entity's `x-entity.temporal` members are
+ * normalized and keyed by, or `null` without it. @param {any} options */
+const temporalHooksOf = (options) => options?.temporals?.hooks ?? null;
+
 /**
  * Normalize the `entities` member of a model document.
  * @param {any} model
@@ -359,11 +382,13 @@ function entityQueryOptions(options, owner) {
  * @returns {Map<string, any>} entity name -> normalized entity
  */
 export function normalizeEntities(model, options = undefined) {
-  return entitiesOf(model, entityQueryOptions(options, 'normalizeEntities()'));
+  return entitiesOf(model, entityQueryOptions(options, 'normalizeEntities()'), temporalHooksOf(options));
 }
 
-/** @param {any} model @param {{ calendar: object } | undefined} queryOptions @returns {Map<string, any>} */
-function entitiesOf(model, queryOptions) {
+/** @param {any} model @param {{ calendar: object } | undefined} queryOptions
+ * @param {any} [temporalHooks] - the temporal seam's hooks, or `null`
+ * @returns {Map<string, any>} */
+function entitiesOf(model, queryOptions, temporalHooks = null) {
   const declared = model?.entities;
   if (declared === undefined) return new Map();
   if (!isJsonObject(declared)
@@ -393,6 +418,8 @@ function entitiesOf(model, queryOptions) {
     const declaredTypes = new Map();
     const keys = [];
     const relations = [];
+    /** The properties declared a calendar kind (`x-entity.temporal`). */
+    const temporals = [];
     for (const propertyName of Object.keys(schema.properties)) {
       const propertyPath = `${docPath}/schema/properties/${propertyName}`;
       const raw = schema.properties[propertyName];
@@ -438,8 +465,13 @@ function entitiesOf(model, queryOptions) {
       // property the document keeps — `column: 'json'`, a non-scalar, a
       // union — they were accepted and never applied (a key with no key
       // column let duplicates in and broke every read)
+      // a calendar kind keys the property by columns of its own: an index
+      // or a unique one is over those (`unique` across spellings of one value)
+      const temporal = entityBlock.temporal === undefined ? null
+        : entityTemporal(propertyName, entityBlock, effective, propertyPath, temporalHooks);
       const columnMapped = SCALAR_TYPES.has(type ?? '') && entityBlock.column !== 'json';
-      const needsColumn = ['key', 'unique', 'index'].filter((member) => entityBlock[member] === true);
+      const needsColumn = ['key', 'unique', 'index'].filter((member) => entityBlock[member] === true
+        && !(temporal !== null && member !== 'key'));
       if (!columnMapped && needsColumn.length > 0) {
         const why = entityBlock.column === 'json'
           ? "column: 'json' keeps the property in the document"
@@ -487,6 +519,7 @@ function entitiesOf(model, queryOptions) {
         version: entityBlock.version === true,
         default: entityBlock.default,
         column: entityBlock.column,
+        ...(temporal === null ? {} : { temporal }),
         // COPIED: relation resolution annotates this object (kind,
         // fkEntity, joinTable) and must never write into the caller's
         // model document
@@ -500,6 +533,7 @@ function entitiesOf(model, queryOptions) {
         keys.push(propertyName);
       }
       if (property.relation !== undefined) relations.push(property);
+      if (temporal !== null) temporals.push(temporal);
       properties.set(propertyName, property);
     }
 
@@ -526,6 +560,14 @@ function entitiesOf(model, queryOptions) {
     if (versions.length > 1)
       throw modelError(`entity '${name}' declares more than one version property`, docPath);
 
+    const physical = normalizePhysical(spec.physical, properties, keys, docPath, historyReads > 0 ? undefined : declaredTypes);
+    // an adopted layout has no document a key column could read: the
+    // application owns the columns, and none of them is planned from one
+    if (physical !== null && temporals.length > 0) {
+      throw modelError(`'${temporals[0].name}' declares a calendar kind, keyed by columns generated from the entity's `
+        + 'document, and an adopted layout (physical) has no document column: keep the value in the columns the '
+        + 'application declares, or declare the entity without physical', temporals[0].docPath, 'JD0004');
+    }
     entities.set(name, {
       name,
       docPath,
@@ -535,7 +577,10 @@ function entitiesOf(model, queryOptions) {
       relations,
       version: versions.length === 1 ? versions[0].name : null,
       indexes: normalizeEntityIndexes(spec, docPath),
-      physical: normalizePhysical(spec.physical, properties, keys, docPath, historyReads > 0 ? undefined : declaredTypes),
+      physical,
+      // the declared calendar members, and the seam that keys them
+      temporals,
+      ...(temporals.length === 0 ? {} : { temporalHooks }),
       invariants: normalizeInvariants(spec.invariants, `${docPath}/invariants`, queryOptions),
       // the calendar seam its `{ query }` defaults compile with at write time
       ...(queryOptions === undefined ? {} : { queryOptions }),
@@ -791,7 +836,7 @@ export function relationTables(entities) {
  * @returns {any}
  */
 export function explainMapping(model, options = undefined) {
-  return mappingOf(model, entitiesOf(model, entityQueryOptions(options, 'explainMapping()')));
+  return mappingOf(model, entitiesOf(model, entityQueryOptions(options, 'explainMapping()'), temporalHooksOf(options)));
 }
 
 /** Normalize and map once for lightweight engines sharing model metadata.
@@ -800,7 +845,7 @@ export function explainMapping(model, options = undefined) {
  *   `normalizeEntities` takes them
  * @returns {{entities:Map<string,any>,mapping:any}} */
 export function compileEntityModel(model, options = undefined) {
-  const entities = entitiesOf(model, entityQueryOptions(options, 'compileEntityModel()'));
+  const entities = entitiesOf(model, entityQueryOptions(options, 'compileEntityModel()'), temporalHooksOf(options));
   return { entities, mapping: mappingOf(model, entities) };
 }
 
@@ -876,6 +921,14 @@ function storageOf(property) {
   if (!SCALAR_TYPES.has(property.type ?? '') || property.column === 'json') return 'document';
   return property.column === 'integer' ? 'epoch' : 'column';
 }
+
+/**
+ * A normalized temporal member as mapping data: what the table plans it by.
+ * @param {any} temporal @returns {any}
+ */
+const temporalMapping = (temporal) => ({ name: temporal.name, path: temporal.path, kind: temporal.kind,
+  ...(temporal.policy === undefined ? {} : { policy: temporal.policy }), constraint: temporal.constraint,
+  segments: temporal.segments, canonical: temporal.canonical, docPath: temporal.docPath });
 
 /** @param {any} model @param {Map<string,any>} entities @returns {any} */
 function mappingOf(model, entities) {
@@ -982,6 +1035,15 @@ function mappingOf(model, entities) {
       // a composite or partial unique index is never a unique column
       ...(entity.indexes.length ? { entityIndexes: entityIndexesOf(entity, columns, foreignKeys) } : {}),
       ...(entity.invariants.length ? { invariants: model.entities[entity.name].invariants } : {}),
+      // the properties declared a calendar kind, each as the collection's
+      // `temporals[]` entry naming it: the document keeps the value, the
+      // table keys it by the columns the declaration plans (`planEntity`)
+      // (its `index`/`unique` flag is over its key columns, so it rides here,
+      // never in `indexes`, whose every entry is a column's)
+      ...(entity.temporals.length ? { temporals: entity.temporals.map((/** @type {any} */ temporal) => {
+        const property = entity.properties.get(temporal.name);
+        return { ...temporalMapping(temporal), ...(property.unique ? { unique: true } : property.index ? { index: true } : {}) };
+      }) } : {}),
     });
   }
 

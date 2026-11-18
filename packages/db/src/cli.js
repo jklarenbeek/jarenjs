@@ -517,7 +517,7 @@ async function commandStatus(options, { asCheck }) {
   }
   // a rule program the database holds as an earlier release planned it, named for its upgrade; no exit changes
   if (model !== undefined && status.pending.length === 0 && unplanned === null
-    && [...normalizeEntities(model).values()].some((entity) => entity.invariants.some((rule) => rule.enforcement === 'database'))) {
+    && [...normalizeEntities(model, PLANNING).values()].some((entity) => entity.invariants.some((rule) => rule.enforcement === 'database'))) {
     let connection = null;
     try {
       connection = await nodeDriver().open(existingStore(options.store), {});
@@ -692,10 +692,10 @@ async function commandShape(options) {
     for (const sql of planCollection(collection.name, collection, sqliteDialect).createSql)
       console.log(sql);
   }
-  if (normalizeEntities(model).size > 0) {
-    const mapping = explainMapping(model);
+  if (normalizeEntities(model, PLANNING).size > 0) {
+    const mapping = explainMapping(model, PLANNING);
     for (const name of Object.keys(mapping.entities)) {
-      for (const sql of planEntity(name, mapping.entities[name], mapping, sqliteDialect).createSql)
+      for (const sql of planEntity(name, mapping.entities[name], mapping, sqliteDialect, { temporalHooks: TEMPORAL_HOOKS }).createSql)
         console.log(sql);
     }
     for (const name of Object.keys(mapping.joinTables)) {

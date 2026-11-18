@@ -2542,6 +2542,10 @@ export function openStore(model, options) {
       }
       collection.temporalHooks.refuseUnrecordedZones(collection, zoneProvider);
     }
+    // an entity's calendar members as a collection's: normalized by the seam
+    // (`JD0017` without it), a zoned one keyed under a recorded provider
+    for (const entity of entities.values())
+      if (entity.temporals.length > 0) entity.temporalHooks.refuseUnrecordedZones(entity, zoneProvider);
   }
   catch (error) {
     return Promise.reject(error);
@@ -3455,7 +3459,7 @@ export function openStore(model, options) {
         if (mapping !== null) {
           for (const name of Object.keys(mapping.entities))
             entityPlans.set(name, planEntity(name, mapping.entities[name], mapping, dialect,
-              { deferCycles: true, expressions }));
+              { deferCycles: true, expressions, temporalHooks: entities.get(name)?.temporalHooks }));
           for (const joinName of Object.keys(mapping.joinTables)) {
             entityPlans.set(joinName,
               planJoinTable(joinName, mapping.joinTables[joinName], mapping, dialect));
@@ -4214,7 +4218,7 @@ export function openStore(model, options) {
                 ? options.compileSchema(writeSchemaOf(entity, mapping.entities[name]))
                 : null);
               core = captureEntity(name, entityCore(connection, entity,
-                mapping.entities[name], validate, runtime, entityPlans.get(name)?.keyConstraint, entityPlans.get(name)?.keyAllocates));
+                mapping.entities[name], validate, runtime, entityPlans.get(name)?.keyConstraint, entityPlans.get(name)?.keyAllocates, zoneProvider));
               entityCores.set(name, core);
             }
             return core;

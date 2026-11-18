@@ -21,6 +21,7 @@ import {
   openStore, normalizeModel, normalizeEntities, explainMapping, shapeHash, DbCompileError,
 } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
+import { storeTemporals } from '@jarenjs/db/temporals';
 
 import { compileArtifact } from '../json/schema-artifact-helpers.js';
 import { CORPUS, User, Post, fixtureModel } from './model-corpus.js';
@@ -335,6 +336,11 @@ describe('the model pen — refusals, each with the fix in the message', () => {
   it('JL0102 — entity() writes the CLOSED vocabulary, and nothing else', () => {
     assert.deepStrictEqual(m.string().entity({ key: true, unique: true }).schema['x-entity'],
       { key: true, unique: true });
+    // a calendar member (MODEL-FORMAT §9.3) is a member of the vocabulary, read by the store through its seam
+    const calendarMember = m.object({ instant: m.string() }).entity({ temporal: { kind: 'utc' }, index: true });
+    assert.deepStrictEqual(calendarMember.schema['x-entity'], { temporal: { kind: 'utc' }, index: true });
+    assert.equal(normalizeEntities(m.defineModel({ entities: { A: m.object({ id: m.string().key(), on: calendarMember.optional() }) } }),
+      { temporals: storeTemporals() }).get('A').temporals[0].kind, 'utc');
     assert.throws(() => m.string().entity({ bogus: true }),
       (e) => e.code === 'JL0102' && /closed x-entity vocabulary/.test(e.message));
     assert.throws(() => m.string().entity(/** @type {any} */ (null)), (e) => e.code === 'JL0101');

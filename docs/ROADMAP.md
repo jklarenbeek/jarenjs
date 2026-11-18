@@ -1156,12 +1156,19 @@ what each does is its own documentation's job
 - [ ] **An EXDATE of a range override's own slot orphans the range.** Excluding the occurrence a RANGE=THISANDFUTURE
   override starts at drops the range's changes for every later occurrence, so `@jarenjs/josl/ical`'s `patchIcal` moves
   the range to the next slot instead of writing the exclusion beside the kept range.
-- [ ] **An entity member has no temporal column kind.** A collection declares a member a calendar kind
-  (`temporals`, MODEL-FORMAT §2), refused, keyed and compared identically on SQLite and PostgreSQL; an entity
-  member holding a calendar value stays in the entity's document, unkeyed. A zoned member takes no unique index
-  and is ordered by the engine, and a recurrence rule is stored as its JSON form (`…/rrule.schema.json`). A collection's
-  temporal members are keyed through the seam `@jarenjs/db/temporals` (MODEL-FORMAT §2), whose hooks an entity kind
-  would reuse.
+- [ ] **A zoned calendar member is compared and ordered by the engine on an entity.** A collection's zoned
+  key narrows the rows the engine decides; an entity query has no narrowed fetch (a conjunct it pushes is its
+  answer), so a comparison or an ordering of a zoned entity member (`x-entity.temporal`, MODEL-FORMAT §9.3)
+  reads every row, though the store writes its key and stamp. No zoned member takes a unique index, and a
+  recurrence rule is stored as its JSON form (`…/rrule.schema.json`).
+- [ ] **Replication orders no swap over a unique calendar member.** Its unique slots compare an entity's column
+  values, and a calendar member (`x-entity.temporal` with `unique`) is keyed by its key columns' one spelling, which
+  no slot reads: two operations that exchange such values are applied in the order they arrive, and the unique index
+  refuses the one that lands first (`JD2005`).
+- [ ] **An entity load or page on a store with operators is `JD0032`.** `load({ orderBy })`, `load({ where })` and
+  `page()` analyze with the store's whole operator record, whose `pushableScalar` the query options refuse
+  (`unknown query option 'pushableScalar'`), so on a store opened with `temporals: storeTemporals()` (or registered
+  operators) every such load is refused.
 - [ ] **String helpers that answer for a non-string.** `countCodePoints(5)` and
   `countCharCode(5, 48)` answer 0, `toCodePoints(5)` answers `[]`, and `fnv1a(5)` equals
   `fnv1a('')` (so `hashContent({})` is `hashContent('')`), each because a non-string's missing

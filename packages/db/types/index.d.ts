@@ -2408,9 +2408,12 @@ export declare function applyMandatoryPredicate(plan: unknown, predicate: unknow
 export declare function applyRowBound(plan: unknown, maxRows: number): unknown;
 export declare function translatePatch(ops: readonly unknown[], doc: unknown, dialect: Dialect): unknown;
 /** Plan an entity's table. `expressions` are the host's declared index
- * functions an entity index over an expression calls (MODEL-FORMAT §7A). */
+ * functions an entity index over an expression calls (MODEL-FORMAT §7A);
+ * `temporalHooks`, the `hooks` of `storeTemporals()`, plan the key columns
+ * and CHECK of a member declared a calendar kind (§9.3), `JD0017` without. */
 export declare function planEntity(name: string, entityMapping: unknown, mapping: unknown, dialect: Dialect,
-  options?: { deferCycles?: boolean; expressions?: Record<string, ExpressionFunction> }): unknown;
+  options?: { deferCycles?: boolean; expressions?: Record<string, ExpressionFunction>;
+    temporalHooks?: import('./temporals.js').StoreTemporals['hooks'] }): unknown;
 export declare function planJoinTable(name: string, joinTable: unknown, mapping: unknown, dialect: Dialect): unknown;
 export declare function entityCore(connection: unknown, entity: unknown, entityMapping: unknown, validate: unknown): unknown;
 export declare function chain<T, R>(value: T | Promise<T>, next: (value: T) => R): R | Promise<R>;

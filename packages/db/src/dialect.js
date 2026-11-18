@@ -562,11 +562,15 @@ export function createDialect(spec) {
      *   primaryKey?: boolean, check?: string, keyCheck?: string,
      *   references?: { table: string, column: string,
      *     onDelete: 'cascade' | 'restrict' | 'setNull' } }[],
-     *   compositeKey?: string[] }} shape - `keyCheck`, a column holding a
-     *   key's second CHECK beside its own (`ddl.js` `keyCheckOf`)
+     *   compositeKey?: string[], generated?: { name: string, type: string,
+     *   pathText: string | null, expression?: string | null, stored?: boolean }[],
+     *   checks?: { name: string, sql: string }[] }} shape - `keyCheck`, a column holding a
+     *   key's second CHECK beside its own (`ddl.js` `keyCheckOf`); `generated`, the
+     *   key columns of the entity's declared temporal members over its document
+     *   column (`doc`), and `checks`, their named CHECKs
      * @returns {string}
      */
-    createRelationalTable({ table, columns, compositeKey }) {
+    createRelationalTable({ table, columns, compositeKey, generated = [], checks = [] }) {
       const rendered = columns.map((column) => {
         let sql = `${q(column.name)} ${column.type}`;
         if (column.primaryKey === true) sql += ' PRIMARY KEY';
@@ -579,8 +583,10 @@ export function createDialect(spec) {
         return sql;
       });
       rendered.push(...identityColumnSql());
+      rendered.push(...generated.map((column) => generatedColumnSql('doc', column)));
       if (compositeKey !== undefined && compositeKey.length > 0)
         rendered.push(`PRIMARY KEY (${compositeKey.map(q).join(', ')})`);
+      rendered.push(...checks.map((check) => `CONSTRAINT ${q(check.name)} CHECK (${check.sql})`));
       return `CREATE TABLE ${q(table)} (${rendered.join(', ')})${spec.tableSuffix}`;
     },
     /**

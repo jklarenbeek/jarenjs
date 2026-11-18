@@ -4057,6 +4057,23 @@ release refuses `latenessMs` in `schedule()` and `tick` in `createWorker()`
   first — `planModelMigration(declared, plain)` drops the CHECKs, indexes and key
   columns on both engines — then open with the previous release. Stores the
   previous release created open, read, query and explain unchanged.
+- An entity property declares the same kinds as `x-entity: { temporal: { kind,
+  policy? } }` (MODEL-FORMAT §9.3): the value stays in the document, and the
+  table gains the collection's key columns, CHECK and refusals for it, through
+  the same seam (`JD0017` without it); `index`/`unique` on the property index
+  its keys. Declaring, dropping or changing one rebuilds the entity's table
+  (`JD0021` first, over a stored member that is no value of its kind). An entity
+  without one, and its `explainMapping`, plan the same tables as before. A
+  physical (adopted) entity declares none (`JD0004`).
+- Downgrade: the previous release refuses an entity model that declares one
+  (`JD0030`, the unknown `x-entity` member), and a plain model over a table this
+  release created with one (`JD0002`, the key columns it does not declare).
+  Migrate the declaration away first — `planModelMigration(declared, plain)`
+  rebuilds the table without the key columns, CHECK and index, the value kept in
+  the document — then open with the previous release, which reads every row.
+  Entity tables the previous release created open, read, query and explain
+  unchanged, and `introspectModel` → `planModelMigration` plans over them what
+  it planned before.
 
 ## 78. Recurring schedules take sub-daily rules
 

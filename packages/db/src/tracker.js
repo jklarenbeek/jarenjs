@@ -500,6 +500,9 @@ export function createTracker(context) {
       }
       if (plan.document === false) throw contractError(entityName, `'${first}' is not a mapped column`);
       docOps.push(op);
+      // a declared zoned member keys the row by columns the store writes:
+      // an edit of the member writes them anew, under the store's provider
+      for (const [name, value] of plan.zonedSets(record.stamped, first)) columnSets.set(name, value);
     }
     let docBuild = null;
     if (!fallback && docOps.length > 0) {

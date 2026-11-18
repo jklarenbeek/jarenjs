@@ -50,6 +50,12 @@ export interface EntityBlock {
   readonly default?: 'now' | 'updated' | 'uuid' | 'auto'
     | { readonly value: Json }
     | { readonly query: { readonly [keyword: string]: unknown } };
+  /** A calendar value of one kind, keyed by columns of its own (§9.3);
+   * `policy` resolves a zoned one's gap or fold, and only a zoned one's. */
+  readonly temporal?: {
+    readonly kind: 'date' | 'floating' | 'utc' | 'zoned' | 'date-range';
+    readonly policy?: 'rfc5545' | 'later' | 'reject';
+  };
   /** A relation, as `rel.*` spells one (§9.4). */
   readonly relation?: {
     readonly to: string;

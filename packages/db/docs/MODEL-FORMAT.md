@@ -2052,7 +2052,7 @@ undefined`, as on every coded error.*
 | `JD0014` | a transaction guarantee was requested where it cannot act |
 | `JD0015` | owner was asked of an adopted store whose database has no owner table |
 | `JD0016` | recurring job schedules were used without `jobs.schedules` from `@jarenjs/db/schedules`, or a tick met a schedule in a zone without the runtime's zone provider |
-| `JD0017` | a model declares a temporal member, and `openStore`, `prepareModel` or `normalizeModel` was given no `temporals` from `@jarenjs/db/temporals` |
+| `JD0017` | a model declares a temporal member (a collection's `temporals[]` or an entity's `x-entity.temporal`, §9.3), and `openStore`, `prepareModel`, `normalizeModel`, `normalizeEntities`, `explainMapping` or `compileEntityModel` was given no `temporals` from `@jarenjs/db/temporals` (`planEntity` no `temporalHooks`) |
 | `JD0030` | an unknown x-entity member was declared |
 | `JD0031` | relation declarations contradict each other, or two many-to-many declarations that are not inverses name one join table (§9.4) |
 | `JD0032` | the include specification is invalid |
@@ -2992,6 +2992,7 @@ one specification.
 | `column` | a property | storage override: `"integer"` on a `date-time`/`date` string stores epoch milliseconds in a real column (index-friendly range predicates); `"json"` keeps a scalar in the JSONB document (the opt-out that preserves present-`null`, §9.3) |
 | `relation` | a property | `{ to, many?, via?, through?, onDelete? }` — §9.4 |
 | `version` | a property | the optimistic-concurrency token (§11.5): a plain integer column, one per entity, never the key — engine-owned and bumped on every successful write |
+| `temporal` | a property | `{ kind, policy? }`: the property holds a **calendar value** of that kind, keyed, refused and compared exactly as a collection's `temporals[]` member (§2) naming the property — §9.3 |
 
 **`unique` and `index` are the one-column shorthand; an entity's
 `indexes` member declares the rest.** A rule such as "one active shift
@@ -3145,7 +3146,36 @@ Stated once, mechanically applied, and returned as data by
 | a union of several scalar types (`['string', 'integer']`) | the JSONB document — a column has one affinity and a union has several; `['integer', 'null']` is that scalar, nullable |
 | a nullable member spelled as a union, `{ "anyOf": [{ "type": "string" }, { "type": "null" }] }` | the JSONB document, while `{ "type": ["string", "null"] }` gets a nullable column — the mapper reads the spelling, not the value set (below) |
 | nested object / array, or `column: "json"` | the JSONB document column, queryable by path exactly as in phase A |
+| an object with `temporal: { kind, policy? }` | the JSONB document keeps the value as written; the table keys it by the columns and the CHECK a collection's `temporals[]` member of that kind plans (below) |
 | relation | a foreign-key column, or a join table for many-to-many (§9.4) |
+
+**A calendar member** (`x-entity: { temporal: { kind, policy? } }`) is a
+top-level property whose value is a calendar value of `@jarenjs/core/calendar`
+of one kind — `date`, `floating`, `utc`, `zoned` (with the `policy` its gap or
+fold resolves under, required there and refused elsewhere) or `date-range`.
+It is the collection's declared temporal member (§2, `temporals[]`) with the
+property as its `name` and `$.<property>` as its `path`, through the same seam
+(`storeTemporals()` of `@jarenjs/db/temporals`; `JD0017` without it) and the
+same implementation: the value stays in the document as written; the table
+gains the key columns `tk_<property>` (a date range's `tk_<property>$end`, a
+zoned member's store-written key and stamp `tk_<property>$<policy>`), generated
+from the document exactly as a collection's, and the CHECK
+`<property>_temporal`, so every writer is refused alike (`JD2003` before the
+statement, `JD2005` from the CHECK). `index: true` and `unique: true` index the
+key columns (a zoned member takes no unique index, `JD0004`), so `unique`
+refuses a second spelling of one value. A comparison, an `$overlaps` of a date
+range and an ordering of the key plan as a collection's do, natively and
+exactly for every kind but `zoned`; a zoned comparison and ordering are the
+engine's, since an entity query has no narrowed fetch for a key that only
+narrows (the store still writes its key and stamp with every document, an
+edit of the member restamping it, and `index: true` on a zoned member builds
+an index over them that no entity query reads yet). The member takes no `key`, `column`,
+`relation` or `version` beside it (`JD0005`), and its name is an identifier
+(it names the key columns). Declaring, dropping or changing the kind rebuilds
+the table (a stored member that is no value of the new kind refuses the link
+`JD0021` before any step, and a zoned key arrives empty, a candidate), and
+`introspectModel` with `temporals` reads it back. An adopted layout (§12) takes
+no calendar member.
 
 A column takes its member's name, so a member named like the table's own
 document column (`doc`), like its row identity column on PostgreSQL
@@ -4801,7 +4831,11 @@ persistence ladder are specified in [execution hosts](HOSTS.md).
 ## 12. Existing column layouts
 
 An entity's optional `physical` member declares an existing column-only layout.
-Omitting it retains the hybrid mapping. Opening a physical entity MUST verify
+Omitting it retains the hybrid mapping. A physical entity declares no calendar
+member (`x-entity.temporal`, §9.3): its keys are generated from a document
+column the application's table does not have, and mapping one onto the
+application's own columns would be a second keying the store could not hold
+every writer to — the declaration is `JD0004` at the member's `x-entity/temporal`. Opening a physical entity MUST verify
 its existing table or view and MUST NOT create it; the open verifies every
 physical entity against one read of the catalog and holds no write lock
 while it does ([§4](#4-the-driver-contract-and-the-synchronous-fast-path)). `adopt: true` also prevents

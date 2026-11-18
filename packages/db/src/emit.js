@@ -1898,6 +1898,12 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
     if (pred.p === 'not') return `NOT ${emitPred(aliasSql, docSql, pred.item, tableSql)}`;
     if (pred.p === 'const')
       return pred.value ? dialect.booleanLiteral(true) : dialect.booleanLiteral(false);
+    if (pred.p === 'colCmp') {
+      // a bound over a declared calendar member's key column (`temporal.js`),
+      // which holds no NULL for a present member: an absent one holds none
+      const column = `${aliasSql}.${q(pred.column)}`;
+      return `(${column} IS NOT NULL AND ${column} ${SYMBOLS[pred.op]} ${param({ literal: pred.operand.lit })})`;
+    }
     if (pred.ref?.flavor === 'entity-column')
       return emitColumnPred(aliasSql, pred, tableSql);
     if (pred.ref?.flavor === 'entity-epoch') {

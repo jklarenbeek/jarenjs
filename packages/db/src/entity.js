@@ -122,9 +122,14 @@ export function insertAttempt(connection, call, details, held) {
  *   a key the model leaves to the database (`default: "auto"`), as the open
  *   read it: `false` where it allocates nothing, so a write that leaves the
  *   key to the database is refused by name; allocating where not read
+ * @param {any} [zoneProvider] - the store's zone provider, which keys a
+ *   declared zoned member (`x-entity.temporal`); without one a zoned member's
+ *   key and stamp are written absent, and the row stays a candidate the engine
+ *   decides, as one another provider keyed
  * @returns {any}
  */
-export function entityCore(connection, entity, entityMapping, validate, runtime = undefined, keyConstraint = undefined, keyAllocates = true) {
+export function entityCore(connection, entity, entityMapping, validate, runtime = undefined, keyConstraint = undefined, keyAllocates = true,
+  zoneProvider = null) {
   const host = resolveRuntime(runtime);
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
@@ -180,6 +185,24 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       { docPath, collection: entity.name });
   };
 
+  // the declared calendar members (`x-entity.temporal`): the table keys each
+  // one by columns generated from the document, except a zoned one, whose
+  // key and stamp the store writes beside every document it writes
+  const temporals = entity.temporals ?? [];
+  const hooks = entity.temporalHooks;
+  const zonedColumns = (entityMapping.temporals ?? []).filter((/** @type {any} */ temporal) => temporal.kind === 'zoned')
+    .flatMap((/** @type {any} */ temporal) => {
+      const columns = hooks.temporalColumns(temporal);
+      return [{ name: columns.key, derive: 'zoned-instant', policy: temporal.policy, property: temporal.name },
+        { name: columns.stamp, derive: 'zoned-stamp', policy: temporal.policy, property: temporal.name }];
+    });
+  /** The zoned key columns' values for a document as the database holds it.
+   * @param {any} doc @param {string} [property] - only this member's */
+  const zonedValues = (doc, property = undefined) => zonedColumns
+    .filter((column) => property === undefined || column.property === property)
+    .map((column) => ({ name: column.name, value: zoneProvider === null ? null
+      : hooks.zonedValueFor(column, memberOf(doc, column.property), zoneProvider) }));
+
   const relationNames = new Set(
     [...entity.properties.values()]
       .filter((property) => property.relation !== undefined)
@@ -230,6 +253,9 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       const value = memberOf(doc, fk);
       values.push({ name: fk, value: value === undefined || value === null ? null : storable(fk, value) });
     }
+    // every write of the document writes a zoned member's key and stamp
+    // with it: an edit of the member restamps it, none can leave it stale
+    values.push(...zonedValues(doc));
     if (physical && Object.keys(rest).length > 0) throw new DbRuntimeError('JD2003',
       `column-only entity '${entity.name}' cannot store undeclared members: ${Object.keys(rest).join(', ')}`);
     return { values, rest };
@@ -351,6 +377,10 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   };
 
   const checkValid = (doc) => {
+    // a declared calendar member is refused before the statement, hook or
+    // no hook, as its CHECK refuses every other writer (a collection's alike)
+    if (temporals.length > 0)
+      hooks.refuse({ name: entity.name, docPath, temporals }, (/** @type {any[]} */ segments) => memberOf(doc, segments[0].name), zoneProvider, 'entity');
     if (validate === null) return;
     const outcome = validate(doc);
     const valid = outcome === true || outcome?.valid === true;
@@ -678,6 +708,9 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       scalarColumns,
       fkColumns,
       columnSet,
+      /** The zoned key and stamp a change of one member writes beside the
+       * document: `[name, value]` of each, none for any other member. */
+      zonedSets: (/** @type {any} */ doc, /** @type {string} */ property) => zonedValues(doc, property).map((value) => [value.name, value.value]),
       split,
       merge,
       encodeColumn,

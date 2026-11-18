@@ -214,9 +214,11 @@ export function isCalendarDate(text) {
  * @param {any} temporal
  * @param {unknown} member - the member as the database will hold it
  * @param {any} provider - the store's zone provider, or `null`
+ * @param {boolean} [resolve] - whether a zoned value must resolve in
+ *   `provider` (`false`: a writer with none writes its key absent)
  * @returns {string | null}
  */
-export function temporalFault(temporal, member, provider) {
+export function temporalFault(temporal, member, provider, resolve = true) {
   if (member === undefined) return null;
   let value;
   try {
@@ -226,7 +228,7 @@ export function temporalFault(temporal, member, provider) {
     return `is not a calendar value (${/** @type {any} */ (e).code ?? 'refused'}: ${/** @type {any} */ (e).message})`;
   }
   if (value.kind !== temporal.kind) return `is a ${value.kind} value, and the member is declared ${temporal.kind}`;
-  if (value.kind === 'zoned') {
+  if (value.kind === 'zoned' && resolve) {
     try {
       toUtc(value, { provider, policy: temporal.policy });
     }
@@ -249,6 +251,19 @@ export function zonedValueFor(column, member, provider) {
   if (member === undefined || member === null) return null;
   const resolved = toUtc(parseTemporal(/** @type {any} */ (member)), { provider, policy: /** @type {any} */ (column.policy) });
   return column.derive === 'zoned-instant' ? /** @type {any} */ (resolved).instant : stampOf(/** @type {any} */ (resolved).provider);
+}
+
+/**
+ * The columns the store writes for the zoned members among `temporals`:
+ * each one's key, then its stamp.
+ * @param {{ name: string, kind: string, policy?: string }[]} temporals
+ * @returns {string[]}
+ */
+function zonedColumnsOf(temporals) {
+  return temporals.filter((temporal) => temporal.kind === 'zoned').flatMap((temporal) => {
+    const columns = temporalColumns(temporal);
+    return [columns.key, /** @type {string} */ (columns.stamp)];
+  });
 }
 
 /** Whether a stored derived column is a zoned key. @param {{ derive?: string }} column */
@@ -318,24 +333,8 @@ function normalizeTemporals(spec, docPath, intervals) {
     if (names.has(temporal.name))
       throw modelError('JD0005', `duplicate temporal member name '${temporal.name}'`, `${at}/name`);
     names.add(temporal.name);
-    const constraint = `${temporal.name}_temporal`;
-    if (utf8ByteLength(constraint) > CONSTRAINT_NAME_BYTES) {
-      throw modelError('JD0005',
-        `the constraint name '${constraint}' exceeds ${CONSTRAINT_NAME_BYTES} bytes`, `${at}/name`);
-    }
-    if (!TEMPORAL_KINDS.includes(temporal.kind)) {
-      throw modelError('JD0005',
-        `a temporal member's kind is one of ${TEMPORAL_KINDS.join(', ')}, got ${JSON.stringify(temporal.kind)}`, `${at}/kind`);
-    }
-    if (temporal.kind === 'zoned' && !TEMPORAL_POLICIES.includes(temporal.policy)) {
-      throw modelError('JD0005',
-        `a zoned member declares the policy its gap or fold resolves under, one of ${TEMPORAL_POLICIES.join(', ')}, `
-        + `got ${temporal.policy === undefined ? 'none' : JSON.stringify(temporal.policy)}`, `${at}/policy`);
-    }
-    if (temporal.kind !== 'zoned' && temporal.policy !== undefined) {
-      throw modelError('JD0005',
-        `a policy resolves a zoned member's wall clock; a ${temporal.kind} member has none to resolve`, `${at}/policy`);
-    }
+    const pointers = { name: `${at}/name`, kind: `${at}/kind`, policy: `${at}/policy`, path: `${at}/path`, docPath: at };
+    refuseKind(temporal, pointers);
     if (typeof temporal.path !== 'string' || temporal.path === '') {
       throw modelError('JD0005',
         'a temporal member path is a singular JSONPath string selecting the member', `${at}/path`);
@@ -358,23 +357,105 @@ function normalizeTemporals(spec, docPath, intervals) {
     members.add(compiled.canonical);
     if (intervals.some((interval) => interval.canonical === compiled.canonical))
       throw modelError('JD0005', `the member '${temporal.path}' is a declared interval's span`, `${at}/path`);
-    const type = schemaNodeAt(spec.schema, compiled.segments)?.type;
-    if (type !== undefined && type !== 'object' && !(Array.isArray(type) && type.includes('object'))) {
-      throw modelError('JD0005',
-        `the schema types '${temporal.path}' ${JSON.stringify(type)}: a calendar value is an object`, `${at}/path`);
-    }
-    temporals.push({
-      name: temporal.name,
-      constraint,
-      path: temporal.path,
-      kind: temporal.kind,
-      ...(temporal.kind === 'zoned' ? { policy: temporal.policy } : {}),
-      segments: compiled.segments,
-      canonical: compiled.canonical,
-      docPath: at,
-    });
+    temporals.push(temporalDeclaration(temporal, compiled, schemaNodeAt(spec.schema, compiled.segments), pointers));
   }
   return temporals;
+}
+
+/**
+ * One declared temporal member, normalized — a collection's `temporals[]`
+ * entry and an entity property's `x-entity.temporal` alike: its constraint
+ * `<name>_temporal` of at most 63 bytes, a kind of `@jarenjs/core/calendar`,
+ * a policy for a zoned member and only there, and a member the schema
+ * types as an object where it types it at all. Each refusal names the
+ * pointer the declaration spells it at.
+ * @param {{ name: string, kind?: unknown, policy?: unknown, path: string }} temporal
+ * @param {{ segments: any[], canonical: string }} compiled - the member's path
+ * @param {any} node - the schema node at the member, or `undefined`
+ * @param {{ name: string, kind: string, policy: string, path: string, docPath: string }} at - the pointers
+ * @returns {any}
+ */
+function temporalDeclaration(temporal, compiled, node, at) {
+  const type = node?.type;
+  if (type !== undefined && type !== 'object' && !(Array.isArray(type) && type.includes('object'))) {
+    throw modelError('JD0005',
+      `the schema types '${temporal.path}' ${JSON.stringify(type)}: a calendar value is an object`, at.path);
+  }
+  return {
+    name: temporal.name,
+    constraint: `${temporal.name}_temporal`,
+    path: temporal.path,
+    kind: temporal.kind,
+    ...(temporal.kind === 'zoned' ? { policy: temporal.policy } : {}),
+    segments: compiled.segments,
+    canonical: compiled.canonical,
+    docPath: at.docPath,
+  };
+}
+
+/**
+ * Refuse a declaration's constraint name, kind or policy: a constraint
+ * `<name>_temporal` of at most 63 bytes, a kind of `@jarenjs/core/calendar`,
+ * a policy for a zoned member and only there.
+ * @param {{ name: string, kind?: unknown, policy?: unknown }} temporal
+ * @param {{ name: string, kind: string, policy: string }} at - the pointers
+ */
+function refuseKind(temporal, at) {
+  const constraint = `${temporal.name}_temporal`;
+  if (utf8ByteLength(constraint) > CONSTRAINT_NAME_BYTES) {
+    throw modelError('JD0005',
+      `the constraint name '${constraint}' exceeds ${CONSTRAINT_NAME_BYTES} bytes`, at.name);
+  }
+  if (!TEMPORAL_KINDS.includes(/** @type {any} */ (temporal.kind))) {
+    throw modelError('JD0005',
+      `a temporal member's kind is one of ${TEMPORAL_KINDS.join(', ')}, got ${JSON.stringify(temporal.kind)}`, at.kind);
+  }
+  if (temporal.kind === 'zoned' && !TEMPORAL_POLICIES.includes(/** @type {any} */ (temporal.policy))) {
+    throw modelError('JD0005',
+      `a zoned member declares the policy its gap or fold resolves under, one of ${TEMPORAL_POLICIES.join(', ')}, `
+      + `got ${temporal.policy === undefined ? 'none' : JSON.stringify(temporal.policy)}`, at.policy);
+  }
+  if (temporal.kind !== 'zoned' && temporal.policy !== undefined) {
+    throw modelError('JD0005',
+      `a policy resolves a zoned member's wall clock; a ${temporal.kind} member has none to resolve`, at.policy);
+  }
+}
+
+/** The closed members of an entity property's `x-entity.temporal`. */
+const ENTITY_TEMPORAL_MEMBERS = ['kind', 'policy'];
+
+/**
+ * An entity property declared a calendar kind (`x-entity: { temporal: {
+ * kind, policy? } }`, MODEL-FORMAT §9.3): normalized as a collection's
+ * `temporals[]` entry naming the property itself — a top-level member of
+ * the entity's document, keyed by the columns the same declaration plans.
+ * The member stays in the document, keyed by columns of its own: its block
+ * takes no `key`, `column`, `relation` or `version` beside it.
+ * @param {string} name - the property @param {any} entityBlock - its `x-entity`
+ * @param {any} node - the property's (effective) schema
+ * @param {string} propertyPath - the property's pointer
+ * @returns {any}
+ */
+function normalizeEntityTemporal(name, entityBlock, node, propertyPath) {
+  for (const member of ['key', 'column', 'relation', 'version']) {
+    if (entityBlock[member] !== undefined && entityBlock[member] !== false) {
+      throw modelError('JD0005', `x-entity.temporal keeps the property in the entity's document, keyed by columns of its own: `
+        + `it takes no ${member} beside it`, `${propertyPath}/x-entity/${member}`);
+    }
+  }
+  const block = entityBlock.temporal;
+  const at = `${propertyPath}/x-entity/temporal`;
+  if (!isJsonObject(block))
+    throw modelError('JD0005', "x-entity.temporal is an object: { kind, policy? }", at);
+  refuseUnknownModelMembers(block, ENTITY_TEMPORAL_MEMBERS, at, 'temporal member');
+  if (!IDENTIFIER.test(name))
+    throw modelError('JD0005', `a temporal member names its key columns after the property, and '${name}' is no identifier`, propertyPath);
+  const segments = [{ name }];
+  const temporal = { name, kind: block.kind, policy: block.policy, path: modelPath(segments) };
+  const pointers = { name: propertyPath, kind: `${at}/kind`, policy: `${at}/policy`, path: propertyPath, docPath: at };
+  refuseKind(temporal, pointers);
+  return temporalDeclaration(temporal,
+    { segments, canonical: canonicalOf(segments) }, node, pointers);
 }
 
 // ————— The table —————
@@ -539,7 +620,8 @@ function temporalPathsOf(columns, temporals, paths) {
  * @param {Map<string, any>} byName - the table's columns
  * @param {string} docColumn
  * @returns {{ declarations: any[], checks: Set<string>, keys: Set<string>,
- *   indexPaths: (columns: string[], paths: Map<string, { path: string }>) => string[] | null }}
+ *   indexPaths: (columns: string[], paths: Map<string, { path: string }>) => string[] | null,
+ *   indexColumns: (path: string) => string[] | null }}
  */
 function readTable(dialect, table, byName, docColumn) {
   const declarations = [];
@@ -557,7 +639,9 @@ function readTable(dialect, table, byName, docColumn) {
     for (const column of temporal.columns) keys.add(column);
     indexed.push({ path: temporal.declaration.path, columns: temporal.indexColumns });
   }
-  return { declarations, checks, keys, indexPaths: (columns, paths) => temporalPathsOf(columns, indexed, paths) };
+  return { declarations, checks, keys, indexPaths: (columns, paths) => temporalPathsOf(columns, indexed, paths),
+    /** The columns an index over a declared member's path covers, by its path. */
+    indexColumns: (/** @type {string} */ path) => indexed.find((entry) => entry.path === path)?.columns ?? null };
 }
 
 // ————— The writes —————
@@ -566,16 +650,18 @@ function readTable(dialect, table, byName, docColumn) {
  * Refuse a document whose declared temporal member would not be stored
  * under its declaration (`JD2003`, before the statement, hook or no hook,
  * as the CHECK refuses every other writer).
- * @param {any} collection
+ * @param {{ name: string, docPath: string, temporals: any[] }} collection - the collection, or the entity
  * @param {(segments: any[]) => unknown} readMember - the member as the database will hold it
  * @param {any} provider - the store's zone provider
+ * @param {'collection' | 'entity'} [what] - which `collection` is
  */
-function refuseFaults(collection, readMember, provider) {
+function refuseFaults(collection, readMember, provider, what = 'collection') {
   for (const temporal of collection.temporals) {
-    const fault = temporalFault(temporal, readMember(temporal.segments), provider);
+    // an entity core with no provider (a migration's) writes a zoned key absent
+    const fault = temporalFault(temporal, readMember(temporal.segments), provider, what === 'collection' || provider !== null);
     if (fault !== null) {
       throw new DbRuntimeError('JD2003',
-        `collection '${collection.name}' rejected the document: the ${temporal.kind} member '${temporal.name}' at ${temporal.path} ${fault}`,
+        `${what} '${collection.name}' rejected the document: the ${temporal.kind} member '${temporal.name}' at ${temporal.path} ${fault}`,
         { docPath: collection.docPath, collection: collection.name });
     }
   }
@@ -817,12 +903,15 @@ const TEMPORAL_PLANNER = Object.freeze({
  */
 export const TEMPORAL_HOOKS = Object.freeze({
   normalize: normalizeTemporals,
+  normalizeEntity: normalizeEntityTemporal,
   refuseUnrecordedZones,
   planCollection: planCollectionTemporals,
   verifyCheck,
   readTable,
   keyColumn: zonedKeyColumn,
   refuse: refuseFaults,
+  temporalColumns,
+  zonedColumnsOf,
   zonedValueFor,
   stampOf,
   rekey,

@@ -37,7 +37,7 @@ const COLUMNS = new Set(['integer', 'json']);
 /** The closed set MODEL-FORMAT §9.2 defines. An unknown member is the
  * store's `JD0030` — a silently ignored mapping directive loses data —
  * so `entity()` refuses it here rather than emitting it. */
-const BLOCK = ['key', 'unique', 'index', 'default', 'column', 'relation', 'version'];
+const BLOCK = ['key', 'unique', 'index', 'default', 'column', 'relation', 'version', 'temporal'];
 
 /**
  * Kinds that can NEVER be a column of their own: the store maps a
