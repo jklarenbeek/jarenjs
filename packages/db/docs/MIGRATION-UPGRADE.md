@@ -4055,10 +4055,18 @@ release refuses `latenessMs` in `schedule()` and `tick` in `createWorker()`
 - `jobs.schedule()` accepts a SECONDLY, MINUTELY or HOURLY rule, as the
   calendar now enumerates them, where it refused `JY0020`; the answers are the
   same on SQLite and PostgreSQL. A sub-daily schedule's search looks a few of
-  the rule's periods past the tick before the day windows, and a day without
-  ticks fires what `missed` says within the calendar's limits; under smaller
-  ones it fires what the policy keeps of the proved prefix and stalls
+  the rule's periods past the tick before the day windows
   ([JOBS-FORMAT §11](JOBS-FORMAT.md#11-recurring-schedules), Sub-daily rules).
+- A tick whose backlog is longer than one search reads under the limits reads
+  it from the tick backwards and fires exactly what `missed` says, where it
+  fired what the policy kept of the prefix the search proved and stalled the
+  schedule; the occurrences before the span it reads are not counted as
+  skipped, and the record's `counts.uncounted` (absent until then) counts the
+  ticks that passed one so. A floating series is bound over the wall clock its
+  span's instants can read under the zone's offsets, where it was expanded over
+  two civil days either side; the answers are the same, the work less, and a
+  floating SECONDLY schedule ticks under the default limits (A backlog of any
+  length, Floating series and zones).
 - [JOBS-FORMAT §12](JOBS-FORMAT.md#12-long-computations) is new: a long
   assignment solve as a job, in slices resumed from a checkpoint.
 - No table, column, index or CHECK changes. Downgrade: the previous release

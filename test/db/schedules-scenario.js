@@ -72,7 +72,7 @@ export function scenarioSchedules() {
 export function lateSchedules() {
   const daily = compileRecurrence({ dtstart: floatingValue('2026-03-01', '09:00'), rrule: 'FREQ=DAILY' });
   return [
-    // a search budget an hourly tick's search fits and the three-day backlog's does not
+    // a small search budget: the three-day backlog's search fits it, the wall clock around its span read by the zone's offsets
     { id: 'stalls', kind: 'digest', series: daily, zone: ZONE, missed: { catchUp: 5 }, limits: { maxWork: 30 } },
   ];
 }
@@ -202,12 +202,12 @@ export function assertScenario(t, provider, assert) {
   assert.deepEqual(back.fired, ['utc@2026-10-23T05:00:00Z', 'utc@2026-10-25T05:00:00Z',
     'zoned-catchup@2026-10-23T07:15:00', 'zoned-catchup@2026-10-24T07:15:00', 'zoned-catchup@2026-10-25T07:15:00',
     'daily-once@2026-10-24T09:00:00', 'daily-once@2026-10-25T09:00:00', 'daily-skip@2026-10-25T09:00:00',
-    'yearly@2026-10-25', 'monthly@2026-10-25T09:00:00']);
+    'stalls@2026-10-23T09:00:00', 'stalls@2026-10-24T09:00:00', 'stalls@2026-10-25T09:00:00', 'yearly@2026-10-25', 'monthly@2026-10-25T09:00:00']);
   assert.equal(back.skipped, 3);
   const byId = new Map(t.schedules.map((record) => [record.id, record]));
   assert.deepEqual(t.schedules.map((record) => [record.id, record.state]), [
     ['daily-once', 'active'], ['daily-skip', 'active'], ['dates', 'ended'], ['floating', 'unresolved'], ['gap', 'ended'],
-    ['hourly', 'ended'], ['monthly', 'active'], ['series', 'active'], ['stalls', 'stalled'], ['utc', 'active'], ['weekly', 'active'], ['yearly', 'active'],
+    ['hourly', 'ended'], ['monthly', 'active'], ['series', 'active'], ['stalls', 'active'], ['utc', 'active'], ['weekly', 'active'], ['yearly', 'active'],
     ['zoned-catchup', 'active']]);
   assert.deepEqual([byId.get('monthly').nextRunAt, byId.get('monthly').nextRecurrenceId, byId.get('monthly').counts],
     [Date.UTC(2026, 10, 29, 8), '2026-11-29T09:00:00', { fired: 3, skipped: 5 }]);
@@ -215,11 +215,11 @@ export function assertScenario(t, provider, assert) {
     [{ fired: 208, skipped: 1 }, '2026-03-29T05:00:00', null]);
   assert.deepEqual([byId.get('yearly').nextRunAt, byId.get('yearly').nextRecurrenceId, byId.get('yearly').counts],
     [Date.UTC(2027, 2, 27, 23), '2027-03-28', { fired: 2, skipped: 0 }]);
-  // the backlog's search ran out of its budget: stalled with its counts, never dropped
-  assert.deepEqual(byId.get('stalls').stall, { limit: 'maxWork', counts: { emitted: 0, work: 30, providerCalls: 0 } });
-  assert.deepEqual(byId.get('stalls').counts, { fired: 5, skipped: 0 });
-  assert.equal(byId.get('stalls').nextRunAt, null);
-  assert.equal(byId.get('stalls').lastRecurrenceId, '2026-10-22T09:00:00');
+  // the backlog fits its small budget: catchUp 5 fires the two missed ones and the current one, and it stays active
+  assert.deepEqual(back.fired.filter((id) => id.startsWith('stalls@')),
+    ['stalls@2026-10-23T09:00:00', 'stalls@2026-10-24T09:00:00', 'stalls@2026-10-25T09:00:00']);
+  assert.deepEqual([byId.get('stalls').stall, byId.get('stalls').counts, byId.get('stalls').lastRecurrenceId],
+    [null, { fired: 11, skipped: 0 }, '2026-10-28T09:00:00']);
   // no zone, none assumed
   const floating = byId.get('floating');
   assert.deepEqual([floating.nextRunAt, floating.zone, floating.providerRevision, floating.counts],

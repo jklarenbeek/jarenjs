@@ -20,7 +20,7 @@ const tablesOf = (file) => {
 };
 
 describe('recurring job schedules', () => {
-  it('fires the scenario: 09:00 local across both transitions, missed policies, gap, stall, unresolved', async () => {
+  it('fires the scenario: 09:00 local across both transitions, missed policies, gap, a small budget, unresolved', async () => {
     const { clock, provider, options } = scenarioClock();
     const store = await openStore(model, { driver: nodeDriver(), ...options() });
     try {

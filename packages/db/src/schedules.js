@@ -14,7 +14,7 @@
  * @module
  */
 import {
-  compileRecurrence, defineSeries, expandSeries, bindFloating, assertZone, dateValue, RECURRENCE_LIMITS,
+  compileRecurrence, defineSeries, expandSeries, bindFloating, assertZone, dateValue, floatingValue, RECURRENCE_LIMITS,
 } from '@jarenjs/core/calendar';
 import { DbCompileError } from './errors.js';
 import { readOptions, readOptionsOrNull } from './options.js';
@@ -64,8 +64,19 @@ function windowsOf(series) {
   const own = SUB_DAILY_PERIODS.map((count) => count * period * (rule.INTERVAL ?? 1)).filter((size) => size < days[0]);
   return [...own, ...days];
 }
-/** Days of civil-date margin either side of a floating horizon: no zone's offset reaches a day. */
+/** Days of civil-date margin either side of a date series' horizon: no zone's offset reaches a day. */
 const MARGIN_DAYS = 2;
+const HOUR = 3600000;
+/**
+ * The offsets a zone's wall clock keeps from UTC, in milliseconds, when its
+ * provider lists no changes: every zone of the tz database keeps within
+ * UTC-12:00 and UTC+14:00 (the local mean times of the nineteenth century
+ * aside), so a floating occurrence binds to an instant at most 14 hours
+ * before its wall clock and 12 hours after it.
+ */
+const OFFSET_SPAN = Object.freeze({ min: -12 * HOUR, max: 14 * HOUR });
+/** A rule's cycle, in milliseconds per unit of its INTERVAL: where a backward read of a backlog starts. */
+const CYCLES = Object.freeze({ ...PERIODS, DAILY: DAY, WEEKLY: 7 * DAY, MONTHLY: 31 * DAY, YEARLY: 366 * DAY });
 
 /** @param {unknown} value @returns {value is Record<string, any>} */
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -246,9 +257,44 @@ function civilDate(at, zone, provider, shift) {
 }
 
 /**
+ * The floating value a UTC reading of an instant spells, cut to the second.
+ * @param {number} ms
+ */
+function wallValue(ms) {
+  const text = new Date(Math.floor(ms / 1000) * 1000).toISOString();
+  return floatingValue(text.slice(0, 10), text.slice(11, 19));
+}
+
+/**
+ * The wall clock a floating series is expanded over so that every
+ * occurrence binding into the instants `[low, high]` is in it: those
+ * instants read under each offset the zone keeps around them. A provider
+ * that lists its changes (`offsetChanges`) names them, from a day before
+ * `low` (a gap moves a time by less than a day) to a day after `high`;
+ * without the list, every offset a zone keeps ({@link OFFSET_SPAN}).
+ * @param {ScheduleDefinition} definition @param {any} provider @param {number} low @param {number} high
+ */
+function wallBand(definition, provider, low, high) {
+  const zone = /** @type {string} */ (definition.zone);
+  let { min, max } = OFFSET_SPAN;
+  if (typeof provider.offsetChanges === 'function') {
+    const offsets = [provider.toParts(low, zone).offset, provider.toParts(high, zone).offset];
+    for (const change of provider.offsetChanges(low - DAY, high + DAY, zone)) offsets.push(change.before, change.after);
+    min = Math.min(...offsets) * 60000;
+    max = Math.max(...offsets) * 60000;
+  }
+  return { horizon: [wallValue(low + min), wallValue(high + max + 1000)], max };
+}
+
+/**
  * The occurrences of a schedule after `from` (inclusive or not) through
  * `until`, and the first one after `until`: the horizon widens until one
- * is found, the series ends, or a limit stops the search.
+ * is found, the series ends, or a limit stops the search. A floating
+ * series is expanded over the wall clock its instants can read
+ * ({@link wallBand}) and bound occurrence by occurrence; the limits
+ * count the occurrences that bind into the span (`maxOccurrences`) and the
+ * provider calls the binding makes (`maxProviderCalls`), so the wall
+ * clock either side of the span is work, as a zoned walk's is.
  * @param {ScheduleDefinition} definition - a resolvable one: a zone-less series has its zone
  * @param {any} provider
  * @param {{ from: number, inclusive: boolean, until: number }} span
@@ -256,16 +302,30 @@ function civilDate(at, zone, provider, shift) {
  *   stall: null | { limit: string, counts: { emitted: number, work: number, providerCalls: number } }
  *     | { code: string, message: string, recurrenceId: string } }}
  */
-function occurrencesAfter(definition, provider, span) {
+function searchSpan(definition, provider, span) {
   const { from, inclusive, until } = span;
   const counts = { emitted: 0, work: 0, providerCalls: 0 };
   const maxDays = definition.limits?.maxHorizonDays ?? RECURRENCE_LIMITS.maxHorizonDays;
-  const floating = definition.seriesKind === 'floating' || definition.seriesKind === 'date';
+  const floating = definition.seriesKind === 'floating';
+  const dated = definition.seriesKind === 'date';
   const spanDays = Math.ceil((until - from) / DAY) + 2 * MARGIN_DAYS + 1;
+  const maxOccurrences = definition.limits?.maxOccurrences ?? RECURRENCE_LIMITS.maxOccurrences;
+  const maxProviderCalls = definition.limits?.maxProviderCalls ?? RECURRENCE_LIMITS.maxProviderCalls;
+  // a floating series' occurrences outside the span are the binding's work: the expansion is
+  // bounded by maxWork, and the span's own occurrences and the binding's calls are counted here
+  const limits = floating
+    ? { ...definition.limits, maxOccurrences: definition.limits?.maxWork ?? RECURRENCE_LIMITS.maxWork }
+    : definition.limits ?? undefined;
+  const meter = { calls: 0 };
+  const metered = floating ? {
+    ...provider,
+    toParts: (/** @type {any[]} */ ...args) => { meter.calls += 1; return provider.toParts(...args); },
+    candidates: (/** @type {any[]} */ ...args) => { meter.calls += 1; return provider.candidates(...args); },
+  } : provider;
   const instantOf = (/** @type {any} */ occurrence) => {
-    if (!floating) return occurrence.instants.start;
+    if (!floating && !dated) return occurrence.instants.start;
     const bound = bindFloating(occurrence.start, {
-      zone: definition.zone, provider, policy: definition.policy,
+      zone: definition.zone, provider: metered, policy: definition.policy,
       ...(definition.zoneSource === null ? {} : { source: definition.zoneSource }),
     });
     return bound.kind === 'instant' ? bound.instant : bound.start;
@@ -276,19 +336,30 @@ function occurrencesAfter(definition, provider, span) {
     const size = last ? (maxDays - spanDays) * DAY : windows[i];
     if (size < DAY && last) return { due: [], next: null, stall: { limit: 'maxHorizonDays', counts } };
     const high = until + size;
-    const horizon = floating
-      ? [civilDate(from, /** @type {string} */ (definition.zone), provider, -MARGIN_DAYS),
-        civilDate(high, /** @type {string} */ (definition.zone), provider, MARGIN_DAYS)]
-      : [from, high];
-    const answer = expandSeries(definition.series, {
-      horizon, limits: definition.limits ?? undefined, provider: provider ?? undefined });
-    counts.emitted += answer.counts.emitted;
+    meter.calls = 0;
+    const band = floating ? wallBand(definition, metered, from, high) : null;
+    const horizon = band !== null ? band.horizon
+      : dated
+        ? [civilDate(from, /** @type {string} */ (definition.zone), provider, -MARGIN_DAYS),
+          civilDate(high, /** @type {string} */ (definition.zone), provider, MARGIN_DAYS)]
+        : [from, high];
+    const answer = expandSeries(definition.series, { horizon, limits, provider: provider ?? undefined });
     counts.work += answer.counts.work;
-    counts.providerCalls += answer.counts.providerCalls;
-    const found = [];
+    let found = [];
     /** @type {any} */
     let refused = null;
+    /** @type {string | null} */
+    let stopped = answer.status === 'incomplete' && answer.limit !== 'calendar-end' ? /** @type {string} */ (answer.limit) : null;
+    /** Past this instant the occurrences are not all bound: a binding the calls' limit stopped. */
+    let proven = Infinity;
     for (const occurrence of answer.occurrences) {
+      if (floating && answer.counts.providerCalls + meter.calls >= maxProviderCalls) {
+        // every occurrence not bound yet starts at or after this one's wall clock, so binds at most
+        // the largest offset before it
+        stopped = 'maxProviderCalls';
+        proven = Date.parse(`${occurrence.start.date}T${occurrence.start.time}Z`) - /** @type {any} */ (band).max;
+        break;
+      }
       let at;
       try {
         at = instantOf(occurrence);
@@ -301,18 +372,56 @@ function occurrencesAfter(definition, provider, span) {
         refused = { code: failure.code, message: failure.message, recurrenceId: occurrence.recurrenceId };
         break;
       }
-      if (inclusive ? at >= from : at > from) found.push({ recurrenceId: occurrence.recurrenceId, at });
+      if ((inclusive ? at >= from : at > from) && (!floating || at <= high))
+        found.push({ recurrenceId: occurrence.recurrenceId, at });
     }
+    counts.providerCalls += answer.counts.providerCalls + meter.calls;
     found.sort((a, b) => a.at - b.at || (a.recurrenceId < b.recurrenceId ? -1 : a.recurrenceId > b.recurrenceId ? 1 : 0));
+    if (proven !== Infinity) found = found.filter((occurrence) => occurrence.at < proven);
+    if (floating && found.length > maxOccurrences) {
+      found = found.slice(0, maxOccurrences);
+      stopped = 'maxOccurrences';
+    }
+    counts.emitted += floating ? found.length : answer.counts.emitted;
     const due = found.filter((occurrence) => occurrence.at <= until);
     const next = found.find((occurrence) => occurrence.at > until) ?? null;
     if (next !== null) return { due, next, stall: null };
     if (refused !== null) return { due, next: null, stall: refused };
     // the last spellable day is an end, not a stall
-    if (answer.status === 'incomplete' && answer.limit !== 'calendar-end')
-      return { due, next: null, stall: { limit: /** @type {string} */ (answer.limit), counts } };
+    if (stopped !== null) return { due, next: null, stall: { limit: stopped, counts } };
     if (last || answer.status === 'incomplete') return { due, next: null, stall: null };
   }
+}
+
+/**
+ * The occurrences of a schedule due after `from` through `until`, and its
+ * next one ({@link searchSpan}). When a tick's backlog is longer than the
+ * limits let one search read, it is read from the tick backwards: a span
+ * ending at the tick, a few of the rule's cycles wide and widening
+ * eightfold, until it holds the `keep` latest missed occurrences and the
+ * latest due ones beside them — all that `missed` can fire. The
+ * occurrences before that span are passed without being counted
+ * (`uncounted`). A tick's backlog never stalls a schedule; a span its
+ * limits cannot read whatever its width does.
+ * @param {ScheduleDefinition} definition @param {any} provider
+ * @param {{ from: number, inclusive: boolean, until: number }} span
+ * @param {number | null} [keep] - the missed occurrences `missed` fires (0, 1 or n), or no backward read
+ */
+function occurrencesAfter(definition, provider, span, keep = null) {
+  const whole = searchSpan(definition, provider, span);
+  const stall = /** @type {any} */ (whole.stall);
+  if (keep === null || whole.next !== null || stall === null || stall.limit === undefined || stall.limit === 'maxHorizonDays')
+    return whole;
+  const rule = definition.series.base?.rrule;
+  const cycle = (rule === undefined ? DAY : CYCLES[/** @type {keyof typeof CYCLES} */ (rule.FREQ)] * (rule.INTERVAL ?? 1));
+  for (let width = cycle * (keep + 1); span.until - width > span.from; width *= 8) {
+    const tail = searchSpan(definition, provider, { from: span.until - width, inclusive: true, until: span.until });
+    const limited = /** @type {any} */ (tail.stall)?.limit !== undefined;
+    if (limited) return whole;
+    if (new Set(tail.due.map((occurrence) => occurrence.at)).size > keep || tail.stall !== null)
+      return { ...tail, uncounted: true };
+  }
+  return whole;
 }
 
 /**
@@ -418,10 +527,11 @@ function attach(context) {
    * is `ended`; a search a limit stopped is `stalled`, with its counts.
    * @param {any} definition - a schedule definition the seam read
    * @param {number} from @param {boolean} inclusive @param {number} until
+   * @param {number | null} [keep] - for a tick, the missed occurrences its policy fires
    */
-  const standing = (definition, from, inclusive, until) => {
+  const standing = (definition, from, inclusive, until, keep = null) => {
     if (definition.zone === null && definition.seriesKind !== 'utc') return { state: 'unresolved', due: [], next: null, stall: null };
-    const out = occurrencesAfter(definition, provider, { from, inclusive, until });
+    const out = occurrencesAfter(definition, provider, { from, inclusive, until }, keep);
     return { ...out, state: out.next !== null ? 'active' : out.stall !== null ? 'stalled' : 'ended' };
   };
   /** @param {any} definition */
@@ -507,7 +617,9 @@ function attach(context) {
             }
             try {
               definition = definitionOfRow(row);
-              outcome = standing(definition, lastRunAt ?? Number(row.created_at), lastRunAt === null, at);
+              const missed = JSON.parse(row.missed);
+              outcome = standing(definition, lastRunAt ?? Number(row.created_at), lastRunAt === null, at,
+                missed === 'skip' ? 0 : missed === 'once' ? 1 : missed.catchUp);
             }
             catch (error) {
               const failure = /** @type {any} */ (error);
@@ -518,6 +630,8 @@ function attach(context) {
             const counts = JSON.parse(row.counts);
             counts.fired += fire.length;
             counts.skipped += passed;
+            // a backlog read from the tick backwards passed occurrences it did not count
+            if (outcome.uncounted === true) counts.uncounted = (counts.uncounted ?? 0) + 1;
             skipped += passed;
             const latest = outcome.due.length === 0 ? null : outcome.due[outcome.due.length - 1];
             const advance = () => chain(prepared('scheduleAdvance').run([

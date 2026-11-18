@@ -591,14 +591,9 @@ costs a descriptor plus examples and no UI code at all.
   in JS. Explain reports this honestly, so the cost is unbounded but nothing is hidden. Wanted:
   the `'$[*]'` operand of a top-level `$exists` or `$subsequence` planned as the `$for` scan it
   abbreviates, as `'$[*]'` alone and `{ $count: '$[*]' }` are.
-- [ ] **A floating sub-daily job schedule binds every occurrence of two civil days before its tick.** A floating or date
-  series is expanded from two civil days before the span a tick reads and each occurrence bound in its zone, so a floating
-  SECONDLY schedule stalls `maxOccurrences` under the default limits, and under raised ones binds days of seconds every
-  tick. Wanted: a margin from the zone's offset changes around the tick rather than whole days.
-- [ ] **A schedule search a limit stops fires from its prefix as if it were the whole backlog.** After downtime longer
-  than the limits cover (a day of a SECONDLY rule under the default `maxOccurrences`), the tick fires what `missed` keeps
-  of the prefix it proved — under `'skip'` its latest, though later occurrences are due — and stalls the schedule.
-  Wanted: a rule without COUNT read from the tick backwards, so `missed` answers exactly whatever the backlog.
+- [ ] **A backlog read from the tick backwards is not counted.** A tick whose backlog is longer than one search reads
+  under the limits fires exactly what `missed` says, but counts as skipped only the occurrences of the span it read;
+  `counts.uncounted` says a tick did so. Wanted: the passed occurrences counted without enumerating them.
 - [ ] **PostgreSQL reads a collection's CHECKs only where the model declares one.** A collection declaring
   no interval and no temporal member opens on PostgreSQL over a table carrying a CHECK of someone else's
   (`ALTER TABLE … ADD CONSTRAINT x CHECK (…)`), where SQLite's CREATE-text comparison answers `JD0002`; the

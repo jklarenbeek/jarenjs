@@ -18,6 +18,7 @@ import { createRuntime } from '@jarenjs/core/runtime';
 import { compileRecurrence, floatingValue, utcValue, zonedValue } from '@jarenjs/core/calendar';
 import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
 import { model, ZONE } from './schedules-scenario.js';
+import { recordingSqlite, recordingPool } from './statement-recorders.js';
 
 const url = process.env.JAREN_PG_URL;
 const SECOND = 1000;
@@ -27,14 +28,33 @@ const secondly = compileRecurrence({ dtstart: utcValue('2026-03-20T12:00:00Z'), 
 /** An occurrence id of `secondly`, `seconds` after its start. @param {number} seconds */
 const idAt = (seconds) => new Date(T0 + seconds * SECOND).toISOString().replace('.000Z', 'Z');
 
-/** A provider that counts the calls a tick makes to it. */
-function countingProvider() {
+/**
+ * Amsterdam's offset changes in 2026, as a provider that lists its
+ * changes would answer them (minutes east, the instant of each change).
+ */
+const AMSTERDAM_2026 = [
+  { at: Date.UTC(2026, 2, 29, 1), before: 60, after: 120 },
+  { at: Date.UTC(2026, 9, 25, 1), before: 120, after: 60 },
+];
+
+/**
+ * A provider that counts the calls made to it; with `changes`, one that
+ * lists Amsterdam's 2026 offset changes too.
+ * @param {boolean} [changes]
+ */
+function countingProvider(changes = false) {
   const base = createIntlZoneProvider({ revision: 'host ICU' });
   const counter = { calls: 0 };
   const provider = Object.freeze({
     ...base,
     toParts: (/** @type {any[]} */ ...args) => { counter.calls += 1; return base.toParts(...args); },
     candidates: (/** @type {any[]} */ ...args) => { counter.calls += 1; return base.candidates(...args); },
+    ...(changes ? { offsetChanges: (/** @type {number} */ from, /** @type {number} */ to, /** @type {string} */ zone) => {
+      counter.calls += 1;
+      assert.equal(zone, ZONE);
+      assert.ok(from >= Date.UTC(2026, 0, 1) && to < Date.UTC(2027, 0, 1), 'the list covers 2026 only');
+      return AMSTERDAM_2026.filter((change) => change.at >= from && change.at <= to);
+    } } : {}),
   });
   return { provider, counter };
 }
@@ -53,14 +73,16 @@ after(async () => { await pool?.end(); });
  * One store over a fresh database on an engine, with a clock the test steps.
  * @param {'sqlite' | 'postgres'} engine
  * @param {(store: any, clock: { at: number }, counter: { calls: number }) => Promise<void>} fn
+ * @param {{ changes?: boolean, ran?: string[] }} [options] - a provider listing its changes; a statement record
  */
-async function withStore(engine, fn) {
+async function withStore(engine, fn, { changes = false, ran = /** @type {string[] | undefined} */ (undefined) } = {}) {
   const schema = `jaren_subdaily_${process.pid}_${serial++}`;
   const clock = { at: T0 };
   const now = () => clock.at;
-  const { provider, counter } = countingProvider();
+  const { provider, counter } = countingProvider(changes);
   if (engine === 'postgres') await pool.query(`CREATE SCHEMA "${schema}"`);
-  const driver = engine === 'sqlite' ? nodeDriver() : postgresDriver(pool, { schema });
+  const driver = engine === 'sqlite' ? (ran === undefined ? nodeDriver() : recordingSqlite(ran))
+    : postgresDriver(ran === undefined ? pool : recordingPool(pool, ran), { schema });
   const store = await openStore(model, { driver, runtime: createRuntime({ zoneProvider: provider, now }),
     jobs: { now, random: () => 0, schedules: jobSchedules() } });
   try { await fn(store, clock, counter); }
@@ -114,12 +136,12 @@ for (const engine of /** @type {const} */ (['sqlite', 'postgres'])) {
         assert.deepEqual(rules.map(([id]) => [id, of(id)]), [['utc-s', 181], ['utc-m', 60], ['zoned-m', 5], ['floating-h', 3]]);
         const runAt = (await store.jobs.get('zoned-m@2026-03-20T13:45:00')).runAt;
         assert.equal(runAt, T0 + 45 * 60 * SECOND);
-        // a floating SECONDLY series is expanded from two civil days before its span: under the default
-        // limits those seconds stop the search, and the schedule says so
+        // a floating SECONDLY series started days before: only the wall clock its span's instants can read
+        // is expanded and bound, so the default limits find its next second
         const old = await store.jobs.schedule({ id: 'floating-s', kind: 'k', zone: ZONE, missed: 'skip',
           series: compileRecurrence({ dtstart: floatingValue('2026-03-10', '00:00'), rrule: 'FREQ=SECONDLY' }) });
-        assert.deepEqual([old.state, old.stall?.limit, old.nextRunAt], ['stalled', 'maxOccurrences', null]);
-        same('every frequency', { written, fired: fired.slice().sort(), old: old.stall });
+        assert.deepEqual([old.state, old.stall, old.nextRecurrenceId], ['active', null, '2026-03-20T14:00:00']);
+        same('every frequency', { written, fired: fired.slice().sort(), old: old.nextRunAt });
       });
     });
 
@@ -149,33 +171,105 @@ for (const engine of /** @type {const} */ (['sqlite', 'postgres'])) {
       });
     });
 
-    it('a day without ticks over the default limits fires what the policy keeps of the proved prefix, and stalls', async () => {
-      await withStore(engine, async (store, clock) => {
-        await store.jobs.schedule({ id: 'skip', kind: 'k', series: secondly, missed: 'skip' });
-        await store.jobs.schedule({ id: 'catchup', kind: 'k', series: secondly, missed: { catchUp: 2 } });
-        // a minute's lateness: none of the prefix is that recent, so none of it fires
-        await store.jobs.schedule({ id: 'late', kind: 'k', series: secondly, missed: 'skip', latenessMs: 60 * SECOND });
+    for (const [freq, period] of /** @type {const} */ ([['SECONDLY', SECOND], ['MINUTELY', 60 * SECOND], ['HOURLY', 3600 * SECOND]])) {
+      it(`${freq}: any downtime fires exactly what missed says under the default limits, in the same statements`, async () => {
+        const series = compileRecurrence({ dtstart: utcValue('2026-03-20T12:00:00Z'), rrule: `FREQ=${freq}` });
+        const id = (/** @type {number} */ at) => new Date(at).toISOString().replace('.000Z', 'Z');
+        /** @type {any[]} */
+        const rows = [];
+        for (const downtime of [3600 * SECOND, DAY, 30 * DAY]) {
+          /** @type {string[]} */
+          const ran = [];
+          await withStore(engine, async (store, clock, counter) => {
+            for (const [name, missed] of /** @type {const} */ ([['skip', 'skip'], ['once', 'once'], ['catchup', { catchUp: 3 }]]))
+              await store.jobs.schedule({ id: name, kind: 'k', series, missed });
+            await store.jobs.tick();
+            clock.at = T0 + downtime;
+            ran.length = 0;
+            counter.calls = 0;
+            const back = await store.jobs.tick();
+            // one enqueue per fired job; every other statement is the tick's own
+            const statements = ran.length - back.fired.length;
+            const end = T0 + downtime;
+            const due = downtime / period;
+            // the current one, and the latest missed ones the policy keeps of the due - 1 missed
+            const latest = (/** @type {number} */ late) => Array.from({ length: Math.min(late, due - 1) + 1 },
+              (_, k) => id(end - (Math.min(late, due - 1) - k) * period));
+            assert.deepEqual([...back.fired].sort(), [
+              ...latest(3).map((at) => `catchup@${at}`), ...latest(1).map((at) => `once@${at}`), `skip@${id(end)}`,
+            ], `${freq} after ${downtime} ms`);
+            const records = await store.jobs.schedules();
+            // a backlog one search reads is counted whole; a longer one is read from the tick backwards
+            const counted = due + 64 <= 10000;
+            for (const record of records) {
+              assert.deepEqual([record.state, record.stall, record.lastRecurrenceId, record.nextRecurrenceId],
+                ['active', null, id(end), id(end + period)], record.id);
+              const fired = latest({ catchup: 3, once: 1, skip: 0 }[/** @type {'catchup' | 'once' | 'skip'} */ (record.id)]).length;
+              if (counted) assert.deepEqual(record.counts, { fired: 1 + fired, skipped: due - fired }, record.id);
+              else assert.equal(record.counts.uncounted, 1, record.id);
+            }
+            rows.push({ downtime, statements, providerCalls: counter.calls, skipped: back.skipped,
+              uncounted: records.map((/** @type {any} */ r) => r.counts.uncounted ?? 0) });
+          }, { ran });
+        }
+        // beside its enqueues, the tick runs the same statements whatever the backlog, and a utc rule asks no provider
+        assert.equal(new Set(rows.map((row) => row.statements)).size, 1, JSON.stringify(rows));
+        assert.deepEqual(rows.map((row) => row.providerCalls), [0, 0, 0]);
+        same(`${freq} downtime`, rows.map(({ downtime, skipped, uncounted }) => ({ downtime, skipped, uncounted })));
+      });
+    }
+
+    it('a floating SECONDLY schedule ticks under the default limits after a day\'s downtime, bound around the listed offset changes', async () => {
+      await withStore(engine, async (store, clock, counter) => {
+        const series = compileRecurrence({ dtstart: floatingValue('2026-03-10', '00:00'), rrule: 'FREQ=SECONDLY' });
+        for (const [name, missed] of /** @type {const} */ ([['skip', 'skip'], ['once', 'once'], ['catchup', { catchUp: 3 }]]))
+          await store.jobs.schedule({ id: name, kind: 'k', series, zone: ZONE, missed });
         await store.jobs.tick();
         clock.at = T0 + DAY;
+        counter.calls = 0;
         const back = await store.jobs.tick();
-        // the search stops after 10000 occurrences, the one fired before included: the prefix's latest is
-        // the latest the tick proved, and the policy picks from the 9999 due ones it holds
-        assert.deepEqual([...back.fired].sort(), [
-          `catchup@${idAt(9997)}`, `catchup@${idAt(9998)}`, `catchup@${idAt(9999)}`, `skip@${idAt(9999)}`]);
-        assert.equal(back.skipped, 9996 + 9999 + 9998);
-        const stall = { limit: 'maxOccurrences', counts: { emitted: 10000, work: 20003, providerCalls: 0 } };
-        const byId = new Map((await store.jobs.schedules()).map((/** @type {any} */ r) => [r.id, r]));
-        for (const id of ['skip', 'catchup', 'late']) {
-          const record = byId.get(id);
-          assert.deepEqual([record.state, record.stall, record.nextRunAt, record.lastRecurrenceId],
-            ['stalled', stall, null, idAt(9999)], id);
+        // 13:00 in Amsterdam on 21 March is 12:00Z
+        assert.deepEqual([...back.fired].sort(), ['catchup@2026-03-21T12:59:57', 'catchup@2026-03-21T12:59:58',
+          'catchup@2026-03-21T12:59:59', 'catchup@2026-03-21T13:00:00', 'once@2026-03-21T12:59:59',
+          'once@2026-03-21T13:00:00', 'skip@2026-03-21T13:00:00']);
+        for (const record of await store.jobs.schedules()) {
+          assert.deepEqual([record.state, record.nextRecurrenceId, record.counts.uncounted], ['active', '2026-03-21T13:00:01', 1],
+            record.id);
         }
-        assert.deepEqual(byId.get('late').counts, { fired: 1, skipped: 9999 });
-        // nothing is due again until it is written again, which resumes after the prefix
-        assert.deepEqual((await store.jobs.tick()).fired, []);
-        const resumed = await store.jobs.schedule({ id: 'skip', kind: 'k', series: secondly, missed: 'skip' });
-        assert.deepEqual([resumed.state, resumed.nextRecurrenceId, resumed.counts], ['active', idAt(10000), { fired: 2, skipped: 9998 }]);
-        same('the prefix a limit stopped', { fired: [...back.fired].sort(), skipped: back.skipped, resumed: resumed.nextRecurrenceId });
+        // each schedule's first search binds the day until its budget, then the tail binds a few seconds
+        const backlog = counter.calls;
+        assert.ok(backlog <= 3 * (100000 + 1000), `${backlog} provider calls`);
+        clock.at += SECOND;
+        counter.calls = 0;
+        assert.equal((await store.jobs.tick()).fired.length, 3);
+        // a tick a second later binds the seconds its span and the window past it hold
+        assert.ok(counter.calls < 1000, `${counter.calls} provider calls`);
+        same('floating downtime', { fired: back.fired.slice().sort(), skipped: back.skipped });
+      }, { changes: true });
+    });
+
+    it('a floating SECONDLY schedule ticks under the default limits with a provider that lists no changes', async () => {
+      await withStore(engine, async (store, clock, counter) => {
+        const series = compileRecurrence({ dtstart: floatingValue('2026-03-10', '00:00'), rrule: 'FREQ=SECONDLY' });
+        await store.jobs.schedule({ id: 'skip', kind: 'k', series, zone: ZONE, missed: 'skip' });
+        await store.jobs.tick();
+        /** @type {number[]} */
+        const calls = [];
+        /** @type {string[]} */
+        const fired = [];
+        for (const step of [SECOND, 3600 * SECOND]) {
+          clock.at += step;
+          counter.calls = 0;
+          const out = await store.jobs.tick();
+          fired.push(...out.fired);
+          calls.push(counter.calls);
+        }
+        assert.deepEqual(fired, ['skip@2026-03-20T13:00:01', 'skip@2026-03-20T14:00:01']);
+        const [record] = await store.jobs.schedules();
+        assert.deepEqual([record.state, record.counts], ['active', { fired: 3, skipped: 3599 }]);
+        // the 26 hours of wall clock every offset can read are bound, within the default 100000 calls
+        for (const count of calls) assert.ok(count > 26 * 3600 && count < 100000, `${count} provider calls`);
+        same('floating without a list', { fired, calls: calls.length });
       });
     });
 

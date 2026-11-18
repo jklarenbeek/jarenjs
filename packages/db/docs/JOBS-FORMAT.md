@@ -760,7 +760,8 @@ store.jobs.createWorker({ handlers: { report: async () => {} }, tick: true }).st
     downtime or a tick that came late. The latest due occurrences (every one
     at the latest instant) fire; `'skip'` fires no missed one, `'once'` the
     latest missed one, `{ catchUp: n }` the latest n. Every occurrence that
-    does not fire is counted as skipped, and the schedule passes it:
+    does not fire is counted as skipped (but for a backlog read from the
+    tick backwards, below), and the schedule passes it:
     `lastRunAt` and `lastRecurrenceId` name the latest due occurrence,
     fired or skipped;
   - a tick in a process whose runtime has no zone provider refuses
@@ -791,38 +792,45 @@ fire, exactly as after downtime. Each search for a schedule's next
 occurrence looks 64 of the rule's periods past the tick first (64
 seconds for SECONDLY), widening eightfold until one is found, before the
 day windows every rule uses, so a tick resolves the occurrences it
-passes and a few past it, not days of them. A search's work is bounded
-by the calendar's limits (`limits`, default `maxOccurrences` 10000), and
-the occurrences since the last tick count against them: a day without
-ticks is 86400 due occurrences of a SECONDLY rule, which fire as
-`missed` says only under limits that cover them (`{ maxOccurrences:
-100000 }`). Under smaller ones the search stops, and the tick fires what
-the policy keeps of the prefix it proved — under `'skip'` its latest,
-though later ones may be due, so a `latenessMs` is what keeps a stale
-prefix from firing — counts the rest as skipped, and leaves the schedule
-`stalled` with the limit and counts; writing it again resumes after the
-prefix. A floating or date series is expanded from two civil days
-before the span (up to three days of wall clock) and bound occurrence by
-occurrence, so a floating SECONDLY schedule stalls `maxOccurrences` under
-the default limits, and under limits raised past those days of seconds
-binds each of them every tick. A zoned sub-daily walk under a provider
-without `offsetChanges` (the Intl one) resolves each wall-clock time of
-the day before its horizon (CALENDAR.md), so a zoned SECONDLY schedule
-spends about 86400 provider calls a tick, within the default
-`maxProviderCalls`. A utc series costs neither.
+passes and a few past it, not days of them.
 
-All zone, recurrence and missed-occurrence arithmetic runs in
-JavaScript through the runtime's provider and clock; SQL stores and
-compares only epoch milliseconds (the queue's number type: NUMERIC on
-PostgreSQL), canonical text (`COLLATE "C"` on PostgreSQL) and JSON held as
-text. No statement reads the database's clock or zone data, so SQLite and
-PostgreSQL answer every schedule identically. The rows live in
-`_jaren_job_schedules`, which the first `schedule()` creates (on
-PostgreSQL under the jobs advisory lock); a store that never schedules
-keeps exactly the queue tables it had, and an adopted store (`adopt:
-true`) without the table refuses `schedule()` `JD0002`. Every schedule
-call is root-only, like administration: a transaction view's `jobs` has
-none, and without `jobs.schedules` each refuses `JD0016`.
+**A backlog of any length.** A search's work is bounded by the
+calendar's limits (`limits`, default `maxOccurrences` 10000), and a
+tick's first search reads every occurrence due since the last tick, so
+each is counted. When that backlog is longer than the limits let one
+search read — a day without ticks is 86400 due occurrences of a SECONDLY
+rule — the tick reads it from its own instant backwards instead: a span
+ending at the tick, `n + 1` of the rule's cycles wide (`n` the missed
+occurrences the policy fires: 0, 1 or `catchUp`), widening eightfold
+until it holds them and the latest due ones. The policy then fires
+exactly what it fires over the whole backlog, the schedule moves past
+everything due, and it stays `active`: downtime never stalls a schedule.
+The occurrences before that span are passed without being counted: the
+tick's `skipped` and `counts.skipped` hold only those the span read, and
+`counts.uncounted` (absent until it happens) counts the ticks that
+passed a backlog so. A rule with COUNT walks from its DTSTART, so its
+backward span costs the walk; a span the limits cannot read at any width
+leaves the schedule `stalled`, as a limit always did. The tick's
+statements are the same whatever the backlog: one read of the due rows,
+one enqueue per fired job, one advance per schedule.
+
+**Floating series and zones.** A floating series is bound occurrence by
+occurrence, so a tick expands only the wall clock its span's instants
+can read: those instants under every offset the zone keeps around them.
+A provider that lists its offset changes (`offsetChanges`, a compiled
+VTIMEZONE) names them, and the wall clock is the span's own widened by
+the changes near it; a provider without the list (the Intl one) is
+read under every offset a zone of the tz database keeps, UTC-12:00 to
+UTC+14:00, so 26 hours of wall clock around the span are bound. The
+occurrences outside the span are the binding's work: `maxOccurrences`
+counts those that bind into the span and `maxProviderCalls` the
+binding's calls, so a floating SECONDLY schedule ticks under the default
+limits, binding each of the 26 hours' seconds a tick without the list. A date
+series is expanded over two civil days either side of the span. A zoned
+sub-daily walk under a provider without `offsetChanges` resolves each
+wall-clock time of the day before its horizon (CALENDAR.md), so a zoned
+SECONDLY schedule spends about 86400 provider calls a tick, within the
+default `maxProviderCalls`. A utc series costs neither.
 
 ## 12. Long computations
 
