@@ -431,7 +431,7 @@ describe('evaluateAvailability refuses a malformed layer or option', () => {
   it('a layer outside the horizon claims nothing and still reads its spans', () => {
     const result = evaluateAvailability([{ ...ok, bounds: [0, 1000], spans: [{ start: 0, end: 500 }] }], { horizon: day });
     assert.deepStrictEqual(brief(result), ['03-02T00:00 03-03T00:00 unknown:default ']);
-    assert.deepStrictEqual(result.layers, [{ id: 'a', source: 's', status: 'complete', counts: { emitted: 0, work: 0, providerCalls: 0 } }]);
+    assert.deepStrictEqual(result.layers, [{ id: 'a', source: 's', status: 'complete', complete: true, counts: { emitted: 0, work: 0, providerCalls: 0 } }]);
     assert.deepStrictEqual(result.counts, { layers: 1, spans: 1, available: 0, busy: 0, unknown: 1, emitted: 0, work: 0, providerCalls: 0 });
   });
 });

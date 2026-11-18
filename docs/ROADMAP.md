@@ -1142,23 +1142,6 @@ what each does is its own documentation's job
 
 ## @jarenjs/core
 
-- [ ] **`solve` does not report its evaluator's fallbacks.** A rule that reads outside its row makes every
-  preview of `local` and `construct` a full re-evaluation, but `solve`'s `counts` carry no `fullFallbacks`,
-  so a host sees only the time. An additive member on the `local` and `auto` answers would show it.
-- [ ] **Two admissions of a zone provider.** `createRuntime` accepts a `zoneProvider` with `toParts` and
-  `toEpoch`; the calendar (and so `civilDays`) needs `candidates` and `toParts`, and spells the option
-  `provider`. A runtime record a host built can be refused when handed on to the calendar. One admission
-  and one spelling across the core layers would let the record be passed through unchanged.
-- [ ] **Two spellings of an incomplete result.** The calendar layer answers `status: 'incomplete'` with
-  `limit`; the assignment engine answers `complete: false` with `stoppedAt: { limit, rule, unit }`. One
-  shape across the core layers would let a host handle every bounded answer alike.
-- [ ] **A named-zone clock refuses a time that exists when its fraction rounds up.** With the
-  Intl provider, `toEpoch({ 2026-07-01 09:00:05.9996 }, 'Europe/Amsterdam', 'reject')` is `NaN`
-  and `resolveClock({ zone, provider }).epochOf` calls it "ambiguous or does not exist", while
-  the fixed-offset clock answers the same parts (rounded to `…06.000`): the probe rounds the
-  fraction to the next second and the read-back compares whole seconds. `@jarenjs/core/calendar`
-  refuses a fraction past the millisecond instead; the seam's `toEpoch` should either do the same
-  or compare the rounded instant.
 - [ ] **`@jarenjs/core/calendar` enumerates DAILY, WEEKLY, MONTHLY and YEARLY recurrence, not
   sub-daily.** Temporal values, zone binding, civil-day splitting, DAILY, WEEKLY, MONTHLY and
   YEARLY recurrence (every BY part RFC 5545 allows for each, BYSETPOS, BYWEEKNO under WKST,
@@ -1179,10 +1162,6 @@ what each does is its own documentation's job
   §3.8.5.3 examples are written this way (`FREQ=YEARLY;COUNT=10;BYMONTH=6,7` becomes
   `UNTIL=20010710T090000` plus an RDATE). The set read back is the same. The probe should start
   the rule one month or year earlier, by month index.
-- [ ] **`findSlots` takes a fractional width that `findAvailableSlots` refuses.**
-  `findSlots([{ start: 0, end: 10 }], { duration: 0.5 })` answers twenty slots, while
-  `@jarenjs/core/calendar`'s `findAvailableSlots` (and every calendar width) refuses a width that
-  is not whole milliseconds. One of them should move.
 - [ ] **`@jarenjs/josl/ical` writes no VTIMEZONE by RRULE and reads no VAVAILABILITY or scheduling
   method.** Events, recurring series and free/busy spans are written by kind; under `zones: 'utc'` a
   zoned time is written as the UTC instant `toUtc` answers, and a zoned recurring series as its
@@ -1199,11 +1178,6 @@ what each does is its own documentation's job
   RANGE=THISANDFUTURE expansion, a zoned override whose own DURATION differs from its slot's (withheld,
   `ICAL1022`, so `patchIcal` refuses to write one, `ICAL4012`), and edits inside VTODO, VJOURNAL or VALARM
   (kept as written).
-- [ ] **The RFC 3339 epoch readers disagree past the millisecond.**
-  `getEpochOfDateTimeRFC3339('2026-03-29T01:30:00.9999Z')` truncates to `…00.999Z` (it reads
-  through `Date.parse`), while `epochOfRFC3339Parts(parseRFC3339Parts(…))` rounds the same string
-  to `…01.000Z`. `@jarenjs/core/calendar`'s `utcValue` refuses a fourth fraction digit instead;
-  the readers should agree on one of refusing or rounding.
 - [ ] **String helpers that answer for a non-string.** `countCodePoints(5)` and
   `countCharCode(5, 48)` answer 0, `toCodePoints(5)` answers `[]`, and `fnv1a(5)` equals
   `fnv1a('')` (so `hashContent({})` is `hashContent('')`), each because a non-string's missing

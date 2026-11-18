@@ -150,6 +150,15 @@ describe('vtimezoneFor then compileVtimezone: the Intl provider over 2000-2040, 
 });
 
 describe('compileVtimezone: definitions by rule against the transcribed table', () => {
+  it('cuts a fraction finer than a millisecond, as the fixed-offset clock does', () => {
+    const compiled = compileVtimezone(NEW_YORK, { horizon: HORIZON });
+    const parts = { year: 2026, month: 7, day: 1, hours: 9, minutes: 0, seconds: 5.9996 };
+    const instant = Date.parse('2026-07-01T13:00:05.999Z');
+    assert.strictEqual(compiled.toEpoch(parts, 'America/New_York'), instant);
+    assert.deepStrictEqual(compiled.candidates(parts, 'America/New_York'),
+      { candidates: [{ instant, offsetMinutes: -240 }] });
+  });
+
   it('New York by RRULE with UTC UNTILs gives the 82 changes of 2000-2040', () => {
     const compiled = compileVtimezone(NEW_YORK, { horizon: HORIZON });
     assert.deepStrictEqual(changesOf(compiled), oracleZone('America/New_York').changes);

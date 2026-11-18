@@ -179,7 +179,10 @@ by reading its wall clock back. Two that read back are a fold, and
 transition (that far *before* the gap), `'later'` the reading with the
 offset before it (that far after) — one transition apart either way.
 `'reject'`, the kernel's default, answers both with `NaN`, which the
-kernel turns into a refusal naming the local time. Offsets are derived
+kernel turns into a refusal naming the local time. A fraction of a
+second finer than a millisecond is cut, as JavaScript's `Date` reads
+it (`09:00:05.9996` is `09:00:05.999`), never rounded into the next
+second, exactly as the kernel's fixed-offset clock cuts it. Offsets are derived
 from the wall clock rather than parsed from a `GMT+02:00` string, so a
 historical `-00:44:30` is exact.
 

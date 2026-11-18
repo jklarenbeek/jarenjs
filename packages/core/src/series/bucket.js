@@ -148,7 +148,9 @@ function requirePositiveInteger(value, role) {
  * @param {Object} [options] - the clock, as {@link resolveClock} takes it
  * @param {string} [options.zone]
  * @param {number} [options.offset]
- * @param {import('./zone.js').ZoneProvider} [options.provider]
+ * @param {import('./zone.js').ZoneProvider} [options.zoneProvider]
+ * @param {import('./zone.js').ZoneProvider} [options.provider] - the older spelling of `zoneProvider`
+ * @param {Partial<import('../runtime.js').Runtime>} [options.runtime] - its `zoneProvider`, when neither is given
  * @param {'reject' | 'earlier' | 'later'} [options.disambiguation]
  * @returns {{ calendar: boolean, unit: string, amount: number, width: number, clock: Clock }}
  * @throws {TypeError} for a span that is not one positive whole family,
@@ -176,7 +178,9 @@ export function compileSpan(every, options = {}) {
  * @param {Object} [options] - the clock, as {@link resolveClock} takes it
  * @param {string} [options.zone]
  * @param {number} [options.offset]
- * @param {import('./zone.js').ZoneProvider} [options.provider]
+ * @param {import('./zone.js').ZoneProvider} [options.zoneProvider]
+ * @param {import('./zone.js').ZoneProvider} [options.provider] - the older spelling of `zoneProvider`
+ * @param {Partial<import('../runtime.js').Runtime>} [options.runtime] - its `zoneProvider`, when neither is given
  * @param {'reject' | 'earlier' | 'later'} [options.disambiguation]
  * @returns {CompiledBuckets}
  * @throws {TypeError} for a width that is not a positive whole span, a

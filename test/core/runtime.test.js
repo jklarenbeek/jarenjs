@@ -95,7 +95,9 @@ describe('core/runtime — overrides', function () {
     assert.throws(() => createRuntime(/** @type {any} */ ({ uuid: 'abc' })), /runtime\.uuid is a function/);
     assert.throws(() => createRuntime(/** @type {any} */ ({ random: null })), /runtime\.random is a function/);
     assert.throws(() => createRuntime(/** @type {any} */ ({ zoneProvider: { toParts: () => 1 } })),
-      /runtime\.zoneProvider is null or a provider with toParts\(epoch, zone\) and toEpoch/);
+      /^TypeError: runtime\.zoneProvider is null or a zone provider with toEpoch\(parts, zone, disambiguation\)$/);
+    assert.throws(() => createRuntime(/** @type {any} */ ({ zoneProvider: { toEpoch: () => 1 } })),
+      /^TypeError: runtime\.zoneProvider is null or a zone provider with toParts\(epoch, zone\)$/);
     assert.throws(() => createRuntime(/** @type {any} */ ({ zoneProvider: 'Europe/Amsterdam' })), /runtime\.zoneProvider/);
     assert.throws(() => createRuntime(/** @type {any} */ ('now')), /a runtime record is an object/);
     assert.throws(() => resolveRuntime(/** @type {any} */ (5)), /a runtime record is an object/);

@@ -24,7 +24,7 @@ import {
   admitHorizon, admitKeys, answer, budgetOf, compileRecurrence, exactLength, expandPlan, inHorizon, isRecord, placeZoned,
   planFor, recurrenceIdOf, resolveWall, valueAt, walk, wallOf,
 } from './recurrence.js';
-import { admitProvider, identityOf } from './resolve.js';
+import { admitProvider, identityOf, providerOf } from './resolve.js';
 import { WEEKDAYS } from './rrule.js';
 
 const DAY = 86400000;
@@ -68,11 +68,16 @@ const ID_FORM = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(Z)?)?$/;
  */
 
 /**
+ * A series expansion's answer: `complete` and `stoppedAt` as a
+ * recurrence expansion carries them, `status` and `limit` their older
+ * spelling.
  * @typedef {Object} SeriesExpansion
  * @property {'complete' | 'incomplete'} status
+ * @property {boolean} complete - no limit stopped the walk
  * @property {readonly SeriesOccurrence[]} occurrences - in order of start
  * @property {import('./recurrence.js').RecurrenceCounts} counts
  * @property {import('./recurrence.js').RecurrenceExpansion['limit']} [limit]
+ * @property {import('./recurrence.js').RecurrenceExpansion['stoppedAt']} [stoppedAt]
  * @property {{ readonly count: number, readonly ids: readonly string[] }} orphans - overrides whose slot the series never makes
  */
 
@@ -461,8 +466,8 @@ function wallOfOccurrence(occurrence) {
  * 9999-12-31 is left out and the answer is `incomplete` with
  * `limit: 'calendar-end'`; the other slots stay.
  * @param {Series | readonly Series[]} series
- * @param {{ horizon: [unknown, unknown], limits?: import('./recurrence.js').RecurrenceLimits,
- *   provider?: import('../series/zone.js').ZoneProvider }} options
+ * @param {{ horizon: [unknown, unknown], limits?: import('./recurrence.js').RecurrenceLimits }
+ *   & import('./resolve.js').ZoneProviderOptions} options
  * @returns {SeriesExpansion}
  * @throws {CalendarError} what {@link expandRecurrence} throws; `JY0021`
  *   for an override ranging over this and future occurrences; `JY0014`
@@ -489,14 +494,15 @@ export function expandSeries(series, options) {
     }
   }
   if (!isRecord(options))
-    throw new CalendarError('JY0014', 'expansion options are { horizon, limits?, provider? }', '/options');
-  admitKeys(options, ['horizon', 'limits', 'provider'], '/options', 'a series expansion');
+    throw new CalendarError('JY0014', 'expansion options are { horizon, limits?, zoneProvider?, runtime? }', '/options');
+  admitKeys(options, ['horizon', 'limits', 'zoneProvider', 'provider', 'runtime'], '/options', 'a series expansion');
   const budget = budgetOf(options.limits);
   const [low, wanted] = admitHorizon(kind, options.horizon);
   const high = Math.min(wanted, low + budget.limits.maxHorizonDays * DAY);
+  const named = providerOf(options);
   let resolver;
   if (kind === 'zoned') {
-    const provider = admitProvider(admitProvider(options.provider, 'candidates'), 'toParts');
+    const provider = admitProvider(admitProvider(named, 'candidates'), 'toParts');
     resolver = { provider, identity: identityOf(provider), policy: 'rfc5545' };
   }
   /** @type {{ key: number, uid: string, occurrence: any }[]} */

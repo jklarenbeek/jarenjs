@@ -41,6 +41,27 @@ still serves the series kernel; classification refuses it (`JY0004`)
 rather than guessing through `toEpoch`. A provider without `identity`
 is recorded as `{ name: 'unrecorded', revision: 'unrecorded' }`.
 
+**One spelling, one admission.** Every call below that takes the
+provider in its options spells it `zoneProvider`, the member a runtime
+record (`createRuntime` in `@jarenjs/core/runtime`) carries, and takes
+`runtime` too: without a `zoneProvider` of its own, a call reads
+`runtime.zoneProvider`, so a record a host built is handed on unchanged.
+The call's own option wins over the record's member, as in every
+subsystem that takes `runtime`. `provider` is the older spelling, kept
+as an alias; `zoneProvider` and `provider` naming two different
+providers is `JY0014`, never a guess between them. The provider is
+admitted by one check shared with the runtime record and the series
+clock, and each call asks only for the members it reads: classifying
+and resolving read `candidates` and `toParts`, `todayIn`, `isZone`,
+`assertZone`, `vtimezoneFor` and a zone check read `toParts` alone. A
+missing member is refused at the call that needs it (`JY0004`, "the
+call needs a zone provider with candidates(parts, zone)"), never earlier
+for a member the call does not read. The runtime record admits a
+provider with `toParts` and `toEpoch`, because its other readers (a
+store's queries, the series clock) read `toEpoch`; it never asks for
+`candidates`, so a record whose provider lacks it serves those readers
+and is refused only by a call here that classifies.
+
 ## Parts
 
 A local time is `{ year, month, day, hours, minutes, seconds }`:
@@ -50,7 +71,10 @@ most a millisecond fraction. Absent time members are `0`. Anything else
 is refused (`JY0007`) **before** the provider is asked: the thirtieth of
 February reads back as another wall clock exactly as a gap does, and a
 policy must never "resolve" it. `24:00`, a leap second and a fraction
-past the millisecond are refused, never rolled over or rounded. A
+past the millisecond are refused, never rolled over or rounded; the
+series clocks and the zone seam's `toEpoch` cut such a fraction to the
+millisecond instead, as `Date` reads it, because their parts are a
+computed clock rather than a value someone wrote. A
 member that misspells one the record lacks, and is no longer than it, is
 refused too (`JY0007`, naming the spelling it meant, by the suite's
 nearest-name rule): `{ hour: 2, minute: 30 }` would otherwise read as
@@ -117,7 +141,7 @@ answer must agree with; and the iCal writer's DTSTAMP is the runtime's
 `now()` floored to the second, the platform clock when no runtime is
 given (`@jarenjs/josl` ICAL.md).
 
-## `resolveLocal(parts, zone, { provider, policy })`
+## `resolveLocal(parts, zone, { zoneProvider, policy })`
 
 Returns `{ instant, resolution }`, where `resolution` is
 `{ kind, policy, zone, offsetMinutes, provider: { name, revision } }`:
@@ -162,12 +186,12 @@ link name (`US/Eastern`), a case variant (`europe/amsterdam`) and, on
 hosts whose `Intl` does, a fixed offset such as `+01:00`. Neither says
 a name is the canonical one.
 
-## `todayIn(zone, { runtime, provider })`
+## `todayIn(zone, { runtime, zoneProvider })`
 
 The civil date in a zone at the runtime clock's instant, as
 `YYYY-MM-DD`. The instant is `runtime.now()` (a fixed clock in a test,
-the platform's by default), and the provider is `provider` or else the
-runtime's `zoneProvider`. At `2026-01-01T10:30:00Z` it is `'2026-01-01'`
+the platform's by default), and the provider is `zoneProvider` (or
+`provider`) or else the runtime's `zoneProvider`. At `2026-01-01T10:30:00Z` it is `'2026-01-01'`
 in `Pacific/Apia` (23:30 at +13:00) and `'2025-12-31'` in
 `Pacific/Pago_Pago` (23:30 at -11:00).
 
@@ -190,7 +214,7 @@ until a caller binds it to a zone.
 | date | `{ kind: 'date', date: 'YYYY-MM-DD' }` | `dateValue(date)` |
 | floating | `{ kind: 'floating', date, time: 'HH:MM[:SS[.fff]]' }` | `floatingValue(date, time, { bound })` |
 | utc | `{ kind: 'utc', instant: 'YYYY-MM-DDTHH:MM:SS[.fff]Z' }` | `utcValue(instant)` — a string, or epoch milliseconds |
-| zoned | `{ kind: 'zoned', date, time, zone }` | `zonedValue(date, time, zone, { bound, provider })` |
+| zoned | `{ kind: 'zoned', date, time, zone }` | `zonedValue(date, time, zone, { bound, zoneProvider })` |
 | date-range | `{ kind: 'date-range', start, end }`, `end` exclusive | `dateRangeValue(start, endInclusive)` |
 
 `dateRangeValue` takes the last day the way people write it and stores
@@ -203,7 +227,7 @@ the day after, so no caller writes the +1:
 kept as written. `zonedValue` checks the zone against `provider` when
 one is passed; otherwise the zone must be a non-empty name, and whether
 the provider knows it is learned when the value is resolved.
-`parseTemporal(json, { bound, provider })` reads an object or its JSON
+`parseTemporal(json, { bound, zoneProvider })` reads an object or its JSON
 text, checks it as its kind's constructor does, refuses any member
 beyond the kind's own and a date range that does not end after it
 starts, and answers a new frozen value.
@@ -230,7 +254,7 @@ refusal above fails in the definition named after its code
 schema cannot say them: a zone the provider does not know, and a date
 range that does not end after it starts.
 
-## `bindFloating(value, { zone, source, provider, policy })`
+## `bindFloating(value, { zone, source, zoneProvider, policy })`
 
 Binding gives a zone-less value (a date, floating or date-range value)
 the zone the caller names, and records where that zone came from.
@@ -317,7 +341,7 @@ and keeps the wall clock it was written with. A utc value moves by
   That time is in the gap, so under `rfc5545` it resolves to
   `2026-03-29T01:30:00.000Z` with `resolution.kind: 'gap'`.
 
-## `splitByCivilDay(interval, { zone, provider, policy, maxDays })`
+## `splitByCivilDay(interval, { zone, zoneProvider, policy, maxDays })`
 
 It splits a half-open interval of instants, `{ start, end }` in epoch
 milliseconds, at a zone's civil-day boundaries. The answer is
@@ -434,10 +458,20 @@ third BYMONTHDAY value is `rrule.BYMONTHDAY[2]` in text and JSON alike.
 | UNTIL of the wrong kind: date for a date start, floating for a floating start, utc for a utc or zoned start | `JY0019` |
 | a valid rule whose FREQ this release does not enumerate | `JY0020` |
 
-### `expandRecurrence(compiled, { horizon, limits?, provider? })`
+### `expandRecurrence(compiled, { horizon, limits?, zoneProvider?, runtime? })`
 
 The answer is
-`{ status: 'complete' | 'incomplete', occurrences, counts: { emitted, work, providerCalls }, limit? }`.
+`{ status: 'complete' | 'incomplete', complete, occurrences, counts: { emitted, work, providerCalls }, limit?, stoppedAt? }`.
+`complete` is a boolean, and an incomplete answer carries
+`stoppedAt: { limit }`: the shape every bounded answer of
+`@jarenjs/core` carries, the assignment engine's
+(`complete: false` with `stoppedAt: { limit, rule, unit }`, see
+[ASSIGN.md §5](ASSIGN.md#5-limits-and-incomplete-results)), so a host
+handles each alike. `status` and `limit` are the older spelling of the
+same two facts, kept beside them: `status` is `'complete'` exactly when
+`complete` is true, and `limit` is `stoppedAt.limit`. The same holds for
+`nextOccurrences`, `expandSeries`, each layer of `evaluateAvailability`,
+`findAvailableSlots` and a compiled zone (`compileVtimezone`).
 Each occurrence is `{ recurrenceId, start, end }`, with `start` and
 `end` (exclusive) of the rule's kind:
 
@@ -542,8 +576,9 @@ a generated 03:30.
 (`JY0014`, at the member's path), so `policy` or `zone` on an expansion,
 or a limit outside `limits`, is an error rather than ignored.
 
-**The limits.** Every limit stops the walk with `status: 'incomplete'`,
-the occurrences found before it in order, and its name in `limit`. Any
+**The limits.** Every limit stops the walk with `complete: false`
+(`status: 'incomplete'`), the occurrences found before it in order, and
+its name in `stoppedAt.limit` (and `limit`). Any
 limit left out takes `RECURRENCE_LIMITS`.
 
 | Limit | Default | Counts |
@@ -556,7 +591,7 @@ limit left out takes `RECURRENCE_LIMITS`.
 `limit` can also be `'calendar-end'`, which is not a limit the caller
 sets: an occurrence's end passes 9999-12-31.
 
-### `nextOccurrences(compiled, from, n, { limits?, provider? })`
+### `nextOccurrences(compiled, from, n, { limits?, zoneProvider?, runtime? })`
 
 This is `expandRecurrence` over `maxHorizonDays` from `from`, stopped
 after `n`, so it is the same engine. It is complete when it found `n`
@@ -584,7 +619,7 @@ reads one recurring series and freezes it:
 
 All values share one kind, and a zoned series one zone.
 
-`expandSeries(series, { horizon, limits?, provider? })` reads its
+`expandSeries(series, { horizon, limits?, zoneProvider?, runtime? })` reads its
 options as `expandRecurrence` does. It also takes a list of series of
 one kind, under one shared budget, and adds `orphans: { count, ids }` to
 the answer. The occurrences are in order of start, each with the
@@ -612,7 +647,8 @@ never dropped silently.
 `expandSeries` (`JY0021`). Every RDATE costs one step of `maxWork`. An
 incomplete series answer holds only the series that finished before the
 limit. A slot whose end passes 9999-12-31 is left out, and the answer is
-`incomplete` with `limit: 'calendar-end'`; the other slots stay.
+incomplete with `stoppedAt: { limit: 'calendar-end' }`; the other slots
+stay.
 
 ## `weeklyPattern({ days, wkst? })`
 
@@ -675,7 +711,7 @@ availabilityOf(staff, { start: utcValue('2026-03-02T09:00:00Z'), end: utcValue('
 // 'available'
 ```
 
-### `evaluateAvailability(layers, { horizon, zone?, zoneSource?, provider?, policy?, limits?, default? })`
+### `evaluateAvailability(layers, { horizon, zone?, zoneSource?, zoneProvider?, runtime?, policy?, limits?, default? })`
 
 A layer is `{ id, priority, mode, busyType?, series | spans, bounds?, source, revision? }`:
 
@@ -747,10 +783,11 @@ When two layers of one rank leave a span unknown for different reasons,
 | `horizon` | `{ start, end }` in epoch milliseconds |
 | `spans` | ascending `{ start, end, state, busyType?, sources: [{ id, revision? }], reason? }`, tiling the horizon, with no two neighbours alike |
 | `complete` | `true` when no layer's expansion stopped |
+| `stoppedAt` | when `complete` is false: `{ limit, layer }`, the first layer in the order given that a limit stopped, and that limit |
 | `provider` | the provider's `{ name, revision }`, or `null` without one |
 | `binding` | `{ zone, source }`, or `null` without a zone |
 | `default` | `'unknown'` or `'busy'` |
-| `layers` | per layer: `{ id, revision?, source, status, limit?, counts }`, where `counts` are its expansions' (a re-proved prefix included) |
+| `layers` | per layer: `{ id, revision?, source, status, complete, limit?, stoppedAt?, counts }`, where `counts` are its expansions' (a re-proved prefix included) and `stoppedAt` is `{ limit }` |
 | `counts` | `{ layers, spans, available, busy, unknown, emitted, work, providerCalls }` |
 
 `source`, `revision`, `provider` and `complete` are what a cache needs
@@ -808,11 +845,15 @@ overlaps unknown or busy time:
   given.
 - With `alignment`, every start is a multiple of it counted from the
   epoch (UTC), and `step` must be a multiple of it.
-- Widths are milliseconds or fixed ISO 8601 durations (`'PT30M'`).
+- Widths are whole milliseconds or fixed ISO 8601 durations
+  (`'PT30M'`); a fraction of a millisecond is `JY0014`, because every
+  instant here is whole milliseconds. `@jarenjs/core/series`' own
+  `findSlots` keeps a fraction instead: its axis is any finite number.
 - A search that would pass `limits.maxSlots` (`AVAILABILITY_LIMITS`:
-  10000) stops there and is `incomplete` with `limit: 'maxSlots'`.
+  10000) stops there: `complete: false` with
+  `stoppedAt: { limit: 'maxSlots' }`.
 
-The answer is `{ status, slots, counts: { emitted }, limit? }`. Choosing
+The answer is `{ status, complete, slots, counts: { emitted }, limit?, stoppedAt? }`. Choosing
 among the candidates is the assignment engine's job
 ([`@jarenjs/core/assign`](ASSIGN.md)), not this function's.
 
@@ -871,8 +912,9 @@ and the revision is a hash of the definition. It also carries what it
 was compiled over:
 
 - `horizon: { start, end }` in epoch milliseconds;
-- `status` (`complete` or `incomplete`), and `limit` when a limit
-  stopped it;
+- `complete`, and `stoppedAt: { limit }` when a limit stopped it (in
+  the older spelling, `status`, `complete` or `incomplete`, and
+  `limit`);
 - `counts: { observances, transitions, work }`;
 - `transitions: [{ at, before, after }]`;
 - `initial`, the offset at the horizon's start.
@@ -905,9 +947,9 @@ Refusals:
 
 `maxTransitions` (onsets kept) and `maxWork` (the recurrence engine's
 work over every rule) do not refuse. They end the horizon at the last
-onset found, with `status: 'incomplete'`.
+onset found, with `complete: false` (`status: 'incomplete'`).
 
-### `vtimezoneFor(zone, { provider, horizon, limits? })`
+### `vtimezoneFor(zone, { zoneProvider, horizon, limits? })`
 
 The definition a provider answers for one zone over a horizon. It scans
 `toParts` one day apart and bisects to the second inside each day the

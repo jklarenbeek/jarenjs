@@ -24,8 +24,10 @@ publish the members they admit — `RESAMPLE_MEMBERS`, `ROLLING_MEMBERS`,
 for `minPeriods` accepted and ignored is a window with no minimum and a
 plausible number; `timezone` for `zone` is the quiet fall back to UTC
 that the clock's own refusal exists to prevent. The query language
-reads these same lists (§8.16), minus `provider`, which is a pair of
-functions and therefore not something a document can carry.
+reads these same lists (§8.16), minus `zoneProvider`, `provider` and
+`runtime`, which are functions and a record of them and therefore not
+something a document can carry; a query takes the provider as its
+compile option `zoneProvider` instead.
 
 ## Normalization — `normalize.js`
 
@@ -103,8 +105,13 @@ walks each window from its own start in `step` increments (default: back
 to back), keeping every span that still ends inside. `duration` and
 `step` are fixed widths — milliseconds, or a fixed ISO 8601 duration
 (`'PT30M'`); a calendar duration (`P1M`) is refused rather than called
-thirty days. It is enumeration, not scheduling: choosing among the
-answers, weighing preferences and assigning people is the job of the
+thirty days. A fraction is kept, as everywhere on this axis (`toEpoch`
+passes any finite number through): `findSlots([{ start: 0, end: 10 }],
+{ duration: 0.5 })` is twenty slots, so sub-millisecond timestamps
+(`performance.timeOrigin + performance.now()`) slot exactly.
+`@jarenjs/core/calendar`'s `findAvailableSlots` takes whole milliseconds
+only (`JY0014`), because every calendar instant is whole milliseconds.
+It is enumeration, not scheduling: choosing among the answers, weighing preferences and assigning people is the job of the
 assignment engine, [`@jarenjs/core/assign`](ASSIGN.md), under the
 host's own rules, deliberately not this one.
 
@@ -201,7 +208,17 @@ hidden clock this kernel exists without. So `resolveClock(options)` is a
 |---|---|
 | *(nothing)* | UTC. Nothing to configure, and no local time is ever ambiguous |
 | `{ offset: -300 }` | minutes east of UTC, constant. Exact integer arithmetic |
-| `{ zone, provider }` | the caller's tzdb, in whatever form they already have one |
+| `{ zone, zoneProvider }` | the caller's tzdb, in whatever form they already have one |
+
+The provider is spelled `zoneProvider`, as the runtime record
+(`createRuntime` in `@jarenjs/core/runtime`), the calendar and the
+assignment day seam spell it; `provider` is its older spelling, kept as
+an alias, and `runtime` hands on a runtime record whose `zoneProvider` is
+read when neither is given (the spec's own member wins over the
+record's). `zoneProvider` and `provider` naming two different providers
+is a `TypeError` with the calendar's wording (the calendar's `JY0014`),
+never a guess between them. The same names are members of
+`CLOCK_MEMBERS`, so `resampleSeries` and `rollingSeries` take them too.
 
 A provider answers two questions, and the second is the hard one:
 `toParts(epoch, zone)` is the wall clock at an instant, and
@@ -212,12 +229,17 @@ twice. `disambiguation` is `'reject'` (the default: an error, not an
 hour nobody notices), `'earlier'` or `'later'`. Asking for a named zone
 with no provider is a refusal, never a quiet fall back to UTC — which is
 right for Amsterdam for none of the year and *looks* right for eight
-months of it.
+months of it. Both clocks read a wall clock's seconds to the millisecond
+and cut a finer fraction, as JavaScript's `Date` reads it
+(`09:00:05.9996` is `09:00:05.999`, never the next second), so a named
+zone and a fixed offset name the same instant;
+`@jarenjs/core/calendar`, whose values are strict, refuses such a
+fraction instead (`JY0007`, `JY0010`).
 
 The seam is crossed, not closed. `@jarenjs/locales/intl-zones` ships
 `createIntlZoneProvider()`, a provider over the host's own ICU data —
 the one copy of the tzdb that is already installed and already
-maintained — that a caller passes as `provider`. It is opt-in and on
+maintained — that a caller passes as `zoneProvider`. It is opt-in and on
 its own subpath, because ICU output moves between hosts and may not be
 anyone's default; it never reads the host's own zone, because every
 call names its zone and there is no default that asks the process
@@ -375,7 +397,7 @@ naming the number.
 import { resampleSeries, rollingSeries, asOfJoin, downsampleSeries } from '@jarenjs/core/series';
 
 resampleSeries(readings, { every: 'PT1H', aggregate: 'mean', fill: 'linear' });
-resampleSeries(readings, { every: 'P1M', zone: 'Europe/Amsterdam', provider });
+resampleSeries(readings, { every: 'P1M', zone: 'Europe/Amsterdam', zoneProvider });
 rollingSeries(readings, { width: 'PT5M', aggregate: 'max', minPeriods: 3 });
 asOfJoin(trades, quotes, { direction: 'nearest', tolerance: 'PT1S', key: 'symbol' });
 downsampleSeries(readings, { target: 2000 });   // → { points, sourceCount, renderedCount, method }

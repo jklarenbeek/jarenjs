@@ -319,8 +319,8 @@ export function createIntlZoneProvider(options = undefined) {
     if (found === null)
       throw new TypeError('the wall clock names no instant this platform can hold');
     const { guess, probed, verified } = found;
-    // a wall clock that is not one (the thirtieth of February, hour 25, a
-    // fraction that rounds into the next second) reads back as another,
+    // a wall clock that is not one (the thirtieth of February, hour 25,
+    // minute 60) reads back as another,
     // exactly as a gap does; it is refused here rather than answered as one
     if (!sameWall(partsFromEpoch(guess), wantedWall(parts)))
       throw new TypeError('the parts are not a civil date and time of day this provider can place');

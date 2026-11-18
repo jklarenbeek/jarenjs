@@ -198,6 +198,19 @@ describe('createIntlZoneProvider — named answers', () => {
     assert.strictEqual(provider.toEpoch(wall(2026, 7, 1, 12, 0, 30.25), 'Asia/Kolkata'), at);
   });
 
+  it('cuts a fraction finer than a millisecond, as the fixed-offset clock does', () => {
+    const parts = wall(2026, 7, 1, 9, 0, 5.9996);
+    const instant = Date.parse('2026-07-01T07:00:05.999Z');
+    assert.strictEqual(provider.toEpoch(parts, 'Europe/Amsterdam', 'reject'), instant);
+    assert.strictEqual(resolveClock({ zone: 'Europe/Amsterdam', provider }).epochOf(parts), instant);
+    assert.strictEqual(resolveClock({ offset: 120 }).epochOf(parts), instant);
+    assert.strictEqual(epochOfRFC3339Parts({ ...parts, offset: 120 }), instant);
+    // the last instant of a second stays in it, in a zone and at an offset alike
+    const last = wall(2026, 12, 31, 23, 59, 59.9999);
+    assert.strictEqual(provider.toEpoch(last, 'Asia/Kolkata'), Date.parse('2026-12-31T18:29:59.999Z'));
+    assert.strictEqual(resolveClock({ offset: 330 }).epochOf(last), Date.parse('2026-12-31T18:29:59.999Z'));
+  });
+
   it('keeps year-zero leap day and its UTC offset in both directions', () => {
     const at = Date.parse('0000-02-29T12:34:56.789Z');
     const parts = { ...wall(0, 2, 29, 12, 34, 56.789), offset: 0 };

@@ -152,16 +152,18 @@ describe('limits on a rule that rarely or never matches', () => {
 
   it('a year of horizon is complete and empty, every day examined once', () => {
     const got = expandRecurrence(never, { horizon: [floatingValue('2027-01-01', '00:00'), floatingValue('2028-01-01', '00:00')] });
-    assert.deepStrictEqual(got, { status: 'complete', occurrences: [], counts: { emitted: 0, work: 366, providerCalls: 0 } });
+    assert.deepStrictEqual(got, { status: 'complete', complete: true, occurrences: [], counts: { emitted: 0, work: 366, providerCalls: 0 } });
   });
 
   it('nextOccurrences stops at maxWork with exact counts, never spinning', () => {
     const got = nextOccurrences(never, floatingValue('2026-01-02', '00:00'), 1, { limits: { maxWork: 10000 } });
-    assert.deepStrictEqual(got, { status: 'incomplete', occurrences: [], counts: { emitted: 0, work: 10000, providerCalls: 0 }, limit: 'maxWork' });
+    assert.deepStrictEqual(got, { status: 'incomplete', complete: false, occurrences: [], counts: { emitted: 0, work: 10000, providerCalls: 0 },
+      limit: 'maxWork', stoppedAt: { limit: 'maxWork' } });
     // under the default limits it walks the 100-year horizon and says so
     const far = nextOccurrences(never, floatingValue('2026-01-02', '00:00'), 1);
     assert.strictEqual(far.status, 'incomplete');
     assert.strictEqual(far.limit, 'maxHorizonDays');
+    assert.deepStrictEqual([far.complete, far.stoppedAt], [false, { limit: 'maxHorizonDays' }]);
   });
 
   it('29 February on a Monday: first made in 2044, then 2072', () => {

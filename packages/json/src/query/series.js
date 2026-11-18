@@ -47,15 +47,16 @@ import { EMPTY, Seq, itemRef } from './runtime.js';
 const hasOwn = Object.hasOwn;
 
 /**
- * The one member of a kernel specification a DOCUMENT cannot carry.
- * `provider` is a pair of functions and JSON has no such value, so a
+ * The members of a kernel specification a DOCUMENT cannot carry.
+ * `zoneProvider` (and `provider`, its older spelling) is a set of
+ * functions and `runtime` a record of them; JSON has no such value, so a
  * named zone reaches the kernel through `options.zoneProvider` at
  * compile time instead. Everything else these operators admit is
  * whatever `@jarenjs/core/series` admits, read from the kernel rather
  * than restated here — one list, one place, and a member added to a
  * kernel reaches the language in the same change.
  */
-const NOT_IN_A_DOCUMENT = Object.freeze(['provider']);
+const NOT_IN_A_DOCUMENT = Object.freeze(['zoneProvider', 'provider', 'runtime']);
 
 /** @param {readonly string[]} members @returns {readonly string[]} */
 const spellable = (members) =>
@@ -271,7 +272,7 @@ export function compileSelector(value, member, docPath) {
  * @param {any} spec - the captured spec (or calendar context)
  * @param {any} provider - `options.zoneProvider`, or null
  * @param {string} docPath
- * @returns {{ zone?: string, offset?: number, provider?: any, disambiguation?: string }}
+ * @returns {{ zone?: string, offset?: number, zoneProvider?: any, disambiguation?: string }}
  *   the clock options the kernel takes
  * @throws {JsonQueryCompileError} JQ0003
  */
@@ -287,7 +288,7 @@ export function compileClock(spec, provider, docPath) {
       if (provider === null) {
         throw compileError('JQ0003', 'query/series-zone-provider', { zone: spec.zone }, docPath);
       }
-      clock.provider = provider;
+      clock.zoneProvider = provider;
     }
   }
   if (hasOwn(spec, 'offset'))

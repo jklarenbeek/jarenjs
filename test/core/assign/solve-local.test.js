@@ -451,6 +451,40 @@ describe('solve local: the search', () => {
   });
 });
 
+describe('solve counts the evaluator\'s full fallbacks', () => {
+  // a rule that reads outside its row and matches nothing: the search walks the same path,
+  // and every evaluator answer it asks for re-evaluates that rule over every unit
+  const outside = (/** @type {string} */ id) => /** @type {any} */ ({ id, version: 1, level: 'soft', scope: 'resource',
+    evaluate(/** @type {any} */ view) {
+      view.assignments();
+      return { matches: [] };
+    } });
+  it('one per moving answer for each such rule, and none for rules that keep to their row', () => {
+    const plain = registerRules(ROSTER_RULES);
+    const one = registerRules([...ROSTER_RULES, outside('wide')]);
+    const two = registerRules([...ROSTER_RULES, outside('wide'), outside('wider')]);
+    for (const strategy of /** @type {const} */ (['construct', 'local', 'auto'])) {
+      for (const seed of [1, 2]) {
+        const problem = rosterFixture(seed, 4, 6);
+        const options = { strategy, seed, budgets: { maxMoves: 3000 } };
+        const base = solve(problem, plain, options);
+        const once = solve(problem, one, options);
+        const twice = solve(problem, two, options);
+        assert.strictEqual(base.counts.fullFallbacks, 0, `${strategy} ${seed}`);
+        assert.strictEqual(text(once.best), text(base.best), `${strategy} ${seed}`);
+        assert.ok(base.counts.moves > 0);
+        assert.strictEqual(once.counts.fullFallbacks, base.counts.moves, `${strategy} ${seed}`);
+        assert.strictEqual(twice.counts.fullFallbacks, 2 * base.counts.moves, `${strategy} ${seed}`);
+      }
+    }
+  });
+
+  it('is not on an exhaustive answer, whose budget counts candidates', () => {
+    const answer = solve(oneFixed(tinyInstance(1)), reference, { strategy: 'exhaustive' });
+    assert.strictEqual('fullFallbacks' in answer.counts, false);
+  });
+});
+
 describe('solve auto', () => {
   it('within the limit runs exhaustive and answers exactly what exhaustive answers', () => {
     for (let seed = 1; seed <= 30; seed++) {
@@ -458,10 +492,11 @@ describe('solve auto', () => {
       const auto = /** @type {any} */ (solve(problem, reference, { strategy: 'auto', seed }));
       const exact = /** @type {any} */ (solve(problem, reference, { strategy: 'exhaustive' }));
       for (const member of ['status', 'best', 'added', 'score', 'bound']) assert.strictEqual(text(auto[member]), text(exact[member]), `seed ${seed} ${member}`);
-      const { restarts, editWork, ...counts } = auto.counts;
+      const { restarts, editWork, fullFallbacks, ...counts } = auto.counts;
       assert.strictEqual(text(counts), text(exact.counts));
       assert.strictEqual(restarts, 0);
       assert.ok(editWork > 0);
+      assert.strictEqual(fullFallbacks, 0);
       assert.strictEqual(auto.provenance.algorithm, 'exhaustive');
       assert.strictEqual(auto.provenance.strategy, 'auto');
       assert.deepStrictEqual(auto.removed, []);

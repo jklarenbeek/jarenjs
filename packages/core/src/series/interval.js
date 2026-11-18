@@ -342,7 +342,9 @@ export const SLOTS_MEMBERS = Object.freeze(['duration', 'step']);
  * `duration` and `step` are fixed widths — a number of milliseconds or
  * a fixed ISO 8601 duration (`'PT30M'`). A calendar duration is refused
  * rather than approximated, because "every month" needs a calendar and
- * a zone to say where its boundaries fall.
+ * a zone to say where its boundaries fall. A fraction of a millisecond
+ * is kept, as the bounds keep one; `@jarenjs/core/calendar`'s
+ * `findAvailableSlots` takes whole milliseconds only.
  *
  * @param {Interval[]} availability - in any order
  * @param {Object} spec

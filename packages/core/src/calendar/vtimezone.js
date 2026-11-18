@@ -21,7 +21,7 @@ import { hashContent } from '../string.js';
 import { CalendarError } from './errors.js';
 import { floatingValue, parseTemporal } from './model.js';
 import { admitKeys, compileRecurrence, expandRecurrence, isRecord } from './recurrence.js';
-import { admitProvider, admitZoneName } from './resolve.js';
+import { admitProvider, admitZoneName, providerOf } from './resolve.js';
 import { readRRule } from './rrule.js';
 
 const SECOND = 1000;
@@ -38,7 +38,7 @@ const LOOKBACK = 400 * DAY;
  * - `maxObservances`: STANDARD and DAYLIGHT blocks; past it the
  *   definition is refused (`JY0025`) before any walk.
  * - `maxTransitions`: onsets kept (DTSTART, RDATE and RRULE ones);
- *   past it the horizon ends at the last one kept, `status: 'incomplete'`.
+ *   past it the horizon ends at the last one kept, `complete: false` (`status: 'incomplete'`).
  * - `maxWork`: the recurrence engine's work over every RRULE; past it
  *   likewise.
  * - `maxProviderCalls`: `vtimezoneFor`'s calls to `toParts`; past it the
@@ -93,8 +93,12 @@ export const VTIMEZONE_LIMITS = /* @__PURE__ */ Object.freeze({
  * @property {{ readonly name: string, readonly revision: string }} identity - the TZID, and a hash of the definition
  * @property {string} tzid
  * @property {{ readonly start: number, readonly end: number }} horizon - epoch milliseconds, `[start, end)`; outside it every call refuses
- * @property {'complete' | 'incomplete'} status - `incomplete` when a limit ended the horizon early
+ * @property {'complete' | 'incomplete'} status - `incomplete` when a limit ended the horizon early;
+ *   the older spelling of `complete`
+ * @property {boolean} complete - no limit ended the horizon early
  * @property {'maxTransitions' | 'maxWork'} [limit] - what ended it
+ * @property {{ readonly limit: 'maxTransitions' | 'maxWork' }} [stoppedAt] - an incomplete
+ *   compilation only: the limit that ended the horizon, as `limit`
  * @property {{ readonly observances: number, readonly transitions: number, readonly work: number }} counts
  * @property {readonly ZoneTransition[]} transitions - the changes inside the horizon, in order
  * @property {number} initial - the offset in force at the horizon's start, minutes east
@@ -668,7 +672,8 @@ function zoneProvider(tzid, transitions, initial, low, end, about) {
     tzid,
     horizon: Object.freeze({ start: low, end }),
     status: about.status,
-    ...(about.limit !== undefined ? { limit: about.limit } : {}),
+    complete: about.limit === undefined,
+    ...(about.limit !== undefined ? { limit: about.limit, stoppedAt: Object.freeze({ limit: about.limit }) } : {}),
     counts: about.counts,
     transitions,
     initial: initial / MINUTE,
@@ -694,8 +699,9 @@ function zoneProvider(tzid, transitions, initial, low, end, about) {
  *   seen by the scan; changes of the IANA database are months apart.
  *
  * @param {string} zone
- * @param {{ provider: import('../series/zone.js').ZoneProvider, horizon: [unknown, unknown],
- *   limits?: Partial<typeof VTIMEZONE_LIMITS> }} options - `horizon`: `[start, end)`, utc values or epoch milliseconds
+ * @param {{ horizon: [unknown, unknown], limits?: Partial<typeof VTIMEZONE_LIMITS> }
+ *   & import('./resolve.js').ZoneProviderOptions} options - the provider is `zoneProvider` (or
+ *   `provider`), else `runtime.zoneProvider`; `horizon`: `[start, end)`, utc values or epoch milliseconds
  * @returns {VtimezoneDefinition} frozen
  * @throws {CalendarError} `JY0001` for a zone the provider does not know,
  *   `JY0004` for a provider without `toParts` or one that answers no
@@ -710,9 +716,9 @@ function zoneProvider(tzid, transitions, initial, low, end, about) {
  */
 export function vtimezoneFor(zone, options) {
   if (!isRecord(options))
-    throw new CalendarError('JY0014', 'options are { provider, horizon, limits? }', '/options');
-  admitKeys(options, ['provider', 'horizon', 'limits'], '/options', 'vtimezoneFor');
-  const provider = admitProvider(options.provider, 'toParts');
+    throw new CalendarError('JY0014', 'options are { zoneProvider (or runtime), horizon, limits? }', '/options');
+  admitKeys(options, ['zoneProvider', 'provider', 'runtime', 'horizon', 'limits'], '/options', 'vtimezoneFor');
+  const provider = admitProvider(providerOf(options), 'toParts');
   const name = admitZoneName(zone);
   const { low, high } = admitHorizon(options.horizon, '/options/horizon');
   const limits = admitLimits(options.limits);

@@ -28,7 +28,7 @@
 import { civilFromDays, daysFromCivil, daysInMonth, isLeapYear, isoWeekdayFromDays } from '../dates/civil.js';
 import { CalendarError } from './errors.js';
 import { admitValue, formatDate, LAST_DAY, utcValue } from './model.js';
-import { admitPolicy, admitProvider, identityOf, resolveLocal } from './resolve.js';
+import { admitPolicy, admitProvider, identityOf, providerOf, resolveLocal } from './resolve.js';
 import { wallAt } from './bind.js';
 import { readRRule, WEEKDAYS } from './rrule.js';
 
@@ -101,12 +101,19 @@ export const RECURRENCE_LIMITS = /* @__PURE__ */ Object.freeze({
  */
 
 /**
+ * An expansion's answer. `complete` and, when it is false, `stoppedAt`
+ * are the shape every bounded answer of `@jarenjs/core` carries (the
+ * assignment engine's); `status` and `limit` are the older spelling of
+ * the same facts, kept beside them.
  * @typedef {Object} RecurrenceExpansion
  * @property {'complete' | 'incomplete'} status
+ * @property {boolean} complete - no limit stopped the walk
  * @property {readonly Occurrence[]} occurrences - in order of start
  * @property {RecurrenceCounts} counts
  * @property {'maxOccurrences' | 'maxWork' | 'maxProviderCalls' | 'maxHorizonDays' | 'calendar-end'} [limit] - what stopped
  *   an incomplete expansion; `calendar-end` when an occurrence's end passes 9999-12-31, the last day a value can name
+ * @property {{ readonly limit: 'maxOccurrences' | 'maxWork' | 'maxProviderCalls' | 'maxHorizonDays' | 'calendar-end' }} [stoppedAt] -
+ *   an incomplete expansion only: the limit that stopped it, as `limit`
  */
 
 /**
@@ -1067,26 +1074,28 @@ export function expandPlan(plan, low, high, budget, resolver, stopAfter) {
 export function answer(occurrences, budget, limit, extra = undefined) {
   return Object.freeze({
     status: limit === undefined ? 'complete' : 'incomplete',
+    complete: limit === undefined,
     occurrences: Object.freeze(occurrences),
     counts: Object.freeze({ emitted: occurrences.length, work: budget.work, providerCalls: budget.providerCalls }),
-    ...(limit !== undefined ? { limit } : {}),
+    ...(limit !== undefined ? { limit, stoppedAt: Object.freeze({ limit }) } : {}),
     ...extra,
   });
 }
 
 /**
- * Read `{ horizon, limits?, provider? }` against a plan.
+ * Read `{ horizon, limits?, zoneProvider?, runtime? }` against a plan
+ * (`provider` is `zoneProvider`'s older spelling).
  * @param {Plan} plan
  * @param {unknown} options
  */
 export function admitExpansion(plan, options) {
   if (!isRecord(options))
-    throw new CalendarError('JY0014', 'expansion options are { horizon, limits?, provider? }', '/options');
-  admitKeys(options, ['horizon', 'limits', 'provider'], '/options', 'an expansion');
+    throw new CalendarError('JY0014', 'expansion options are { horizon, limits?, zoneProvider?, runtime? }', '/options');
+  admitKeys(options, ['horizon', 'limits', 'zoneProvider', 'provider', 'runtime'], '/options', 'an expansion');
   const budget = budgetOf(options.limits);
   const [low, wanted] = admitHorizon(plan.kind, options.horizon);
   const cap = low + budget.limits.maxHorizonDays * DAY;
-  return { budget, low, high: Math.min(wanted, cap), clipped: wanted > cap, resolver: resolverFor(plan, options.provider) };
+  return { budget, low, high: Math.min(wanted, cap), clipped: wanted > cap, resolver: resolverFor(plan, providerOf(options)) };
 }
 
 /**
@@ -1107,7 +1116,7 @@ export function admitExpansion(plan, options) {
  *   An occurrence whose end passes 9999-12-31 has no spelling; it stops
  *   the walk the same way, with `limit: 'calendar-end'`.
  * @param {CompiledRecurrence} compiled
- * @param {{ horizon: [unknown, unknown], limits?: RecurrenceLimits, provider?: import('../series/zone.js').ZoneProvider }} options
+ * @param {{ horizon: [unknown, unknown], limits?: RecurrenceLimits } & import('./resolve.js').ZoneProviderOptions} options
  * @returns {RecurrenceExpansion}
  * @throws {CalendarError} `JY0014` for options, `JY0013` for a horizon
  *   bound of the wrong kind, `JY0004` for a zoned rule without a
@@ -1133,7 +1142,7 @@ export function expandRecurrence(compiled, options) {
  * @param {CompiledRecurrence} compiled
  * @param {unknown} from - a horizon start of the rule's kind
  * @param {number} n - how many, from 1
- * @param {{ limits?: RecurrenceLimits, provider?: import('../series/zone.js').ZoneProvider }} [options]
+ * @param {{ limits?: RecurrenceLimits } & import('./resolve.js').ZoneProviderOptions} [options]
  * @returns {RecurrenceExpansion}
  * @throws {CalendarError} what {@link expandRecurrence} throws; `JY0014` for `n`
  */
@@ -1142,13 +1151,13 @@ export function nextOccurrences(compiled, from, n, options = undefined) {
   if (!Number.isSafeInteger(n) || n < 1)
     throw new CalendarError('JY0014', `n is a whole number from 1, not ${String(n)}`, '/n');
   if (options !== undefined && !isRecord(options))
-    throw new CalendarError('JY0014', 'options are { limits?, provider? }', '/options');
+    throw new CalendarError('JY0014', 'options are { limits?, zoneProvider?, runtime? }', '/options');
   if (options !== undefined)
-    admitKeys(options, ['limits', 'provider'], '/options', 'nextOccurrences');
+    admitKeys(options, ['limits', 'zoneProvider', 'provider', 'runtime'], '/options', 'nextOccurrences');
   const budget = budgetOf(options?.limits);
   const low = horizonBound(plan.kind, from, 'start', '/from');
   const high = low + budget.limits.maxHorizonDays * DAY;
-  const { occurrences, ended } = expandPlan(plan, low, high, budget, resolverFor(plan, options?.provider), n);
+  const { occurrences, ended } = expandPlan(plan, low, high, budget, resolverFor(plan, providerOf(options)), n);
   // a limit reached while a zoned walk was still settling the order leaves the first n unproven
   const limit = budget.limit ?? (occurrences.length >= n || ended ? undefined : 'maxHorizonDays');
   return /** @type {RecurrenceExpansion} */ (answer(occurrences, budget, limit));

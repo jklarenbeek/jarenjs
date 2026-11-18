@@ -94,9 +94,11 @@ export const ROLLING_MEMBERS = Object.freeze([
  * @param {'sum'|'mean'|'min'|'max'|'first'|'last'|'count'} [spec.aggregate]
  *   default `'mean'`
  * @param {number} [spec.minPeriods] - default 1
- * @param {string} [spec.zone] - a named zone, needing `provider`
+ * @param {string} [spec.zone] - a named zone, needing `zoneProvider`
  * @param {number} [spec.offset] - minutes east of UTC
- * @param {import('./zone.js').ZoneProvider} [spec.provider]
+ * @param {import('./zone.js').ZoneProvider} [spec.zoneProvider]
+ * @param {import('./zone.js').ZoneProvider} [spec.provider] - the older spelling of `zoneProvider`
+ * @param {Partial<import('../runtime.js').Runtime>} [spec.runtime] - its `zoneProvider`, when neither is given
  * @param {'reject'|'earlier'|'later'} [spec.disambiguation]
  * @param {string | ((item: any, index: number) => any)} [spec.at]
  * @param {string | ((item: any, index: number) => any)} [spec.value]

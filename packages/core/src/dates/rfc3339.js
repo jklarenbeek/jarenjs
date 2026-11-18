@@ -238,7 +238,7 @@ export function getDateTypeOfDateTimeRFC3339(str, def = undefined) {
 // second's `:60`) reads as NaN, exactly as its Date twin reads as an
 // invalid Date - every comparison against it is false. The engine keeps
 // the first three fraction digits of any length, so these truncate to
-// the millisecond (`epochOfRFC3339Parts` rounds instead).
+// the millisecond (`epochOfRFC3339Parts` cuts the same way).
 
 export function getEpochOfDateOnlyRFC3339(str, def = undefined) {
   return isDateOnlyRFC3339(str)
@@ -365,8 +365,11 @@ export function parseRFC3339Parts(str) {
  *
  * A bare full-date has no offset and is read as UTC midnight. Note JS
  * has no leap seconds: a `:60` second rolls into the following minute.
- * The fraction rounds to the nearest millisecond, so `.9996` carries
- * into the next second (the `getEpochOf…RFC3339` readers truncate).
+ * A fraction finer than a millisecond is cut, as `Date.parse` and the
+ * `getEpochOf…RFC3339` readers read it: `.9996` is `.999`, never carried
+ * into the next second. The fraction is first read to the nanosecond, so
+ * a three-digit one whose binary value sits just below it (`59.999` is
+ * 59.99899…) is not cut away.
  *
  * @param {{ year: number, month: number, day: number, hours: number,
  *   minutes: number, seconds: number, offset: number | null }} parts -
@@ -377,14 +380,13 @@ export function epochOfRFC3339Parts(parts) {
   if (parts.year < 0)
     return NaN;
   const seconds = parts.seconds < 0 ? 0 : parts.seconds;
-  const whole = Math.floor(seconds);
   // Civil day numbers preserve year zero's leap day and carries across
   // year 99; Date.UTC's 1900-based interpretation of 0-99 cannot.
   const ms = Date.UTC(
     1970, 0, 1 + daysFromCivil(parts.year, parts.month, parts.day),
     parts.hours < 0 ? 0 : parts.hours,
     parts.minutes < 0 ? 0 : parts.minutes,
-    whole, Math.round((seconds - whole) * 1000));
+    0, Math.floor(Math.round(seconds * 1e9) / 1e6));
   if (ms !== ms)
     return NaN;
   return ms - (parts.offset === null ? 0 : parts.offset) * 60000;

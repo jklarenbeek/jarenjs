@@ -43,12 +43,32 @@ longer than six digits can render differently:
 `…:00.001001Z`, and a fraction within half a microsecond of the next
 second (`5.9999996` seconds) gives `…:05.999999Z` and `SSS` `999` where
 it used to lose the whole fraction (`…:05Z`, `000`).
-`epochOfRFC3339Parts(parts)` → epoch ms, the fraction rounded to the
-nearest millisecond: a
+`epochOfRFC3339Parts(parts)` → epoch ms, a fraction finer than a
+millisecond cut (as `Date.parse` reads it, never rounded into the next
+second): a
 date-only reads as UTC midnight, an offset shifts to its instant, and a
 time-only has **no** instant — it returns `NaN` rather than inventing a
-day. The `getEpochOf…RFC3339` readers go through `Date.parse`, which
-truncates the fraction to the millisecond. `getDateTypeOf*` variants produce a `Date` for callers that want
+day. The `getEpochOf…RFC3339` readers go through `Date.parse`, so every
+reader names the same millisecond. It used to round to the nearest
+millisecond instead, which changes the instant of a string with four or
+more fraction digits whose fourth and later digits round up:
+`'2026-03-29T01:30:00.9999Z'` is now `…00.999Z`, where it used to be
+`…01.000Z`. Everything that reads an RFC 3339 string through it moves
+with it: the series kernel's `toEpoch` (so every interval, bucket and
+clock bound given as a string), the series clocks (a fixed offset and
+the Intl zone seam alike), a compiled zone definition, and the query
+operators `$date-diff`, `$epoch` and `$time-bucket`. Downgrade: an older
+release rounds these instants again. It also predates the provider's
+`zoneProvider` and `runtime` spelling in the series and calendar options:
+it refuses either in a closed specification (`resampleSeries`,
+`rollingSeries`: a `TypeError` naming the member; `expandRecurrence`,
+`evaluateAvailability` and the other calendar calls with closed options:
+`JY0014`), and where options are not closed (`resolveClock`,
+`compileBuckets`, `bindFloating`, `toUtc`, `todayIn`) it ignores them and
+refuses the named zone as having no provider, never a quiet UTC, except
+that `zonedValue` and `parseTemporal` skip their optional zone check. A
+query document can carry neither member in either release (`JQ0003`), so
+no saved document changes meaning. `getDateTypeOf*` variants produce a `Date` for callers that want
 one; `isDateType` / `isDateishType` classify values.
 
 ## Calendar arithmetic — `civil.js`

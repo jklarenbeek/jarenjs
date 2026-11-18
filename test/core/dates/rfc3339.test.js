@@ -88,19 +88,49 @@ describe('RFC 3339 fractional seconds (time-secfrac = "." 1*DIGIT)', () => {
       '2026-01-01T00:00:59.999999Z');
   });
 
-  it('converts to milliseconds by each reader\'s own rule, whatever the digit count', () => {
+  it('converts to milliseconds by one rule, whatever the digit count: a finer fraction is cut', () => {
     // the getEpochOf… readers go through Date.parse, which truncates
     assert.strictEqual(getEpochOfDateTimeRFC3339('2026-01-01T00:00:00.1234567Z'), 1767225600123);
     assert.strictEqual(getEpochOfDateTimeRFC3339('2026-01-01T00:00:00.123456789Z'), 1767225600123);
     assert.strictEqual(getEpochOfDateTimeRFC3339('2026-01-01T00:00:00.9999999Z'), 1767225600999);
     assert.strictEqual(getEpochOfTimeOnlyRFC3339('13:45:30.0000000Z'), 49530000);
-    // epochOfRFC3339Parts rounds to the nearest millisecond, as it does
-    // for six digits (.999999 already carries into the next second)
+    // epochOfRFC3339Parts cuts the same way, never carrying into the next second
     const epoch = (s) => epochOfRFC3339Parts(parseRFC3339Parts(s));
     assert.strictEqual(epoch('2026-01-01T00:00:00.1234567Z'), 1767225600123);
-    assert.strictEqual(epoch('2026-01-01T00:00:00.1239Z'), 1767225600124);
-    assert.strictEqual(epoch('2026-01-01T00:00:00.999999Z'), 1767225601000);
-    assert.strictEqual(epoch('2026-01-01T00:00:00.9999999Z'), 1767225601000);
+    assert.strictEqual(epoch('2026-01-01T00:00:00.1239Z'), 1767225600123);
+    assert.strictEqual(epoch('2026-01-01T00:00:00.999999Z'), 1767225600999);
+    assert.strictEqual(epoch('2026-01-01T00:00:00.9999999Z'), 1767225600999);
+    assert.strictEqual(epoch('2026-03-29T01:30:00.9999Z'), Date.parse('2026-03-29T01:30:00.999Z'));
+    // a three-digit fraction whose double sits just below it is not cut away
+    assert.strictEqual(epoch('2026-01-01T00:00:59.999Z'), 1767225659999);
+    assert.strictEqual(epoch('2026-01-01T00:00:05.123Z'), 1767225605123);
+  });
+
+  it('answers what Date.parse answers for every fraction length and every offset', () => {
+    const fractions = [];
+    for (let digits = 1; digits <= 9; digits++) {
+      for (const lead of ['0', '1', '5', '9', '123', '998', '9995', '9996', '9999', '99995', '0005', '0009', '500', '1239', '999999999']) {
+        fractions.push(lead.padEnd(digits, lead === '999999999' ? '9' : '0').slice(0, digits));
+        fractions.push(lead.padEnd(digits, '9').slice(0, digits));
+      }
+    }
+    const clocks = ['2026-03-29T01:30:00', '2026-07-01T09:00:05', '2026-01-01T00:00:59', '2026-12-31T23:59:59',
+      '1999-12-31T23:59:59', '0001-01-01T00:00:00', '9999-12-31T23:59:59', '1969-12-31T23:59:59'];
+    const offsets = ['Z', '+00:00', '+05:30', '-08:00', '+14:00', '-12:00'];
+    let compared = 0;
+    for (const clock of clocks) {
+      for (const fraction of new Set(fractions)) {
+        for (const offset of offsets) {
+          const text = `${clock}.${fraction}${offset}`;
+          const expected = Date.parse(text);
+          if (!Number.isFinite(expected)) continue;
+          assert.strictEqual(epochOfRFC3339Parts(parseRFC3339Parts(text)), expected, text);
+          assert.strictEqual(getEpochOfDateTimeRFC3339(text), expected, text);
+          compared++;
+        }
+      }
+    }
+    assert.ok(compared > 2000, `compared ${compared}`);
   });
 
   it('formats a fraction past six digits cut at the sixth, never carried into the next second', () => {

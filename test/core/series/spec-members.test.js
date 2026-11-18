@@ -83,7 +83,7 @@ describe('a kernel specification is closed', () => {
     assert.throws(() => resampleSeries(ROWS, { every: 'P1D', timezone: 'Europe/Amsterdam' }),
       /timezone.*'zone'/s);
     assert.throws(() => resampleSeries(ROWS, { every: 'P1D', zone: 'Europe/Amsterdam' }),
-      /needs a provider/);
+      /needs a zone provider/);
   });
 
   it('the case of a member is part of its name', () => {
@@ -104,11 +104,11 @@ describe('a kernel specification is closed', () => {
 describe('the language and the kernel read ONE list', () => {
   it('spells every kernel member a document can carry, and only those', async () => {
     // §8.16's `$resample` and `$rolling` specs are the kernel's own
-    // members, minus the one JSON has no value for. A member added to a
+    // members, minus the three JSON has no value for. A member added to a
     // kernel therefore reaches the language in the same change, and a
     // member the language grew alone fails right here.
     const json = await import('../../../packages/json/src/query/series.js');
-    const NO_VALUE_IN_JSON = ['provider'];
+    const NO_VALUE_IN_JSON = ['zoneProvider', 'provider', 'runtime'];
     for (const [name, kernel] of /** @type {[string, readonly string[]][]} */ ([
       ['CLOCK_MEMBERS', CLOCK_MEMBERS],
       ['RESAMPLE_MEMBERS', RESAMPLE_MEMBERS],
@@ -118,10 +118,13 @@ describe('the language and the kernel read ONE list', () => {
         kernel.filter((member) => !NO_VALUE_IN_JSON.includes(member)),
         `${name} disagrees between @jarenjs/core/series and the query language`);
     }
-    // a function is not a JSON value, so the provider is the one member
-    // a document cannot spell; it arrives as `options.zoneProvider`
-    assert.ok(CLOCK_MEMBERS.includes('provider'));
-    assert.ok(!json.CLOCK_MEMBERS.includes('provider'));
+    // a function is not a JSON value, so the provider (under either
+    // spelling) and a runtime record are the members a document cannot
+    // spell; the provider arrives as `options.zoneProvider`
+    for (const member of NO_VALUE_IN_JSON) {
+      assert.ok(CLOCK_MEMBERS.includes(member), member);
+      assert.ok(!json.CLOCK_MEMBERS.includes(member), member);
+    }
   });
 
   it('translates the as-of spec rather than sharing it, and both are closed', async () => {

@@ -8,7 +8,7 @@
 
 import { resolveRuntime } from '../runtime.js';
 import { CalendarError } from './errors.js';
-import { admitProvider, admitZoneName, providerKnows, wholeIn } from './resolve.js';
+import { admitProvider, admitZoneName, providerKnows, providerOf, wholeIn } from './resolve.js';
 
 /**
  * Whether the provider knows a zone name. It asks the provider (through
@@ -49,12 +49,12 @@ export function assertZone(name, provider) {
 /**
  * The civil date in a zone at the runtime clock's instant, as
  * `YYYY-MM-DD`. The instant is `runtime.now()` (a fixed clock in a test,
- * the platform's otherwise) and the provider is `provider`, or the
- * runtime's `zoneProvider` when none is passed; the zone is always
+ * the platform's otherwise) and the provider is `zoneProvider` (or its
+ * older spelling `provider`), or the runtime's `zoneProvider` when none
+ * is passed; the zone is always
  * named, never the host's.
  * @param {string} zone
- * @param {{ runtime?: Partial<import('../runtime.js').Runtime>,
- *   provider?: import('../series/zone.js').ZoneProvider }} [options]
+ * @param {import('./resolve.js').ZoneProviderOptions} [options]
  * @returns {string}
  * @throws {CalendarError} `JY0001` for a zone the provider does not know,
  *   `JY0004` for no provider, or one whose wall clock is not a date
@@ -66,7 +66,7 @@ export function assertZone(name, provider) {
  */
 export function todayIn(zone, options = undefined) {
   const runtime = resolveRuntime(options?.runtime);
-  const provider = admitProvider(options?.provider ?? runtime.zoneProvider, 'toParts');
+  const provider = admitProvider(providerOf(options), 'toParts');
   const name = admitZoneName(zone);
   const now = runtime.now();
   if (typeof now !== 'number' || !Number.isFinite(now))

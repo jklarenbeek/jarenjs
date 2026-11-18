@@ -33,7 +33,7 @@ import { parseDuration, durationToMs } from '../dates/duration.js';
 import { CalendarError } from './errors.js';
 import { admitValue } from './model.js';
 import { toUtc } from './bind.js';
-import { admitZoneName, identityOf } from './resolve.js';
+import { admitZoneName, identityOf, providerOf } from './resolve.js';
 import { admitHorizon, admitKeys, budgetOf, horizonBound, isRecord, valueAt, wallOf } from './recurrence.js';
 import { expandSeries, seriesKindOf } from './series.js';
 
@@ -112,11 +112,15 @@ export const AVAILABILITY_LIMITS = /* @__PURE__ */ Object.freeze({ maxSlots: 100
  * @property {{ readonly start: number, readonly end: number }} horizon
  * @property {readonly AvailabilitySpanState[]} spans - ascending, tiling the horizon
  * @property {boolean} complete - no layer stopped at a limit
+ * @property {{ readonly limit: string, readonly layer: string }} [stoppedAt] - an incomplete
+ *   evaluation only: the first layer, in the order given, that a limit stopped, and that limit
  * @property {{ readonly name: string, readonly revision: string } | null} provider
  * @property {{ readonly zone: string, readonly source: string } | null} binding - the zone floating layers were bound to
  * @property {'unknown' | 'busy'} default
  * @property {readonly { id: string, revision?: string, source: unknown, status: 'complete' | 'incomplete',
- *   limit?: string, counts: import('./recurrence.js').RecurrenceCounts }[]} layers
+ *   complete: boolean, limit?: string, stoppedAt?: { readonly limit: string },
+ *   counts: import('./recurrence.js').RecurrenceCounts }[]} layers - `status` and `limit` are the
+ *   older spelling of `complete` and `stoppedAt`
  * @property {{ layers: number, spans: number, available: number, busy: number, unknown: number,
  *   emitted: number, work: number, providerCalls: number }} counts
  */
@@ -401,12 +405,14 @@ function placeLayer(layer, index, context) {
     id, rank: priority === 0 ? 10 : priority, busyType: busyType ?? 'busy', source, pieces,
     entry: Object.freeze({
       ...source, source: layer.source, status: placed.incompleteFrom === undefined ? 'complete' : 'incomplete',
-      ...(placed.incompleteFrom !== undefined ? { limit: placed.limit } : {}), counts: Object.freeze(placed.counts),
+      complete: placed.incompleteFrom === undefined,
+      ...(placed.incompleteFrom !== undefined ? { limit: placed.limit, stoppedAt: Object.freeze({ limit: placed.limit }) } : {}),
+      counts: Object.freeze(placed.counts),
     }),
   };
 }
 
-const OPTION_KEYS = /* @__PURE__ */ Object.freeze(['horizon', 'zone', 'zoneSource', 'provider', 'policy', 'limits', 'default']);
+const OPTION_KEYS = /* @__PURE__ */ Object.freeze(['horizon', 'zone', 'zoneSource', 'zoneProvider', 'provider', 'runtime', 'policy', 'limits', 'default']);
 
 /**
  * Evaluate availability layers over a half-open horizon: the horizon cut
@@ -437,8 +443,9 @@ const OPTION_KEYS = /* @__PURE__ */ Object.freeze(['horizon', 'zone', 'zoneSourc
  *
  * @param {readonly AvailabilityLayer[]} layers
  * @param {{ horizon: [unknown, unknown], zone?: string | null, zoneSource?: string,
- *   provider?: import('../series/zone.js').ZoneProvider, policy?: 'rfc5545' | 'later' | 'reject',
- *   limits?: import('./recurrence.js').RecurrenceLimits, default?: 'unknown' | 'busy' }} options -
+ *   policy?: 'rfc5545' | 'later' | 'reject',
+ *   limits?: import('./recurrence.js').RecurrenceLimits, default?: 'unknown' | 'busy' }
+ *   & import('./resolve.js').ZoneProviderOptions} options -
  *   the horizon in epoch milliseconds or utc values
  * @returns {AvailabilityResult}
  * @throws {CalendarError} `JY0014` for a malformed layer or option, `JY0013`
@@ -453,14 +460,14 @@ const OPTION_KEYS = /* @__PURE__ */ Object.freeze(['horizon', 'zone', 'zoneSourc
  */
 export function evaluateAvailability(layers, options) {
   if (!isRecord(options))
-    throw new CalendarError('JY0014', 'evaluation options are { horizon, zone?, zoneSource?, provider?, policy?, limits?, default? }', '/options');
+    throw new CalendarError('JY0014', 'evaluation options are { horizon, zone?, zoneSource?, zoneProvider?, runtime?, policy?, limits?, default? }', '/options');
   admitKeys(options, OPTION_KEYS, '/options', 'an availability evaluation');
   const [low, high] = admitHorizon('utc', options.horizon);
   const fallback = options.default ?? 'unknown';
   if (fallback !== 'unknown' && fallback !== 'busy')
     throw new CalendarError('JY0014', `default is 'unknown' or 'busy', never available; not ${String(fallback)}`, '/options/default');
   const zone = options.zone === undefined || options.zone === null ? null : under('/options', () => admitZoneName(options.zone));
-  const provider = options.provider;
+  const provider = providerOf(options);
   if (provider !== undefined && !isRecord(provider))
     throw new CalendarError('JY0004', 'the provider is an object with the seam\'s members', '/options/provider');
   const identity = provider === undefined ? null : under('/options', () => identityOf(provider));
@@ -486,10 +493,13 @@ export function evaluateAvailability(layers, options) {
     counts.work += entry.counts.work;
     counts.providerCalls += entry.counts.providerCalls;
   }
+  // the first layer, in the order given, that a limit stopped
+  const stopped = placed.find(({ entry }) => entry.status !== 'complete')?.entry;
   return Object.freeze({
     horizon: Object.freeze({ start: low, end: high }),
     spans: Object.freeze(spans),
-    complete: placed.every(({ entry }) => entry.status === 'complete'),
+    complete: stopped === undefined,
+    ...(stopped === undefined ? {} : { stoppedAt: Object.freeze({ limit: stopped.limit, layer: stopped.id }) }),
     provider: identity,
     binding: zone === null ? null : Object.freeze({ zone, source: options.zoneSource ?? 'unrecorded' }),
     default: fallback,
@@ -732,12 +742,16 @@ const SLOT_KEYS = /* @__PURE__ */ Object.freeze(['duration', 'step', 'alignment'
  * back to back, or the alignment when one is given), and every start is
  * a multiple of `alignment` counted from the epoch (UTC) when given.
  * A search that would pass `limits.maxSlots` (default 10000) stops
- * there, `incomplete` with `limit: 'maxSlots'`.
+ * there: `complete: false` with `stoppedAt: { limit: 'maxSlots' }`
+ * (and, in the older spelling, `status: 'incomplete'` with
+ * `limit: 'maxSlots'`).
  * @param {AvailabilityResult} result
  * @param {{ duration: number | string, step?: number | string, alignment?: number | string,
  *   limits?: { maxSlots?: number } }} options - widths in milliseconds or fixed ISO 8601 durations
- * @returns {{ readonly status: 'complete' | 'incomplete', readonly slots: readonly { start: number, end: number }[],
- *   readonly counts: { readonly emitted: number }, readonly limit?: 'maxSlots' }}
+ * @returns {{ readonly status: 'complete' | 'incomplete', readonly complete: boolean,
+ *   readonly slots: readonly { start: number, end: number }[],
+ *   readonly counts: { readonly emitted: number }, readonly limit?: 'maxSlots',
+ *   readonly stoppedAt?: { readonly limit: 'maxSlots' } }}
  * @throws {CalendarError} `JY0014` for a malformed result or option, or a
  *   step that is not a multiple of the alignment
  * @example
@@ -786,9 +800,10 @@ export function findAvailableSlots(result, options) {
   }
   return Object.freeze({
     status: limited ? 'incomplete' : 'complete',
+    complete: !limited,
     slots: Object.freeze(slots.map((slot) => Object.freeze(slot))),
     counts: Object.freeze({ emitted: slots.length }),
-    ...(limited ? { limit: /** @type {const} */ ('maxSlots') } : {}),
+    ...(limited ? { limit: /** @type {const} */ ('maxSlots'), stoppedAt: Object.freeze({ limit: /** @type {const} */ ('maxSlots') }) } : {}),
   });
 }
 //#endregion

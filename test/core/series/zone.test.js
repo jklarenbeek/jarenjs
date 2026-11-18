@@ -97,9 +97,9 @@ describe('resolveClock', () => {
     // UTC is right for Amsterdam for none of the year and looks right
     // for eight months of it, which is the worst possible default
     assert.throws(() => resolveClock({ zone: 'Test/Amsterdam' }),
-      /needs a provider with toParts\(epoch, zone\)/);
+      /needs a zone provider with toParts\(epoch, zone\)/);
     assert.throws(() => resolveClock({ zone: 'Test/Amsterdam', provider: { toParts: () => ({}) } }),
-      /needs a provider/);
+      /needs a zone provider with toEpoch\(parts, zone, disambiguation\)/);
   });
 
   it('should refuse a clock that is both a zone and an offset', () => {

@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import * as assert from '../../assert.node.js';
 
 import { findSlots } from '@jarenjs/core/series';
+import { evaluateAvailability, findAvailableSlots } from '@jarenjs/core/calendar';
 
 const iv = (start, end) => ({ start, end });
 const pairs = (list) => list.map((i) => [i.start, i.end]);
@@ -88,6 +89,16 @@ describe('findSlots', () => {
       [[0.1, 0.30000000000000004], [0.35, 0.55]]);
     assert.deepStrictEqual(pairs(findSlots([iv(-0.75, 0.25)], { duration: 0.25, step: 0.5 })),
       [[-0.75, -0.5], [-0.25, 0]]);
+  });
+
+  it('should keep a fractional width where the calendar takes whole milliseconds only', () => {
+    // the series axis is any finite number; every calendar instant is whole milliseconds
+    assert.strictEqual(findSlots([iv(0, 10)], { duration: 0.5 }).length, 20);
+    const result = evaluateAvailability([{ id: 'a', priority: 1, mode: 'available', spans: [{ start: 0, end: 10 }], source: 's' }],
+      { horizon: [0, 10] });
+    assert.strictEqual(findAvailableSlots(result, { duration: 1 }).slots.length, 10);
+    assert.throws(() => findAvailableSlots(result, { duration: 0.5 }),
+      (error) => /** @type {any} */ (error).code === 'JY0014' && /** @type {any} */ (error).docPath === '/options/duration');
   });
 
   it('should refuse a duration that rounds to an empty slot', () => {

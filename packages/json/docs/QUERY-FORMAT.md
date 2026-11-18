@@ -1516,8 +1516,10 @@ anywhere but 23:59:60 UTC with its local hour and minute in range:
 2017-01-02T00:00:00Z), and is now `JQ2001`.
 
 **Instants.** Unary `$epoch` maps a value carrying a date to **milliseconds
-since 1970-01-01T00:00:00Z** (a fractional second of any length rounds to
-the nearest millisecond), and `$datetime` maps such a number back to a
+since 1970-01-01T00:00:00Z** (a fraction finer than a millisecond is cut, as
+`Date.parse` reads it, never rounded into the next second; it used to round, so
+`"2026-01-01T00:00:00.9999999Z"` was `1767225601000` and is now
+`1767225600999`), and `$datetime` maps such a number back to a
 canonical UTC `date-time` string. `$epoch` is the one place a value is
 shifted to UTC, which makes it the way to compare or subtract across
 offsets — as *strings*, `"…T14:00:00+02:00"` sorts after `"…T12:00:00Z"`
@@ -2090,7 +2092,10 @@ suite deliberately does not bundle**, and a JSON document cannot carry one, so
 `options.zoneProvider` — an object with `toParts(epoch, zone)` and
 `toEpoch(parts, zone, disambiguation)`. Without it the document is refused
 (`JQ0003`) naming the seam, rather than falling back to UTC and being right
-for eight months of the year.
+for eight months of the year. The kernel's spec spells the provider
+`zoneProvider` (with `provider`, its older alias, and `runtime`); a document
+spells none of the three — each is `JQ0003` as a spec member — and the host's
+`options.zoneProvider` is what reaches the kernel.
 
 `disambiguation` says what a local time that happens twice, or never, resolves
 to: `reject` (the default — it is an error), `earlier` or `later`.

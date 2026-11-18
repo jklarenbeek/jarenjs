@@ -73,7 +73,11 @@ export const SOLVE_LIMITS = /* @__PURE__ */ Object.freeze({
  * the scorings the search made whose verdict was `unknown` (a hard rule
  * could not decide) or that stopped at a limit. `local` and `auto`
  * also count the restarts made and the evaluator's rule evaluations
- * over one unit (`editWork`).
+ * over one unit (`editWork`). `construct`, `local` and `auto` count the
+ * evaluator answers (edits and previews) in which a rule was evaluated
+ * over every unit of its scope because it read outside its row
+ * (`fullFallbacks`, `EvaluatorCounts.fullFallbacks`; one per such rule
+ * per answer), so a host sees why each move cost a full re-evaluation.
  * @typedef {Object} SolveCounts
  * @property {number} nodes
  * @property {number} moves
@@ -82,6 +86,7 @@ export const SOLVE_LIMITS = /* @__PURE__ */ Object.freeze({
  * @property {number | null} space
  * @property {number} [restarts]
  * @property {number} [editWork]
+ * @property {number} [fullFallbacks]
  */
 
 /**
@@ -352,6 +357,7 @@ export function solve(problem, ruleSet, options) {
     bound = null;
   }
   if (searches) counts.editWork = evaluator.counts.evaluated;
+  if (searches || read.strategy === 'construct') counts.fullFallbacks = evaluator.counts.fullFallbacks;
   const score = scoreAssignment(index.problem, set, best.list, read.scoring);
   if (stableStringify(score) !== stableStringify(best.result))
     throw new AssignError('JN0026', 'a fresh scoring of the best list differs from the search\'s scoring of it: a rule reads state past its view', '/ruleSet');

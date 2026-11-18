@@ -12,6 +12,7 @@
 
 import { daysFromCivil, daysInMonth } from '../dates/civil.js';
 import { nearestName } from '../object.js';
+import { zoneProviderNeed, zoneProviderOf } from '../runtime.js';
 import { CalendarError } from './errors.js';
 
 /**
@@ -205,17 +206,46 @@ export function providerKnows(provider, zone) {
 }
 
 /**
- * Refuse a provider that lacks `member`.
+ * Refuse a provider that lacks `member`, in the wording every core layer
+ * admits a zone provider with (`zoneProviderNeed`).
  * @param {any} provider
  * @param {'candidates' | 'toParts'} member
  * @returns {any}
  */
 export function admitProvider(provider, member) {
-  if (provider === null || typeof provider !== 'object' || typeof provider[member] !== 'function') {
-    throw new CalendarError('JY0004', `the provider has no ${member}(${member === 'toParts' ? 'epoch' : 'parts'}, zone)`
+  const need = zoneProviderNeed(provider, [member]);
+  if (need !== null) {
+    throw new CalendarError('JY0004', `the call needs ${need}`
       + (member === 'candidates' ? '; classification never guesses through toEpoch' : ''), '/provider');
   }
   return provider;
+}
+
+/**
+ * How a calendar call's options name its zone provider (see {@link providerOf}).
+ * @typedef {Object} ZoneProviderOptions
+ * @property {import('../series/zone.js').ZoneProvider} [zoneProvider]
+ * @property {import('../series/zone.js').ZoneProvider} [provider] - the older spelling of `zoneProvider`
+ * @property {Partial<import('../runtime.js').Runtime>} [runtime] - its `zoneProvider` is read when the call names none
+ */
+
+/**
+ * The zone provider a calendar call's options name, read by the one rule
+ * every core layer shares (`zoneProviderOf` in the runtime module):
+ * `zoneProvider`, or `provider`, its older spelling, kept as an alias;
+ * when neither names one, the `runtime` record's `zoneProvider`. What
+ * the call needs of the provider is checked by the call
+ * ({@link admitProvider}), never here.
+ * @param {any} options - the call's options (anything but a record names no provider)
+ * @returns {any} the provider, or `undefined` (or the `null` given) when none is named
+ * @throws {CalendarError} `JY0014` at `/options/provider` for `zoneProvider` and `provider`
+ *   naming two providers
+ * @throws {TypeError} for a malformed `runtime`, as `createRuntime` does
+ */
+export function providerOf(options) {
+  return zoneProviderOf(options, (reason) => {
+    throw new CalendarError('JY0014', reason, '/options/provider');
+  });
 }
 
 /** @param {unknown} value @returns {boolean} */
@@ -329,8 +359,8 @@ export function classifyLocal(parts, zone, provider) {
  *
  * @param {LocalParts} parts - the civil date and time of day
  * @param {string} zone - a zone name the provider knows
- * @param {{ provider: import('../series/zone.js').ZoneProvider,
- *   policy: 'rfc5545' | 'later' | 'reject' }} options
+ * @param {{ policy: 'rfc5545' | 'later' | 'reject' } & ZoneProviderOptions} options - the provider is
+ *   `zoneProvider` (or `provider`), else `runtime.zoneProvider`
  * @returns {{ instant: number, resolution: Resolution }}
  * @throws {CalendarError} `JY0006` without a policy, `JY0005` for an
  *   unknown one, `JY0002` / `JY0003` for a gap / fold under `reject`, and
@@ -346,7 +376,7 @@ export function resolveLocal(parts, zone, options) {
   const policy = admitPolicy(options?.policy);
   const wall = admitParts(parts);
   const name = admitZoneName(zone);
-  const provider = admitProvider(options.provider, 'candidates');
+  const provider = admitProvider(providerOf(options), 'candidates');
   const identity = identityOf(provider);
   const found = classify(provider, wall, name);
   let instant;

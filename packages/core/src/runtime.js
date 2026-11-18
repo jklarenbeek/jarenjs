@@ -53,15 +53,70 @@ const DEFAULT_RUNTIME = Object.freeze({
   zoneProvider: null,
 });
 
+/** Each member of the zone seam, spelled as a call reads it. */
+const ZONE_SEAM = /* @__PURE__ */ Object.freeze({
+  toParts: 'toParts(epoch, zone)',
+  toEpoch: 'toEpoch(parts, zone, disambiguation)',
+  candidates: 'candidates(parts, zone)',
+});
+
 /**
- * Whether a value is the pair of functions the temporal kernel's clock
- * seam takes for a named zone.
- * @param {any} value
- * @returns {boolean}
+ * The one admission of a zone provider, shared by every core layer that
+ * takes one: what `provider` lacks of the members a call needs, in one
+ * wording per member, or `null` when it has them all. A layer refuses
+ * with its own error class (the runtime record and the series clock a
+ * `TypeError`, the calendar `JY0004`, the assignment day seam `JN0015`)
+ * and asks only for the members its call reads, so a provider is never
+ * refused for a member the call does not use. `identity` and any member
+ * beyond the three are carried, never checked here.
+ * @param {unknown} provider
+ * @param {readonly ('toParts' | 'toEpoch' | 'candidates')[]} members - what the call reads
+ * @returns {string | null} `a zone provider with <member>(…)`, naming the first member missing
+ * @example
+ * zoneProviderNeed({ toParts() {} }, ['toParts', 'candidates']);
+ * // 'a zone provider with candidates(parts, zone)'
  */
-function isZoneProvider(value) {
-  return value !== null && typeof value === 'object'
-    && typeof value.toParts === 'function' && typeof value.toEpoch === 'function';
+export function zoneProviderNeed(provider, members) {
+  for (const member of members) {
+    if (provider === null || typeof provider !== 'object'
+      || typeof (/** @type {any} */ (provider))[member] !== 'function')
+      return `a zone provider with ${ZONE_SEAM[member]}`;
+  }
+  return null;
+}
+
+/**
+ * The one rule by which every core layer reads the zone provider a
+ * call's options name: `zoneProvider` (the runtime record's own member)
+ * or `provider`, its older spelling, kept as an alias; when neither
+ * names one, the `runtime` record's `zoneProvider`. The call's own
+ * option wins over the record's member, as in every subsystem that takes
+ * `runtime`. Both spellings given and different are refused, never
+ * guessed between: `refuse` throws the layer's own refusal (the
+ * calendar's `JY0014`, the series clock's `TypeError`) with this reason.
+ * @param {any} options - a call's options; anything but an object names no provider
+ * @param {(reason: string) => never} refuse
+ * @returns {any} the provider, or `undefined` (or the `null` given) when none is named
+ * @throws {TypeError} for a malformed `runtime`, as {@link createRuntime} does
+ * @example
+ * zoneProviderOf({ runtime: createRuntime({ zoneProvider }) }, fail) === zoneProvider; // true
+ */
+export function zoneProviderOf(options, refuse) {
+  if (options === null || typeof options !== 'object')
+    return undefined;
+  const own = options.zoneProvider;
+  const alias = options.provider;
+  if (own !== undefined && alias !== undefined && own !== alias)
+    refuse('zoneProvider and provider, its older spelling, name two different providers');
+  const named = own !== undefined ? own : alias;
+  if (named !== undefined && named !== null)
+    return named;
+  if (options.runtime !== undefined) {
+    const held = resolveRuntime(options.runtime).zoneProvider;
+    if (held !== null)
+      return held;
+  }
+  return named;
 }
 
 /**
@@ -99,10 +154,11 @@ export function createRuntime(overrides = undefined) {
     if (value === undefined)
       continue;
     if (key === 'zoneProvider') {
-      if (value !== null && !isZoneProvider(value)) {
-        throw new TypeError('runtime.zoneProvider is null or a provider with'
-          + ' toParts(epoch, zone) and toEpoch(parts, zone, disambiguation)');
-      }
+      // the record's readers (a store's query compilation, the series
+      // clock) read toEpoch; a calendar call asks for candidates itself
+      const need = value === null ? null : zoneProviderNeed(value, ['toParts', 'toEpoch']);
+      if (need !== null)
+        throw new TypeError(`runtime.zoneProvider is null or ${need}`);
     }
     else if (typeof value !== 'function') {
       throw new TypeError(`runtime.${key} is a function`);

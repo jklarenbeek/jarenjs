@@ -34,6 +34,7 @@
 
 import { partsFromEpoch } from '../dates/civil.js';
 import { epochOfRFC3339Parts } from '../dates/rfc3339.js';
+import { zoneProviderNeed, zoneProviderOf } from '../runtime.js';
 
 /**
  * A wall clock the caller supplies, for zones this suite does not carry.
@@ -77,11 +78,14 @@ import { epochOfRFC3339Parts } from '../dates/rfc3339.js';
 const DISAMBIGUATION = Object.freeze(['reject', 'earlier', 'later']);
 
 /**
- * The four members every calendar-aware specification carries, so
- * a bucket ladder, a rolling window and a query document all spell
- * the clock the same way.
+ * The members every calendar-aware specification carries, so a bucket
+ * ladder, a rolling window and a query document all spell the clock the
+ * same way. `zoneProvider` is the provider's spelling in every core
+ * layer, `provider` its older alias, and `runtime` a runtime record
+ * whose `zoneProvider` is read when neither is given; a query document
+ * spells none of the three (they are functions and records, not JSON).
  */
-export const CLOCK_MEMBERS = Object.freeze(['zone', 'offset', 'provider', 'disambiguation']);
+export const CLOCK_MEMBERS = Object.freeze(['zone', 'offset', 'zoneProvider', 'provider', 'runtime', 'disambiguation']);
 
 /**
  * The clock an operation reads its calendar boundaries on.
@@ -96,17 +100,21 @@ export const CLOCK_MEMBERS = Object.freeze(['zone', 'offset', 'provider', 'disam
  * @param {Object} [options]
  * @param {string} [options.zone] - an IANA name; `'UTC'` needs no provider
  * @param {number} [options.offset] - minutes east of UTC, for a fixed offset
- * @param {ZoneProvider} [options.provider] - the tzdb, for a named zone
+ * @param {ZoneProvider} [options.zoneProvider] - the tzdb, for a named zone
+ * @param {ZoneProvider} [options.provider] - the older spelling of `zoneProvider`, kept as an alias
+ * @param {Partial<import('../runtime.js').Runtime>} [options.runtime] - a runtime record, whose
+ *   `zoneProvider` is read when neither spelling is given
  * @param {'reject' | 'earlier' | 'later'} [options.disambiguation]
  *   what a local time that happens twice, or never, resolves to
  *   (default `'reject'`)
  * @returns {Clock}
  * @throws {TypeError} for a named zone with no provider, a non-finite
- *   offset, an unknown disambiguation, or both a zone and an offset
+ *   offset, an unknown disambiguation, both a zone and an offset, or
+ *   `zoneProvider` and `provider` naming two different providers
  * @example
  * resolveClock();                        // UTC
  * resolveClock({ offset: 330 });         // +05:30, constant
- * resolveClock({ zone: 'Europe/Amsterdam', provider, disambiguation: 'later' });
+ * resolveClock({ zone: 'Europe/Amsterdam', zoneProvider, disambiguation: 'later' });
  */
 export function resolveClock(options = {}) {
   if (options === null || typeof options !== 'object')
@@ -116,11 +124,14 @@ export function resolveClock(options = {}) {
     throw new TypeError(`disambiguation is ${
       DISAMBIGUATION.map((d) => `'${d}'`).join(', ')}, not '${disambiguation}'`);
   }
+  const provider = zoneProviderOf(options, (reason) => {
+    throw new TypeError(`a clock's ${reason}`);
+  });
   const named = options.zone !== undefined && options.zone !== 'UTC';
   if (named && options.offset !== undefined)
     throw new TypeError(`a clock is a zone or an offset, not both ('${options.zone}' and ${options.offset})`);
   if (named)
-    return providerClock(/** @type {string} */(options.zone), options.provider, disambiguation);
+    return providerClock(/** @type {string} */(options.zone), provider, disambiguation);
   const offset = options.offset ?? 0;
   if (typeof offset !== 'number' || !Number.isFinite(offset))
     throw new TypeError('an offset is a finite number of minutes east of UTC');
@@ -156,11 +167,9 @@ function offsetClock(offset) {
  * @returns {Clock}
  */
 function providerClock(zone, provider, disambiguation) {
-  if (provider === null || typeof provider !== 'object'
-    || typeof provider.toParts !== 'function' || typeof provider.toEpoch !== 'function') {
-    throw new TypeError(`the zone '${zone}' needs a provider with toParts(epoch, zone) and`
-      + ' toEpoch(parts, zone, disambiguation); this suite bundles no time-zone database');
-  }
+  const need = zoneProviderNeed(provider, ['toParts', 'toEpoch']);
+  if (need !== null)
+    throw new TypeError(`the zone '${zone}' needs ${need}; this suite bundles no time-zone database`);
   return {
     zone,
     partsAt: (epoch) => {

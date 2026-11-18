@@ -14,7 +14,7 @@
 
 import { bindFloating, splitByCivilDay } from '../calendar/bind.js';
 import { dateValue } from '../calendar/model.js';
-import { admitPolicy, admitProvider, identityOf } from '../calendar/resolve.js';
+import { admitPolicy, admitProvider, identityOf, providerOf } from '../calendar/resolve.js';
 import { AssignError } from './errors.js';
 import { isRecord, pointer } from './model.js';
 import { DAY_SEAMS } from './seam.js';
@@ -29,7 +29,7 @@ import { DAY_SEAMS } from './seam.js';
  * @property {{ readonly name: string, readonly revision: string }} provider - the provider's identity, or `unrecorded`
  */
 
-const MEMBERS = /* @__PURE__ */ Object.freeze(['zoneProvider', 'policy']);
+const MEMBERS = /* @__PURE__ */ Object.freeze(['zoneProvider', 'runtime', 'policy']);
 /** How many civil days one task may span: the calendar's own default, passed so the two cannot drift. */
 const MAX_DAYS = 36600;
 
@@ -57,7 +57,10 @@ function optionOf(admit, path) {
  * scoring). The provider's `identity` (`{ name, revision }`, else
  * `unrecorded`) and the policy go into every result's provenance, so a
  * result says which zone data told its days.
- * @param {{ zoneProvider: object, policy: DayPolicy }} options
+ * The provider is `zoneProvider`, or, when it is not given, the
+ * `runtime` record's `zoneProvider`, so a runtime record a host built is
+ * handed on unchanged.
+ * @param {{ zoneProvider?: object, runtime?: Partial<import('../runtime.js').Runtime>, policy: DayPolicy }} options
  * @returns {Readonly<CivilDays>}
  * @throws {AssignError} JN0015 for an unknown option, a missing or malformed
  *   provider or identity, or a policy that is not one of the three (the
@@ -68,12 +71,15 @@ function optionOf(admit, path) {
  * scoreAssignment(problem, ruleSet, assignments, { days });
  */
 export function civilDays(options) {
-  if (!isRecord(options)) throw new AssignError('JN0015', 'civilDays takes { zoneProvider, policy }', '/options');
+  if (!isRecord(options)) throw new AssignError('JN0015', 'civilDays takes { zoneProvider or runtime, policy }', '/options');
   for (const key of Object.keys(options))
     if (!MEMBERS.includes(key)) throw new AssignError('JN0015', `${key} is not a civilDays option`, `/options/${pointer(key)}`);
   const policy = /** @type {DayPolicy} */ (optionOf(() => admitPolicy(options.policy), '/options/policy'));
-  const provider = optionOf(() => admitProvider(admitProvider(options.zoneProvider, 'candidates'), 'toParts'), '/options/zoneProvider');
-  const own = optionOf(() => identityOf(provider), '/options/zoneProvider/identity');
+  // the call's own zoneProvider wins over the runtime record's, as the calendar reads them
+  const fromRuntime = (options.zoneProvider === undefined || options.zoneProvider === null) && options.runtime !== undefined;
+  const at = fromRuntime ? '/options/runtime' : '/options/zoneProvider';
+  const provider = optionOf(() => admitProvider(admitProvider(providerOf(options), 'candidates'), 'toParts'), at);
+  const own = optionOf(() => identityOf(provider), `${at}${fromRuntime ? '/zoneProvider' : ''}/identity`);
   // the identity is provenance: only its two members, in one key order, whatever the host's object holds
   const identity = Object.freeze({ name: own.name, revision: own.revision });
   const context = { zone: '', provider, policy };

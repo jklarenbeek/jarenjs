@@ -20,7 +20,7 @@
 import { civilFromDays, daysFromCivil, daysInMonth } from '../dates/civil.js';
 import { CalendarError } from './errors.js';
 import { assertZone } from './zones.js';
-import { admitZoneName } from './resolve.js';
+import { admitZoneName, providerOf } from './resolve.js';
 
 const DAY = 86400000;
 /** The first and last civil day a value may name: 0000-01-01 and 9999-12-31. */
@@ -345,7 +345,7 @@ export function utcValue(instant) {
  * @param {string} date - `YYYY-MM-DD`
  * @param {string} time - `HH:MM[:SS[.fff]]`; `24:00` only with `{ bound: 'end' }`
  * @param {string} zone - a zone name, never an offset spelled into `time`
- * @param {BoundOption & { provider?: import('../series/zone.js').ZoneProvider }} [options]
+ * @param {BoundOption & import('./resolve.js').ZoneProviderOptions} [options]
  * @returns {ZonedValue}
  * @throws {CalendarError} `JY0001` for an empty zone or one the provider
  *   does not know, and what {@link floatingValue} throws
@@ -353,7 +353,7 @@ export function utcValue(instant) {
  * zonedValue('2026-10-25', '02:30', 'Europe/Amsterdam'); // an appointment in the repeated hour
  */
 export function zonedValue(date, time, zone, options = undefined) {
-  return /** @type {ZonedValue} */ (admitValue({ kind: 'zoned', date, time, zone }, admitBound(options), '', options?.provider).value);
+  return /** @type {ZonedValue} */ (admitValue({ kind: 'zoned', date, time, zone }, admitBound(options), '', providerOf(options)).value);
 }
 
 /**
@@ -381,7 +381,7 @@ export function dateRangeValue(start, endInclusive) {
  * checked exactly as the constructor of its kind checks it, with no
  * member beyond the kind's own. The answer is a new frozen value.
  * @param {unknown} json
- * @param {BoundOption & { provider?: import('../series/zone.js').ZoneProvider }} [options]
+ * @param {BoundOption & import('./resolve.js').ZoneProviderOptions} [options]
  * @returns {TemporalValue}
  * @throws {CalendarError} `JY0013` for text that is not JSON, an unknown
  *   kind, a missing or extra member, a date range that does not end after
@@ -400,6 +400,6 @@ export function parseTemporal(json, options = undefined) {
       throw new CalendarError('JY0013', 'the text is not JSON', '/', error);
     }
   }
-  return admitValue(input, bound, '', options?.provider).value;
+  return admitValue(input, bound, '', providerOf(options)).value;
 }
 //#endregion

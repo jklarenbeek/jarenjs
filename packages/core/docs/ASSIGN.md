@@ -401,6 +401,8 @@ Past a limit the result is typed incomplete:
 
 It has no score, no matches and no unknowns: a partial total is never answered. A rule that catches the stop and returns normally is still stopped. `unit` is the unit being evaluated, or `null` when the `missing-fact` unknowns of a rule that never ran (§2) were the work that passed `maxWork`.
 
+This is the one shape of a bounded answer across `@jarenjs/core`: every bounded answer of `@jarenjs/core/calendar` (a recurrence or series expansion, an availability evaluation and each of its layers, a slot search, a compiled zone) also carries `complete` and, when it is false, `stoppedAt: { limit }` (an evaluation's adds the `layer` that stopped), beside its older `status` and `limit` ([CALENDAR.md](CALENDAR.md)).
+
 ## 6. Explanations
 
 `explain(result, { group })` groups a complete result's matches and unknowns for a report. Each group carries the exact score of its matches. Groups are sorted by key, and within a group entries keep the result's order.
@@ -729,7 +731,7 @@ The answer is frozen JSON:
 - `score` is `scoreAssignment(problem, ruleSet, best, { limits, days })`, made again after the search. The search's own scoring of `best` must be the same bytes; when it is not, a rule read state past its view, and the solve is refused (`JN0026`).
 - `bound`, when present, is a score no candidate of the space can beat.
 - `churn`, for `local` and `auto` on a problem with a `baseline`, is how `best` differs from the baseline (below). Without a baseline it is absent, not zero. It is never part of `score`.
-- `counts` is `{ nodes, moves, ranked, undecided, space }`, defined under the strategies below; `local` and `auto` add `restarts` and `editWork`.
+- `counts` is `{ nodes, moves, ranked, undecided, space }`, defined under the strategies below; `local` and `auto` add `restarts` and `editWork`. `construct`, `local` and `auto` add `fullFallbacks`, the evaluator's count (§8): one for each rule that read outside its row, in each edit or preview the search asked for, so a host sees why its moves cost full re-evaluations. A search whose rules keep to their rows counts `0`.
 - `provenance` is the scoring provenance of the problem as given (§3), which carries the baseline's revision, with the strategy that ran as `algorithm`, and `budgets`, `limits`, `rank` (whether a hook ordered the candidates) and `seed` (null for none). For `local` and `auto` it also names the `strategy` asked for, and `budgets` holds all four budgets.
 
 A proposal never commits itself. Nothing is written, and the host rechecks revisions and authority before it applies `best`.
@@ -809,7 +811,8 @@ export const proposals = {
       "moves": 4,
       "ranked": 0,
       "undecided": 0,
-      "space": null
+      "space": null,
+      "fullFallbacks": 0
     }
   }
 }

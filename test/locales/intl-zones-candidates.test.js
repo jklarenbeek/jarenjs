@@ -48,13 +48,19 @@ describe('candidates(parts, zone)', () => {
   it('parts that are not a civil wall clock are refused, never answered as a gap', () => {
     // each reads back as another wall clock, exactly as a gap does; the day
     // before the change is chosen so the probes do see two offsets
-    for (const parts of [wall(2026, 3, 28, 9, 0, 5.9996), wall(2026, 3, 28, 25), wall(2026, 2, 30, 9),
-      wall(2026, 3, 28, 9, 60), wall(2026, 7, 1, 9, 0, 5.9996)]) {
+    for (const parts of [wall(2026, 3, 28, 25), wall(2026, 2, 30, 9), wall(2026, 3, 28, 9, 60)]) {
       assert.throws(() => provider.candidates?.(parts, 'Europe/Amsterdam'), /not a civil date and time of day/,
         JSON.stringify(parts));
     }
-    // toEpoch is unchanged: the rounded fraction is still NaN there
-    assert.ok(Number.isNaN(provider.toEpoch(wall(2026, 7, 1, 9, 0, 5.9996), 'Europe/Amsterdam', 'later')));
+  });
+
+  it('a fraction finer than a millisecond is cut, so it is the wall clock it is in, never the next second', () => {
+    for (const parts of [wall(2026, 3, 28, 9, 0, 5.9996), wall(2026, 7, 1, 9, 0, 5.9996)]) {
+      const cut = { ...parts, seconds: 5.999 };
+      assert.deepStrictEqual(provider.candidates?.(parts, 'Europe/Amsterdam'), provider.candidates?.(cut, 'Europe/Amsterdam'));
+      assert.strictEqual(provider.toEpoch(parts, 'Europe/Amsterdam', 'later'), provider.toEpoch(cut, 'Europe/Amsterdam', 'later'));
+    }
+    assert.strictEqual(provider.toEpoch(wall(2026, 7, 1, 9, 0, 5.9996), 'Europe/Amsterdam', 'reject'), Date.parse('2026-07-01T07:00:05.999Z'));
   });
 
   it('absent or negative time members read as midnight, as toEpoch reads them', () => {

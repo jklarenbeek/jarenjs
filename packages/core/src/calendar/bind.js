@@ -20,7 +20,7 @@
 import { civilFromDays, daysFromCivil } from '../dates/civil.js';
 import { CalendarError } from './errors.js';
 import { admitBound, admitValue, formatDate, utcValue } from './model.js';
-import { admitPolicy, admitProvider, admitZoneName, classifyLocal, identityOf, providerKnows, resolveLocal } from './resolve.js';
+import { admitPolicy, admitProvider, admitZoneName, classifyLocal, identityOf, providerKnows, providerOf, resolveLocal } from './resolve.js';
 
 const MINUTE = 60000;
 const DAY = 86400000;
@@ -80,7 +80,9 @@ const DEFAULT_MAX_DAYS = 36600;
  * @typedef {Object} BindOptions
  * @property {string | null} [zone]
  * @property {string} [source]
- * @property {import('../series/zone.js').ZoneProvider} [provider]
+ * @property {import('../series/zone.js').ZoneProvider} [zoneProvider]
+ * @property {import('../series/zone.js').ZoneProvider} [provider] - the older spelling of `zoneProvider`
+ * @property {Partial<import('../runtime.js').Runtime>} [runtime] - its `zoneProvider` is read when no provider is named
  * @property {'rfc5545' | 'later' | 'reject'} [policy]
  * @property {'start' | 'end'} [bound]
  */
@@ -104,7 +106,7 @@ function admitSource(source) {
  */
 function admitResolver(options) {
   const policy = admitPolicy(options?.policy);
-  const provider = admitProvider(admitProvider(options?.provider, 'candidates'), 'toParts');
+  const provider = admitProvider(admitProvider(providerOf(options), 'candidates'), 'toParts');
   return { policy, provider, identity: identityOf(provider) };
 }
 
@@ -347,8 +349,8 @@ export function shiftCivil(value, shift, options = undefined) {
  * for where a day starts.
  * @param {{ start: number, end: number }} interval - epoch milliseconds,
  *   `start` inclusive and `end` exclusive
- * @param {{ zone: string, provider: import('../series/zone.js').ZoneProvider,
- *   policy: 'rfc5545' | 'later' | 'reject', maxDays?: number }} options -
+ * @param {{ zone: string, policy: 'rfc5545' | 'later' | 'reject', maxDays?: number }
+ *   & import('./resolve.js').ZoneProviderOptions} options -
  *   `maxDays` (default 36600) bounds how many civil days are walked
  * @returns {ReadonlyArray<CivilDayPiece>}
  * @throws {CalendarError} `JY0014` for an interval that is not two whole
