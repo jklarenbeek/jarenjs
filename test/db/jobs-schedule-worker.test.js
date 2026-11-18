@@ -6,7 +6,8 @@
  * occurrences, and each test body runs on SQLite and, where JAREN_PG_URL
  * names a server, on PostgreSQL, answering the same occurrence ids. The
  * statement trace proves an idle worker over a store with no schedule
- * table issues what a worker without the option does.
+ * table issues what a worker without the option does, but for one
+ * presence probe every 16 loop passes.
  */
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -222,7 +223,7 @@ for (const engine of /** @type {const} */ (['sqlite', 'postgres'])) {
       });
     });
 
-    it('an idle poll runs the same statements with the option as without it while no schedule exists', async () => {
+    it('an idle poll runs the same statements with the option as without it, but for a probe every 16 passes, while no schedule exists', async () => {
       await withDatabase(engine, async (open) => {
         const { options } = scenarioClock();
         /** @type {string[]} */
@@ -247,25 +248,34 @@ for (const engine of /** @type {const} */ (['sqlite', 'postgres'])) {
           return { first, steady: ran.splice(0), stats: worker.stats() };
         };
         const plain = await idle({});
-        const ticking = await idle({ tick: true });
+        const ticking = await idle({ tick: true }, 40);
         const distinct = (/** @type {string[]} */ list) => [...new Set(list)].sort();
-        assert.deepEqual(distinct(ticking.steady), distinct(plain.steady));
-        assert.ok(plain.steady.length > 0);
-        // one presence probe at the start (on PostgreSQL inside a cursor of its own), and none after it
         const probe = (/** @type {string} */ sql) => /_jaren_job_schedules/.test(sql);
+        // what the ticking polls ran beyond a plain poll's statements is the probes alone: on PostgreSQL each
+        // reads its catalog rows through a cursor of its own, in a transaction of its own
+        const control = (/** @type {string} */ sql) => /^(?:BEGIN|COMMIT|FETCH FORWARD \d+ FROM "jaren_c\d+"|CLOSE "jaren_c\d+")$/.test(sql);
+        const extra = ticking.steady.filter((sql) => !plain.steady.includes(sql));
+        assert.deepEqual(extra.filter((sql) => !probe(sql) && !control(sql)), []);
+        assert.ok(extra.filter((sql) => sql === 'BEGIN').length <= ticking.steady.filter(probe).length);
+        assert.deepEqual(distinct(ticking.steady.filter((sql) => !probe(sql) && !control(sql))), distinct(plain.steady));
+        assert.ok(plain.steady.length > 0);
         assert.equal(plain.first.filter(probe).length + plain.steady.filter(probe).length, 0);
+        // one presence probe at the first poll (on PostgreSQL inside a cursor of its own), and one every
+        // 16th poll after it: each loop pass ticks once, and the passes are the polls and the one in flight
         assert.equal(ticking.first.filter(probe).length, 1, String(ticking.first.filter(probe)));
-        assert.equal(ticking.steady.filter(probe).length, 0);
+        const probes = ticking.first.filter(probe).length + ticking.steady.filter(probe).length;
+        assert.equal(probes, Math.floor(ticking.stats.polls / 16) + 1, `${probes} probes over ${ticking.stats.polls} polls`);
+        assert.ok(probes >= 3);
         assert.equal(ticking.stats.ticks, 0);
-        // a second start probes once again
+        // a second start probes at its first poll again
         const again = await idle({ tick: true }, 2);
         assert.equal(again.first.filter(probe).length, 1);
         assert.equal(again.steady.filter(probe).length, 0);
-        same('idle statement counts', [plain.steady.length > 0, ticking.first.filter(probe).length]);
+        same('idle statement counts', [plain.steady.length > 0, ticking.first.filter(probe).length, probes >= 3]);
       });
     });
 
-    it('starts ticking when its own store writes the first schedule; another store\'s first schedule reaches it at its next start', async () => {
+    it('starts ticking when its own store writes the first schedule; another store\'s first schedule reaches it within 16 polls', async () => {
       await withDatabase(engine, async (open) => {
         const { clock, options } = scenarioClock();
         const own = await open(options());
@@ -277,23 +287,18 @@ for (const engine of /** @type {const} */ (['sqlite', 'postgres'])) {
         try {
           await until(() => ownWorker.stats().polls >= 2 && otherWorker.stats().polls >= 2, 'both probes');
           // the first schedule is written through `own`: its worker ticks at once
+          const from = otherWorker.stats().polls;
           await own.jobs.schedule({ id: 'daily', kind: 'digest', series: daily, zone: ZONE, missed: 'skip' });
           clock.at = nineOn(21) + HOUR;
           await until(async () => (await own.jobs.counts()).done === 1, 'the first occurrence');
           assert.deepEqual([...mine.ran, ...theirs.ran], ['daily@2026-03-21T09:00:00']);
           assert.ok(ownWorker.stats().ticks > 0);
-          // `other` started before the table existed and has not ticked
-          assert.equal(otherWorker.stats().ticks, 0);
           await ownWorker.stop();
+          // `other` started before the table existed: a probe within 16 of its polls finds it, and it ticks
           clock.at = nineOn(22) + HOUR;
-          await new Promise((resolve) => setTimeout(resolve, 40));
-          assert.equal((await own.jobs.counts()).pending ?? 0, 0);
-          assert.equal(otherWorker.stats().ticks, 0);
-          // its next start probes again, finds the table, and ticks
-          await otherWorker.stop();
-          otherWorker.start();
+          await until(() => otherWorker.stats().ticks > 0, 'the other worker\'s first tick');
+          assert.ok(otherWorker.stats().polls - from <= 17, `found after ${otherWorker.stats().polls - from} polls`);
           await until(async () => (await other.jobs.counts()).done === 2, 'the second occurrence');
-          assert.ok(otherWorker.stats().ticks > 0);
           // either worker may claim what a tick fired: the queue is one
           assert.deepEqual([...mine.ran, ...theirs.ran].sort(), ['daily@2026-03-21T09:00:00', 'daily@2026-03-22T09:00:00']);
           assert.ok(theirs.ran.includes('daily@2026-03-22T09:00:00'));

@@ -317,12 +317,16 @@ a third of its lease, and at most every 2^31 − 1 milliseconds:
   once. It needs `jobs.schedules` (`JD0016` at `createWorker` otherwise);
   anything but `true`, `false` or `{ limit }` is a `TypeError`, and another
   member `JD0013`. One tick runs at a time per worker, shared by its loops.
-  While the schedule table does not exist, each `start()` asks once
-  whether it does — then an idle poll runs exactly the statements it runs
-  without `tick`; this store's own `schedule()`, `schedules()` or `tick()`
-  finding the table starts the ticking at once, and a table another
-  process creates later is found at the worker's next `start()`. Once the
-  table exists, every poll pays one tick transaction (the due-row read)
+  While the schedule table does not exist, the worker asks whether it does
+  at its first loop pass (a tick before a claim) and again every 16th —
+  one statement per 16 passes, and between them an idle poll runs exactly
+  the statements it runs without `tick` (an idle claim answers no row, so
+  it cannot carry the answer). This store's own `schedule()`,
+  `schedules()` or `tick()` finding the table starts the ticking at once,
+  and a table another process creates is found within 16 passes, without
+  a restart: an idle worker passes once per `pollInterval` (8 s at the
+  default 500 ms), a busy one once per claim.
+  Once the table exists, every poll pays one tick transaction (the due-row read)
   before its claim. A tick that fails — a zone without the runtime's
   provider (`JD0016`), a busy database — is counted in `stats().tickErrors`
   (`stats().ticks` counts the ones that ran) and never stops the claim;
@@ -581,7 +585,7 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
   idempotent outbox relay and durable receipts; they share no atomic transaction.
 - No priority classes in 0.1 (`run_at` ordering only), no cron
   expressions (recurring schedules are RFC 5545 rules from
-  `@jarenjs/core/calendar`, §11, DAILY, WEEKLY, MONTHLY and YEARLY today), no timer of
+  `@jarenjs/core/calendar`, §11, of every frequency it enumerates), no timer of
   the queue's own that fires them (a host calls `tick()`), no
   workflow-level compensation or sagas, no cross-process
   push — wake-on-write is same-process; everything else polls. A
@@ -716,10 +720,10 @@ store.jobs.createWorker({ handlers: { report: async () => {} }, tick: true }).st
   validates and computes the definition before anything is stored, and
   answers the stored record:
   - `series` is a compiled recurrence (`compileRecurrence`) or a series
-    (`defineSeries`), as values or as their JSON. A rule the calendar
-    refuses refuses here with the calendar's code: a valid frequency it
-    does not enumerate (SECONDLY, MINUTELY, HOURLY) is `JY0020`, at schedule time and
-    never at a fire.
+    (`defineSeries`), as values or as their JSON, of any frequency the
+    calendar enumerates, SECONDLY through YEARLY (sub-daily rules below).
+    A rule the calendar refuses refuses here with the calendar's code, at
+    schedule time and never at a fire.
   - A date or floating series is bound in `zone`, checked against the
     provider now (an unknown zone is `JY0001`; a zone with no provider is
     `JY0004`). Without a zone the schedule is `unresolved` and never
@@ -778,6 +782,35 @@ and `counts: { fired, skipped }`, `lastRunAt`, `lastRecurrenceId`, and
 `providerRevision` (the zone provider's revision the instants were
 computed under).
 
+**Sub-daily rules.** A SECONDLY, MINUTELY or HOURLY schedule is fired by
+the same tick as any other; nothing refuses a rule finer than the
+host's cadence. A tick fires what was due since the last one, so a rule
+due every second ticked every 500 ms fires each occurrence, and ticked
+every minute sees sixty due ones: `missed` and `latenessMs` decide which
+fire, exactly as after downtime. Each search for a schedule's next
+occurrence looks 64 of the rule's periods past the tick first (64
+seconds for SECONDLY), widening eightfold until one is found, before the
+day windows every rule uses, so a tick resolves the occurrences it
+passes and a few past it, not days of them. A search's work is bounded
+by the calendar's limits (`limits`, default `maxOccurrences` 10000), and
+the occurrences since the last tick count against them: a day without
+ticks is 86400 due occurrences of a SECONDLY rule, which fire as
+`missed` says only under limits that cover them (`{ maxOccurrences:
+100000 }`). Under smaller ones the search stops, and the tick fires what
+the policy keeps of the prefix it proved — under `'skip'` its latest,
+though later ones may be due, so a `latenessMs` is what keeps a stale
+prefix from firing — counts the rest as skipped, and leaves the schedule
+`stalled` with the limit and counts; writing it again resumes after the
+prefix. A floating or date series is expanded from two civil days
+before the span (up to three days of wall clock) and bound occurrence by
+occurrence, so a floating SECONDLY schedule stalls `maxOccurrences` under
+the default limits, and under limits raised past those days of seconds
+binds each of them every tick. A zoned sub-daily walk under a provider
+without `offsetChanges` (the Intl one) resolves each wall-clock time of
+the day before its horizon (CALENDAR.md), so a zoned SECONDLY schedule
+spends about 86400 provider calls a tick, within the default
+`maxProviderCalls`. A utc series costs neither.
+
 All zone, recurrence and missed-occurrence arithmetic runs in
 JavaScript through the runtime's provider and clock; SQL stores and
 compares only epoch milliseconds (the queue's number type: NUMERIC on
@@ -790,6 +823,116 @@ keeps exactly the queue tables it had, and an adopted store (`adopt:
 true`) without the table refuses `schedule()` `JD0002`. Every schedule
 call is root-only, like administration: a transaction view's `jobs` has
 none, and without `jobs.schedules` each refuses `JD0016`.
+
+## 12. Long computations
+
+A computation that outlives a lease, a deploy or a process runs as a job
+that saves its incumbent as it goes: each attempt reads the checkpoint
+its predecessors wrote (§5), works in bounded slices, saves after each
+one, and gives the event loop a turn between them, where the handler's
+`signal` (§6) and the worker's lease renewal land. The assignment
+engine's `solve` (`@jarenjs/core/assign`, [ASSIGN.md
+§9](../../core/docs/ASSIGN.md#9-search)) is the worked case: it is
+synchronous and storage-free, so a call cannot be interrupted, but a
+`local` search started from a list continues from it. A slice is one
+`solve` with a `maxMoves` budget; the job carries the problem, which is
+data, and the handler holds the rules, which are code.
+
+```js
+import { openStore } from '@jarenjs/db';
+import { nodeDriver } from '@jarenjs/db/node';
+import { solve, registerRules } from '@jarenjs/core/assign';
+
+const resources = ['ana', 'ben', 'cy', 'dee', 'eli', 'fay'].map((id) => ({ id, revision: 1 }));
+const tasks = Array.from({ length: 10 }, (_, i) => ({ id: `t${i}`, revision: 1,
+  interval: { start: i * 240, end: i * 240 + 300 }, demands: [{ slot: 'crew', count: 1 + (i % 2) }] }));
+const problem = { revision: 'week-12', resources, tasks, assignments: [] };
+const rules = registerRules([
+  // each place a task leaves open
+  { id: 'covered', version: 1, level: 'service', scope: 'task', evaluate(view, unit) {
+    const open = view.task(unit.id).demands.reduce((sum, demand) => sum + demand.count, 0) - view.assignmentsFor(unit.id).length;
+    return open > 0 ? { matches: [{ magnitude: open, messageId: 'open', subjects: { tasks: [unit.id] } }] } : {};
+  } },
+  // two tasks of one resource that overlap
+  { id: 'overlap', version: 1, level: 'hard', scope: 'resource', evaluate(view, unit) {
+    const mine = view.assignmentsOf(unit.id).map((a) => view.task(a.task).interval).sort((a, b) => a.start - b.start);
+    const clashes = mine.filter((interval, i) => i > 0 && interval.start < mine[i - 1].end).length;
+    return clashes > 0 ? { matches: [{ magnitude: clashes, messageId: 'overlap', subjects: { resources: [unit.id] } }] } : {};
+  } },
+  // more than two tasks for one resource, squared
+  { id: 'fair', version: 1, level: 'soft', scope: 'resource', evaluate(view, unit) {
+    const over = view.assignmentsOf(unit.id).length - 2;
+    return over > 0 ? { matches: [{ magnitude: over * over, messageId: 'load', subjects: { resources: [unit.id] } }] } : {};
+  } },
+]);
+
+/**
+ * A job handler that solves in slices and resumes from the last one saved.
+ * @param {import('@jarenjs/core/assign').RuleSet} rules
+ * @returns {(payload: any, context: any) => Promise<unknown>}
+ */
+function solveInSlices(rules) {
+  return async ({ problem, seed, maxMoves, limits }, { job, signal, checkpoints }) => {
+    const saved = /** @type {any} */ (await checkpoints.load(job.id));
+    let state = saved?.values.incumbent ?? { maxMoves, assignments: problem.assignments };
+    for (;;) {
+      signal.throwIfAborted();
+      const answer = solve({ ...problem, assignments: state.assignments }, rules,
+        { strategy: 'local', seed, limits, budgets: { maxMoves: state.maxMoves }, signal });
+      // a slice the signal cut is not saved: the next attempt repeats it whole
+      signal.throwIfAborted();
+      if (answer.status !== 'limit') return answer;
+      // a slice that moved nothing gets twice the budget, so a whole sweep fits at last
+      const moved = JSON.stringify(answer.best) !== JSON.stringify(state.assignments);
+      state = { maxMoves: moved ? state.maxMoves : 2 * state.maxMoves, assignments: answer.best };
+      await checkpoints.save(job.id, 'incumbent', state);
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  };
+}
+
+const store = await openStore({ $model: '0.1', collections: { rosters: { key: '/id', schema: { type: 'object' } } } },
+  { driver: nodeDriver(), jobs: true });
+const id = await store.jobs.enqueue('solve', { problem, seed: 7, maxMoves: 40 });
+const settled = new Promise((resolve) => {
+  store.jobs.createWorker({ handlers: { solve: solveInSlices(rules) }, onOutcome: resolve }).start();
+});
+await settled;
+const { result } = await store.jobs.get(id);
+const { hard, service, soft } = result.score.score;
+const solved = { status: result.status, hard, service, soft };
+await store.close();
+// → { status: 'feasible', hard: 0, service: 0, soft: -3 }
+```
+
+What makes a resumed run answer what an uninterrupted one does:
+
+- **Each slice is a function of the checkpoint alone.** The incumbent
+  and the slice's budget are all a slice reads beside the job's payload,
+  and the `seed` is the payload's, so the slices after a resume are the
+  ones the uninterrupted run made, and the final answer is the same
+  bytes. Nothing reads a clock: budgets count work (ASSIGN.md, Budgets
+  and the signal).
+- **A slice the signal cut is thrown away.** `solve` reads `signal`
+  before each move and answers `limit` with `cancelled: true` where it
+  stopped, which depends on when the abort came; the handler throws
+  instead of saving it, the attempt fails (retried with backoff, §4) or
+  its lease lapses (§5), and the next attempt repeats the slice from the
+  same incumbent.
+- **The checkpoint follows the lease.** `save` is fenced like any
+  settling call (§3), so a superseded attempt writes nothing; `load` reads
+  what attempts up to this one saved, one row per node id, the last save
+  kept. The job's `maxAttempts` bounds how many times it starts again.
+- **`limits` are the scoring's** (ASSIGN.md §5) and travel in the
+  payload with the seed and the slice budget. Only `maxMoves` bounds a
+  slice here: the doubling assumes it is what stopped one.
+- **A slice holds the event loop.** `solve` is synchronous, so the lease
+  is renewed only between slices: a slice, its budget doubled, must end
+  well inside `leaseMs` (§5), or a second worker reclaims the job and the
+  first one's next save is refused.
+
+A finished job keeps its result in the queue row (`get`); its checkpoint
+rows stay until `sweep` (§10) removes them with the job.
 
 ## Business receipt and external-effect composition
 

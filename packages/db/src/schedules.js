@@ -40,6 +40,30 @@ const POLICIES = Object.freeze(['rfc5545', 'later', 'reject']);
 const DAY = 86400000;
 /** The horizons a search for the next occurrence widens through, in days; the last is the limit's whole horizon. */
 const WINDOWS = Object.freeze([8, 64, 512, 4096]);
+/** A sub-daily rule's period, in milliseconds per unit of its INTERVAL. */
+const PERIODS = Object.freeze({ SECONDLY: 1000, MINUTELY: 60000, HOURLY: 3600000 });
+/**
+ * The periods a sub-daily rule's search looks past the tick first, each
+ * window eight times the last, before the day windows: a rule due every
+ * second finds its next occurrence in 64 seconds, not in eight days of
+ * occurrences it would expand and bind for nothing.
+ */
+const SUB_DAILY_PERIODS = Object.freeze([64, 512, 4096, 32768]);
+
+/**
+ * The window sizes, in milliseconds, a search for a definition's next
+ * occurrence widens through: a sub-daily rule's own periods first.
+ * @param {any} series
+ * @returns {number[]}
+ */
+function windowsOf(series) {
+  const rule = series.base?.rrule;
+  const period = rule === undefined ? undefined : PERIODS[/** @type {keyof typeof PERIODS} */ (rule.FREQ)];
+  const days = WINDOWS.map((size) => size * DAY);
+  if (period === undefined) return days;
+  const own = SUB_DAILY_PERIODS.map((count) => count * period * (rule.INTERVAL ?? 1)).filter((size) => size < days[0]);
+  return [...own, ...days];
+}
 /** Days of civil-date margin either side of a floating horizon: no zone's offset reaches a day. */
 const MARGIN_DAYS = 2;
 
@@ -106,8 +130,8 @@ function reviveSeries(value) {
 
 /**
  * Read a schedule definition, refusing a malformed member `JD0013` and
- * an invalid recurrence with the calendar's own code (`JY0020` for a
- * frequency the calendar does not enumerate), before anything is stored.
+ * an invalid recurrence with the calendar's own code, before anything is
+ * stored. Every frequency the calendar enumerates is a schedule's.
  * @param {unknown} spec
  * @param {(value: unknown, what: string) => string} storedJson - the queue's payload serializer
  * @param {any} provider - the runtime's zone provider, or null
@@ -246,11 +270,12 @@ function occurrencesAfter(definition, provider, span) {
     });
     return bound.kind === 'instant' ? bound.instant : bound.start;
   };
+  const windows = windowsOf(definition.series);
   for (let i = 0; ; i++) {
-    const last = i >= WINDOWS.length || WINDOWS[i] >= maxDays - spanDays;
-    const size = last ? maxDays - spanDays : WINDOWS[i];
-    if (size < 1) return { due: [], next: null, stall: { limit: 'maxHorizonDays', counts } };
-    const high = until + size * DAY;
+    const last = i >= windows.length || windows[i] >= (maxDays - spanDays) * DAY;
+    const size = last ? (maxDays - spanDays) * DAY : windows[i];
+    if (size < DAY && last) return { due: [], next: null, stall: { limit: 'maxHorizonDays', counts } };
+    const high = until + size;
     const horizon = floating
       ? [civilDate(from, /** @type {string} */ (definition.zone), provider, -MARGIN_DAYS),
         civilDate(high, /** @type {string} */ (definition.zone), provider, MARGIN_DAYS)]

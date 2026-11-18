@@ -3994,10 +3994,10 @@ plans that rebuilds the table drops the CHECK, which this release's
   ([JOBS-FORMAT §6](JOBS-FORMAT.md#6-workers-and-concurrency)). A worker
   without it (absent or `false`) runs exactly the statements it ran. With it,
   an idle poll over a store with no schedule table runs the same statements
-  too: each `start()` asks once whether the table exists, and a table another
-  process creates later is found at the worker's next `start()` (this store's
-  own `schedule()`, `schedules()` or `tick()` finding it starts the ticking at
-  once). `tick` without `jobs.schedules` is `JD0016`, a malformed one a
+  too, but for one probe of whether the table exists at its first loop pass and
+  every 16th after it: a table another process creates is found within 16
+  passes, without a restart (this store's own `schedule()`, `schedules()` or
+  `tick()` finding it starts the ticking at once). `tick` without `jobs.schedules` is `JD0016`, a malformed one a
   `TypeError`. `worker.stats()` has two more members, `ticks` and
   `tickErrors`.
 - A schedule takes `latenessMs`, a positive whole number of milliseconds: an
@@ -4049,6 +4049,23 @@ release refuses `latenessMs` in `schedule()` and `tick` in `createWorker()`
   first — `planModelMigration(declared, plain)` drops the CHECKs, indexes and key
   columns on both engines — then open with the previous release. Stores the
   previous release created open, read, query and explain unchanged.
+
+## 78. Recurring schedules take sub-daily rules
+
+- `jobs.schedule()` accepts a SECONDLY, MINUTELY or HOURLY rule, as the
+  calendar now enumerates them, where it refused `JY0020`; the answers are the
+  same on SQLite and PostgreSQL. A sub-daily schedule's search looks a few of
+  the rule's periods past the tick before the day windows, and a day without
+  ticks fires what `missed` says within the calendar's limits; under smaller
+  ones it fires what the policy keeps of the proved prefix and stalls
+  ([JOBS-FORMAT §11](JOBS-FORMAT.md#11-recurring-schedules), Sub-daily rules).
+- [JOBS-FORMAT §12](JOBS-FORMAT.md#12-long-computations) is new: a long
+  assignment solve as a job, in slices resumed from a checkpoint.
+- No table, column, index or CHECK changes. Downgrade: the previous release
+  reads a sub-daily schedule's row and recomputes it with its own calendar,
+  which refuses the rule (`JY0020`): such a schedule is left `stalled` with
+  that code and fires nothing. Unschedule sub-daily schedules before opening
+  with it.
 
 ## Measured costs
 

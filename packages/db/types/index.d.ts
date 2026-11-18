@@ -2694,8 +2694,9 @@ export interface JobScheduleDefinition {
   /** JSON; every fired job carries it. */
   payload?: unknown;
   /** A compiled recurrence (`compileRecurrence`) or a series (`defineSeries`)
-   * from `@jarenjs/core/calendar`, or either one's JSON. A frequency the
-   * calendar does not enumerate refuses with its code (`JY0020`). */
+   * from `@jarenjs/core/calendar`, or either one's JSON, of any frequency
+   * the calendar enumerates (SECONDLY through YEARLY). A rule the calendar
+   * refuses refuses with its code, at schedule time. */
   series: unknown;
   /** The zone a date or floating series is bound in. Without one such a
    * schedule is `unresolved` and never fires: no zone is assumed. A utc or

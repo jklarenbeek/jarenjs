@@ -591,15 +591,18 @@ costs a descriptor plus examples and no UI code at all.
   in JS. Explain reports this honestly, so the cost is unbounded but nothing is hidden. Wanted:
   the `'$[*]'` operand of a top-level `$exists` or `$subsequence` planned as the `$for` scan it
   abbreviates, as `'$[*]'` alone and `{ $count: '$[*]' }` are.
+- [ ] **A floating sub-daily job schedule binds every occurrence of two civil days before its tick.** A floating or date
+  series is expanded from two civil days before the span a tick reads and each occurrence bound in its zone, so a floating
+  SECONDLY schedule stalls `maxOccurrences` under the default limits, and under raised ones binds days of seconds every
+  tick. Wanted: a margin from the zone's offset changes around the tick rather than whole days.
+- [ ] **A schedule search a limit stops fires from its prefix as if it were the whole backlog.** After downtime longer
+  than the limits cover (a day of a SECONDLY rule under the default `maxOccurrences`), the tick fires what `missed` keeps
+  of the prefix it proved — under `'skip'` its latest, though later occurrences are due — and stalls the schedule.
+  Wanted: a rule without COUNT read from the tick backwards, so `missed` answers exactly whatever the backlog.
 - [ ] **PostgreSQL reads a collection's CHECKs only where the model declares one.** A collection declaring
   no interval and no temporal member opens on PostgreSQL over a table carrying a CHECK of someone else's
   (`ALTER TABLE … ADD CONSTRAINT x CHECK (…)`), where SQLite's CREATE-text comparison answers `JD0002`; the
   CHECK changes which writes the table refuses.
-- [ ] **A running worker does not see a schedule table another process creates.** A worker with
-  `tick` asks once per `start()` whether the schedule table exists, so its idle poll runs no extra
-  statement; a database's first schedule written by another process is ticked from that worker's
-  next `start()`, or once its own store reads schedules. Wanted: discovery without a statement per
-  idle poll.
 The fluent front door and the SQLite document store shipped as a pair;
 what each does is its own documentation's job
 ([linq](../packages/linq/README.md) ·
@@ -1158,7 +1161,8 @@ what each does is its own documentation's job
   period's length.
 - [ ] **A zoned SECONDLY expansion through the Intl provider asks it about every time of the day before its horizon.**
   ICU exposes no list of offset changes, so `createIntlZoneProvider` carries no `offsetChanges`, and up to 86400
-  provider calls precede the first occurrence (a compiled VTIMEZONE lists its changes and needs none of them).
+  provider calls precede the first occurrence (a compiled VTIMEZONE lists its changes and needs none of them). A zoned
+  SECONDLY job schedule pays them on every tick.
 - [ ] **`@jarenjs/josl/ical` reads no VAVAILABILITY or scheduling method.** Events, recurring series and free/busy spans are written by kind; under `zones: 'utc'` a
   zoned time is written as the UTC instant `toUtc` answers, and a zoned recurring series as its
   occurrences over a caller's horizon (refused without one, `ICAL3011`); under `zones: 'embed'` a zoned

@@ -63,6 +63,13 @@ const WORKER_OPTIONS = ['handlers', 'concurrency', 'pollInterval', 'leaseMs', 'o
   'effectSafety', 'backoffBase', 'backoffCap', 'stopGraceMs', 'tick'];
 /** What a worker's `tick` object reads: the tick's own (§11). */
 const WORKER_TICK_OPTIONS = ['limit'];
+/**
+ * How many of its polls a ticking worker passes between two probes for a
+ * schedule table it has not seen (§6): the bound on how late it finds a
+ * table another process creates, and one statement per that many idle
+ * polls.
+ */
+const SCHEDULE_PROBE_EVERY = 16;
 /** The longest delay a timer keeps: a longer one fires at once. */
 const TIMER_MAX = 2 ** 31 - 1;
 
@@ -1411,13 +1418,15 @@ export function createJobEngine(options) {
     };
 
     /**
-     * Whether this `start()` has probed for the schedule table. The probe
-     * runs once per start, so an idle poll over a store with no schedule
-     * table runs exactly the statements it would without `tick`; the
-     * store's own `schedule()`, `schedules()` and `tick()` make the table
-     * known without one.
+     * The polls since this worker last probed for the schedule table, while
+     * it is unknown: a `start()` probes at its first poll and again every
+     * {@link SCHEDULE_PROBE_EVERY}th, so a table another process creates is
+     * found within that many polls, and the idle polls between run exactly
+     * the statements they would without `tick`. The store's own
+     * `schedule()`, `schedules()` and `tick()` make the table known without
+     * a probe.
      */
-    let probed = false;
+    let sinceProbe = 0;
     /** The tick in flight, which every loop polling meanwhile shares. @type {Promise<void> | null} */
     let ticking = null;
     /** Fire the due schedules before a claim. Never throws: a failure is counted, and the claim goes ahead. */
@@ -1425,12 +1434,15 @@ export function createJobEngine(options) {
       const schedules = /** @type {any} */ (scheduling);
       try {
         if (!schedules.known()) {
-          if (probed) return;
-          probed = true;
+          if (sinceProbe > 0) {
+            sinceProbe = (sinceProbe + 1) % SCHEDULE_PROBE_EVERY;
+            return;
+          }
+          sinceProbe = 1;
           let present;
           try { present = await io(() => schedules.present(), 'a worker schedule probe', shutdown.signal); }
           catch (error) {
-            probed = false; // unknown still: the next poll asks again
+            sinceProbe = 0; // unknown still: the next poll asks again
             throw error;
           }
           if (!present) return;
@@ -1497,7 +1509,7 @@ export function createJobEngine(options) {
         running = true;
         shutdown = new AbortController();
         session = { cancelled: false };
-        probed = false;
+        sinceProbe = 0;
         loops = Array.from({ length: concurrency }, () => loop(session));
         // a restart re-registers what stop() removed: the
         // wake-on-enqueue hook and the stopAll membership

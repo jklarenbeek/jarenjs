@@ -1009,6 +1009,8 @@ Ari's two assignments now carry a hard match. Moving each costs one change, and 
 
 `signal` is an `AbortSignal`, read before each node and each move. A solve is synchronous, so it sees an abort raised before the call, or by host code it calls (a rule or the rank hook). Either way the answer is `limit` with `cancelled: true`.
 
+A solve longer than a process should hold runs in slices: each a `local` solve with a `maxMoves` budget from the list the last one answered, saved between them, so an abort, a deploy or a crash costs at most one slice. [JOBS-FORMAT §12](../../db/docs/JOBS-FORMAT.md#12-long-computations) runs it as a durable job of `@jarenjs/db`, resumed from the saved list and answering the bytes an uninterrupted run does.
+
 `SOLVE_LIMITS` is `{ maxSpace: 100000 }`.
 
 ## 10. Codes
