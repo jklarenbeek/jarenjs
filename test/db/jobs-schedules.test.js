@@ -193,8 +193,10 @@ describe('recurring job schedules', () => {
     const store = await openStore(model, { driver: nodeDriver(), ...options() });
     try {
       const record = await store.jobs.schedule(spec({ limits: { maxWork: 1 } }));
+      // the Intl provider lists its offset changes: the floating series' binding asks for them (two calls) before the
+      // search's first step meets the limit
       assert.deepEqual([record.state, record.nextRunAt, record.stall],
-        ['stalled', null, { limit: 'maxWork', counts: { emitted: 0, work: 1, providerCalls: 0 } }]);
+        ['stalled', null, { limit: 'maxWork', counts: { emitted: 0, work: 1, providerCalls: 2 } }]);
       // written again with room to search, it resumes
       assert.equal((await store.jobs.schedule(spec())).state, 'active');
     }

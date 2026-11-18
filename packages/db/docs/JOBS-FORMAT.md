@@ -818,19 +818,22 @@ one enqueue per fired job, one advance per schedule.
 occurrence, so a tick expands only the wall clock its span's instants
 can read: those instants under every offset the zone keeps around them.
 A provider that lists its offset changes (`offsetChanges`, a compiled
-VTIMEZONE) names them, and the wall clock is the span's own widened by
-the changes near it; a provider without the list (the Intl one) is
-read under every offset a zone of the tz database keeps, UTC-12:00 to
+VTIMEZONE, and the Intl provider, which reads the offset once a day and
+bisects to the change) names them, and the wall clock is the span's own
+widened by the changes near it; a provider without the list is read
+under every offset a zone of the tz database keeps, UTC-12:00 to
 UTC+14:00, so 26 hours of wall clock around the span are bound. The
 occurrences outside the span are the binding's work: `maxOccurrences`
 counts those that bind into the span and `maxProviderCalls` the
 binding's calls, so a floating SECONDLY schedule ticks under the default
-limits, binding each of the 26 hours' seconds a tick without the list. A date
-series is expanded over two civil days either side of the span. A zoned
-sub-daily walk under a provider without `offsetChanges` resolves each
-wall-clock time of the day before its horizon (CALENDAR.md), so a zoned
-SECONDLY schedule spends about 86400 provider calls a tick, within the
-default `maxProviderCalls`. A utc series costs neither.
+limits, binding each of the 26 hours' seconds a tick only with a provider
+that lists no changes. A date series is expanded over two civil days
+either side of the span. A zoned sub-daily walk under a provider without
+`offsetChanges` resolves each wall-clock time of the day before its
+horizon (CALENDAR.md), so a zoned SECONDLY schedule spends about 86400
+provider calls a tick there, within the default `maxProviderCalls`; with
+the list it asks about the hours around its changes. A utc series costs
+neither.
 
 ## 12. Long computations
 

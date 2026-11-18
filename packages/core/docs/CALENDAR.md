@@ -31,11 +31,14 @@ and `toEpoch` — plus three optional members this layer reads:
 |---|---|
 | `candidates(parts, zone)` | `{ candidates, offsets? }`: the instants that carry the wall clock, ascending, each `{ instant, offsetMinutes }` with the offset in force there. One is a time that exists, two a fold; none is a gap, and then `offsets: { before, after }` are the offsets in force either side of the change. A fold carries `offsets` too. |
 | `identity` | `{ name, revision }`: which zone data answers, recorded on every resolution |
-| `offsetChanges(from, to, zone)` | every change of offset with `from <= at <= to` (epoch milliseconds), as `[{ at, before, after }]` with the offsets in minutes east. A provider that carries it promises the list is whole; a zoned SECONDLY or MINUTELY expansion reads it to pass a wall-clock hour with no change in one step. A compiled zone definition carries it; the Intl provider does not, since the host's ICU exposes offsets at instants, not its list of changes |
+| `offsetChanges(from, to, zone)` | every change of offset with `from <= at <= to` (epoch milliseconds), as `[{ at, before, after }]` with the offsets in minutes east. A provider that carries it promises the list is whole; a zoned SECONDLY or MINUTELY expansion reads it to pass a wall-clock hour with no change in one step. A compiled zone definition carries it, from its own list. The Intl provider carries it too, found by reading the offset every `step` (a day by default) and bisecting to the millisecond between readings that differ: exact while a zone's offset changes at most once per `step`, since a change and its undoing inside one step are not seen (the IANA database's closest two changes of one zone are about seven days apart) |
 
-`createIntlZoneProvider({ zones, revision })` implements both from the
-probe `toEpoch` already runs, so the two cannot disagree; `toEpoch`
-itself is unchanged. Its `identity` is `{ name: 'intl', revision }`,
+`createIntlZoneProvider({ zones, revision, step })` implements
+`candidates` from the probe `toEpoch` already runs, so the two cannot
+disagree, and `offsetChanges` from `toParts` readings `step`
+milliseconds apart (a host whose zone data may change an offset twice
+within a day lowers `step`; a call costs one reading per step of its
+span plus about 27 per change); `toEpoch` itself is unchanged. Its `identity` is `{ name: 'intl', revision }`,
 where `revision` is what the caller passed or `'unrecorded'` — the
 provider never reads or invents one. A provider without `candidates`
 still serves the series kernel; classification refuses it (`JY0004`)
@@ -592,10 +595,16 @@ and the changes between their instants. An hour whose start and end
 exist with no change between them has one offset throughout, so each
 time in it starts at the hour's instant plus its distance from it, and
 one that starts before the horizon needs no call of its own; any other
-hour, such as one where the offset changes and changes back, is
-resolved time by time. Without the list, a zoned SECONDLY walk spends
-up to a day of provider calls (86400) before the horizon: raise
-`maxProviderCalls`, or use a provider that lists its changes. Once it
+hour, such as one holding a change or one where the offset changes and
+changes back, is resolved time by time, and the walk goes on asking
+about the hours after it. So the day before the horizon costs about two
+calls an hour, plus one per time in each hour that holds a change (an
+hour whose end falls in a gap or fold, or that starts at a change,
+counts too: a change costs up to three such hours). A provider without the list (one a
+host wrote with `toParts`, `toEpoch` and `candidates` only) makes a
+zoned SECONDLY walk spend up to a day of provider calls (86400) before
+the horizon: raise `maxProviderCalls`, or give it `offsetChanges`. The
+Intl provider and a compiled zone definition both list their changes. Once it
 has enough occurrences and has resolved a time a gap moved, a sub-daily
 walk goes on only as far past it as that gap moved it, not three days.
 
@@ -679,18 +688,43 @@ reads one recurring series and freezes it:
 
 - **`base`** is a compiled recurrence, or `null`.
 - **`rdates`** are values of the base's kind, or periods
-  `{ start, end }`. A zoned series also takes zoned values in another
-  zone and utc values (RFC 5545 lets each RDATE carry its own TZID).
+  `{ start, end }` or `{ start, duration }`. A zoned series also takes
+  zoned values in another zone and utc values (RFC 5545 lets each RDATE
+  carry its own TZID).
 - **`exdates`** are values of the base's kind; a zoned series also
   takes zoned values in another zone and utc values.
 - **`overrides`** are
-  `{ recurrenceId, status: 'moved' | 'cancelled', start?, end?, payload?, range? }`,
+  `{ recurrenceId, status: 'moved' | 'cancelled', start?, end?, duration?, payload?, range? }`,
   one per recurrenceId. A moved override names its new `start`, and its
-  `end` or the slot's own length. `payload` is carried on the moved
-  occurrence and never read.
+  `end`, its `duration`, or the slot's own length. `payload` is carried
+  on the moved occurrence and never read.
 
 All values share one kind and, apart from those RDATEs and EXDATEs, a
 zoned series one zone.
+
+**An end or a duration.** A moved override and an RDATE period end at
+their `end`, or after their `duration`, an RFC 5545 duration as
+`compileRecurrence` reads one (§3.3.6): its weeks and days are added to
+the start's wall clock, its hours, minutes and seconds to the instant
+that wall clock resolves to. A date series takes whole days only. On a
+zoned series the two differ where the end's wall clock happens twice:
+an `end` of 02:30 on the day Amsterdam's clocks go back names the
+first 02:30 under `rfc5545` (the second under `later`), while a start of
+01:30 with `duration: 'PT2H'` ends at the second, `01:30Z`, and the
+occurrence's `instants.end` says so (its `end` reads 02:30). A nominal
+day across a change lasts 23 or 25 hours (`P1D`), an exact one 24
+(`PT24H`). An RDATE period in another zone or utc counts its days on its
+own start's wall clock.
+
+Given both, they must name one end: the duration's end instant reads
+the end's wall clock (so an end in the second pass of a repeated hour
+agrees with the duration that ends there), or the end resolves to it
+under the series' policy (so a wall clock in a gap agrees with the
+instant it moves to); otherwise the pair is refused (`JY0014` at
+`…/duration`). A date, floating or utc series compares them when it is
+defined; a zoned one at every expansion, whatever the horizon, up to
+three provider calls a pair. Given both, the duration places the end.
+A cancelled override takes no duration.
 
 **RDATEs and EXDATEs in another zone or utc.** Each is read at its
 instant, in its own zone under the series' policy (under `reject` a time
@@ -738,9 +772,11 @@ ordered by `recurrenceId`:
   2026-01-08 09:00 to 10:30 starts every later slot an hour and a half
   later. The distance is in wall clock (a utc series' in instants), so a
   zoned series' moved 09:00 stays 10:30 across a change of offset, and
-  each moved time resolves under the series' policy. With `end` the
-  override's length (in wall clock, from its start) is every later
-  slot's; without it each keeps its own (an RDATE period its period's).
+  each moved time resolves under the series' policy. With `duration`
+  that duration is every later slot's (its days on the wall clock, its
+  time exact); with `end` the override's length (in wall clock, from
+  its start) is; with neither each keeps its own (an RDATE period its
+  period's).
   Its `payload` is carried on every slot it moves. Each moved slot keeps
   its `recurrenceId` and reads `moved: true`.
 - **Several** apply in `recurrenceId` order, each from its own slot on:
@@ -748,8 +784,8 @@ ordered by `recurrenceId`:
   `recurrenceId` (RECURRENCE-ID always names the slot the rule made), so
   distances do not add up. A later cancelled range ends a moved one.
 - **An override without a range** still wins for its one slot, after
-  the ranges: its start, and its `end` or else the length the range in
-  force gives that slot, and its own `payload`. It can bring back a slot
+  the ranges: its start, and its `duration` or `end`, or else the
+  length the range in force gives that slot, and its own `payload`. It can bring back a slot
   a cancelled range removed.
 - **EXDATEs** remove their slots before any range applies; a range
   whose own slot is removed, or that names a slot the series never makes,

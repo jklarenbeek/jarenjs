@@ -38,18 +38,24 @@ const AMSTERDAM_2026 = [
 ];
 
 /**
- * A provider that counts the calls made to it; with `changes`, one that
- * lists Amsterdam's 2026 offset changes too.
- * @param {boolean} [changes]
+ * A provider over the host's ICU that counts the calls made to it. By
+ * default it lists no offset changes (the Intl provider's own list left
+ * out); with `changes: true` it lists Amsterdam's 2026 changes from the
+ * table above, and with `changes: 'intl'` the Intl provider's own list.
+ * @param {boolean | 'intl'} [changes]
  */
 function countingProvider(changes = false) {
-  const base = createIntlZoneProvider({ revision: 'host ICU' });
+  const { offsetChanges: listed, ...base } = createIntlZoneProvider({ revision: 'host ICU' });
   const counter = { calls: 0 };
   const provider = Object.freeze({
     ...base,
     toParts: (/** @type {any[]} */ ...args) => { counter.calls += 1; return base.toParts(...args); },
     candidates: (/** @type {any[]} */ ...args) => { counter.calls += 1; return base.candidates(...args); },
-    ...(changes ? { offsetChanges: (/** @type {number} */ from, /** @type {number} */ to, /** @type {string} */ zone) => {
+    ...(changes === 'intl' ? { offsetChanges: (/** @type {number} */ from, /** @type {number} */ to, /** @type {string} */ zone) => {
+      counter.calls += 1;
+      return listed(from, to, zone);
+    } } : {}),
+    ...(changes === true ? { offsetChanges: (/** @type {number} */ from, /** @type {number} */ to, /** @type {string} */ zone) => {
       counter.calls += 1;
       assert.equal(zone, ZONE);
       assert.ok(from >= Date.UTC(2026, 0, 1) && to < Date.UTC(2027, 0, 1), 'the list covers 2026 only');
@@ -73,7 +79,8 @@ after(async () => { await pool?.end(); });
  * One store over a fresh database on an engine, with a clock the test steps.
  * @param {'sqlite' | 'postgres'} engine
  * @param {(store: any, clock: { at: number }, counter: { calls: number }) => Promise<void>} fn
- * @param {{ changes?: boolean, ran?: string[] }} [options] - a provider listing its changes; a statement record
+ * @param {{ changes?: boolean | 'intl', ran?: string[] }} [options] - a provider listing its changes (the table's, or the
+ *   Intl provider's own); a statement record
  */
 async function withStore(engine, fn, { changes = false, ran = /** @type {string[] | undefined} */ (undefined) } = {}) {
   const schema = `jaren_subdaily_${process.pid}_${serial++}`;
@@ -271,6 +278,34 @@ for (const engine of /** @type {const} */ (['sqlite', 'postgres'])) {
         for (const count of calls) assert.ok(count > 26 * 3600 && count < 100000, `${count} provider calls`);
         same('floating without a list', { fired, calls: calls.length });
       });
+    });
+
+    it('a floating SECONDLY schedule through the Intl provider, which lists its changes, binds its span and no more', async () => {
+      await withStore(engine, async (store, clock, counter) => {
+        const series = compileRecurrence({ dtstart: floatingValue('2026-03-10', '00:00'), rrule: 'FREQ=SECONDLY' });
+        await store.jobs.schedule({ id: 'skip', kind: 'k', series, zone: ZONE, missed: 'skip' });
+        await store.jobs.tick();
+        /** @type {number[]} */
+        const calls = [];
+        /** @type {string[]} */
+        const fired = [];
+        for (const step of [SECOND, 3600 * SECOND]) {
+          clock.at += step;
+          counter.calls = 0;
+          const out = await store.jobs.tick();
+          fired.push(...out.fired);
+          calls.push(counter.calls);
+        }
+        // the same fires and counts as without the list
+        assert.deepEqual(fired, ['skip@2026-03-20T13:00:01', 'skip@2026-03-20T14:00:01']);
+        const [record] = await store.jobs.schedules();
+        assert.deepEqual([record.state, record.counts], ['active', { fired: 3, skipped: 3599 }]);
+        // no change lies near the span, so it is bound under one offset: a call for each second the tick's span holds (1,
+        // then 3600) and a few dozen for the window past it and the lists, not the 26 hours every offset can read
+        for (const [i, count] of calls.entries())
+          assert.ok(count >= [1, 3600][i] && count < [1, 3600][i] + 200, `${count} provider calls`);
+        same('floating through the Intl list', { fired, calls: calls.length });
+      }, { changes: 'intl' });
     });
 
     it('a tick looks past itself by the rule\'s own period, not by days of occurrences', async () => {

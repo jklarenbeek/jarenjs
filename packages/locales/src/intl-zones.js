@@ -44,6 +44,14 @@ const DISAMBIGUATION = Object.freeze(['reject', 'earlier', 'later']);
 const MINUTE = 60000;
 const DAY = 86400000;
 
+/**
+ * How far apart `offsetChanges` reads the offset by default: a day, as
+ * `vtimezoneFor` scans. The IANA database has no two changes of one
+ * zone's offset less than about seven days apart (America/Recife's one
+ * week of daylight time, and Asia/Gaza's rules to come).
+ */
+const CHANGE_STEP = DAY;
+
 /** The instants a `Date` can hold: beyond it ICU has nothing to read. */
 const RANGE = 8.64e15;
 
@@ -232,10 +240,18 @@ function probe(format, parts) {
  * Parts that are not a real civil date and time of day are a `TypeError`,
  * never a gap.
  *
- * It carries no `offsetChanges` (the seam's optional list of a zone's
- * changes): ICU answers offsets at instants, not its list of changes,
- * and no scan of instants can see a change and its undoing between two
- * of them, so this provider makes no promise it cannot keep.
+ * `offsetChanges(from, to, zone)` answers the seam's optional list of
+ * a zone's changes, `[{ at, before, after }]` with `from <= at <= to`
+ * and the offsets in minutes east. ICU answers offsets at instants, not
+ * its list of changes, so the list is found by reading the offset every
+ * `step` milliseconds across the span (from just before `from`) and
+ * bisecting, to the millisecond, between two readings that differ. It
+ * is exact while a zone's offset changes at most once per `step` (a
+ * day by default): a change and its undoing inside one step are not
+ * seen. The IANA database's closest two changes of one zone are about
+ * seven days apart; a host whose data may hold closer ones lowers
+ * `step`. A call costs one reading per step of the span plus about 27
+ * per change.
  *
  * `identity` is `{ name: 'intl', revision }`: the revision is the one
  * the caller passed (the tzdata version its hosts run, say) or
@@ -244,11 +260,14 @@ function probe(format, parts) {
  * An unknown zone name is a refusal naming it, never a quiet UTC, and
  * no call reads the host's own zone.
  *
- * @param {{ zones?: number, revision?: string }} [options] - `zones`: how
+ * @param {{ zones?: number, revision?: string, step?: number }} [options] - `zones`: how
  *   many zones' formatters stay resident (default `ZONE_CACHE_LIMIT`);
- *   `revision`: the zone data's version, recorded in `identity`
- * @returns {Required<import('@jarenjs/core/series').ZoneProvider>} - the seam's two
- *   optional members, `candidates` and `identity`, always present
+ *   `revision`: the zone data's version, recorded in `identity`;
+ *   `step`: how far apart `offsetChanges` reads the offset, in
+ *   milliseconds (default a day)
+ * @returns {Required<import('@jarenjs/core/series').ZoneProvider> & { offsetChanges:
+ *   (from: number, to: number, zone: string) => readonly { at: number, before: number, after: number }[] }} - the
+ *   seam's optional members, `candidates`, `offsetChanges` and `identity`, always present
  * @example
  * const provider = createIntlZoneProvider({ revision: 'tzdata of the host' });
  * resolveClock({ zone: 'Europe/Amsterdam', provider, disambiguation: 'later' });
@@ -261,6 +280,9 @@ export function createIntlZoneProvider(options = undefined) {
   const revision = options?.revision ?? 'unrecorded';
   if (typeof revision !== 'string' || revision === '')
     throw new TypeError('revision is a non-empty string naming the zone data\'s version');
+  const step = options?.step ?? CHANGE_STEP;
+  if (typeof step !== 'number' || !Number.isInteger(step) || step <= 0)
+    throw new TypeError('step is a positive whole number of milliseconds between offset readings');
   /** @type {import('@jarenjs/core/cache').BoundedCache<string, Intl.DateTimeFormat>} */
   const formatters = createBoundedCache(limit);
 
@@ -352,7 +374,50 @@ export function createIntlZoneProvider(options = undefined) {
     });
   }
 
+  /**
+   * @param {number} from
+   * @param {number} to
+   * @param {string} zone
+   * @returns {readonly { at: number, before: number, after: number }[]}
+   */
+  function offsetChanges(from, to, zone) {
+    const format = formatterFor(zone);
+    if (typeof from !== 'number' || typeof to !== 'number' || !Number.isFinite(from) || !Number.isFinite(to))
+      throw new TypeError('a span of changes is two finite numbers of epoch milliseconds');
+    checkInstant(from);
+    checkInstant(to);
+    const offsetAt = (/** @type {number} */ at) => readParts(format, at).offset;
+    /** @type {{ at: number, before: number, after: number }[]} */
+    const changes = [];
+    // read from just before `from`, so a change at `from` itself is listed
+    let at = from > -RANGE ? from - 1 : from;
+    let offset = offsetAt(at);
+    while (at < to) {
+      const next = Math.min(at + step, to);
+      const ahead = offsetAt(next);
+      if (ahead === offset) {
+        at = next;
+        continue;
+      }
+      // the first millisecond whose offset is not `offset`, and the scan goes on from it
+      let low = at;
+      let high = next;
+      while (high - low > 1) {
+        const middle = low + Math.floor((high - low) / 2);
+        if (offsetAt(middle) === offset)
+          low = middle;
+        else
+          high = middle;
+      }
+      const after = high === next ? ahead : offsetAt(high);
+      changes.push(Object.freeze({ at: high, before: offset, after }));
+      at = high;
+      offset = after;
+    }
+    return Object.freeze(changes);
+  }
+
   const identity = Object.freeze({ name: 'intl', revision });
 
-  return Object.freeze({ toParts, toEpoch, candidates, identity });
+  return Object.freeze({ toParts, toEpoch, candidates, offsetChanges, identity });
 }

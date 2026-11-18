@@ -1157,16 +1157,10 @@ what each does is its own documentation's job
   and is ordered by the engine, and a recurrence rule is stored as its JSON form (`…/rrule.schema.json`). A collection's
   temporal members are keyed through the seam `@jarenjs/db/temporals` (MODEL-FORMAT §2), whose hooks an entity kind
   would reuse.
-- [ ] **A zoned SECONDLY or MINUTELY walk stops skipping before the horizon at the first wall-clock hour holding a
-  change.** Every later time before the horizon is then resolved one by one, so a long walk to a far horizon costs a
-  provider call per time after the first change it meets (cost only; the answers are exact).
-- [ ] **A series override has an end but no exact duration.** A zoned override whose DURATION ends in the second pass
-  of a repeated hour cannot be held, so `@jarenjs/josl/ical` withholds it (`ICAL1022`), as it does a zoned RDATE
-  period's length.
-- [ ] **A zoned SECONDLY expansion through the Intl provider asks it about every time of the day before its horizon.**
-  ICU exposes no list of offset changes, so `createIntlZoneProvider` carries no `offsetChanges`, and up to 86400
-  provider calls precede the first occurrence (a compiled VTIMEZONE lists its changes and needs none of them). A zoned
-  SECONDLY job schedule pays them on every tick.
+- [ ] **`@jarenjs/josl/ical` withholds a zoned DURATION that ends in the second pass of a repeated hour.**
+  `defineSeries` now holds it (`duration` on a moved override or an RDATE period), but the reader still reports it
+  `ICAL1022`, for an override and for a zoned RDATE period's length, and the writer reads a period's or override's
+  `end` only.
 - [ ] **`@jarenjs/josl/ical` reads no VAVAILABILITY or scheduling method.** Events, recurring series and free/busy spans are written by kind; under `zones: 'utc'` a
   zoned time is written as the UTC instant `toUtc` answers, and a zoned recurring series as its
   occurrences over a caller's horizon (refused without one, `ICAL3011`); under `zones: 'embed'` a zoned

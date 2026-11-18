@@ -1,0 +1,205 @@
+{
+  "cases": [
+    {
+      "name": "fold, first pass by duration",
+      "zone": "Europe/Amsterdam",
+      "change": "2026-10-25T01:00:00.000Z",
+      "policy": "rfc5545",
+      "start": "2026-10-25T01:30:00",
+      "duration": "PT1H",
+      "endInstant": "2026-10-25T00:30:00Z",
+      "endWall": "2026-10-25T02:30:00",
+      "derivation": "01:30 is before the fold: +120, 2026-10-24T23:30Z; one hour later, 00:30Z, is before the change: +120 reads 02:30"
+    },
+    {
+      "name": "fold, second pass by duration",
+      "zone": "Europe/Amsterdam",
+      "change": "2026-10-25T01:00:00.000Z",
+      "policy": "rfc5545",
+      "start": "2026-10-25T01:30:00",
+      "duration": "PT2H",
+      "endInstant": "2026-10-25T01:30:00Z",
+      "endWall": "2026-10-25T02:30:00",
+      "derivation": "23:30Z plus two hours is 01:30Z, at or after the change: +60 reads 02:30, its second pass"
+    },
+    {
+      "name": "fold, end alone, rfc5545",
+      "zone": "Europe/Amsterdam",
+      "change": "2026-10-25T01:00:00.000Z",
+      "policy": "rfc5545",
+      "start": "2026-10-25T01:30:00",
+      "end": "2026-10-25T02:30:00",
+      "endInstant": "2026-10-25T00:30:00Z",
+      "endWall": "2026-10-25T02:30:00",
+      "derivation": "02:30 happens twice; rfc5545 takes the earlier offset, +120: 00:30Z"
+    },
+    {
+      "name": "fold, end alone, later",
+      "zone": "Europe/Amsterdam",
+      "change": "2026-10-25T01:00:00.000Z",
+      "policy": "later",
+      "start": "2026-10-25T01:30:00",
+      "end": "2026-10-25T02:30:00",
+      "endInstant": "2026-10-25T01:30:00Z",
+      "endWall": "2026-10-25T02:30:00",
+      "derivation": "later takes the later offset, +60: 01:30Z"
+    },
+    {
+      "name": "fold, first pass by duration, later",
+      "zone": "Europe/Amsterdam",
+      "change": "2026-10-25T01:00:00.000Z",
+      "policy": "later",
+      "start": "2026-10-25T01:30:00",
+      "duration": "PT1H",
+      "endInstant": "2026-10-25T00:30:00Z",
+      "endWall": "2026-10-25T02:30:00",
+      "derivation": "the start is not in the fold, so later reads it as rfc5545 does; 00:30Z is the first pass, which an end alone cannot name under later"
+    },
+    {
+      "name": "fold, end and duration agree on the second pass",
+      "zone": "Europe/Amsterdam",
+      "change": "2026-10-25T01:00:00.000Z",
+      "policy": "rfc5545",
+      "start": "2026-10-25T01:30:00",
+      "end": "2026-10-25T02:30:00",
+      "duration": "PT2H",
+      "endInstant": "2026-10-25T01:30:00Z",
+      "endWall": "2026-10-25T02:30:00",
+      "derivation": "the duration ends at 01:30Z, which reads 02:30: the end given"
+    },
+    {
+      "name": "fold, end and duration agree on the first pass, later",
+      "zone": "Europe/Amsterdam",
+      "change": "2026-10-25T01:00:00.000Z",
+      "policy": "later",
+      "start": "2026-10-25T01:30:00",
+      "end": "2026-10-25T02:30:00",
+      "duration": "PT1H",
+      "endInstant": "2026-10-25T00:30:00Z",
+      "endWall": "2026-10-25T02:30:00",
+      "derivation": "the duration ends at 00:30Z, which reads 02:30: the end given"
+    },
+    {
+      "name": "gap, nominal day",
+      "zone": "Europe/Amsterdam",
+      "change": "2026-03-29T01:00:00.000Z",
+      "policy": "rfc5545",
+      "start": "2026-03-28T12:00:00",
+      "duration": "P1D",
+      "endInstant": "2026-03-29T10:00:00Z",
+      "endWall": "2026-03-29T12:00:00",
+      "derivation": "12:00 on the 28th is +60, 11:00Z; a nominal day is 12:00 on the 29th, +120: 10:00Z, 23 hours later"
+    },
+    {
+      "name": "gap, exact day",
+      "zone": "Europe/Amsterdam",
+      "change": "2026-03-29T01:00:00.000Z",
+      "policy": "rfc5545",
+      "start": "2026-03-28T12:00:00",
+      "duration": "PT24H",
+      "endInstant": "2026-03-29T11:00:00Z",
+      "endWall": "2026-03-29T13:00:00",
+      "derivation": "11:00Z plus 24 hours is 11:00Z on the 29th, +120: 13:00"
+    },
+    {
+      "name": "gap, nominal day and an exact hour",
+      "zone": "Europe/Amsterdam",
+      "change": "2026-03-29T01:00:00.000Z",
+      "policy": "rfc5545",
+      "start": "2026-03-28T12:00:00",
+      "duration": "P1DT1H",
+      "endInstant": "2026-03-29T11:00:00Z",
+      "endWall": "2026-03-29T13:00:00",
+      "derivation": "the day on the wall clock (10:00Z), then one exact hour: 11:00Z, 13:00"
+    },
+    {
+      "name": "gap, exact 25 hours",
+      "zone": "Europe/Amsterdam",
+      "change": "2026-03-29T01:00:00.000Z",
+      "policy": "rfc5545",
+      "start": "2026-03-28T12:00:00",
+      "duration": "PT25H",
+      "endInstant": "2026-03-29T12:00:00Z",
+      "endWall": "2026-03-29T14:00:00",
+      "derivation": "11:00Z plus 25 hours is 12:00Z on the 29th, +120: 14:00"
+    },
+    {
+      "name": "gap, an end in the gap agrees with the duration it moves to",
+      "zone": "Europe/Amsterdam",
+      "change": "2026-03-29T01:00:00.000Z",
+      "policy": "rfc5545",
+      "start": "2026-03-29T01:00:00",
+      "end": "2026-03-29T02:30:00",
+      "duration": "PT1H30M",
+      "endInstant": "2026-03-29T01:30:00Z",
+      "endWall": "2026-03-29T03:30:00",
+      "derivation": "01:00 is +60, 00:00Z; plus 90 minutes is 01:30Z, which reads 03:30; 02:30 never happens and resolves with the offset before the change, +60: 01:30Z"
+    },
+    {
+      "name": "New York fold, first pass by duration",
+      "zone": "America/New_York",
+      "change": "2026-11-01T06:00:00.000Z",
+      "policy": "rfc5545",
+      "start": "2026-11-01T00:30:00",
+      "duration": "PT1H",
+      "endInstant": "2026-11-01T05:30:00Z",
+      "endWall": "2026-11-01T01:30:00",
+      "derivation": "00:30 is -240, 04:30Z; plus one hour is 05:30Z, before the change: -240 reads 01:30"
+    },
+    {
+      "name": "New York fold, second pass by duration",
+      "zone": "America/New_York",
+      "change": "2026-11-01T06:00:00.000Z",
+      "policy": "rfc5545",
+      "start": "2026-11-01T00:30:00",
+      "duration": "PT2H",
+      "endInstant": "2026-11-01T06:30:00Z",
+      "endWall": "2026-11-01T01:30:00",
+      "derivation": "plus two hours is 06:30Z, after the change: -300 reads 01:30, its second pass"
+    },
+    {
+      "name": "New York fold, end alone, rfc5545",
+      "zone": "America/New_York",
+      "change": "2026-11-01T06:00:00.000Z",
+      "policy": "rfc5545",
+      "start": "2026-11-01T00:30:00",
+      "end": "2026-11-01T01:30:00",
+      "endInstant": "2026-11-01T05:30:00Z",
+      "endWall": "2026-11-01T01:30:00",
+      "derivation": "rfc5545 takes the earlier offset, -240: 05:30Z"
+    },
+    {
+      "name": "New York fold, end alone, later",
+      "zone": "America/New_York",
+      "change": "2026-11-01T06:00:00.000Z",
+      "policy": "later",
+      "start": "2026-11-01T00:30:00",
+      "end": "2026-11-01T01:30:00",
+      "endInstant": "2026-11-01T06:30:00Z",
+      "endWall": "2026-11-01T01:30:00",
+      "derivation": "later takes the later offset, -300: 06:30Z"
+    },
+    {
+      "name": "New York gap, nominal day",
+      "zone": "America/New_York",
+      "change": "2026-03-08T07:00:00.000Z",
+      "policy": "rfc5545",
+      "start": "2026-03-07T12:00:00",
+      "duration": "P1D",
+      "endInstant": "2026-03-08T16:00:00Z",
+      "endWall": "2026-03-08T12:00:00",
+      "derivation": "12:00 on the 7th is -300, 17:00Z; 12:00 on the 8th is -240: 16:00Z, 23 hours later"
+    },
+    {
+      "name": "New York gap, exact day",
+      "zone": "America/New_York",
+      "change": "2026-03-08T07:00:00.000Z",
+      "policy": "rfc5545",
+      "start": "2026-03-07T12:00:00",
+      "duration": "PT24H",
+      "endInstant": "2026-03-08T17:00:00Z",
+      "endWall": "2026-03-08T13:00:00",
+      "derivation": "17:00Z plus 24 hours, -240: 13:00"
+    }
+  ]
+}

@@ -193,18 +193,20 @@ const DURATION_FORM = /^\+?P(?:(\d+)W|(?=\d|T\d)(?:(\d+)D)?(?:T(?=\d)(?:(\d+)H)?
  * and days are nominal (added to the wall clock), its time exact.
  * @param {unknown} text
  * @param {RecurrenceKind} kind
+ * @param {string} [path] - where a refusal points
+ * @param {string} [what] - what a refusal says lasts whole days
  * @returns {{ days: number, ms: number }}
  */
-function readDuration(text, kind) {
+export function readDuration(text, kind, path = '/duration', what = 'a recurrence of dates') {
   const form = typeof text === 'string' ? DURATION_FORM.exec(text) : null;
   if (form === null) {
     throw new CalendarError('JY0014', `duration is an RFC 5545 duration such as P1W, P1D or PT1H30M, never negative, not ${
-      typeof text === 'string' ? `'${text}'` : typeof text}`, '/duration');
+      typeof text === 'string' ? `'${text}'` : typeof text}`, path);
   }
   const days = Number(form[1] ?? 0) * 7 + Number(form[2] ?? 0);
   const ms = ((Number(form[3] ?? 0) * 60 + Number(form[4] ?? 0)) * 60 + Number(form[5] ?? 0)) * 1000;
   if (kind === 'date' && ms !== 0)
-    throw new CalendarError('JY0014', 'a recurrence of dates lasts whole days or weeks', '/duration');
+    throw new CalendarError('JY0014', `${what} lasts whole days or weeks`, path);
   return { days, ms };
 }
 
@@ -1159,8 +1161,11 @@ function noChangeIn(resolver, budget, from, to) {
  * shared with the next hour's start) and the provider's changes between
  * their instants. An hour whose start and end exist, with no change
  * between them, has one offset throughout, so a time in it starts at
- * its start's instant plus its distance from it, exactly. Asking stops
- * at the first time that does not start before `before`.
+ * its start's instant plus its distance from it, exactly. Any other hour
+ * (one holding a change, or whose start or end falls in a gap or fold)
+ * is resolved time by time, and the next hour is asked again. Asking
+ * stops at the first time of a clean hour that does not start before
+ * `before`.
  * @param {Resolver} resolver
  * @param {Budget} budget
  * @param {number} before - an instant
@@ -1191,7 +1196,10 @@ function beforeHorizon(resolver, budget, before) {
         at = clean ? first.instant : undefined;
       }
     }
-    if (at === undefined || at + (wall - start) >= before) {
+    // an hour holding a change: its times are resolved one by one, and the next hour is asked again
+    if (at === undefined)
+      return false;
+    if (at + (wall - start) >= before) {
       skipping = false;
       return false;
     }

@@ -186,7 +186,7 @@ second, exactly as the kernel's fixed-offset clock cuts it. Offsets are derived
 from the wall clock rather than parsed from a `GMT+02:00` string, so a
 historical `-00:44:30` is exact.
 
-The provider also answers the seam's two optional members, which
+The provider also answers the seam's optional members, which
 `@jarenjs/core/calendar` reads to classify a local time before any
 policy picks an instant. `candidates(parts, zone)` is the same probe
 without the choice: `{ candidates }`, one `{ instant, offsetMinutes }`
@@ -194,8 +194,21 @@ for a time that exists or two ascending for a fold, and for a gap no
 candidate plus `offsets: { before, after }`. `identity` is
 `{ name: 'intl', revision }`, where `revision` is whatever
 `options.revision` named (the tzdata version the hosts run, say) or
-`'unrecorded'`; the provider never reads or invents one. See
-[CALENDAR.md](../core/docs/CALENDAR.md).
+`'unrecorded'`; the provider never reads or invents one.
+`offsetChanges(from, to, zone)` lists the zone's changes of offset with
+`from <= at <= to` as `[{ at, before, after }]` (offsets in minutes
+east), so a zoned SECONDLY or MINUTELY expansion passes a wall-clock
+hour with no change in one step instead of asking about every second.
+ICU answers offsets at instants, not a list of changes, so the provider
+reads the offset every `step` milliseconds (`options.step`, a day by
+default) and bisects to the millisecond between two readings that
+differ. It is exact while a zone's offset changes at most once per
+`step`: a change and its undoing inside one step are not seen. The IANA
+database's closest two changes of one zone are about seven days apart
+(America/Recife in 2000); a host whose data may hold closer ones lowers
+`step`. The provider's members are `toParts`, `toEpoch`, `candidates`,
+`offsetChanges` and `identity`: a host that compares its key set sees
+the new member. See [CALENDAR.md](../core/docs/CALENDAR.md).
 
 Like `createIntlDateLocale`, it is opt-in for the reason the header of
 that module gives: ICU output moves between Node versions and between a

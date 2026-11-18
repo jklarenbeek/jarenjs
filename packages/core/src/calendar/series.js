@@ -29,7 +29,7 @@ import { CalendarError } from './errors.js';
 import { admitValue, FIRST_DAY, LAST_DAY } from './model.js';
 import {
   admitHorizon, admitKeys, answer, budgetOf, compileRecurrence, exactLength, expandPlan, inHorizon, isRecord, placeZoned,
-  planFor, recurrenceIdOf, resolveWall, valueAt, walk, wallAtInstant, wallOf,
+  planFor, readDuration, recurrenceIdOf, resolveWall, valueAt, walk, wallAtInstant, wallOf,
 } from './recurrence.js';
 import { admitProvider, identityOf, providerOf } from './resolve.js';
 import { WEEKDAYS } from './rrule.js';
@@ -45,14 +45,18 @@ const ID_FORM = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(Z)?)?$/;
  * @property {string} recurrenceId - the slot, as an occurrence spells it
  * @property {'moved' | 'cancelled'} status
  * @property {import('./recurrence.js').StartValue} [start] - moved: the new start
- * @property {import('./recurrence.js').StartValue} [end] - moved: the new end; left out, the slot keeps its length
+ * @property {import('./recurrence.js').StartValue} [end] - moved: the new end; left out (and no `duration`), the slot keeps its length
+ * @property {string} [duration] - moved: the new length, an RFC 5545 duration (§3.3.6: weeks and days on the wall clock,
+ *   hours, minutes and seconds exact), so a zoned end in the second pass of a repeated hour is held; with `end`, the two
+ *   name one end
  * @property {unknown} [payload] - the caller's own data, carried on the moved occurrence and never read
  * @property {'THISANDFUTURE'} [range] - the override applies to its slot and every later slot of the series (RFC 5545 §3.8.4.4)
  */
 
 /**
- * A period an RDATE names: a start and an exclusive end of one kind.
- * @typedef {{ start: import('./recurrence.js').StartValue, end: import('./recurrence.js').StartValue }} SeriesPeriod
+ * A period an RDATE names: a start and an exclusive end of one kind, or
+ * a start and an RFC 5545 duration (both given, they name one end).
+ * @typedef {{ start: import('./recurrence.js').StartValue, end?: import('./recurrence.js').StartValue, duration?: string }} SeriesPeriod
  */
 
 /**
@@ -95,24 +99,32 @@ const ID_FORM = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(Z)?)?$/;
  * @property {'date' | 'floating' | 'utc' | 'zoned'} kind
  * @property {string | undefined} zone
  * @property {import('./recurrence.js').Plan | null} plan
- * @property {Map<string, { wall: number, endWall: number | undefined }>} rdates
+ * @property {Map<string, { wall: number, endWall: number | undefined, length?: Length }>} rdates
  * @property {Set<string>} exdates
  * @property {Map<string, SlotOverride>} overrides
- * @property {{ rdates: { start: any, end?: any, index: number }[], exdates: { value: any, index: number }[] }} foreign - a zoned
- *   series' RDATEs and EXDATEs in another zone or utc, admitted, read at expansion
+ * @property {{ rdates: { start: any, end?: any, length?: Length, index: number }[], exdates: { value: any, index: number }[] }} foreign - a
+ *   zoned series' RDATEs and EXDATEs in another zone or utc, admitted, read at expansion
+ * @property {{ start: any, end: any, length: Length, path: string }[]} agreements - a zoned series' ends given both as an end
+ *   and as a duration, admitted, compared at expansion
+ */
+
+/**
+ * A duration as a zoned slot reads it: days on the wall clock, then an
+ * exact time.
+ * @typedef {{ days: number, exact: number }} Length
  */
 
 /**
  * An RDATE as one expansion reads it: its wall clock in the series' kind
  * (and zone), and for one given in another zone or utc its instant and,
  * for a period, its exact length.
- * @typedef {{ wall: number, endWall?: number, exact?: number, instant?: number }} SlotDate
+ * @typedef {{ wall: number, endWall?: number, exact?: number, instant?: number, length?: Length }} SlotDate
  */
 
 /**
  * An override as a series plan reads it.
- * @typedef {{ status: 'moved' | 'cancelled', idWall: number, wall?: number, endWall?: number, payload?: unknown, hasPayload: boolean,
- *   index: number, range?: string }} SlotOverride
+ * @typedef {{ status: 'moved' | 'cancelled', idWall: number, wall?: number, endWall?: number, length?: Length, payload?: unknown,
+ *   hasPayload: boolean, index: number, range?: string }} SlotOverride
  */
 
 /** @type {WeakMap<object, SeriesPlan>} */
@@ -161,6 +173,42 @@ function foreignOf(value, side, path, shape) {
   if (wallOf(admitted) % 1000 !== 0)
     throw new CalendarError('JY0013', 'a series slot falls on a whole second, as its recurrenceId does', path);
   return admitted;
+}
+
+/**
+ * Read a moved override's or an RDATE period's end: its `end`, its
+ * `duration` (RFC 5545 §3.3.6), or both. A date, floating or utc series
+ * reads a duration as an end on its wall clock (an instant for utc), and
+ * an end given beside it must be that one; a zoned series keeps the
+ * duration as a length, and the end beside it is compared at expansion.
+ * @param {any} entry - holds `end` and/or `duration`
+ * @param {number} wall - the start's wall clock
+ * @param {string} path
+ * @param {{ kind?: string, zone?: string }} shape
+ * @param {string} what - what refuses an end before its start
+ * @returns {{ endWall?: number, length?: Length, check?: boolean }} `check`:
+ *   a zoned end and duration both given
+ * @throws {CalendarError} `JY0014` for a duration that is not one, an end
+ *   before the start, or an end and a duration naming different ends
+ */
+function endOf(entry, wall, path, shape, what) {
+  /** @type {number | undefined} */
+  let endWall;
+  if (entry.end !== undefined) {
+    endWall = readStart(entry.end, 'end', `${path}/end`, shape);
+    if (endWall < wall)
+      throw new CalendarError('JY0014', `${what} ends at or after its start`, `${path}/end`);
+  }
+  if (entry.duration === undefined)
+    return { endWall };
+  const { days, ms } = readDuration(entry.duration, /** @type {any} */ (shape.kind), `${path}/duration`, 'a duration in a series of dates');
+  if (shape.kind === 'zoned')
+    return { length: { days, exact: ms }, check: endWall !== undefined };
+  const byLength = wall + days * DAY + ms;
+  if (endWall !== undefined && endWall !== byLength)
+    throw new CalendarError('JY0014', `the end and the duration name different ends: ${recurrenceIdOf(/** @type {any} */ (shape.kind), endWall)} and ${
+      recurrenceIdOf(/** @type {any} */ (shape.kind), byLength)}`, `${path}/duration`);
+  return { endWall: byLength };
 }
 
 /**
@@ -244,12 +292,18 @@ export function defineSeries(definition) {
   const rdates = new Map();
   /** @type {SeriesPlan['foreign']} */
   const foreign = { rdates: [], exdates: [] };
+  /** @type {SeriesPlan['agreements']} */
+  const agreements = [];
   const rdatesOut = rdatesIn.map((entry, i) => {
     const path = `/rdates/${i}`;
     const period = isRecord(entry) && !Object.hasOwn(entry, 'kind');
-    if (period && Object.keys(entry).some((key) => key !== 'start' && key !== 'end'))
-      throw new CalendarError('JY0014', 'a period is { start, end }', path);
+    if (period && Object.keys(entry).some((key) => key !== 'start' && key !== 'end' && key !== 'duration'))
+      throw new CalendarError('JY0014', 'a period is { start, end } or { start, duration }', path);
+    const timed = period && entry.duration !== undefined;
     const startPath = period ? `${path}/start` : path;
+    // a period as given: its start and its end, its duration or both
+    const echo = () => (period ? Object.freeze({ start: entry.start, ...(entry.end !== undefined || !timed ? { end: entry.end } : {}),
+      ...(timed ? { duration: entry.duration } : {}) }) : entry);
     const away = foreignOf(period ? entry.start : entry, 'start', startPath, shape);
     const awayEnd = period ? foreignOf(entry.end, 'end', `${path}/end`, shape) : undefined;
     if (away !== undefined || awayEnd !== undefined) {
@@ -258,21 +312,32 @@ export function defineSeries(definition) {
         readStart(value, side, at, shape);
         return admitValue(value, side, at);
       };
-      foreign.rdates.push({ start: away ?? own(period ? entry.start : entry, 'start', startPath), index: i,
-        ...(period ? { end: awayEnd ?? own(entry.end, 'end', `${path}/end`) } : {}) });
-      return period ? Object.freeze({ start: entry.start, end: entry.end }) : entry;
+      /** @type {SeriesPlan['foreign']['rdates'][number]} */
+      const read = { start: away ?? own(period ? entry.start : entry, 'start', startPath), index: i };
+      if (period && (entry.end !== undefined || !timed))
+        read.end = awayEnd ?? own(entry.end, 'end', `${path}/end`);
+      if (timed) {
+        const { days, ms } = readDuration(entry.duration, 'zoned', `${path}/duration`);
+        read.length = { days, exact: ms };
+      }
+      foreign.rdates.push(read);
+      return echo();
     }
     const wall = readStart(period ? entry.start : entry, 'start', startPath, shape);
-    let endWall;
+    /** @type {{ endWall?: number, length?: Length, check?: boolean }} */
+    let end = {};
     if (period) {
-      endWall = readStart(entry.end, 'end', `${path}/end`, shape);
-      if (endWall < wall)
+      end = timed ? endOf(entry, wall, path, shape, 'a period') : { endWall: readStart(entry.end, 'end', `${path}/end`, shape) };
+      if (end.endWall !== undefined && end.endWall < wall)
         throw new CalendarError('JY0014', 'a period ends at or after its start', `${path}/end`);
+      if (end.check)
+        agreements.push({ start: admitValue(entry.start, 'start', startPath), end: admitValue(entry.end, 'end', `${path}/end`),
+          length: /** @type {Length} */ (end.length), path: `${path}/duration` });
     }
     const id = recurrenceIdOf(shape.kind, wall);
     if (!rdates.has(id))
-      rdates.set(id, { wall, endWall });
-    return period ? Object.freeze({ start: entry.start, end: entry.end }) : entry;
+      rdates.set(id, { wall, endWall: end.endWall, ...(end.length !== undefined ? { length: end.length } : {}) });
+    return echo();
   });
   const exdates = new Set();
   const exdatesOut = (definition.exdates ?? []).map((entry, i) => {
@@ -288,9 +353,9 @@ export function defineSeries(definition) {
   const overridesOut = (definition.overrides ?? []).map((entry, i) => {
     const path = `/overrides/${i}`;
     if (!isRecord(entry))
-      throw new CalendarError('JY0014', 'an override is { recurrenceId, status, start?, end?, payload?, range? }', path);
+      throw new CalendarError('JY0014', 'an override is { recurrenceId, status, start?, end?, duration?, payload?, range? }', path);
     for (const key of Object.keys(entry)) {
-      if (!['recurrenceId', 'status', 'start', 'end', 'payload', 'range'].includes(key))
+      if (!['recurrenceId', 'status', 'start', 'end', 'duration', 'payload', 'range'].includes(key))
         throw new CalendarError('JY0014', `an override carries no '${key}'`, `${path}/${key}`);
     }
     const id = entry.recurrenceId;
@@ -305,14 +370,17 @@ export function defineSeries(definition) {
       if (entry.start === undefined)
         throw new CalendarError('JY0014', 'a moved override names its new start', `${path}/start`);
       read.wall = readStart(entry.start, 'start', `${path}/start`, shape);
-      if (entry.end !== undefined) {
-        read.endWall = readStart(entry.end, 'end', `${path}/end`, shape);
-        if (read.endWall < read.wall)
-          throw new CalendarError('JY0014', 'a moved override ends at or after its start', `${path}/end`);
-      }
+      const end = endOf(entry, read.wall, path, shape, 'a moved override');
+      if (end.endWall !== undefined && end.length === undefined)
+        read.endWall = end.endWall;
+      if (end.length !== undefined)
+        read.length = end.length;
+      if (end.check)
+        agreements.push({ start: admitValue(entry.start, 'start', `${path}/start`), end: admitValue(entry.end, 'end', `${path}/end`),
+          length: end.length, path: `${path}/duration` });
     }
     else if (entry.status === 'cancelled') {
-      for (const key of ['start', 'end']) {
+      for (const key of ['start', 'end', 'duration']) {
         if (entry[key] !== undefined)
           throw new CalendarError('JY0014', `a cancelled override has no ${key}`, `${path}/${key}`);
       }
@@ -332,7 +400,7 @@ export function defineSeries(definition) {
     exdates: Object.freeze(exdatesOut),
     overrides: Object.freeze(overridesOut),
   });
-  SERIES.set(series, { uid, revision, kind: shape.kind, zone: shape.zone, plan, rdates, exdates, overrides, foreign });
+  SERIES.set(series, { uid, revision, kind: shape.kind, zone: shape.zone, plan, rdates, exdates, overrides, foreign, agreements });
   return series;
 }
 
@@ -436,18 +504,73 @@ function instantOf(context, admitted) {
 }
 
 /**
+ * The instant a duration ends at from a zoned series' start value (in
+ * its own zone, or utc): its days added to the start's wall clock (a
+ * utc start's instant) and resolved, then its exact time (RFC 5545
+ * §3.3.6). `undefined` when the budget ran out.
+ * @param {Context} context
+ * @param {any} admitted - the start
+ * @param {Length} length
+ * @returns {number | undefined}
+ * @throws {CalendarError} `JY0002`/`JY0003` under `reject` for a nominal end in a gap or fold
+ */
+function endAfter(context, admitted, length) {
+  if (admitted.value.kind === 'utc')
+    return admitted.epoch + length.days * DAY + length.exact;
+  const at = resolveWall(context.resolver, context.budget, wallOf(admitted) + length.days * DAY, admitted.value.zone);
+  if (at?.refused !== undefined)
+    throw at.refused;
+  return at === undefined ? undefined : at.instant + length.exact;
+}
+
+/**
+ * Whether a zoned series' end value names an instant: its wall clock is
+ * the one the instant reads in its zone (so an end in the second pass of
+ * a repeated hour names that pass), or resolves to it under the series'
+ * policy (so a wall clock in a gap names the instant it moves to); a utc
+ * end is that instant. `undefined` when the budget ran out.
+ * @param {Context} context
+ * @param {any} admitted - the end
+ * @param {number} instant
+ * @returns {boolean | undefined}
+ */
+function names(context, admitted, instant) {
+  if (admitted.value.kind === 'utc')
+    return admitted.epoch === instant;
+  const wall = wallAtInstant({ ...context.resolver, zone: admitted.value.zone }, context.budget, instant);
+  if (wall === undefined)
+    return undefined;
+  if (wall === wallOf(admitted))
+    return true;
+  const at = resolveWall(context.resolver, context.budget, wallOf(admitted), admitted.value.zone);
+  return at === undefined ? undefined : at.instant === instant;
+}
+
+/**
  * Read a series' dates for one expansion; `undefined` when the budget
  * ran out. An RDATE in another zone or utc is named by the series' wall
  * clock at its instant; one whose wall clock the series reads as another
  * instant (the second pass of a repeated hour) is refused, since its
- * recurrenceId would name the other.
+ * recurrenceId would name the other. A zoned end given both as an end
+ * and as a duration is compared here, every expansion, whatever the
+ * horizon.
  * @param {SeriesPlan} series
  * @param {Context} context
  * @returns {SeriesView | undefined}
- * @throws {CalendarError} `JY0013` for such an RDATE, `JY0014` for a period ending before it starts
+ * @throws {CalendarError} `JY0013` for such an RDATE, `JY0014` for a period ending before it starts, or an end and a
+ *   duration naming different ends
  */
 function viewOf(series, context) {
   const view = { rdates: series.rdates, away: new Set() };
+  for (const { start, end, length, path } of series.agreements) {
+    const instant = endAfter(context, start, length);
+    const same = instant === undefined ? undefined : names(context, end, instant);
+    if (same === undefined)
+      return undefined;
+    if (!same)
+      throw new CalendarError('JY0014', `the end and the duration name different ends: ${new Date(/** @type {number} */ (instant)).toISOString()} `
+        + `is not the end given`, path);
+  }
   if (series.foreign.rdates.length === 0 && series.foreign.exdates.length === 0)
     return view;
   const resolver = { ...context.resolver, zone: series.zone };
@@ -459,11 +582,21 @@ function viewOf(series, context) {
   }
   /** @type {Map<string, SlotDate>} */
   const rdates = new Map(series.rdates);
-  for (const { start, end, index } of series.foreign.rdates) {
+  for (const { start, end, length, index } of series.foreign.rdates) {
     const instant = instantOf(context, start);
-    const endInstant = instant === undefined || end === undefined ? undefined : instantOf(context, end);
-    if (instant === undefined || (end !== undefined && endInstant === undefined))
+    let endInstant = instant === undefined || end === undefined || length !== undefined ? undefined : instantOf(context, end);
+    if (instant === undefined || (end !== undefined && length === undefined && endInstant === undefined))
       return undefined;
+    if (length !== undefined) {
+      // a duration counts its days on the start's own wall clock (RFC 5545 §3.3.6)
+      endInstant = endAfter(context, start, length);
+      const same = endInstant === undefined || end === undefined ? true : names(context, end, endInstant);
+      if (endInstant === undefined || same === undefined)
+        return undefined;
+      if (!same)
+        throw new CalendarError('JY0014', `the end and the duration name different ends: ${new Date(endInstant).toISOString()} is not the end given`,
+          `/rdates/${index}/duration`);
+    }
     const wall = wallAtInstant(resolver, context.budget, instant);
     const back = wall === undefined ? undefined : resolveWall(resolver, context.budget, wall);
     if (wall === undefined || back === undefined)
@@ -599,15 +732,27 @@ function expandOne(series, context, out, orphans) {
   const ranges = rangesOf(series, context, view, orphans);
   if (ranges === undefined)
     return false;
-  // a slot a moved range keeps its length from the range's end, when it names one
-  /** @param {SlotOverride | undefined} range */
-  const rangeLength = (range) => (range?.endWall === undefined ? undefined : range.endWall - /** @type {number} */ (range.wall));
+  /**
+   * The end a slot starting at `wall` takes from an override's own
+   * length: its duration, or its end's distance from its start on the
+   * wall clock; `undefined` when it names neither.
+   * @param {SlotOverride | undefined} override
+   * @param {number} wall
+   * @returns {{ endWall?: number, length?: Length } | undefined}
+   */
+  const ownEnd = (override, wall) => {
+    if (override?.length !== undefined)
+      return { length: override.length };
+    return override?.endWall === undefined ? undefined : { endWall: wall + override.endWall - /** @type {number} */ (override.wall) };
+  };
   let baseLength = { days: series.kind === 'date' ? 1 : 0, exact: 0 };
   /** @param {string} id */
   const lengthOf = (id) => {
     const rdate = view.rdates.get(id);
     if (rdate?.exact !== undefined)
       return { days: 0, exact: rdate.exact };
+    if (rdate?.length !== undefined)
+      return rdate.length;
     return rdate?.endWall === undefined ? baseLength : { days: 0, exact: rdate.endWall - rdate.wall };
   };
   /**
@@ -620,9 +765,9 @@ function expandOne(series, context, out, orphans) {
    */
   const shifted = (id, wall, endWall, range) => {
     const by = /** @type {number} */ (range.wall) - range.idWall;
-    const length = rangeLength(range);
-    const built = build(series, context, id, wall + by, length !== undefined ? wall + by + length
-      : endWall === undefined ? undefined : endWall + by, lengthOf(id));
+    const own = ownEnd(range, wall + by);
+    const built = build(series, context, id, wall + by, own !== undefined ? own.endWall
+      : endWall === undefined ? undefined : endWall + by, own?.length ?? lengthOf(id));
     if (built) {
       built.occurrence.moved = true;
       if (range.hasPayload)
@@ -646,9 +791,12 @@ function expandOne(series, context, out, orphans) {
     runs.push({ from: -Infinity, to: Infinity, by: 0, extra: 0 });
     for (const range of ranges) {
       runs[runs.length - 1].to = range.idWall;
-      const length = rangeLength(range);
+      // how far the range's own length reaches past the rule's (a duration's days in wall clock)
+      const own = ownEnd(range, 0);
+      const length = own === undefined ? span : own.length === undefined ? /** @type {number} */ (own.endWall)
+        : own.length.days * DAY + own.length.exact;
       runs.push({ range, from: range.idWall, to: Infinity, by: (range.wall ?? range.idWall) - range.idWall,
-        extra: Math.max(0, (length ?? span) - span) });
+        extra: Math.max(0, length - span) });
     }
   }
   // the rule may lose one occurrence to each EXDATE and override, so it
@@ -767,10 +915,10 @@ function expandOne(series, context, out, orphans) {
       slots.delete(id);
       if (override.status === 'cancelled')
         continue;
-      // under a moved range that names a length, the slot keeps that length
-      const length = rangeLength(rangeOver(ranges, override.idWall));
+      // its own end or duration; else, under a moved range that names a length, that length
       const wall = /** @type {number} */ (override.wall);
-      const built = build(series, context, id, wall, override.endWall ?? (length === undefined ? undefined : wall + length), lengthOf(id));
+      const own = ownEnd(override, wall) ?? ownEnd(rangeOver(ranges, override.idWall), wall);
+      const built = build(series, context, id, wall, own?.endWall, own?.length ?? lengthOf(id));
       if (built === undefined)
         return false;
       if (built !== null) {

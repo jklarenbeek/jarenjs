@@ -96,8 +96,8 @@ describe('identity', () => {
     assert.strictEqual(createIntlZoneProvider(/** @type {any} */ ({ revision: null })).identity?.revision, 'unrecorded');
   });
 
-  it('carries the four members, frozen', () => {
-    assert.deepStrictEqual(Object.keys(provider), ['toParts', 'toEpoch', 'candidates', 'identity']);
+  it('carries the five members, frozen', () => {
+    assert.deepStrictEqual(Object.keys(provider), ['toParts', 'toEpoch', 'candidates', 'offsetChanges', 'identity']);
     assert.ok(Object.isFrozen(provider));
   });
 });
