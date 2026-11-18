@@ -14,8 +14,9 @@ each is its own row. For each row:
   where the RFC's list stops. The MONTHLY and YEARLY lists were parsed
   mechanically from each row's `result` text: its `(YEAR ... EDT|EST)`
   groups, month names, day lists and ranges, at the DTSTART's 09:00.
-- The HOURLY and MINUTELY rows carry no `expected`: those frequencies are
-  refused by name.
+- The HOURLY and MINUTELY rows carry no `expected` (other readers of this
+  file select the rows that do); `rrule-rfc.test.js` writes their lists
+  out by hand from `result`.
 - `errata` notes a verified erratum that touches a row.
 
 Source: [RFC 5545](https://www.rfc-editor.org/rfc/rfc5545), "Internet
@@ -36,8 +37,9 @@ Errata consulted (https://www.rfc-editor.org/errata/rfc5545):
   row).
 - 3747 (verified, editorial) redraws the section 3.3.10 expand/limit table;
   its cells are unchanged.
-- 3883 (verified) corrects the UNTIL of the HOURLY "every 3 hours" example.
-  That row is refused here for its frequency either way.
+- 3883 (verified) corrects the UNTIL of the HOURLY "every 3 hours" example
+  to `19970902T210000Z` (17:00 EDT). The RFC's list (09:00, 12:00, 15:00) is
+  the corrected rule's; the rule as printed ends at 13:00 EDT.
 - 5872, 5920 and 6212 (rejected) leave their examples as printed. The
   "Every Friday the 13th" row keeps its EXDATE of its own DTSTART, so its
   list starts in 1998.

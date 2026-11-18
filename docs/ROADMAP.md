@@ -1142,19 +1142,16 @@ what each does is its own documentation's job
 
 ## @jarenjs/core
 
-- [ ] **`@jarenjs/core/calendar` enumerates DAILY, WEEKLY, MONTHLY and YEARLY recurrence, not
-  sub-daily.** Temporal values, zone binding, civil-day splitting, DAILY, WEEKLY, MONTHLY and
-  YEARLY recurrence (every BY part RFC 5545 allows for each, BYSETPOS, BYWEEKNO under WKST,
-  negative indexes, invalid dates skipped and never clamped), series (RDATE, EXDATE, moved and
-  cancelled overrides), weekly patterns and availability layers (evaluated into available, busy
-  and unknown spans, with whole-interval checks, free/busy and slot search) ship, expanded under
-  explicit limits. A grammatically valid SECONDLY, MINUTELY or HOURLY rule is refused by name
-  (`JY0020`), an override with RANGE=THISANDFUTURE is kept but not expanded (`JY0021`), and a
-  zoned series' RDATE or EXDATE must name the series' own zone. No store has a temporal column
+- [ ] **`@jarenjs/core/calendar` reads a zoned series' RDATE and EXDATE in its own zone only, and no store has a
+  temporal column kind.** A zoned series' RDATE or EXDATE must name the series' own zone. No store has a temporal column
   kind: a caller stores the JSON forms (`@jarenjs/core/schemas/calendar/temporal.schema.json`,
   `…/rrule.schema.json`) and binds floating occurrences with `bindFloating`.
-  Recurring job schedules (`@jarenjs/db/schedules`, JOBS-FORMAT §11) take the same frequencies and refuse
-  the others with the same code at schedule time.
+- [ ] **A zoned SECONDLY or MINUTELY expansion reads a clean wall-clock hour before its horizon at one offset.** It asks
+  the provider about each hour's start and end, not each time, so a zone whose offset changes inside one wall-clock hour
+  and changes back by the same amount before it ends is read as unchanged.
+- [ ] **A zoned series whose range override moves slots back can answer fewer than `maxOccurrences`.** When a run of the
+  rule stops at its cap, the answer is cut two days of instants before where an unread slot could start; it is
+  incomplete and a prefix of the whole answer, but can hold fewer occurrences than the limit allows.
 - [ ] **`@jarenjs/josl/ical` writes no VTIMEZONE by RRULE and reads no VAVAILABILITY or scheduling
   method.** Events, recurring series and free/busy spans are written by kind; under `zones: 'utc'` a
   zoned time is written as the UTC instant `toUtc` answers, and a zoned recurring series as its

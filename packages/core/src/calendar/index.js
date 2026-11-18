@@ -7,7 +7,7 @@
  * five temporal value kinds (date, floating, utc, zoned, date-range) as
  * frozen JSON, binding a zone-less value to a zone, and splitting an
  * interval at a zone's civil-day boundaries; RFC 5545 recurrence rules
- * (the whole grammar read and checked; DAILY, WEEKLY, MONTHLY and YEARLY enumerated)
+ * (the whole grammar read and checked; every frequency, SECONDLY to YEARLY, enumerated)
  * expanded inside an explicit horizon and budget, recurring series with
  * extra dates, excluded dates and overrides, and weekly patterns; and
  * prioritized availability layers evaluated into available, busy and

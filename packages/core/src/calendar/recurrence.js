@@ -2,7 +2,8 @@
 
 //#region Recurrence: compile once, expand inside a horizon
 // A rule compiles once into a plan of numbers; an expansion walks that
-// plan period by period (a day for DAILY, a WKST-aligned week for
+// plan period by period (a second, minute or hour for SECONDLY, MINUTELY
+// and HOURLY, a day for DAILY, a WKST-aligned week for
 // WEEKLY, a month for MONTHLY, a year for YEARLY: with BYWEEKNO the run
 // of weeks the year numbers, from its week 1 to the next year's) inside
 // an explicit half-open horizon, charging every step to a budget. The walk runs on wall clocks read as if UTC (`wall` below:
@@ -16,6 +17,14 @@
 // cases a day is kept when it passes them all), with the parts it leaves
 // out taken from DTSTART. Each day of the period is examined and charged
 // once, so a rule that never matches (February 30) ends under its limits.
+//
+// A SECONDLY, MINUTELY or HOURLY period is INTERVAL seconds, minutes or
+// hours from DTSTART's own. The finer time parts expand it (HOURLY:
+// BYMINUTE and BYSECOND; MINUTELY: BYSECOND), every other part limits it
+// (RFC 5545 §3.3.10's table). A period a limit drops is charged once,
+// and a dropped day, hour or minute is passed in one step: the walk
+// jumps to the first period of the next one, so a rule that limits
+// seconds to one month of the year charges a step per day, not per second.
 //
 // COUNT and UNTIL keep their meaning for the whole rule. Without COUNT
 // every period yields the same occurrences whichever period came before
@@ -37,8 +46,8 @@ const HOUR = 3600000;
 const MINUTE = 60000;
 /** Wider than any zone offset either way: a wall-clock window this much wider holds every instant window. */
 const MARGIN = 3 * DAY;
-/** The frequencies this release enumerates. */
-const ENUMERATED = Object.freeze(['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY']);
+/** The length of a sub-daily period's unit, by FREQ. */
+const UNIT = Object.freeze({ SECONDLY: 1000, MINUTELY: MINUTE, HOURLY: HOUR });
 
 /**
  * The limits an expansion stops at when the caller names none. Each one
@@ -72,7 +81,8 @@ export const RECURRENCE_LIMITS = /* @__PURE__ */ Object.freeze({
  * The limits of one expansion; any left out take {@link RECURRENCE_LIMITS}.
  * @typedef {Object} RecurrenceLimits
  * @property {number} [maxOccurrences] - occurrences returned
- * @property {number} [maxWork] - candidate steps: one per day examined (every day of a MONTHLY or YEARLY period), one per start time generated on a day that passes
+ * @property {number} [maxWork] - candidate steps: one per day examined (every day of a MONTHLY or YEARLY period), one per start time generated on a day that passes;
+ *   for SECONDLY, MINUTELY and HOURLY one per period examined or day, hour or minute passed over, and one per start time a kept period generates
  * @property {number} [maxProviderCalls] - calls to the provider's `candidates` and `toParts`
  * @property {number} [maxHorizonDays] - days of horizon walked
  */
@@ -120,7 +130,12 @@ export const RECURRENCE_LIMITS = /* @__PURE__ */ Object.freeze({
  * @typedef {Object} Plan
  * @property {RecurrenceKind} kind
  * @property {string} [zone]
- * @property {'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'} freq
+ * @property {'SECONDLY' | 'MINUTELY' | 'HOURLY' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'} freq
+ * @property {number} unit - SECONDLY, MINUTELY, HOURLY: the period's unit in milliseconds; 0 otherwise
+ * @property {number} origin - SECONDLY, MINUTELY, HOURLY: the first wall clock of DTSTART's period
+ * @property {boolean[] | null} byHour - SECONDLY, MINUTELY, HOURLY: hours kept (BYHOUR limits)
+ * @property {boolean[] | null} byMinute - SECONDLY, MINUTELY: minutes kept (BYMINUTE limits)
+ * @property {boolean[] | null} bySecond - SECONDLY: seconds kept (BYSECOND limits)
  * @property {number} interval
  * @property {number | undefined} count
  * @property {number} untilWall - the last start wall a walk may reach (exact, or for a zoned rule its instant plus MARGIN)
@@ -133,11 +148,12 @@ export const RECURRENCE_LIMITS = /* @__PURE__ */ Object.freeze({
  * @property {number} startMonth - DTSTART's month as year * 12 + month - 1: MONTHLY's period 0
  * @property {number} wkst - the week's first day, 0 = Monday
  * @property {readonly number[]} times - milliseconds into the day of each start time a passing day yields
+ *   (SECONDLY, MINUTELY, HOURLY: into the period, of each start time a kept period yields)
  * @property {boolean[] | null} byMonth
  * @property {readonly number[] | null} byMonthDay - for MONTHLY and YEARLY with DTSTART's day when the rule names no day
- * @property {boolean[] | null} byWeekday - DAILY: weekdays kept, ISO order from 0
+ * @property {boolean[] | null} byWeekday - DAILY and sub-daily: weekdays kept, ISO order from 0
  * @property {readonly number[] | null} byWeekNo - YEARLY
- * @property {readonly number[] | null} byYearDay - YEARLY
+ * @property {readonly number[] | null} byYearDay - YEARLY; a limit for SECONDLY, MINUTELY and HOURLY
  * @property {readonly (readonly [number, number])[] | null} byDay - MONTHLY and YEARLY: [weekday from 0 = Monday, ordinal or 0]
  * @property {boolean} ordinalInYear - YEARLY without BYMONTH: an ordinal BYDAY counts within the year, not the month
  * @property {readonly number[] | null} setpos
@@ -208,10 +224,9 @@ export function wallOf(admitted) {
 
 /**
  * Compile a recurrence: a start, its length, and an RFC 5545 rule. The
- * whole grammar is checked for every frequency first; a valid rule whose
- * frequency this release does not enumerate (SECONDLY, MINUTELY, HOURLY)
- * is then refused with `JY0020`, never compiled into one that returns no
- * occurrences. DAILY, WEEKLY, MONTHLY and YEARLY are enumerated.
+ * whole grammar is checked; every frequency is enumerated, from SECONDLY
+ * to YEARLY. A sub-daily rule (SECONDLY, MINUTELY, HOURLY) needs a start
+ * with a time of day (`JY0018` for a date start).
  *
  * - `dtstart` is a date, floating, utc or zoned value on a whole second.
  * - The length is `duration` (RFC 5545: nominal weeks and days, exact
@@ -226,8 +241,8 @@ export function wallOf(admitted) {
  * @returns {CompiledRecurrence}
  * @throws {CalendarError} the grammar's `JY0009`, `JY0015`-`JY0018` with a
  *   path such as `rrule.BYMONTHDAY[2]`; `JY0018` for BYHOUR, BYMINUTE or
- *   BYSECOND with a date start; `JY0019` for an UNTIL of the wrong kind;
- *   `JY0020` for a frequency not enumerated here; `JY0013`/`JY0014` for
+ *   BYSECOND, or a SECONDLY, MINUTELY or HOURLY rule, with a date start;
+ *   `JY0019` for an UNTIL of the wrong kind; `JY0013`/`JY0014` for
  *   the start, length or options; `JY0005` for a policy
  * @example
  * compileRecurrence({
@@ -265,6 +280,8 @@ export function compileRecurrence(definition) {
       if (rule[name] !== undefined)
         throw new CalendarError('JY0018', `${name} does not go with a date start, which has no time of day`, `rrule.${name}`);
     }
+    if (Object.hasOwn(UNIT, rule.FREQ))
+      throw new CalendarError('JY0018', `FREQ=${rule.FREQ} does not go with a date start, which has no time of day`, 'rrule.FREQ');
   }
   if (rule.UNTIL !== undefined) {
     const wanted = kind === 'zoned' ? 'utc' : kind;
@@ -272,10 +289,6 @@ export function compileRecurrence(definition) {
       throw new CalendarError('JY0019', `a ${kind} start ends with a ${wanted} UNTIL (RFC 5545 §3.3.10), not a ${rule.UNTIL.kind} one`,
         'rrule.UNTIL');
     }
-  }
-  if (!ENUMERATED.includes(rule.FREQ)) {
-    throw new CalendarError('JY0020', `FREQ=${rule.FREQ} is valid RRULE but is not enumerated in this release; `
-      + 'only DAILY, WEEKLY, MONTHLY and YEARLY are', 'rrule.FREQ');
   }
   if (duration !== undefined && dtend !== undefined)
     throw new CalendarError('JY0014', 'a recurrence takes duration or dtend, not both', '/duration');
@@ -325,10 +338,23 @@ function planOf(kind, start, startWall, rule, length, policy, dtend) {
   const hours = rule.BYHOUR ?? [Math.floor(ofDay / HOUR)];
   const minutes = rule.BYMINUTE ?? [Math.floor((ofDay % HOUR) / MINUTE)];
   const seconds = rule.BYSECOND ?? [Math.floor((ofDay % MINUTE) / 1000)];
+  const unit = /** @type {Record<string, number>} */ (UNIT)[rule.FREQ] ?? 0;
   /** @type {number[]} */
   const times = [];
   if (kind === 'date')
     times.push(0);
+  else if (unit === 1000)
+    times.push(0);
+  else if (unit === MINUTE) {
+    for (const s of seconds)
+      times.push(s * 1000);
+  }
+  else if (unit === HOUR) {
+    for (const m of minutes) {
+      for (const s of seconds)
+        times.push((m * 60 + s) * 1000);
+    }
+  }
   else {
     for (const h of hours) {
       for (const m of minutes) {
@@ -379,7 +405,7 @@ function planOf(kind, start, startWall, rule, length, policy, dtend) {
   }
   /** @type {boolean[] | null} */
   let byWeekday = null;
-  if (rule.FREQ === 'DAILY' && rule.BYDAY !== undefined) {
+  if ((rule.FREQ === 'DAILY' || unit > 0) && rule.BYDAY !== undefined) {
     byWeekday = new Array(7).fill(false);
     for (const weekday of weekdays)
       byWeekday[weekday] = true;
@@ -398,7 +424,12 @@ function planOf(kind, start, startWall, rule, length, policy, dtend) {
   return {
     kind,
     zone: start.value.zone,
-    freq: /** @type {'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'} */ (rule.FREQ),
+    freq: rule.FREQ,
+    unit,
+    origin: unit > 0 ? Math.floor(startWall / unit) * unit : 0,
+    byHour: unit > 0 ? flags(rule.BYHOUR, 24) : null,
+    byMinute: unit > 0 && unit < HOUR ? flags(rule.BYMINUTE, 60) : null,
+    bySecond: unit === 1000 ? flags(rule.BYSECOND, 60) : null,
     interval: rule.INTERVAL ?? 1,
     count: rule.COUNT,
     untilWall,
@@ -423,6 +454,21 @@ function planOf(kind, start, startWall, rule, length, policy, dtend) {
     dtend,
     policy,
   };
+}
+
+/**
+ * A list of whole numbers as flags by value, or null for no list.
+ * @param {readonly number[] | undefined} list
+ * @param {number} size
+ * @returns {boolean[] | null}
+ */
+function flags(list, size) {
+  if (list === undefined)
+    return null;
+  const out = new Array(size).fill(false);
+  for (const value of list)
+    out[value] = true;
+  return out;
 }
 
 /**
@@ -513,8 +559,14 @@ const names = (n, position, length) => (n > 0 ? n : length + n + 1) === position
  * @returns {boolean}
  */
 function passes(plan, day) {
-  if (plan.byMonth !== null || plan.byMonthDay !== null) {
+  if (plan.byMonth !== null || plan.byMonthDay !== null || plan.byYearDay !== null) {
     const civil = civilFromDays(day);
+    if (plan.byYearDay !== null) {
+      const yearDay = day - daysFromCivil(civil.year, 1, 1) + 1;
+      const yearLength = isLeapYear(civil.year) ? 366 : 365;
+      if (!plan.byYearDay.some((n) => names(n, yearDay, yearLength)))
+        return false;
+    }
     if (plan.byMonth !== null && !plan.byMonth[civil.month])
       return false;
     if (plan.byMonthDay !== null) {
@@ -635,12 +687,13 @@ function pick(candidates, setpos) {
 /**
  * Walk the rule's start walls in order from DTSTART, visiting each in
  * `[low, high]`. The visitor answers nothing to go on, or a reason to
- * stop that the walk returns.
+ * stop that the walk returns (a sub-daily visitor may also answer a wall
+ * clock to go on from, which another frequency reads as going on).
  * @param {Plan} plan
  * @param {number} low
  * @param {number} high
  * @param {Budget} budget
- * @param {(wall: number) => (undefined | 'ended' | 'window' | 'stopped')} visit
+ * @param {(wall: number) => (undefined | number | 'ended' | 'window' | 'stopped')} visit
  * @returns {'ended' | 'window' | 'stopped'} `ended`: the rule has no
  *   more occurrences; `window`: the walk passed `high`; `stopped`: a
  *   limit or the visitor stopped it
@@ -653,14 +706,16 @@ export function walk(plan, low, high, budget, visit) {
     return 'window';
   if (!charge(budget, 1))
     return 'stopped';
-  let count = 1;
+  const state = { count: 1 };
   if (plan.startWall >= low) {
     const reason = visit(plan.startWall);
-    if (reason !== undefined)
+    if (reason !== undefined && typeof reason !== 'number')
       return reason;
   }
-  if (plan.count !== undefined && count >= plan.count)
+  if (plan.count !== undefined && state.count >= plan.count)
     return 'ended';
+  if (plan.unit > 0)
+    return walkSubDaily(plan, low, high, budget, visit, lastWall, state);
   const weekly = plan.freq === 'WEEKLY';
   const calendar = plan.freq === 'MONTHLY' || plan.freq === 'YEARLY';
   const first = weekly ? plan.weekStart : plan.startDay;
@@ -692,23 +747,119 @@ export function walk(plan, low, high, budget, visit) {
       for (const time of plan.times)
         candidates.push(day * DAY + time);
     }
-    const picked = plan.setpos === null ? candidates : pick(candidates, plan.setpos);
-    for (const wall of picked) {
-      if (wall <= plan.startWall)
-        continue;
-      if (wall > lastWall)
-        return 'ended';
-      if (wall > high)
-        return 'window';
-      count++;
-      if (wall >= low) {
-        const reason = visit(wall);
-        if (reason !== undefined)
-          return reason;
-      }
-      if (plan.count !== undefined && count >= plan.count)
-        return 'ended';
+    const reason = emit(plan, plan.setpos === null ? candidates : pick(candidates, plan.setpos), low, high, lastWall, state, visit);
+    if (reason !== undefined && typeof reason !== 'number')
+      return reason;
+  }
+}
+
+/**
+ * Visit one period's kept start walls in order, past DTSTART, counting
+ * each against COUNT; answer a reason to stop, or nothing to go on.
+ * @param {Plan} plan
+ * @param {readonly number[]} picked
+ * @param {number} low
+ * @param {number} high
+ * @param {number} lastWall
+ * @param {{ count: number }} state
+ * @param {(wall: number) => (undefined | number | 'ended' | 'window' | 'stopped')} visit
+ * @returns {undefined | number | 'ended' | 'window' | 'stopped'}
+ */
+function emit(plan, picked, low, high, lastWall, state, visit) {
+  /** @type {number | undefined} */
+  let next;
+  for (const wall of picked) {
+    if (wall <= plan.startWall)
+      continue;
+    if (wall > lastWall)
+      return 'ended';
+    if (wall > high)
+      return 'window';
+    state.count++;
+    if (wall >= low) {
+      const reason = visit(wall);
+      // a wall clock to go on from: the period's later walls are still visited
+      if (typeof reason === 'number')
+        next = reason;
+      else if (reason !== undefined)
+        return reason;
     }
+    if (plan.count !== undefined && state.count >= plan.count)
+      return 'ended';
+  }
+  return next;
+}
+
+/**
+ * The first wall clock past the day, hour, minute or second a limit drops
+ * a sub-daily period starting at `at` in, or `undefined` when every limit
+ * keeps it.
+ * @param {Plan} plan
+ * @param {number} at
+ * @returns {number | undefined}
+ */
+function droppedUntil(plan, at) {
+  const day = Math.floor(at / DAY);
+  if (!passes(plan, day))
+    return (day + 1) * DAY;
+  const ofDay = at - day * DAY;
+  const hour = Math.floor(ofDay / HOUR);
+  if (plan.byHour !== null && !plan.byHour[hour])
+    return day * DAY + (hour + 1) * HOUR;
+  const minute = Math.floor((ofDay % HOUR) / MINUTE);
+  if (plan.byMinute !== null && !plan.byMinute[minute])
+    return day * DAY + hour * HOUR + (minute + 1) * MINUTE;
+  if (plan.bySecond !== null && !plan.bySecond[Math.floor((ofDay % MINUTE) / 1000)])
+    return at + 1000;
+  return undefined;
+}
+
+/**
+ * The sub-daily part of {@link walk}: periods of INTERVAL units from
+ * DTSTART's, each charged once whether a limit keeps it or drops it; a
+ * dropped period's day, hour or minute is passed in that one step. A
+ * visitor may answer a wall clock to go on from (a rule without COUNT
+ * only: the periods before it are not counted).
+ * @param {Plan} plan
+ * @param {number} low
+ * @param {number} high
+ * @param {Budget} budget
+ * @param {(wall: number) => (undefined | number | 'ended' | 'window' | 'stopped')} visit
+ * @param {number} lastWall
+ * @param {{ count: number }} state
+ * @returns {'ended' | 'window' | 'stopped'}
+ */
+function walkSubDaily(plan, low, high, budget, visit, lastWall, state) {
+  const step = plan.unit * plan.interval;
+  let period = plan.count === undefined ? Math.max(0, Math.floor((low - plan.origin) / step)) : 0;
+  /** @type {number[]} */
+  const candidates = [];
+  for (;;) {
+    const at = plan.origin + period * step;
+    if (at > lastWall)
+      return 'ended';
+    if (at > high)
+      return 'window';
+    if (!charge(budget, 1))
+      return 'stopped';
+    const until = droppedUntil(plan, at);
+    if (until !== undefined) {
+      period = Math.ceil((until - plan.origin) / step);
+      continue;
+    }
+    if (!charge(budget, plan.times.length))
+      return 'stopped';
+    candidates.length = 0;
+    for (const time of plan.times)
+      candidates.push(at + time);
+    const reason = emit(plan, plan.setpos === null ? candidates : pick(candidates, plan.setpos), low, high, lastWall, state, visit);
+    // the period holding that wall clock: its earlier times are passed again, without a call
+    if (typeof reason === 'number')
+      period = Math.max(period + 1, Math.floor((reason - plan.origin) / step));
+    else if (reason !== undefined)
+      return reason;
+    else
+      period++;
   }
 }
 
@@ -962,6 +1113,51 @@ export function placeZoned(resolver, budget, id, at, wall, endWall, length, low,
 }
 
 /**
+ * For a SECONDLY or MINUTELY zoned walk: a test that answers, for a wall
+ * clock before the horizon, the wall clock to go on from (every time
+ * before it starts before `before`), so it needs no provider call of its
+ * own; `false` for one that must be resolved, and `undefined` when the
+ * budget ran out. Each wall-clock hour is asked once (two clock readings,
+ * its end shared with the next hour's start); an hour whose start and end
+ * exist and lie one hour apart in instants is read at one offset, so a
+ * time in it starts at its start's instant plus its distance from it.
+ * Asking stops at the first time that does not start before `before`. A
+ * zone whose offset changes inside one wall-clock hour and changes back
+ * by the same amount before it ends would be read as unchanged.
+ * @param {Resolver} resolver
+ * @param {Budget} budget
+ * @param {number} before - an instant
+ * @returns {(wall: number) => number | false | undefined}
+ */
+function beforeHorizon(resolver, budget, before) {
+  let hour = NaN;
+  let skipping = true;
+  /** @type {number | undefined} */
+  let at;
+  /** @type {ReturnType<typeof resolveWall>} */
+  let end;
+  return (wall) => {
+    if (!skipping)
+      return false;
+    const start = Math.floor(wall / HOUR) * HOUR;
+    if (start !== hour) {
+      const first = start === hour + HOUR ? end : resolveWall(resolver, budget, start);
+      end = first === undefined ? undefined : resolveWall(resolver, budget, start + HOUR);
+      if (first === undefined || end === undefined)
+        return undefined;
+      hour = start;
+      at = first.resolution.kind === 'exists' && end.resolution.kind === 'exists' && end.instant - first.instant === HOUR
+        ? first.instant : undefined;
+    }
+    if (at === undefined || at + (wall - start) >= before) {
+      skipping = false;
+      return false;
+    }
+    return Math.min(start + HOUR, start + (before - at));
+  };
+}
+
+/**
  * One expansion of a plan: the occurrences in `[low, high)` in order,
  * and why it stopped.
  * @param {Plan} plan
@@ -1018,15 +1214,32 @@ export function expandPlan(plan, low, high, budget, resolver, stopAfter) {
     const found = [];
     let settle = Infinity;
     let movedSeen = false;
-    const reach = length.days * DAY + exact + MARGIN;
+    // A sub-daily walk starts one day (an offset's bound) before the
+    // horizon in wall clock, not three, and settles over the farthest a
+    // gap moved a start, not a margin: its periods are seconds to hours.
+    const sub = plan.unit > 0;
+    let shift = 0;
+    const bound = (length.days * 2 * DAY) + exact;
+    const reach = sub ? bound + DAY : length.days * DAY + exact + MARGIN;
+    const skip = sub && plan.unit < HOUR ? beforeHorizon(resolver, budget, low - bound) : undefined;
     reason = walk(plan, low - reach, high + MARGIN, budget, (wall) => {
       if (wall > settle)
         return 'stopped';
+      if (skip !== undefined) {
+        const skipped = skip(wall);
+        if (skipped === undefined)
+          return 'stopped';
+        // a rule without COUNT passes the skipped times in one step
+        if (skipped !== false)
+          return plan.count === undefined ? skipped : undefined;
+      }
       const at = resolveWall(resolver, budget, wall);
       if (at === undefined)
         return 'stopped';
       const moved = at.resolution.kind === 'gap';
       movedSeen ||= moved;
+      if (moved)
+        shift = Math.max(shift, at.instant + at.resolution.offsetMinutes * MINUTE - wall);
       if (plan.untilInstant !== undefined && at.instant > plan.untilInstant)
         return moved ? undefined : 'ended';
       if (at.instant >= high)
@@ -1044,7 +1257,7 @@ export function expandPlan(plan, low, high, budget, resolver, stopAfter) {
         if (found.length >= want && settle === Infinity) {
           if (!movedSeen)
             return 'stopped';
-          settle = wall + MARGIN;
+          settle = wall + (sub ? shift : MARGIN);
         }
       }
       return undefined;

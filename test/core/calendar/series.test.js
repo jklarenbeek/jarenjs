@@ -221,13 +221,13 @@ describe('the set oracle, with the horizon cut at every boundary', () => {
   });
 });
 
-describe('the RANGE refusal, the shared budget and immutability', () => {
-  it('RANGE=THISANDFUTURE is kept by defineSeries and refused by expandSeries', () => {
+describe('the RANGE spelling, the shared budget and immutability', () => {
+  it('RANGE=THISANDFUTURE is kept by defineSeries and expanded by expandSeries (series-range.test.js); any other range is refused', () => {
     const override = { recurrenceId: '2026-01-12T09:00:00', status: /** @type {const} */ ('moved'), start: f('2026-01-12', '10:00'),
       range: /** @type {const} */ ('THISANDFUTURE') };
     const series = defineSeries({ uid: 's', base: mondays, overrides: [override] });
     assert.deepStrictEqual(series.overrides[0], override);
-    refuses(() => expandSeries(series, { horizon: january }), 'JY0021', '/overrides/0/range');
+    assert.strictEqual(expandSeries(series, { horizon: january }).status, 'complete');
     refuses(() => defineSeries({ uid: 's', base: mondays, overrides: [{ ...override, range: /** @type {any} */ ('THISANDPRIOR') }] }),
       'JY0014', '/overrides/0/range');
   });

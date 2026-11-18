@@ -369,10 +369,10 @@ A recurrence is a start, a length and an RFC 5545 rule (RRULE). It is
 compiled once and expanded inside a half-open horizon `[start, end)`,
 under a budget that every step of the walk is charged to. The answer is
 either complete, or incomplete with the limit that stopped it and exact
-counts. This release reads and checks the whole RRULE grammar for every
-frequency, and enumerates DAILY, WEEKLY, MONTHLY and YEARLY rules. A valid
-SECONDLY, MINUTELY or HOURLY rule is refused by name (`JY0020`). It never
-compiles into a rule that quietly returns no occurrences.
+counts. This release reads and checks the whole RRULE grammar and
+enumerates every frequency: SECONDLY, MINUTELY, HOURLY, DAILY, WEEKLY,
+MONTHLY and YEARLY. A rule that never matches ends under its limits; it
+never hangs.
 
 ```js
 import { compileRecurrence, expandRecurrence, floatingValue, dateValue } from '@jarenjs/core/calendar';
@@ -436,7 +436,6 @@ in a fixed order, so one rule always names the same fault:
    order.
 2. The parts that do not go together.
 3. The parts that do not go with the start.
-4. The frequency.
 
 Every refusal carries the part and list index as its `docPath`, so the
 third BYMONTHDAY value is `rrule.BYMONTHDAY[2]` in text and JSON alike.
@@ -455,8 +454,8 @@ third BYMONTHDAY value is `rrule.BYMONTHDAY[2]` in text and JSON alike.
 | an ordinal BYDAY (`1MO`) with any FREQ but MONTHLY or YEARLY, or with BYWEEKNO | `JY0018` |
 | BYSETPOS without another BY part | `JY0018` |
 | BYHOUR, BYMINUTE or BYSECOND with a date start | `JY0018` |
+| SECONDLY, MINUTELY or HOURLY with a date start, which has no time of day | `JY0018` |
 | UNTIL of the wrong kind: date for a date start, floating for a floating start, utc for a utc or zoned start | `JY0019` |
-| a valid rule whose FREQ this release does not enumerate | `JY0020` |
 
 ### `expandRecurrence(compiled, { horizon, limits?, zoneProvider?, runtime? })`
 
@@ -516,7 +515,8 @@ fall.
 from DTSTART, so a horizon after the tenth occurrence of `COUNT=10` is
 complete and empty. A zoned rule's UTC UNTIL is compared as an instant.
 
-**The walk.** It runs one period at a time: a day for DAILY, a week
+**The walk.** It runs one period at a time: a second, minute or hour
+for SECONDLY, MINUTELY and HOURLY, a day for DAILY, a week
 that starts on WKST for WEEKLY, a month for MONTHLY and a year for
 YEARLY (see below). BYSETPOS picks from each period's
 set before DTSTART is applied, so WKST changes what
@@ -528,6 +528,71 @@ DTSTART and charges every step. A day the month does not have, such as
 An occurrence whose end passes 9999-12-31, the last day a value can
 name, has no spelling. The walk stops there with `status: 'incomplete'`
 and `limit: 'calendar-end'`, so a short list never reads as complete.
+
+**SECONDLY, MINUTELY and HOURLY.** A period is INTERVAL seconds,
+minutes or hours, counted from the second, minute or hour DTSTART falls
+in. The parts follow RFC 5545 §3.3.10's table:
+
+| Part | SECONDLY | MINUTELY | HOURLY |
+|---|---|---|---|
+| BYMONTH, BYYEARDAY, BYMONTHDAY, BYDAY (no ordinal) | limit | limit | limit |
+| BYHOUR | limit | limit | limit |
+| BYMINUTE | limit | limit | expand |
+| BYSECOND | limit | expand | expand |
+
+A limiting part keeps or drops the whole period. An expanding part makes
+the period's start times: HOURLY makes one per BYMINUTE and BYSECOND
+pair, and MINUTELY one per BYSECOND. A part the rule leaves out comes
+from DTSTART, so `FREQ=HOURLY` from 09:30:15 makes a start at 30:15 past
+every hour. BYSETPOS picks from one period's start times, so under
+SECONDLY a period has one start and `BYSETPOS=1` or `-1` keeps it.
+BYYEARDAY and BYMONTHDAY count back from the end of the year or month
+when negative. A date a month does not have is skipped, never clamped.
+
+A period a limit drops costs one step, and the walk passes the day, hour
+or minute that dropped it in that one step: it jumps to the first period
+of the next one. So `FREQ=SECONDLY;BYMONTH=6` from January costs one step
+per day until June, and `FREQ=MINUTELY;BYHOUR=9` one per hour outside
+nine o'clock. A period that is kept costs one step, plus one per start
+time it makes. The limits apply as for any frequency: a SECONDLY rule
+over a year stops at `maxOccurrences` (or `maxWork`) with
+`complete: false` and `stoppedAt`, after building only the occurrences it
+returns.
+
+**Sub-daily rules and the zone.** A floating rule steps its wall clock,
+which has no gaps. A utc rule steps instants: every hour is an hour. A
+zoned rule steps the zone's wall clock (RFC 5545 §3.3.10 reads its times
+as local time), and each generated time resolves under the rule's policy,
+as any zoned time does:
+
+- **Across a gap**, a generated time that never happens is read with the
+  offset before the change (RFC 5545 erratum 4271, §3.3.5), so it moves
+  forward by the gap's length. `FREQ=HOURLY` in Amsterdam on 2026-03-29
+  makes 01:00 (`00:00Z`), then the 02:00 that never happens, which starts
+  at 03:00 (`01:00Z`, `recurrenceId` still `…T02:00:00`), then 03:00
+  (`01:00Z` too): two occurrences at one instant, each with its own id,
+  as `FREQ=DAILY;BYHOUR=2,3` gives on that day. Under `reject` the 02:00
+  refuses the expansion (`JY0002`) when the horizon holds it.
+- **Across a fold**, each wall clock is generated once, so the repeated
+  hour appears once: `FREQ=HOURLY` in Amsterdam on 2026-10-25 makes
+  02:00 at the earlier instant (`00:00Z`) under `rfc5545`, then 03:00
+  (`02:00Z`); `01:00Z`, the second 02:00, is not an occurrence. Under
+  `later` the 02:00 starts at `01:00Z`.
+- A gap that skips a whole day (Apia, 2011-12-30) moves each of its
+  generated times a day forward, onto the next day's own times.
+
+A zoned sub-daily walk starts one day of wall clock before the horizon
+(no offset is a day or more). A SECONDLY or MINUTELY walk asks the
+provider about each wall-clock hour before the horizon once (its start
+and end, the end shared with the next hour) instead of about every time
+in it: in an hour whose start and end exist and lie an hour apart, a
+time starts at the hour's instant plus its distance from the hour, and
+one that starts before the horizon is passed without a call of its own.
+This reads a zone whose offset changes inside one wall-clock hour and
+changes back by the same amount before that hour ends as unchanged.
+Once it has enough occurrences and has resolved a time a gap moved, a
+sub-daily walk goes on only as far past it as that gap moved it, not
+three days.
 
 **MONTHLY and YEARLY.** A period is a month or a year. With BYWEEKNO it
 is the run of weeks the year numbers, from its week 1 to the next year's
@@ -584,7 +649,7 @@ limit left out takes `RECURRENCE_LIMITS`.
 | Limit | Default | Counts |
 |---|---|---|
 | `maxOccurrences` | 10000 | occurrences returned |
-| `maxWork` | 1000000 | candidate steps: 1 for DTSTART, 1 per day examined (every day of a MONTHLY or YEARLY period), 1 per start time generated on a day that passes |
+| `maxWork` | 1000000 | candidate steps: 1 for DTSTART, 1 per day examined (every day of a MONTHLY or YEARLY period), 1 per start time generated on a day that passes; for SECONDLY, MINUTELY and HOURLY 1 per period examined or day, hour or minute passed over, and 1 per start time a kept period makes |
 | `maxProviderCalls` | 100000 | calls to the provider's `candidates` and `toParts` |
 | `maxHorizonDays` | 36600 | days of horizon walked; a longer horizon is cut there |
 
@@ -630,7 +695,44 @@ and `payload` when an override moved it.
 
 1. Union the base occurrences and RDATEs, deduplicated by `recurrenceId`. When both produce one, the RDATE's explicit duration wins.
 2. Remove EXDATEs.
-3. Apply overrides by `recurrenceId`. A cancelled occurrence disappears. A moved one keeps its `recurrenceId` but gets the new start and end, and is reported with `moved: true`.
+3. Apply the overrides with `range: 'THISANDFUTURE'`, in `recurrenceId` order (see below).
+4. Apply the other overrides by `recurrenceId`. A cancelled occurrence disappears. A moved one keeps its `recurrenceId` but gets the new start and end, and is reported with `moved: true`.
+
+**This and future occurrences.** An override with
+`range: 'THISANDFUTURE'` (RFC 5545 §3.2.13, §3.8.4.4) applies to its own
+slot and to every later slot of the series, the rule's and the RDATEs',
+ordered by `recurrenceId`:
+
+- **Cancelled**, it removes them all.
+- **Moved**, it moves each by the distance its new start lies from its
+  own `recurrenceId`: §3.8.4.4's "all subsequent instances are also
+  rescheduled by the same time difference". Moving
+  2026-01-08 09:00 to 10:30 starts every later slot an hour and a half
+  later. The distance is in wall clock (a utc series' in instants), so a
+  zoned series' moved 09:00 stays 10:30 across a change of offset, and
+  each moved time resolves under the series' policy. With `end` the
+  override's length (in wall clock, from its start) is every later
+  slot's; without it each keeps its own (an RDATE period its period's).
+  Its `payload` is carried on every slot it moves. Each moved slot keeps
+  its `recurrenceId` and reads `moved: true`.
+- **Several** apply in `recurrenceId` order, each from its own slot on:
+  a later one takes over, measuring its own distance from its own
+  `recurrenceId` (RECURRENCE-ID always names the slot the rule made), so
+  distances do not add up. A later cancelled range ends a moved one.
+- **An override without a range** still wins for its one slot, after
+  the ranges: its start, and its `end` or else the length the range in
+  force gives that slot, and its own `payload`. It can bring back a slot
+  a cancelled range removed.
+- **EXDATEs** remove their slots before any range applies; a range
+  whose own slot is removed, or that names a slot the series never makes,
+  is an orphan: listed in `orphans`, it moves and cancels nothing.
+
+A range whose distance is negative can move slots from past the horizon
+into it, and one whose distance is positive slots from before it; the
+rule is expanded over the horizon moved back by each range's distance,
+once per range. When such an expansion stops at `maxOccurrences`, the
+answer keeps only the slots before the earliest start a slot it did not
+reach could take, and is incomplete.
 
 **Overrides and the horizon.** An override is looked up by its slot.
 The engine does not walk the whole series to find it. A slot outside the
@@ -642,9 +744,9 @@ horizon that was moved out disappears.
 slot an EXDATE removed, is listed in `orphans`. It is never applied and
 never dropped silently.
 
-**Refusals and budget.** An override with
-`range: 'THISANDFUTURE'` is kept by `defineSeries` and refused by
-`expandSeries` (`JY0021`). Every RDATE costs one step of `maxWork`. An
+**Budget.** Every RDATE costs one step of `maxWork`; a range override
+costs the walk that confirms its slot, and a moved one an expansion of
+the rule over its run. An
 incomplete series answer holds only the series that finished before the
 limit. A slot whose end passes 9999-12-31 is left out, and the answer is
 incomplete with `stoppedAt: { limit: 'calendar-end' }`; the other slots
@@ -1010,8 +1112,8 @@ finite instant, is the runtime's own `TypeError`.
 | `JY0017` | a recurrence rule part is given twice |
 | `JY0018` | a recurrence rule part does not go with the frequency, the start or another part |
 | `JY0019` | the recurrence end (UNTIL) is not of the kind the start requires |
-| `JY0020` | the frequency is valid RRULE but is not enumerated in this release; only DAILY, WEEKLY, MONTHLY and YEARLY are |
-| `JY0021` | an override that ranges over this and future occurrences is kept as data but refused for expansion |
+| `JY0020` | Retired, no longer raised: a valid frequency not enumerated; every frequency from SECONDLY to YEARLY is now enumerated |
+| `JY0021` | Retired, no longer raised: an override ranging over this and future occurrences refused for expansion; it is now expanded |
 | `JY0022` | a zone definition (VTIMEZONE) is not of the form this layer compiles: no TZID or observance, or a member spelled wrong |
 | `JY0023` | a zone definition contradicts itself: two onsets at one instant with different offsets, or changes whose wall-clock spans overlap |
 | `JY0024` | the instant or wall clock lies outside the horizon a compiled zone definition covers; it is never guessed |
@@ -1019,11 +1121,8 @@ finite instant, is the runtime's own `TypeError`.
 
 ## Not here
 
-- **Frequencies.** The sub-daily frequencies (SECONDLY, MINUTELY and
-  HOURLY) are read and checked but not enumerated (`JY0020`).
-- **Series.** RANGE=THISANDFUTURE is kept but not expanded (`JY0021`).
-  An RDATE or EXDATE of a zoned series names the series' zone, never
-  another zone or a utc value.
+- **Series.** An RDATE or EXDATE of a zoned series names the series'
+  zone, never another zone or a utc value.
 - **Availability.** VAVAILABILITY is not read or written; a layer is
   the caller's own JSON. Availability is evaluated, never stored.
 - **Storage.** No temporal value is stored by a database here; a caller

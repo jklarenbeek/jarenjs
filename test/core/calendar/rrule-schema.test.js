@@ -96,7 +96,8 @@ describe('rrule.schema.json validates exactly the rules the grammar reads', () =
 
   it('every compiled rule\'s canonical JSON validates', () => {
     for (const text of ['FREQ=DAILY;COUNT=3', 'FREQ=WEEKLY;INTERVAL=2;UNTIL=20261224T000000;BYDAY=MO,WE;WKST=SU',
-      'FREQ=DAILY;BYMONTH=1;BYMONTHDAY=-1;BYHOUR=9;BYMINUTE=0;BYSECOND=0;BYSETPOS=1'])
+      'FREQ=DAILY;BYMONTH=1;BYMONTHDAY=-1;BYHOUR=9;BYMINUTE=0;BYSECOND=0;BYSETPOS=1', 'FREQ=HOURLY;INTERVAL=3;BYMINUTE=0,30;BYYEARDAY=-1',
+      'FREQ=SECONDLY;BYSECOND=0;BYMINUTE=0;BYDAY=MO'])
       assert.ok(valid(compileRecurrence({ dtstart: floatingValue('2026-01-05', '09:00'), rrule: text }).rrule), text);
   });
 
@@ -105,7 +106,7 @@ describe('rrule.schema.json validates exactly the rules the grammar reads', () =
     const gaps = [
       [{ FREQ: 'DAILY', UNTIL: { kind: 'date', date: '2026-12-24' } }, floatingValue('2026-01-05', '09:00'), 'JY0019'],
       [{ FREQ: 'DAILY', BYHOUR: [9] }, dateValue('2026-01-05'), 'JY0018'],
-      [{ FREQ: 'HOURLY', BYMINUTE: [0] }, floatingValue('2026-01-05', '09:00'), 'JY0020'],
+      [{ FREQ: 'HOURLY', BYMINUTE: [0] }, dateValue('2026-01-05'), 'JY0018'],
     ];
     for (const [rule, dtstart, code] of gaps) {
       assert.ok(valid(rule), JSON.stringify(rule));

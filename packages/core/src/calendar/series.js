@@ -8,7 +8,12 @@
 //   1. the rule's occurrences and the RDATEs together, one per
 //      recurrenceId (an RDATE's length wins over the rule's);
 //   2. minus the EXDATEs;
-//   3. with the overrides applied by recurrenceId: a cancelled slot
+//   3. with the overrides that range over this and future occurrences
+//      (RANGE=THISANDFUTURE) applied in recurrenceId order: each one, from
+//      its own slot on, cancels every later slot or moves it by the
+//      distance its start moved its own (in wall clock), with its length
+//      and payload; a later one takes over from its slot on;
+//   4. with the other overrides applied by recurrenceId: a cancelled slot
 //      disappears, a moved one keeps its recurrenceId with its new start
 //      and end and `moved: true`.
 //
@@ -40,7 +45,7 @@ const ID_FORM = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(Z)?)?$/;
  * @property {import('./recurrence.js').StartValue} [start] - moved: the new start
  * @property {import('./recurrence.js').StartValue} [end] - moved: the new end; left out, the slot keeps its length
  * @property {unknown} [payload] - the caller's own data, carried on the moved occurrence and never read
- * @property {'THISANDFUTURE'} [range] - kept as data; expansion refuses it (`JY0021`)
+ * @property {'THISANDFUTURE'} [range] - the override applies to its slot and every later slot of the series (RFC 5545 §3.8.4.4)
  */
 
 /**
@@ -90,7 +95,13 @@ const ID_FORM = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(Z)?)?$/;
  * @property {import('./recurrence.js').Plan | null} plan
  * @property {Map<string, { wall: number, endWall: number | undefined }>} rdates
  * @property {Set<string>} exdates
- * @property {Map<string, { status: 'moved' | 'cancelled', wall?: number, endWall?: number, payload?: unknown, hasPayload: boolean, index: number, range?: string }>} overrides
+ * @property {Map<string, SlotOverride>} overrides
+ */
+
+/**
+ * An override as a series plan reads it.
+ * @typedef {{ status: 'moved' | 'cancelled', idWall: number, wall?: number, endWall?: number, payload?: unknown, hasPayload: boolean,
+ *   index: number, range?: string }} SlotOverride
  */
 
 /** @type {WeakMap<object, SeriesPlan>} */
@@ -158,7 +169,8 @@ function readId(id, kind, path) {
  * - `overrides` are `{ recurrenceId, status: 'moved' | 'cancelled',
  *   start?, end?, payload?, range? }`, one per recurrenceId. A moved
  *   override names its new `start` (and `end`, or keeps the slot's
- *   length); `payload` is carried, never read.
+ *   length); `payload` is carried, never read. `range: 'THISANDFUTURE'`
+ *   applies the override to its slot and every later one.
  * - All values share the base's kind (and zone, for a zoned series).
  * @param {{ uid: string, sequence?: number, revision?: string, base?: import('./recurrence.js').CompiledRecurrence | null,
  *   rdates?: (import('./recurrence.js').StartValue | SeriesPeriod)[], exdates?: import('./recurrence.js').StartValue[],
@@ -232,13 +244,13 @@ export function defineSeries(definition) {
         throw new CalendarError('JY0014', `an override carries no '${key}'`, `${path}/${key}`);
     }
     const id = entry.recurrenceId;
-    readId(id, shape.kind, `${path}/recurrenceId`);
+    const idWall = readId(id, shape.kind, `${path}/recurrenceId`);
     if (overrides.has(id))
       throw new CalendarError('JY0014', `the slot ${id} has two overrides`, `${path}/recurrenceId`);
     if (entry.range !== undefined && entry.range !== 'THISANDFUTURE')
       throw new CalendarError('JY0014', `range is 'THISANDFUTURE' or absent, not ${String(entry.range)}`, `${path}/range`);
     /** @type {any} */
-    const read = { status: entry.status, payload: entry.payload, hasPayload: Object.hasOwn(entry, 'payload'), index: i, range: entry.range };
+    const read = { status: entry.status, idWall, payload: entry.payload, hasPayload: Object.hasOwn(entry, 'payload'), index: i, range: entry.range };
     if (entry.status === 'moved') {
       if (entry.start === undefined)
         throw new CalendarError('JY0014', 'a moved override names its new start', `${path}/start`);
@@ -349,6 +361,64 @@ function baseMakes(plan, context, wall) {
 }
 
 /**
+ * Whether a series makes a slot: not an EXDATE's, and an RDATE's or the
+ * base rule's. `undefined` when the budget ran out.
+ * @param {SeriesPlan} series
+ * @param {Context} context
+ * @param {string} id
+ * @param {number} wall - the slot's wall clock
+ * @returns {boolean | undefined}
+ */
+function seriesMakes(series, context, id, wall) {
+  if (series.exdates.has(id))
+    return false;
+  if (series.rdates.has(id))
+    return true;
+  return series.plan === null ? false : baseMakes(series.plan, context, wall);
+}
+
+/**
+ * The overrides of a series that range over this and future occurrences
+ * and whose own slot it makes, in recurrenceId order; the others are
+ * orphans. `undefined` when the budget ran out.
+ * @param {SeriesPlan} series
+ * @param {Context} context
+ * @param {string[]} orphans
+ * @returns {(SlotOverride & { id: string })[] | undefined}
+ */
+function rangesOf(series, context, orphans) {
+  const out = [];
+  for (const [id, override] of series.overrides) {
+    if (override.range === undefined)
+      continue;
+    const made = seriesMakes(series, context, id, override.idWall);
+    if (made === undefined)
+      return undefined;
+    if (made)
+      out.push({ id, ...override });
+    else
+      orphans.push(id);
+  }
+  return out.sort((a, b) => a.idWall - b.idWall);
+}
+
+/**
+ * The range override a slot falls under: the last one at or before it.
+ * @param {(SlotOverride & { id: string })[]} ranges
+ * @param {number} wall - the slot's wall clock (its recurrenceId's)
+ * @returns {(SlotOverride & { id: string }) | undefined}
+ */
+function rangeOver(ranges, wall) {
+  let found;
+  for (const range of ranges) {
+    if (range.idWall > wall)
+      break;
+    found = range;
+  }
+  return found;
+}
+
+/**
  * Expand one series into `out`; answer false when the budget ran out.
  * @param {SeriesPlan} series
  * @param {Context} context
@@ -359,46 +429,140 @@ function baseMakes(plan, context, wall) {
 function expandOne(series, context, out, orphans) {
   const { budget, low, high } = context;
   const { plan } = series;
+  const zoned = series.kind === 'zoned';
+  const ranges = rangesOf(series, context, orphans);
+  if (ranges === undefined)
+    return false;
   /** @type {Map<string, { key: number, occurrence: any }>} */
   const slots = new Map();
+  // a slot a moved range keeps its length from the range's end, when it names one
+  /** @param {SlotOverride | undefined} range */
+  const rangeLength = (range) => (range?.endWall === undefined ? undefined : range.endWall - /** @type {number} */ (range.wall));
+  // with ranges, a rule's answer cut at maxOccurrences is whole only before the earliest start an unread slot can take
+  let cut = Infinity;
   let baseLength = { days: series.kind === 'date' ? 1 : 0, exact: 0 };
+  /** @param {string} id */
+  const lengthOf = (id) => {
+    const rdate = series.rdates.get(id);
+    return rdate?.endWall === undefined ? baseLength : { days: 0, exact: rdate.endWall - rdate.wall };
+  };
+  /**
+   * A slot under a moved range: its start moved by the range's distance,
+   * its length the range's or its own.
+   * @param {string} id
+   * @param {number} wall
+   * @param {number | undefined} endWall - an RDATE period's end
+   * @param {SlotOverride} range
+   */
+  const shifted = (id, wall, endWall, range) => {
+    const by = /** @type {number} */ (range.wall) - range.idWall;
+    const length = rangeLength(range);
+    const built = build(series, context, id, wall + by, length !== undefined ? wall + by + length
+      : endWall === undefined ? undefined : endWall + by, lengthOf(id));
+    if (built) {
+      built.occurrence.moved = true;
+      if (range.hasPayload)
+        built.occurrence.payload = range.payload;
+    }
+    return built;
+  };
   if (plan !== null) {
     const resolver = plan.kind === 'zoned' ? { ...context.resolver, zone: plan.zone } : undefined;
     const exact = resolver === undefined ? plan.length.ms : exactLength(plan, resolver, budget);
     if (exact === undefined)
       return false;
     baseLength = { days: plan.length.days, exact };
+    const span = plan.length.days * DAY + exact;
     // the rule may lose one occurrence to each EXDATE and override, so it
     // is asked for that many more than the answer keeps
     const cap = budget.limits.maxOccurrences + series.exdates.size + series.overrides.size;
-    const sub = { ...budget, limits: { ...budget.limits, maxOccurrences: cap }, limit: undefined };
-    const { occurrences } = expandPlan(plan, low, high, sub, resolver, Infinity);
-    budget.work = sub.work;
-    budget.providerCalls = sub.providerCalls;
-    if (sub.limit !== undefined) {
-      budget.limit = sub.limit;
-      // the rule's answer up to either of these is whole: the layers still apply to it
-      if (sub.limit !== 'maxOccurrences' && sub.limit !== 'calendar-end')
-        return false;
+    // the slots before the first range as they are, then each moved
+    // range's own run of slots over the horizon moved back by its distance
+    /** @type {{ range?: SlotOverride, from: number, to: number, by: number, extra: number }[]} */
+    const runs = [{ from: -Infinity, to: Infinity, by: 0, extra: 0 }];
+    for (const range of ranges) {
+      runs[runs.length - 1].to = range.idWall;
+      const length = rangeLength(range);
+      runs.push({ range, from: range.idWall, to: Infinity, by: (range.wall ?? range.idWall) - range.idWall,
+        extra: Math.max(0, (length ?? span) - span) });
     }
-    for (const occurrence of occurrences)
-      slots.set(occurrence.recurrenceId, { key: occurrence.instants?.start ?? wallOfOccurrence(occurrence), occurrence });
+    for (const run of runs) {
+      if (run.range?.status === 'cancelled')
+        continue;
+      const margin = zoned && run.range !== undefined ? MARGIN : 0;
+      let from = low - run.by - run.extra - margin;
+      let to = high - run.by + margin;
+      // the horizon is clipped to the run's own slots: by wall clock, or
+      // for a zoned series by the instants they can have (no offset is a day)
+      from = Math.max(from, run.from - (zoned ? DAY : 0));
+      to = Math.min(to, run.to + (zoned ? DAY : 0));
+      if (!(to > from))
+        continue;
+      const sub = { ...budget, limits: { ...budget.limits, maxOccurrences: cap }, limit: undefined };
+      const { occurrences } = expandPlan(plan, from, to, sub, resolver, Infinity);
+      budget.work = sub.work;
+      budget.providerCalls = sub.providerCalls;
+      if (sub.limit !== undefined) {
+        // the rule's answer up to either of these is whole: the layers still apply to it
+        if (sub.limit !== 'maxOccurrences' && sub.limit !== 'calendar-end') {
+          budget.limit = sub.limit;
+          return false;
+        }
+        if (ranges.length === 0 || sub.limit === 'calendar-end')
+          budget.limit = sub.limit;
+      }
+      // the earliest start a slot of this run past the last one read can take
+      let edge = run.from + run.by;
+      for (const occurrence of occurrences) {
+        const wall = ranges.length === 0 ? 0 : readId(occurrence.recurrenceId, series.kind, '/overrides');
+        if (ranges.length > 0 && !(wall >= run.from && wall < run.to))
+          continue;
+        if (run.range === undefined) {
+          edge = occurrence.instants?.start ?? wallOfOccurrence(occurrence);
+          slots.set(occurrence.recurrenceId, { key: edge, occurrence });
+          continue;
+        }
+        const built = shifted(occurrence.recurrenceId, wall, undefined, run.range);
+        if (built === undefined)
+          return false;
+        edge = built?.key ?? (occurrence.instants?.start ?? wall) + run.by;
+        if (built !== null)
+          slots.set(occurrence.recurrenceId, built);
+      }
+      // a run stopped at its cap leaves later slots unread, none starting
+      // before the last one read (a zoned one: before it less two days, an
+      // offset's change and a gap's): the answer is incomplete only when
+      // that is inside the horizon, and holds nothing from there on
+      const bound = edge - (zoned ? 2 * DAY : 0);
+      if (ranges.length > 0 && sub.limit === 'maxOccurrences' && bound < high) {
+        budget.limit = 'maxOccurrences';
+        cut = Math.min(cut, bound);
+      }
+    }
   }
-  /** @param {string} id */
-  const lengthOf = (id) => {
-    const rdate = series.rdates.get(id);
-    return rdate?.endWall === undefined ? baseLength : { days: 0, exact: rdate.endWall - rdate.wall };
-  };
   for (const [id, rdate] of series.rdates) {
     if (budget.work + 1 > budget.limits.maxWork) {
       budget.limit = 'maxWork';
       return false;
     }
     budget.work++;
+    const range = rangeOver(ranges, rdate.wall);
+    if (range?.status === 'cancelled')
+      continue;
+    if (range !== undefined) {
+      const built = shifted(id, rdate.wall, rdate.endWall, range);
+      if (built === undefined)
+        return false;
+      if (built === null)
+        slots.delete(id);
+      else
+        slots.set(id, built);
+      continue;
+    }
     const length = lengthOf(id);
     const reach = rdate.endWall ?? rdate.wall + length.days * DAY + length.exact;
     // a zoned slot this far outside the horizon needs no provider call to tell
-    const far = series.kind === 'zoned' && (rdate.wall >= high + MARGIN || reach <= low - MARGIN);
+    const far = zoned && (rdate.wall >= high + MARGIN || reach <= low - MARGIN);
     const built = far ? null : build(series, context, id, rdate.wall, rdate.endWall, length);
     if (built === undefined)
       return false;
@@ -410,17 +574,12 @@ function expandOne(series, context, out, orphans) {
   for (const id of series.exdates)
     slots.delete(id);
   for (const [id, override] of series.overrides) {
+    if (override.range !== undefined)
+      continue;
     if (!slots.has(id)) {
-      let made = false;
-      if (!series.exdates.has(id)) {
-        made = series.rdates.has(id);
-        if (!made && plan !== null) {
-          const makes = baseMakes(plan, context, readId(id, series.kind, '/overrides'));
-          if (makes === undefined)
-            return false;
-          made = makes;
-        }
-      }
+      const made = seriesMakes(series, context, id, override.idWall);
+      if (made === undefined)
+        return false;
       if (!made) {
         orphans.push(id);
         continue;
@@ -429,7 +588,10 @@ function expandOne(series, context, out, orphans) {
     slots.delete(id);
     if (override.status === 'cancelled')
       continue;
-    const built = build(series, context, id, /** @type {number} */ (override.wall), override.endWall, lengthOf(id));
+    // under a moved range that names a length, the slot keeps that length
+    const length = rangeLength(rangeOver(ranges, override.idWall));
+    const wall = /** @type {number} */ (override.wall);
+    const built = build(series, context, id, wall, override.endWall ?? (length === undefined ? undefined : wall + length), lengthOf(id));
     if (built === undefined)
       return false;
     if (built !== null) {
@@ -440,6 +602,8 @@ function expandOne(series, context, out, orphans) {
     }
   }
   for (const slot of slots.values()) {
+    if (slot.key >= cut)
+      continue;
     const occurrence = { ...slot.occurrence, uid: series.uid };
     if (series.revision !== undefined)
       occurrence.seriesRevision = series.revision;
@@ -469,8 +633,16 @@ function wallOfOccurrence(occurrence) {
  * @param {{ horizon: [unknown, unknown], limits?: import('./recurrence.js').RecurrenceLimits }
  *   & import('./resolve.js').ZoneProviderOptions} options
  * @returns {SeriesExpansion}
- * @throws {CalendarError} what {@link expandRecurrence} throws; `JY0021`
- *   for an override ranging over this and future occurrences; `JY0014`
+ * An override with `range: 'THISANDFUTURE'` (RFC 5545 §3.8.4.4) applies
+ * to its own slot and every later slot (the rule's and the RDATEs', by
+ * recurrenceId), in recurrenceId order, a later one taking over from its
+ * own slot on: cancelled, it removes them; moved, it moves each by the
+ * distance its start lies from its own recurrenceId (wall clock; a
+ * zoned series' moved times resolve under its policy), with the length
+ * its `end` gives (else each slot keeps its own) and its payload. An
+ * override without a range still wins for its one slot. A range whose
+ * own slot the series does not make is an orphan and moves nothing.
+ * @throws {CalendarError} what {@link expandRecurrence} throws; `JY0014`
  *   for a list mixing kinds or a series `defineSeries` did not return
  */
 export function expandSeries(series, options) {
@@ -486,12 +658,6 @@ export function expandSeries(series, options) {
   for (const [i, entry] of list.entries()) {
     if (entry.kind !== kind)
       throw new CalendarError('JY0014', `the series are all of one kind; ${entry.uid} is ${entry.kind}, not ${kind}`, `/series/${i}`);
-    for (const override of entry.overrides.values()) {
-      if (override.range !== undefined) {
-        throw new CalendarError('JY0021', `${entry.uid}: an override ranging over this and future occurrences is not expanded`,
-          `/overrides/${override.index}/range`);
-      }
-    }
   }
   if (!isRecord(options))
     throw new CalendarError('JY0014', 'expansion options are { horizon, limits?, zoneProvider?, runtime? }', '/options');

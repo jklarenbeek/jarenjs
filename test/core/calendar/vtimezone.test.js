@@ -314,7 +314,7 @@ describe('compileVtimezone: adversarial definitions', () => {
       [{ tzid: 'X', observances: [{ type: 'daylight', start: '2026-03-29T02:00:00Z', offsetFrom: '+01:00', offsetTo: '+02:00' }] }, '/observances/0/start'],
       [{ tzid: 'X', observances: [{ type: 'daylight', start: '2026-03-29T02:00:00', offsetFrom: '-00:00', offsetTo: '+02:00' }] }, '/observances/0/offsetFrom'],
       [{ tzid: 'X', observances: [{ type: 'daylight', start: '2026-03-29T02:00:00', offsetFrom: '+01:00', offsetTo: '+24:00' }] }, '/observances/0/offsetTo'],
-      [{ tzid: 'X', observances: [{ type: 'daylight', start: '2026-03-29T02:00:00', offsetFrom: '+01:00', offsetTo: '+02:00', rrule: 'FREQ=HOURLY' }] }, '/observances/0/rrule'],
+      [{ tzid: 'X', observances: [{ type: 'daylight', start: '2026-03-29T02:00:00', offsetFrom: '+01:00', offsetTo: '+02:00', rrule: 'FREQ=WEEKLY;BYMONTHDAY=1' }] }, '/observances/0/rrule'],
       [{ tzid: 'X', observances: [{ type: 'daylight', start: '2026-03-29T02:00:00', offsetFrom: '+01:00', offsetTo: '+02:00', rdates: '2027' }] }, '/observances/0/rdates'],
       [{ tzid: 'X', observances: [{ type: 'daylight', start: '2026-03-29T02:00:00', offsetFrom: '+01:00', offsetTo: '+02:00', rdates: ['2027'] }] }, '/observances/0/rdates/0'],
       [{ tzid: 'X', observances: [{ type: 'daylight', start: '2026-03-29T02:00:00', offsetFrom: '+01:00', offsetTo: '+02:00', name: 1 }] }, '/observances/0/name'],
@@ -326,7 +326,7 @@ describe('compileVtimezone: adversarial definitions', () => {
     }
     // an observance's RRULE carries the recurrence layer's refusal as its cause
     assert.throws(() => compileVtimezone(/** @type {any} */ (cases[10][0]), { horizon: HORIZON }),
-      (error) => /** @type {any} */ (error).cause?.code === 'JY0020');
+      (error) => /** @type {any} */ (error).cause?.code === 'JY0018');
     assert.throws(() => compileVtimezone(/** @type {any} */ ({ tzid: 'X', observances: [], extra: 1 }), { horizon: HORIZON }), refusal('JY0014'));
   });
 
@@ -356,5 +356,18 @@ describe('compileVtimezone: adversarial definitions', () => {
     assert.ok(worked.horizon.end < HORIZON[1]);
     for (const change of worked.transitions)
       assert.ok(change.at < worked.horizon.end);
+  });
+});
+
+describe('compileVtimezone: an observance of a sub-daily frequency', () => {
+  it('compiles, and stops at maxTransitions with the incomplete shape instead of making a change every two hours of a year', () => {
+    const definition = { tzid: 'X', observances: [
+      { type: 'standard', start: '2026-01-01T00:00:00', offsetFrom: '+01:00', offsetTo: '+01:00' },
+      { type: 'daylight', start: '2026-03-29T02:00:00', offsetFrom: '+01:00', offsetTo: '+02:00', rrule: 'FREQ=HOURLY;INTERVAL=2' },
+      { type: 'standard', start: '2026-03-29T03:00:00', offsetFrom: '+02:00', offsetTo: '+01:00', rrule: 'FREQ=HOURLY;INTERVAL=2' },
+    ] };
+    const zone = compileVtimezone(/** @type {any} */ (definition), { horizon: [Date.UTC(2026, 0, 1), Date.UTC(2027, 0, 1)], limits: { maxTransitions: 50 } });
+    assert.deepStrictEqual([zone.complete, zone.status, zone.stoppedAt], [false, 'incomplete', { limit: 'maxTransitions' }]);
+    assert.ok(zone.transitions.length <= 50);
   });
 });

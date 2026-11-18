@@ -56,18 +56,12 @@ describe('positive cases for every part, in every frequency the grammar has', ()
     ['FREQ=YEARLY;BYYEARDAY=1,-366,366;BYWEEKNO=-53,53,1;BYMONTH=1', 'FREQ=YEARLY;BYYEARDAY=-366,1,366;BYWEEKNO=-53,1,53;BYMONTH=1'],
     ['FREQ=YEARLY;BYDAY=20MO,-53SU', 'FREQ=YEARLY;BYDAY=20MO,-53SU'],
     ['FREQ=YEARLY;BYWEEKNO=20;BYDAY=MO;WKST=SU', 'FREQ=YEARLY;BYDAY=MO;BYWEEKNO=20;WKST=SU'],
-    ['FREQ=HOURLY;BYYEARDAY=100;BYMONTHDAY=-2', null],
-    ['FREQ=MINUTELY;INTERVAL=90;BYDAY=MO', null],
-    ['FREQ=SECONDLY;BYSECOND=59', null],
+    ['FREQ=HOURLY;BYYEARDAY=100;BYMONTHDAY=-2', 'FREQ=HOURLY;BYMONTHDAY=-2;BYYEARDAY=100'],
+    ['FREQ=MINUTELY;INTERVAL=90;BYDAY=MO', 'FREQ=MINUTELY;INTERVAL=90;BYDAY=MO'],
+    ['FREQ=SECONDLY;BYSECOND=59', 'FREQ=SECONDLY;BYSECOND=59'],
   ];
   for (const [text, canonical] of accepted) {
     it(`${text}`, () => {
-      if (canonical === null) {
-        // grammatically valid, not enumerated: the refusal names the frequency
-        refuses(() => compile(text), 'JY0020', 'rrule.FREQ');
-        assert.match(/** @type {string} */ (formatRRule(/** @type {string} */ (text))), /^FREQ=/);
-        return;
-      }
       const compiled = compile(text);
       assert.strictEqual(formatRRule(compiled), canonical);
       assert.strictEqual(formatRRule(/** @type {string} */ (text)), canonical);
@@ -199,7 +193,7 @@ describe('negative cases: every fault has its code and its path, in both forms',
   it('faults are found in one order: spelling and range part by part, then the combinations', () => {
     refuses(() => compile('FREQ=WEEKLY;BYMONTHDAY=0;BYWEEKNO=1'), 'JY0016', 'rrule.BYMONTHDAY[0]');
     refuses(() => compile('FREQ=MONTHLY;COUNT=1;UNTIL=20261224T000000;BYHOUR=24'), 'JY0016', 'rrule.BYHOUR[0]');
-    // grammar before the frequency: a malformed MONTHLY rule names its fault, not JY0020
+    // a malformed rule names its fault part by part
     refuses(() => compile('FREQ=MONTHLY;BYMONTHDAY=1,2,0'), 'JY0016', 'rrule.BYMONTHDAY[2]');
     refuses(() => compile('FREQ=YEARLY;BYWEEKNO=20;BYDAY=1MO'), 'JY0018', 'rrule.BYDAY[0]');
   });
@@ -212,6 +206,11 @@ describe('start-dependent rules', () => {
     refuses(() => compile('FREQ=DAILY;BYMINUTE=9', date), 'JY0018', 'rrule.BYMINUTE');
     refuses(() => compile('FREQ=DAILY;BYSECOND=9', date), 'JY0018', 'rrule.BYSECOND');
     refuses(() => compile('FREQ=MONTHLY;BYHOUR=9', date), 'JY0018', 'rrule.BYHOUR');
+  });
+
+  it('SECONDLY, MINUTELY and HOURLY do not go with a date start', () => {
+    for (const freq of ['SECONDLY', 'MINUTELY', 'HOURLY'])
+      refuses(() => compile(`FREQ=${freq};COUNT=3`, dateValue('2026-01-05')), 'JY0018', 'rrule.FREQ');
   });
 
   it('UNTIL of the wrong kind for the start is JY0019, before the frequency is asked', () => {
@@ -251,21 +250,10 @@ describe('start-dependent rules', () => {
   });
 });
 
-describe('a valid rule of a frequency not enumerated here is a typed refusal, never an empty answer', () => {
-  for (const freq of ['SECONDLY', 'MINUTELY', 'HOURLY']) {
-    it(`FREQ=${freq} names its frequency and "this release"`, () => {
-      assert.throws(() => compile(`FREQ=${freq};COUNT=3`), (/** @type {any} */ error) => {
-        assert.strictEqual(error.code, 'JY0020');
-        assert.strictEqual(error.docPath, 'rrule.FREQ');
-        assert.match(error.message, new RegExp(`FREQ=${freq} is valid RRULE but is not enumerated in this release`));
-        return true;
-      });
-    });
-  }
-  it('MONTHLY and YEARLY compile, and the refusal names the frequencies that are enumerated', () => {
-    for (const freq of ['MONTHLY', 'YEARLY'])
+describe('every frequency compiles', () => {
+  it('SECONDLY to YEARLY each compile from a time start', () => {
+    for (const freq of ['SECONDLY', 'MINUTELY', 'HOURLY', 'DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'])
       assert.strictEqual(compile(`FREQ=${freq};COUNT=3`).rrule.FREQ, freq);
-    assert.throws(() => compile('FREQ=HOURLY'), (/** @type {any} */ error) => /; only DAILY, WEEKLY, MONTHLY and YEARLY are$/.test(error.reason));
   });
   it('the code table carries every recurrence code', () => {
     for (const code of ['JY0015', 'JY0016', 'JY0017', 'JY0018', 'JY0019', 'JY0020', 'JY0021'])

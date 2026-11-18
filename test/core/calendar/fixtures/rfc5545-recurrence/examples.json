@@ -1067,7 +1067,7 @@
       "dtstart": "DTSTART;TZID=America/New_York:19970902T090000",
       "rrule": "FREQ=HOURLY;INTERVAL=3;UNTIL=19970902T170000Z",
       "result": "==> (September 2, 1997 EDT) 09:00,12:00,15:00",
-      "errata": "Errata 3883 (verified) corrects UNTIL to 19970902T210000Z; the rule is refused here for its frequency either way."
+      "errata": "Errata 3883 (verified) corrects UNTIL to 19970902T210000Z; the RFC's list follows the corrected rule."
     },
     {
       "title": "Every 15 minutes for 6 occurrences:",
