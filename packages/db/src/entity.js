@@ -297,7 +297,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       defaulters.push({ name: property.name, fill: () => structuredClone(declared.value) });
       continue;
     }
-    const compiled = compileJsonQuery(declared.query);
+    const compiled = compileJsonQuery(declared.query, entity.queryOptions);
     defaulters.push({ name: property.name, fill: (doc) => compiled(doc) });
   }
 

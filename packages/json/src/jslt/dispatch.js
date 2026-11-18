@@ -18,6 +18,7 @@ import {
   CARD_MANY,
   normalizeQuery,
   hostFailureText,
+  validateCalendar,
 } from '../query/normalize.js';
 import {
   compileNode,
@@ -219,6 +220,7 @@ function compileBody(rule, compileTypeTest, tableBox, targetModes, pathOptions) 
         : { ...pathOptions.extensions, '$apply': applyEntry },
       functions: pathOptions === undefined ? undefined : pathOptions.functions,
       pathFunctions: pathOptions === undefined ? undefined : pathOptions.pathFunctions,
+      calendar: pathOptions === undefined ? undefined : pathOptions.calendar,
     });
     ruleBox.locSlot = normalized.frameSize;
     ruleBox.depthSlot = normalized.frameSize + 1;
@@ -1226,14 +1228,18 @@ export function compileJsltDispatch(model, options = {}, walkPaths = true) {
   // path-function registry, plus the host's registered operators
   // (options.extensions) and $call functions (options.functions) — the
   // JSLT operator registry (registry.js) flows in exactly here. Built
-  // whenever ANY of the three is present.
+  // whenever ANY of the three is present — and the calendar seam
+  // (options.calendar) `$instant` and `$wall` read through, checked here
+  // so a stylesheet without a rule body still refuses a wrong one.
+  const calendar = options.calendar == null ? undefined : validateCalendar(options.calendar);
   const bodyOptions = (options.pathFunctions == null
-    && options.extensions == null && options.functions == null)
+    && options.extensions == null && options.functions == null && calendar === undefined)
     ? undefined
     : {
       pathFunctions: options.pathFunctions ?? undefined,
       extensions: options.extensions ?? undefined,
       functions: options.functions ?? undefined,
+      calendar,
     };
 
   const tableBox = {

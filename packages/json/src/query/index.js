@@ -19,6 +19,7 @@ import { compileQueryRoot, UNBOUND } from './compile.js';
 import { EMPTY, Seq, ebv } from './runtime.js';
 import { queryRuntimeError } from './messages.js';
 import { withDescentCeiling } from '../segments.js';
+import { createOptionVariantCache, identityOf } from '../option-variants.js';
 import { DATA_DEPTH_CEILING } from '../errors.js';
 
 export { JsonQueryCompileError, JsonQueryRuntimeError, QUERY_CODES } from './errors.js';
@@ -400,19 +401,53 @@ const OBJECT_CACHE = createWeakCache();
 const STRING_CACHE = createBoundedCache(512);
 const compileUncached = (/** @type {any} */ doc) => compileJsonQuery(doc);
 
+/** The compilations `queryJson` made under options: object documents by
+ * identity, each with its variants by option values (as `transformJson`
+ * keeps a stylesheet's), and string documents by value and option values. */
+const OPTION_OBJECT_CACHE = createOptionVariantCache();
+const OPTION_STRING_CACHE = createBoundedCache(512);
+/** Option values compared as data rather than by identity. */
+const VALUE_OPTIONS = new Set(['limits', 'externals', 'analysis']);
+
+/**
+ * The variant key of a call's compile options: every member it names, each
+ * by its value (`limits`, `externals`, `analysis`) or by identity (a hook, a
+ * registry, the zone provider, the calendar seam), so a call under other
+ * options, or naming a member compilation refuses, never reuses one.
+ * @param {Record<string, any>} options @returns {string}
+ */
+function queryOptionsKey(options) {
+  return Object.keys(options).sort().map((name) => {
+    const value = options[name];
+    const part = value === undefined ? '' : VALUE_OPTIONS.has(name) ? JSON.stringify(value)
+      : value !== null && (typeof value === 'object' || typeof value === 'function') ? `#${identityOf(value)}` : JSON.stringify(value);
+    return `${JSON.stringify(name)}:${part}`;
+  }).join(',');
+}
+
 /**
  * Apply a Jaren JSON Query document to a JSON value in one call.
  * Compiled queries are cached: object documents by identity (weak),
  * string documents (the degenerate JSONPath case) by value (bounded
  * LRU, 512 entries — the shared `@jarenjs/core/cache` primitive).
+ * With `options` the document compiles under them (the options of
+ * `compileJsonQuery`, `calendar` among them), cached by the options'
+ * values as `transformJson` caches a stylesheet's: a hook, a registry, the
+ * zone provider or the calendar by identity, `limits`, `externals` and
+ * `analysis` by value; a call with other options, or with none, never
+ * reuses that compilation.
  * @param {any} doc - the query document
  * @param {any} data - the JSON value to query
  * @param {object} [externals] - external parameter bindings (`{ name: value }`)
+ * @param {JsonQueryOptions} [options] - compile options, as
+ *   `compileJsonQuery` takes them
  * @returns {any} the query result (undefined | item | array of items)
  * @throws {JsonQueryCompileError} when the document violates the format
  * @throws {JsonQueryRuntimeError} on any JQ2xxx runtime condition
+ * @throws {TypeError} when `options` is not an object
  */
-export function queryJson(doc, data, externals) {
+export function queryJson(doc, data, externals, options = undefined) {
+  if (options !== undefined) return queryWithOptions(doc, data, externals, options);
   let query;
   if (typeof doc === 'string') {
     query = STRING_CACHE.getOrCreate(doc, compileUncached);
@@ -424,6 +459,19 @@ export function queryJson(doc, data, externals) {
     query = compileJsonQuery(doc);
   }
   return query(data, externals);
+}
+
+/** `queryJson` under compile options. @param {any} doc @param {any} data
+ * @param {object | undefined} externals @param {any} options */
+function queryWithOptions(doc, data, externals, options) {
+  if (options === null || typeof options !== 'object' || Array.isArray(options))
+    throw new TypeError('options must be an object of compileJsonQuery options');
+  const key = queryOptionsKey(options);
+  const compile = () => compileJsonQuery(doc, options);
+  const query = typeof doc === 'string' ? OPTION_STRING_CACHE.getOrCreate(`${key}\u0000${doc}`, compile)
+    : typeof doc === 'object' && doc !== null ? OPTION_OBJECT_CACHE.getOrCompile(doc, key, compile)
+      : compileJsonQuery(doc, options);
+  return /** @type {CompiledJsonQuery} */ (query)(data, externals);
 }
 
 //#endregion

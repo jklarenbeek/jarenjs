@@ -1583,10 +1583,16 @@ export declare const MAINTENANCE_OPERATIONS: readonly string[];
 
 // ————— entities: models, mapping, generated types —————
 
-export declare function normalizeEntities(model: unknown): Map<string, unknown>;
-export declare function explainMapping(model: unknown): unknown;
+/** The options of a model read: `temporals`, the temporal seam whose
+ * calendar an entity's `{ query }` defaults and invariants compile with
+ * (`$instant` and `$wall` there are `JD0005` without it). */
+export interface EntityModelOptions {
+  temporals?: import('./temporals.js').StoreTemporals;
+}
+export declare function normalizeEntities(model: unknown, options?: EntityModelOptions): Map<string, unknown>;
+export declare function explainMapping(model: unknown, options?: EntityModelOptions): unknown;
 /** One normalization shared by the entity engine and its physical mapping. */
-export declare function compileEntityModel(model: unknown): { entities: Map<string, unknown>; mapping: unknown };
+export declare function compileEntityModel(model: unknown, options?: EntityModelOptions): { entities: Map<string, unknown>; mapping: unknown };
 /** The relation tables of normalized entities, keyed by entity name
  * then by relation member (MODEL-FORMAT §10.1) — what every entity set
  * exposes as `relations` and every scope carries for all its roots. */
@@ -1603,6 +1609,7 @@ export declare function entityEmitModel(model: unknown, options: {
   compile: (schema: unknown, options?: unknown) => unknown;
   source?: string;
   reserved?: string[];
+  temporals?: import('./temporals.js').StoreTemporals;
 }): unknown;
 
 // ————— the unit of work —————
@@ -1861,7 +1868,7 @@ export declare const ASSERTION_BOUNDS_DEFAULT: {
 
 /** How a host must run an assertion, and why. `perDocument` walks in
  * batches; `fold` accumulates query items in order; `materialize` needs every document at once and is bounded. */
-export declare function classifyAssertion(query: unknown, options?: { expect?: string; maxDistinct?: number }): {
+export declare function classifyAssertion(query: unknown, options?: { expect?: string; maxDistinct?: number; calendar?: object }): {
   strategy: 'perDocument' | 'fold' | 'materialize';
   shape: string | null;
   reason: string;
@@ -2928,7 +2935,7 @@ export interface InvariantProgram {
 export type PlannedInvariant =
   | { type: 'function'; name: string; owner: string; rule: string; sql: string }
   | { type: 'trigger'; name: string; owner: string; rule: string; sql: string; program?: InvariantProgram };
-export declare function planInvariants(model: unknown, options: { dialect: Dialect; expressions?: Record<string, ExpressionFunction> }): PlannedInvariant[];
+export declare function planInvariants(model: unknown, options: { dialect: Dialect; expressions?: Record<string, ExpressionFunction>; temporals?: import('./temporals.js').StoreTemporals }): PlannedInvariant[];
 /** A reviewed preservation document. The supplied steps retain their types;
  * untyped saved steps remain unknown until the caller validates them. */
 export interface MigrationPhysicalHeader {

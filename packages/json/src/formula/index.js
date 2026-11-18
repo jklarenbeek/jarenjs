@@ -3,7 +3,7 @@
 import { createBoundedCache } from '@jarenjs/core/cache';
 import { semanticKey } from '@jarenjs/core/object';
 import { compileJsonQuery } from '../query/index.js';
-import { validateDateNames, validateDecimalFormats, validateZoneProvider } from '../query/normalize.js';
+import { validateDateNames, validateDecimalFormats, validateZoneProvider, validateCalendar } from '../query/normalize.js';
 import { canonicalizeJson } from '../canonical.js';
 import { FormulaError, causeCode, causePath, causeMessage, formulaMessage, snapshot, credit, FORMULA_OPTIONS, checkFormulaOptions } from './shared.js';
 
@@ -30,6 +30,11 @@ export { formulaMessagesEn } from './messages.js';
  *   series operators' `zone`): `createIntlZoneProvider()` of
  *   `@jarenjs/locales/intl-zones`, or a provider of the host's own. Its
  *   `identity` (`{ name, revision }`) is part of each compiled formula's key.
+ * @property {object} [calendar] - The calendar `$instant` and `$wall` read a
+ *   calendar value through: what `queryCalendar()` of
+ *   `@jarenjs/json/query/calendar` answers. Without it either operator is
+ *   a `FormulaError` `JQ0003` at its expression path. Its presence is part
+ *   of each compiled formula's key.
  */
 
 /** Validate a versioned profile; compilation checks the expression and capabilities. */
@@ -132,6 +137,7 @@ export function createFormulaCompiler(options = {}) {
   if (options.dateNames !== undefined) validateDateNames(options.dateNames);
   if (options.decimalFormats !== undefined) validateDecimalFormats(options.decimalFormats);
   if (options.zoneProvider !== undefined) validateZoneProvider(options.zoneProvider);
+  if (options.calendar !== undefined) validateCalendar(options.calendar);
   if (options.packs !== undefined && (typeof options.packs?.packs !== 'function' || typeof options.packs?.forPacks !== 'function'))
     throw new TypeError('options.packs must be an operator pack registry - createJsltRegistry() with its packs - not a list of packs');
   const cache = createBoundedCache(credit(options.cacheSize, 128, 'cacheSize'));
@@ -144,7 +150,10 @@ export function createFormulaCompiler(options = {}) {
   // the zone data joins the key only when the host gives one, so every
   // other key stays as it was: the identity the provider declares (its
   // tz data's revision) and, for one that declares none, its object
-  const zoneKey = options.zoneProvider === undefined ? [] : [zoneIdentity(options.zoneProvider, identity)];
+  const seamKey = options.zoneProvider === undefined ? [] : [zoneIdentity(options.zoneProvider, identity)];
+  // the calendar seam likewise joins only when given: it decides whether
+  // `$instant` and `$wall` compile, and it is one seam (no identity of its own)
+  if (options.calendar !== undefined) seamKey.push(['calendar']);
   function compile(value) {
     const doc = formulaDocument(value);
     const functions = Object.create(null);
@@ -183,7 +192,7 @@ export function createFormulaCompiler(options = {}) {
     // ordered: the expression is a query document, whose `$let` binds in
     // key order and whose object constructors emit members in key order
     const key = semanticKey([doc, capabilityKeys, schemas, options.compileTypeTest ? identity(options.compileTypeTest) : null, options.limits ?? {},
-      options.dateNames ?? null, options.decimalFormats ?? null, ...zoneKey], { ordered: true });
+      options.dateNames ?? null, options.decimalFormats ?? null, ...seamKey], { ordered: true });
     const cached = cache.get(key);
     if (cached) return cached;
     const tests = {};
@@ -199,7 +208,7 @@ export function createFormulaCompiler(options = {}) {
       query = compileJsonQuery(doc.expression, { functions: { ...packOptions.functions, ...functions },
         extensions: packOptions.extensions, compileTypeTest: options.compileTypeTest,
         dateNames: options.dateNames, decimalFormats: options.decimalFormats, zoneProvider: options.zoneProvider,
-        externals: [...Object.keys(doc.bindings ?? {}), 'computed', 'context'], analysis: true,
+        calendar: options.calendar, externals: [...Object.keys(doc.bindings ?? {}), 'computed', 'context'], analysis: true,
         limits: options.limits ?? { steps: 10000, depth: 64, resultItems: 10000, sequenceItems: 10000 } });
     }
     catch (cause) {

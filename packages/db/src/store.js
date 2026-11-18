@@ -520,7 +520,8 @@ export function prepareModel(model, options = undefined) {
   normalizeModel(model, expressions, temporals);
   const document = frozenCopy(model, new Map());
   const collections = normalizeModel(document, expressions, temporals);
-  const { entities } = compileEntityModel(document);
+  // an entity's own expressions read a calendar value through the same seam
+  const { entities } = compileEntityModel(document, options?.temporals === undefined ? undefined : { temporals: options.temporals });
   freezeNormalized(collections, new Set());
   const prepared = Object.defineProperty({ model: document }, PREPARED_MARK, { value: MODEL_VERSION });
   PREPARED_MODELS.set(prepared, { model: document, collections, expressions,
@@ -2516,7 +2517,9 @@ export function openStore(model, options) {
       collections = prepared.collections;
     }
     else collections = normalizeModel(model, expressions, options.temporals?.hooks ?? null);
-    const compiled = compileEntityModel(modelDocument);
+    // an entity's invariants and `{ query }` defaults compile with the
+    // store's calendar seam, as its queries do
+    const compiled = compileEntityModel(modelDocument, options.temporals === undefined ? undefined : { temporals: options.temporals });
     entities = compiled.entities;
     mapping = entities.size > 0 ? compiled.mapping : null;
     if ([...entities.values()].some((e) => e.physical !== null) && (options.capture || options.replication))

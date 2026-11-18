@@ -56,10 +56,10 @@ export function createOptionVariantCache(limitPerDocument = 16) {
 /**
  * The variant key of the JSLT compile options, which JTLT forwards
  * unchanged: every option that changes what compiles - the type-test
- * hook, the dispatch and descent bounds, memoization, and the path
- * functions, operators and functions a registry hands in (compared by
- * identity; a registry hands a stable object per instance, so two calls
- * with the same registry share a compilation).
+ * hook, the dispatch and descent bounds, memoization, the path
+ * functions, operators and functions a registry hands in, and the
+ * calendar seam (compared by identity; a registry hands a stable object
+ * per instance, so two calls with the same registry share a compilation).
  * @param {any} options - The compile options, or `undefined`
  * @returns {string}
  * @throws {TypeError} When `maxDescentDepth` is not a positive integer
@@ -72,5 +72,6 @@ export function jsltOptionsKey(options) {
   const maxDescentDepth = descentCeilingOption(options?.maxDescentDepth, 'options.maxDescentDepth');
   const memo = options?.memo === true;
   return `${identityOf(compileTypeTest)}|${maxDepth}|${maxDescentDepth}|${memo ? 1 : 0}`
-    + `|${identityOf(options?.pathFunctions)}|${identityOf(options?.extensions)}|${identityOf(options?.functions)}`;
+    + `|${identityOf(options?.pathFunctions)}|${identityOf(options?.extensions)}|${identityOf(options?.functions)}`
+    + `|${identityOf(options?.calendar)}`;
 }

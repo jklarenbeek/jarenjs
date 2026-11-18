@@ -178,18 +178,19 @@ function plainArithmetic(operands) {
  * paths read and whether every leaf is a record path or an integer literal:
  * the model check keeps the nodes over integer members alone for the domain
  * store enforcement holds (`withinDomain`).
- * @param {any} node @param {{ evaluate: Function, operands: Function[], reads: (string | undefined)[], plain: boolean }[]} [out]
+ * @param {any} node @param {{ evaluate: Function, operands: Function[], reads: (string | undefined)[], plain: boolean }[]} out
+ * @param {{ calendar: object }} [queryOptions] - as the assert compiles with
  */
-function arithmeticOf(node, out = []) {
-  if (Array.isArray(node)) for (const item of node) arithmeticOf(item, out);
+function arithmeticOf(node, out, queryOptions) {
+  if (Array.isArray(node)) for (const item of node) arithmeticOf(item, out, queryOptions);
   else if (node && typeof node === 'object' && !Object.hasOwn(node, '$const')) {
     if (isArithmetic(node)) {
       const [key, args] = Object.entries(node)[0];
       const operands = key === '$neg' ? [args] : args;
-      out.push({ evaluate: compileJsonQuery(node), operands: operands.map((operand) => compileJsonQuery(operand)),
+      out.push({ evaluate: compileJsonQuery(node, queryOptions), operands: operands.map((operand) => compileJsonQuery(operand, queryOptions)),
         reads: pathsOf(node).map((path) => recordPath(path)?.name), plain: plainArithmetic(operands) });
     }
-    for (const value of Object.values(node)) arithmeticOf(value, out);
+    for (const value of Object.values(node)) arithmeticOf(value, out, queryOptions);
   }
   return out;
 }
@@ -219,8 +220,11 @@ function withinDomain(rule, record) {
   return true;
 }
 
-/** @param {any} rules @param {string} path @returns {any[]} */
-export function normalizeInvariants(rules, path) {
+/** @param {any} rules @param {string} path
+ * @param {{ calendar: object }} [queryOptions] - the store's calendar seam, which
+ *   `$instant` and `$wall` in an assert compile through
+ * @returns {any[]} */
+export function normalizeInvariants(rules, path, queryOptions = undefined) {
   if (rules === undefined) return [];
   if (!Array.isArray(rules)) throw new DbCompileError('JD0005', 'invariants must be an array', path);
   const names = new Set();
@@ -256,7 +260,7 @@ export function normalizeInvariants(rules, path) {
     const expression = withProbes(rule.assert, probes, (reason) => fail(reason, 'assert'));
     let evaluate;
     try {
-      evaluate = compileJsonQuery(expression);
+      evaluate = compileJsonQuery(expression, queryOptions);
     }
     catch (cause) {
       // compiled where the model is checked, as a `{ query }` default is: the
@@ -264,7 +268,7 @@ export function normalizeInvariants(rules, path) {
       throw new DbCompileError('JD0005', `invariant assert does not compile: ${/** @type {Error} */ (cause).message}`,
         `${at}/assert`, /** @type {Error} */ (cause));
     }
-    return { ...rule, probes, evaluate, arithmetic: arithmeticOf(expression) };
+    return { ...rule, probes, evaluate, arithmetic: arithmeticOf(expression, [], queryOptions) };
   });
 }
 

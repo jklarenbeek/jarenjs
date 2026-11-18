@@ -1642,7 +1642,9 @@ Both operators read their values through the **calendar seam**, the
 subpath `@jarenjs/json/query/calendar`, so a query that reads no calendar
 value carries no calendar: compile with the option `calendar:
 queryCalendar()` (a linq source takes it as `{ calendar }`, a store as its
-`temporals`, `storeTemporals()` of `@jarenjs/db/temporals`). Without it either
+`temporals`, `storeTemporals()` of `@jarenjs/db/temporals`; `queryJson` as its
+fourth argument, `queryJson(doc, data, externals, { calendar })`; a JSLT or
+JTLT stylesheet and a formula compiler as their `calendar` option). Without it either
 operator is `JQ0003` when the query compiles, before any value is read.
 
 Every operator that *produces* a date produces it in the same canonical

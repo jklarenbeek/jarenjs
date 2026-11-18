@@ -43,6 +43,9 @@ export { JtltCompileError, JtltRuntimeError } from './errors.js';
  * @param {number} [options.maxDepth=1024] - maximum dispatch nesting depth
  * @param {number} [options.maxDescentDepth=1000] - the descent bound of
  *   the template's descendant segments, as for `compileJsltStylesheet`
+ * @param {object} [options.calendar] - the calendar seam `$instant` and
+ *   `$wall` read a calendar value through in segment expressions, as for
+ *   `compileJsltStylesheet`
  * @returns {function} reusable `render(data, externals?)` function
  * @throws {JtltCompileError} when compilation fails
  * @example
@@ -130,6 +133,9 @@ function cachedRender(template, options) {
  * @param {number} [options.maxDepth=1024] - maximum dispatch nesting depth
  * @param {number} [options.maxDescentDepth=1000] - the descent bound of
  *   the template's descendant segments, as for `compileJsltStylesheet`
+ * @param {object} [options.calendar] - the calendar seam `$instant` and
+ *   `$wall` read a calendar value through in segment expressions, as for
+ *   `compileJsltStylesheet`
  * @returns {string} the rendered output text
  * @throws {JtltCompileError} when compilation fails
  * @throws {JtltRuntimeError} when rendering fails

@@ -19,8 +19,9 @@ const zoneProvider = createIntlZoneProvider({ revision: 'test' });
 const calendar = queryCalendar();
 /** Compiled with the calendar seam installed. @param {any} query @param {any} [options] */
 const compileJsonQuery = (query, options) => compileBare(query, { calendar, ...options });
-/** queryJson takes no options: the seam is a compile option. @param {any} query @param {any} doc */
-const queryJson = (query, doc) => compileJsonQuery(query)(doc);
+const seamOptions = { calendar };
+/** The one-call form, with the seam as its fourth argument. @param {any} query @param {any} doc */
+const queryJson = (query, doc) => queryBare(query, doc, undefined, seamOptions);
 /** @param {any} query @param {any} doc @param {any} [options] */
 const run = (query, doc, options) => compileJsonQuery(query, options)(doc);
 /** @param {() => unknown} fn @param {string} code @param {RegExp} [message] */

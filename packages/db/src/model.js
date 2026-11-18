@@ -22,7 +22,8 @@ import { isJsonObject, isJsonContainer, setObjectMember } from '@jarenjs/core/ob
 import { DbCompileError } from './errors.js';
 import { IDENTIFIER } from './engine-metadata.js';
 import { SCALAR_TYPES } from './scalar-types.js';
-import { refuseUnknownModelMembers } from './options.js';
+import { refuseUnknownModelMembers, readOptions } from './options.js';
+import { isStoreTemporals } from './temporal-seam.js';
 import { columnCodec, normalizePhysical } from './physical.js';
 import { normalizeInvariants, resolveInvariants } from './invariants.js';
 import { schemaPosition } from './schema-positions.js';
@@ -173,8 +174,9 @@ function normalizeEntityBlock(block, docPath) {
  * Validate a default declaration.
  * @param {any} declared
  * @param {string} docPath
+ * @param {any} [queryOptions] - the store's calendar seam, as `{ calendar }`
  */
-function checkDefault(declared, docPath) {
+function checkDefault(declared, docPath, queryOptions = undefined) {
   if (declared === 'now' || declared === 'updated' || declared === 'uuid'
     || declared === 'auto') return;
   if (isJsonObject(declared)
@@ -185,7 +187,7 @@ function checkDefault(declared, docPath) {
       // `store.entity()` call — a default that cannot compile is a model
       // defect, and the engine's reason travels with the model position
       try {
-        compileJsonQuery(declared.query);
+        compileJsonQuery(declared.query, queryOptions);
       }
       catch (cause) {
         throw new DbCompileError('JD0005',
@@ -332,11 +334,36 @@ export function asHistory(read) {
 }
 
 /**
+ * The compile options an entity's own expressions (a `{ query }` default, an
+ * invariant's assert) take from the options of a model read: the calendar
+ * of the temporal seam (`temporals`, `storeTemporals()` of
+ * `@jarenjs/db/temporals`), through which `$instant` and `$wall` compile.
+ * @param {any} options @param {string} owner
+ * @returns {{ calendar: object } | undefined}
+ */
+function entityQueryOptions(options, owner) {
+  readOptions(options, ['temporals'], owner, 'JD0009');
+  if (options?.temporals === undefined) return undefined;
+  if (!isStoreTemporals(options.temporals))
+    throw new DbCompileError('JD0009', `${owner} option 'temporals' is what storeTemporals() from '@jarenjs/db/temporals' answers`);
+  return { calendar: options.temporals.calendar };
+}
+
+/**
  * Normalize the `entities` member of a model document.
  * @param {any} model
+ * @param {{ temporals?: any }} [options] - `temporals`: the temporal seam
+ *   (`storeTemporals()` of `@jarenjs/db/temporals`), whose calendar an
+ *   entity's `{ query }` defaults and invariants compile with, so `$instant`
+ *   and `$wall` there compile; without it either is `JD0005` (wrapping `JQ0003`)
  * @returns {Map<string, any>} entity name -> normalized entity
  */
-export function normalizeEntities(model) {
+export function normalizeEntities(model, options = undefined) {
+  return entitiesOf(model, entityQueryOptions(options, 'normalizeEntities()'));
+}
+
+/** @param {any} model @param {{ calendar: object } | undefined} queryOptions @returns {Map<string, any>} */
+function entitiesOf(model, queryOptions) {
   const declared = model?.entities;
   if (declared === undefined) return new Map();
   if (!isJsonObject(declared)
@@ -398,7 +425,7 @@ export function normalizeEntities(model) {
       const type = declaredType !== undefined || union ? declaredType : enumScalarType(effective.enum);
 
       if (entityBlock.default !== undefined)
-        checkDefault(entityBlock.default, `${propertyPath}/x-entity/default`);
+        checkDefault(entityBlock.default, `${propertyPath}/x-entity/default`, queryOptions);
       if (entityBlock.default !== undefined && entityBlock.relation !== undefined) {
         throw modelError('a relation member takes no default — it is a projection, not stored state',
           `${propertyPath}/x-entity/default`);
@@ -509,7 +536,9 @@ export function normalizeEntities(model) {
       version: versions.length === 1 ? versions[0].name : null,
       indexes: normalizeEntityIndexes(spec, docPath),
       physical: normalizePhysical(spec.physical, properties, keys, docPath, historyReads > 0 ? undefined : declaredTypes),
-      invariants: normalizeInvariants(spec.invariants, `${docPath}/invariants`),
+      invariants: normalizeInvariants(spec.invariants, `${docPath}/invariants`, queryOptions),
+      // the calendar seam its `{ query }` defaults compile with at write time
+      ...(queryOptions === undefined ? {} : { queryOptions }),
     });
   }
 
@@ -758,17 +787,20 @@ export function relationTables(entities) {
  * the checks, the foreign keys, the indexes, and which properties
  * live in the JSONB document.
  * @param {any} model - a model document with `entities`
+ * @param {{ temporals?: any }} [options] - as `normalizeEntities` takes them
  * @returns {any}
  */
-export function explainMapping(model) {
-  return mappingOf(model, normalizeEntities(model));
+export function explainMapping(model, options = undefined) {
+  return mappingOf(model, entitiesOf(model, entityQueryOptions(options, 'explainMapping()')));
 }
 
 /** Normalize and map once for lightweight engines sharing model metadata.
  * No process-global cache retains the model or any connection.
- * @param {any} model @returns {{entities:Map<string,any>,mapping:any}} */
-export function compileEntityModel(model) {
-  const entities = normalizeEntities(model);
+ * @param {any} model @param {{ temporals?: any }} [options] - as
+ *   `normalizeEntities` takes them
+ * @returns {{entities:Map<string,any>,mapping:any}} */
+export function compileEntityModel(model, options = undefined) {
+  const entities = entitiesOf(model, entityQueryOptions(options, 'compileEntityModel()'));
   return { entities, mapping: mappingOf(model, entities) };
 }
 

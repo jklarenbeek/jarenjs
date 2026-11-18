@@ -27,8 +27,6 @@ import { refuseCancelled } from './cancellation.js';
 import { cloneJson, setObjectMember, isPlainOptions, isJsonObject } from '@jarenjs/core/object';
 import { withoutModelRenameHints } from '@jarenjs/core/model';
 import { schemaPosition } from './schema-positions.js';
-import { compileJsonQuery } from '@jarenjs/json/query';
-import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
 import { DbCompileError, isJarenCoded, wrapDriverError } from './errors.js';
 import { readOptions, readControls } from './options.js';
@@ -47,7 +45,8 @@ import { migrationChecksum, historyStatements, readMigrationHistory, checkHistor
   historyHeader, identityRows, checkHistoryIdentity, checkHistoryChain, writeIdentityRows } from './migration-history.js';
 export { HISTORY_TABLE, ENGINE_TABLES };
 import { DOC_COLUMN, planCollection, withoutContainerKeys, verifyShape, legacyColumnTypes, earlierIndexesHeld, planEntity, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder, kindIndexSql, kindIndexTerms, kindIndexDropSql, numberCheckOf, planInvariants, MANAGED_SQL_OPTIONS } from './ddl.js';
-import { normalizeEntities, explainMapping, asHistory } from './model.js';
+import { normalizeEntities as normalizeModelEntities, explainMapping as explainModelMapping, asHistory } from './model.js';
+import { storeTemporals } from './temporals.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
 import { mergeEntityRow } from './graph.js';
 import { entityCore } from './entity.js';
@@ -65,6 +64,7 @@ import { walkPhysicalRows, transformPhysicalRows } from './physical-transform.js
 import {
   MIGRATION_VERSION, isPerDocumentAssertion, compileDocumentStep, checkMigrationDocument, checkReplacement,
   stepFailure, normalizeAssertionBounds, ASSERTION_BOUNDS_DEFAULT, createAssertionBoundGuard,
+  compileStepQuery, compileStepJslt,
 } from './document-steps.js';
 
 /**
@@ -75,6 +75,22 @@ import {
  * @returns {Map<string, any>}
  */
 const normalizeModel = (model, expressions = undefined) => normalizeStoreModel(model, expressions, TEMPORAL_HOOKS);
+
+/** @type {{ temporals: any } | undefined} */
+let planningSeam;
+/**
+ * The temporal seam a migration reads a model's own expressions with, as it
+ * normalizes collections with the hooks: always, so an entity whose
+ * invariant or `{ query }` default reads `$instant` or `$wall` plans — as
+ * history too — on any host (a document step compiles with the calendar
+ * likewise: `compileStepQuery` of document-steps.js).
+ * @returns {{ temporals: any }}
+ */
+const planning = () => (planningSeam ??= Object.freeze({ temporals: storeTemporals() }));
+/** @param {any} model @returns {Map<string, any>} */
+const normalizeEntities = (model) => normalizeModelEntities(model, planning());
+/** @param {any} model @returns {any} */
+const explainMapping = (model) => explainModelMapping(model, planning());
 
 export { MIGRATION_VERSION, isPerDocumentAssertion, ASSERTION_BOUNDS_DEFAULT };
 
@@ -1564,7 +1580,7 @@ export function planProgramUpgrade(connection, model, options = undefined) {
     throw refuse('JD0013', `planProgramUpgrade() option 'spelling' is a spelling a release planned, 0 to ${CURRENT_SPELLING}, got ${JSON.stringify(options?.spelling)}`);
   const dialect = connection.dialect;
   // the plan refuses what the model's programs cannot be, as planInvariants does
-  planInvariants(model, { dialect, expressions: options?.expressions });
+  planInvariants(model, { dialect, expressions: options?.expressions, temporals: planning().temporals });
   const mapping = explainMapping(model);
   const tables = Object.entries(mapping.entities)
     .filter(([, entity]) => (entity.invariants ?? []).some((/** @type {any} */ rule) => rule.enforcement === 'database'))
@@ -3876,8 +3892,8 @@ function runSteps(connection, migration, options) {
         const stepEntity = entityStepMapping(options, current.collection, current, dialect);
         const operation = compileDocumentStep(current, i, {
           migrationId: migration.id,
-          compileJslt: compileJsltStylesheet,
-          compileQuery: compileJsonQuery,
+          compileJslt: compileStepJslt,
+          compileQuery: compileStepQuery,
           keys: stepEntity === null ? [] : stepEntity.mapping.keys,
         });
         if (stepEntity?.mapping.document === false) {
@@ -3905,8 +3921,8 @@ function runSteps(connection, migration, options) {
       const assertionMapping = entityStepMapping(options, current.collection, current, dialect)?.mapping ?? null;
       const operation = compileDocumentStep(current, i, {
         migrationId: migration.id,
-        compileJslt: compileJsltStylesheet,
-        compileQuery: compileJsonQuery,
+        compileJslt: compileStepJslt,
+        compileQuery: compileStepQuery,
         assertionBounds: options.assertionBounds,
       });
       const assertOver = operation.assert;
@@ -4567,7 +4583,7 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
                 }
                 else {
                   const operation = compileDocumentStep(migrationStep, migration.steps.indexOf(migrationStep), {
-                    migrationId: migration.id, compileJslt: compileJsltStylesheet, compileQuery: compileJsonQuery,
+                    migrationId: migration.id, compileJslt: compileStepJslt, compileQuery: compileStepQuery,
                     assertionBounds: runOptions.assertionBounds,
                   });
                   const strategy = textEncoding !== null

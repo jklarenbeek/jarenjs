@@ -54,6 +54,10 @@ export { mathPack, financePack, statsPack, allPacks } from './packs/index.js';
  *   [options.pathFunctions] - custom JSONPath function extensions (RFC
  *   9535 section 2.4), available in rule match paths and in the path
  *   strings inside rule bodies
+ * @param {object} [options.calendar] - the calendar seam `$instant` and
+ *   `$wall` read a calendar value through in rule bodies: what
+ *   `queryCalendar()` of `@jarenjs/json/query/calendar` answers. Without
+ *   it either operator is refused when the stylesheet compiles
  * @returns {function} reusable `transform(data, externals?)` function
  * @throws {import('./errors.js').JsltCompileError} when compilation fails
  * @example
@@ -103,6 +107,10 @@ function cachedTransform(stylesheet, options) {
  * @param {boolean} [options.memo=false] - memoize rule outputs
  * @param {Record<string, import('../path.js').JSONPathFunction>}
  *   [options.pathFunctions] - custom JSONPath function extensions
+ * @param {object} [options.calendar] - the calendar seam `$instant` and
+ *   `$wall` read a calendar value through in rule bodies: what
+ *   `queryCalendar()` of `@jarenjs/json/query/calendar` answers. Without
+ *   it either operator is refused when the stylesheet compiles
  * @returns {any} `undefined`, one JSON item, or an array of result items
  * @throws {import('./errors.js').JsltCompileError} when compilation fails
  * @throws {import('./errors.js').JsltRuntimeError} when dispatch fails

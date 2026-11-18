@@ -487,9 +487,10 @@ renderText(template, data, externals?, options?) // one-shot, WeakMap-cached
 validateJtltTemplate(doc, options?) // { valid, errors: [{ code, message, docPath }] }
 ```
 
-Module: `@jarenjs/json/jtlt`. `options` carries `compileTypeTest` (§8) and
-`maxDepth` (JSLT-FORMAT §5.4), both for `compileJtltStylesheet` and as the
-optional fourth argument of `renderText`. The one-shot function is the
+Module: `@jarenjs/json/jtlt`. `options` carries `compileTypeTest` (§8),
+`maxDepth` (JSLT-FORMAT §5.4) and `calendar` (JSLT-FORMAT §12), all for
+`compileJtltStylesheet` and as the optional fourth argument of
+`renderText`. The one-shot function is the
 counterpart of `queryJson`/`transformJson`, caching compiled templates by
 document identity and compile-option values in a WeakMap.
 

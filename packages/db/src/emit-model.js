@@ -70,15 +70,17 @@ const keyTypeOf = (entity) => {
  * Build the emit-model document for a model's entities.
  * @param {any} model - a jaren-model document with `entities`
  * @param {{ compile: (schema: any, options?: any) => any,
- *   source?: string, reserved?: string[] }} options - `compile` is
- *   `compileEmitModel` (injected; see the header)
+ *   source?: string, reserved?: string[], temporals?: any }} options - `compile` is
+ *   `compileEmitModel` (injected; see the header); `temporals` the temporal
+ *   seam a model whose entity expressions read `$instant` or `$wall` is read
+ *   with, as `normalizeEntities` takes it
  * @returns {any} an EMIT-FORMAT `0.1` model document
  */
 export function entityEmitModel(model, options) {
   const compile = options?.compile;
   if (typeof compile !== 'function')
     throw new TypeError("entityEmitModel needs { compile: compileEmitModel } injected");
-  const entities = normalizeEntities(model);
+  const entities = normalizeEntities(model, options.temporals === undefined ? undefined : { temporals: options.temporals });
   const entityNames = [...entities.keys()];
   for (const name of entityNames) {
     if (FIXED_DECLARATIONS.has(name)

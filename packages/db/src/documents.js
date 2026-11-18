@@ -21,15 +21,13 @@
 
 import { resolveRuntime } from '@jarenjs/core/runtime';
 import { setObjectMember, isJsonObject } from '@jarenjs/core/object';
-import { compileJsonQuery } from '@jarenjs/json/query';
-import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
 import { DbCompileError } from './errors.js';
 import { refuseCancelled } from './cancellation.js';
 import { readOptionsOrNull } from './options.js';
 import {
   compileDocumentStep, checkMigrationDocument, PHYSICAL_STEP_KINDS, DOCUMENT_STEP_KINDS, HOST_STEP_KIND,
-  normalizeAssertionBounds, createAssertionBoundGuard,
+  normalizeAssertionBounds, createAssertionBoundGuard, compileStepQuery, compileStepJslt,
 } from './document-steps.js';
 
 /** A step this runner cannot run as written (`JD0023`): an `error` no
@@ -106,8 +104,8 @@ function runContext(options) {
     onProgress: options.onProgress,
     onAssertionPlan: options.onAssertionPlan,
     keys: options.keys ?? {},
-    compileJslt: options.compileJslt ?? compileJsltStylesheet,
-    compileQuery: options.compileQuery ?? compileJsonQuery,
+    compileJslt: options.compileJslt ?? compileStepJslt,
+    compileQuery: options.compileQuery ?? compileStepQuery,
     assertionBounds: normalizeAssertionBounds(options.assertionBounds),
     check: () => refuseCancelled({ signal: options.signal, deadline: options.deadline },
       runtime.now, {

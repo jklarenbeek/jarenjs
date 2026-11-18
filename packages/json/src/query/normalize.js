@@ -1418,7 +1418,7 @@ export function validateZoneProvider(value) {
 // Validate the calendar seam (options.calendar): only what queryCalendar()
 // of @jarenjs/json/query/calendar answered. A host programming error is a
 // TypeError, like options.zoneProvider.
-function validateCalendar(value) {
+export function validateCalendar(value) {
   if (!CALENDAR_SEAMS.has(value))
     throw new TypeError('options.calendar is what queryCalendar() answers');
   return value;

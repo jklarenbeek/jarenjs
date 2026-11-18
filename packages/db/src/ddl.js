@@ -2566,10 +2566,12 @@ export function clipToBytes(text, bytes) {
  * table, so two tables can meet in one name: the plan refuses that rather
  * than install one table's program over the other's.
  * An entity index over an expression is planned with the table, so a model
- * that declares one takes the host's `expressions`, as `openStore` does.
- * @param {any} model @param {{ dialect: any, expressions?: Record<string, any> }} options @returns {any[]} */
+ * that declares one takes the host's `expressions`, as `openStore` does, and
+ * a model whose entity expressions read a calendar value takes the temporal
+ * seam (`temporals`), as `normalizeEntities` does.
+ * @param {any} model @param {{ dialect: any, expressions?: Record<string, any>, temporals?: any }} options @returns {any[]} */
 export function planInvariants(model, options) {
-  const mapping = explainMapping(model);
+  const mapping = explainMapping(model, options.temporals === undefined ? undefined : { temporals: options.temporals });
   const dialect = options.dialect;
   if (typeof dialect.invariantTriggers !== 'function') throw new DbCompileError('JD0005', 'this dialect cannot lower database invariants');
   const items = Object.entries(mapping.entities).flatMap(([name, entity]) => (entity.document === false

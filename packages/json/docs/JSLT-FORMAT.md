@@ -610,11 +610,15 @@ transformJson(stylesheet, data, externals?, options?) // one-shot, WeakMap-cache
 Module: `@jarenjs/json/jslt`. `transform` returns plain JSON with the query
 API's sequence mapping: `undefined` for the empty sequence, the item itself
 for a singleton, an array of items for a longer sequence. `options` carries
-`compileTypeTest` (§9), `maxDepth` and `maxDescentDepth` (§5.4), all for
-`compileJsltStylesheet` and as the optional fourth argument of
-`transformJson`. The one-shot function is the counterpart of `queryJson`,
-caching compiled stylesheets by document identity and compile-option
-values in a WeakMap.
+`compileTypeTest` (§9), `maxDepth` and `maxDescentDepth` (§5.4), and
+`calendar`, all for `compileJsltStylesheet` and as the optional fourth
+argument of `transformJson`. `calendar` is the calendar seam a rule body's
+`$instant` and `$wall` read through (`queryCalendar()` of
+`@jarenjs/json/query/calendar`, QUERY-FORMAT §8.13): without it either
+operator is `JT0007` wrapping `JQ0003` when the stylesheet compiles, and a
+value other than the seam is a `TypeError`. The one-shot function is the
+counterpart of `queryJson`, caching compiled stylesheets by document
+identity and compile-option values in a WeakMap.
 
 ## 13. Registered operators (host opt-in, non-normative)
 

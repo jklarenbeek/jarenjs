@@ -16,7 +16,9 @@
  * differing in answer.
  */
 
-import { analyzeQuery, createQueryAccumulator } from '@jarenjs/json/query';
+import { analyzeQuery, compileJsonQuery, createQueryAccumulator } from '@jarenjs/json/query';
+import { compileJsltStylesheet } from '@jarenjs/json/jslt';
+import { queryCalendar } from '@jarenjs/json/query/calendar';
 import { setObjectMember, isJsonObject } from '@jarenjs/core/object';
 import { utf8ByteLength } from '@jarenjs/core/string';
 import { DbCompileError, DbRuntimeError } from './errors.js';
@@ -92,10 +94,30 @@ function independentPhrase(node) {
     && !binding.window && bindingLocal(node.where, binding.slot) && bindingLocal(node.ret, binding.slot);
 }
 
-/** Invalid/unknown documents conservatively retain their materializing classification. */
-function assertionAst(query) {
-  try { return analyzeQuery(query).root; }
-  catch { return null; }
+/** @type {object | undefined} */
+let stepCalendar;
+/**
+ * The calendar seam a migration's document steps read a calendar value
+ * through: always, as a migration reads a model with the temporal hooks
+ * always, so an assertion or a stylesheet using `$instant` or `$wall`
+ * answers alike over a store and over arrays of documents, on any host.
+ * @returns {object}
+ */
+const documentStepCalendar = () => (stepCalendar ??= queryCalendar());
+/** A document step's query, compiled with the calendar. @param {any} document */
+export const compileStepQuery = (document) => compileJsonQuery(document, { calendar: documentStepCalendar() });
+/** A document step's stylesheet, compiled with the calendar. @param {any} stylesheet */
+export const compileStepJslt = (stylesheet) => compileJsltStylesheet(stylesheet, { calendar: documentStepCalendar() });
+
+/** Invalid/unknown documents conservatively retain their materializing
+ * classification; a calendar that is not the seam is the host's TypeError.
+ * @param {any} query @param {object} [calendar] - the calendar seam */
+function assertionAst(query, calendar = undefined) {
+  try { return analyzeQuery(query, calendar === undefined ? undefined : { calendar }).root; }
+  catch (error) {
+    if (error instanceof TypeError) throw error;
+    return null;
+  }
 }
 
 /** Whether a query's result is a concatenation of independent per-row results. */
@@ -107,12 +129,15 @@ export function isPerDocumentAssertion(query) {
  * Classify before execution. Folds consume operand ITEMS in their original
  * order; addition is never regrouped into partition totals. Distinct folds
  * require an explicit cardinality bound. EBV applies to the complete sequence.
+ * `calendar` is the calendar seam (`queryCalendar()` of
+ * `@jarenjs/json/query/calendar`) an assertion reading `$instant` or `$wall`
+ * is analyzed with; without it such an assertion is classified `materialize`.
  * @param {any} query
- * @param {{ expect?: string, maxDistinct?: number }} [options]
+ * @param {{ expect?: string, maxDistinct?: number, calendar?: object }} [options]
  * @returns {{ strategy: 'perDocument'|'fold'|'materialize', shape: string|null, reason: string }}
  */
 export function classifyAssertion(query, options = {}) {
-  const ast = assertionAst(query);
+  const ast = assertionAst(query, options.calendar);
   if (independentPhrase(ast)) return options.expect === 'ebv'
     ? { strategy: 'fold', shape: '$ebv', reason: 'sequence EBV retains at most two items across all batches' }
     : { strategy: 'perDocument', shape: null, reason: 'an independent predicate over each document' };
@@ -224,7 +249,7 @@ export function compileDocumentStep(step, index, context) {
       /** @type {Error} */ (cause));
   }
   const classification = classifyAssertion(step.assert, { expect: step.expect,
-    maxDistinct: context.assertionBounds?.maxDistinct });
+    maxDistinct: context.assertionBounds?.maxDistinct, calendar: documentStepCalendar() });
   const operand = classification.shape === '$ebv' ? step.assert
     : classification.shape === null ? null : step.assert[classification.shape];
   const items = classification.strategy === 'fold' ? compileQuery(operand) : null;

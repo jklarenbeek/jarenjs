@@ -247,9 +247,18 @@ The store runs over SQLite — on Node (`@jarenjs/db/node`), on Bun
   prepared once, and to `introspectModel` for a connection read without a
   store). A model declaring a temporal member is `JD0017` without it, at
   `openStore`, `prepareModel` and `normalizeModel`; a query calling
-  `$instant` or `$wall` is `JQ0003` without it, pushed or not. A migration
-  plans with the seam always, so a model declaring one plans — as the model
-  migrated from too — on any host; introspection without it reads such a
+  `$instant` or `$wall` is `JQ0003` without it, pushed or not. A model's own
+  expressions read a calendar value through the same seam: an entity's
+  `{ query }` default and invariant assert compile with the store's
+  calendar, and without the seam either operator there is `JD0005` (wrapping
+  `JQ0003`) when the model is read — at `openStore`, `prepareModel` (a model
+  prepared with the seam is refused opened without it) and
+  `normalizeEntities` / `explainMapping` / `compileEntityModel`, which take it
+  as `{ temporals }` too. A migration plans with the seam always, so a model
+  declaring one, or an entity expression using one, plans — as the model
+  migrated from too — on any host, and its document steps (a `jslt`
+  stylesheet, a `query` assertion) compile with the calendar always, over a
+  store and over arrays (`migrateDocuments`) alike; introspection without it reads such a
   CHECK as one no model declares (`unmapped-constraint`), and a table holding
   a zoned member's store-written key columns as no collection at all.
 

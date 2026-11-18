@@ -19,12 +19,13 @@ import { loadDocument as loadDocumentFile, isDocumentFile } from '@jarenjs/json/
 import {
   planModelMigration, planColumnUpgrade, planProgramUpgrade, migrate, migrationStatus, migrationHistory, adoptMigrationHistory,
   shapeHash, compareShapeToModel,
-  sqliteDialect, normalizeModel, normalizeEntities, explainMapping,
+  sqliteDialect, normalizeModel, normalizeEntities as normalizeModelEntities, explainMapping as explainModelMapping,
   planCollection, planEntity, planJoinTable, HISTORY_TABLE, entityEmitModel,
   migrateDocuments, streamDocuments, classifyAssertion,
 } from './index.js';
 import { nodeDriver } from './drivers/node.js';
 import { TEMPORAL_HOOKS } from './temporal.js';
+import { storeTemporals } from './temporals.js';
 import { modelIdentity } from './migration-identity.js';
 import { prepareDocumentRun } from './documents.js';
 import { normalizeAssertionBounds, createAssertionBoundGuard } from './document-steps.js';
@@ -32,6 +33,15 @@ import {
   readDocuments, readCollectionBundle, openAtomicTarget, openStreamTarget, openNullTarget,
   formatOf, DOCUMENT_FORMATS,
 } from './document-files.js';
+
+/** The temporal seam the CLI reads a model's own expressions with, as it
+ * normalizes collections with the hooks: always (a model's invariant or
+ * `{ query }` default reading `$instant` or `$wall` plans on any host). */
+const PLANNING = Object.freeze({ temporals: storeTemporals() });
+/** @param {any} model */
+const normalizeEntities = (model) => normalizeModelEntities(model, PLANNING);
+/** @param {any} model */
+const explainMapping = (model) => explainModelMapping(model, PLANNING);
 
 const USAGE = `jaren-db — model-driven SQLite migrations
 
@@ -669,7 +679,7 @@ async function commandSnapshot(options) {
     throw error;
   }
   const declaration = typescript.renderTypeScript(
-    entityEmitModel(model, { compile: emit.compileEmitModel, source: options.model }), {});
+    entityEmitModel(model, { compile: emit.compileEmitModel, source: options.model, temporals: PLANNING.temporals }), {});
   const sameTypes = writeIfChanged(options.types, declaration);
   console.log(`${sameTypes ? 'unchanged' : 'wrote'} ${options.types}`);
 }
@@ -768,7 +778,8 @@ async function commandDocuments(options) {
   if (!['json', 'jsonl', 'collections'].includes(outFormat)) misuse('--out-format must be json, jsonl or collections');
   if (names.length > 1 && outFormat !== 'collections') misuse('multiple collections require --out-format collections');
   const materializes = bundleInput || documentSteps.some((step) => step.kind === 'query'
-    && classifyAssertion(step.assert, { expect: step.expect, maxDistinct: assertionBounds.maxDistinct }).strategy === 'materialize');
+    && classifyAssertion(step.assert, { expect: step.expect, maxDistinct: assertionBounds.maxDistinct,
+      calendar: PLANNING.temporals.calendar }).strategy === 'materialize');
   const sources = Object.fromEntries(Object.entries(files).map(([name, file]) => [name,
     readDocuments(file === '-' ? process.stdin : file, inFormat ?? (file === '-' ? 'jsonl' : formatOf(file)))]));
   let sink;

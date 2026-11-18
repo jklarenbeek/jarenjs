@@ -80,7 +80,10 @@ releases.
 
 Formula compiler options are a plain, closed object: `schemas`, `helpers`,
 `compileTypeTest`, `limits`, `cacheSize`, `packs`, `dateNames`,
-`decimalFormats` and `zoneProvider`. Unknown members refuse with `TypeError`, including a
+`decimalFormats`, `zoneProvider` and `calendar` (the calendar seam an
+expression's `$instant` and `$wall` read through, `queryCalendar()` of
+`@jarenjs/json/query/calendar`: without it either operator is a
+`FormulaError` `JQ0003` at its `/expression` path). Unknown members refuse with `TypeError`, including a
 misspelled limit that would otherwise be ignored. This also applies to
 `compileFormula` and `resolveFormulaMigration`.
 
@@ -94,7 +97,8 @@ the provider object itself, within that compiler, when it declares none. Two
 providers whose zone data carries different revisions never share a compiled
 entry; `createIntlZoneProvider()` without a `revision` declares `unrecorded`,
 so name the tzdata a host runs to keep two hosts' entries apart. A compiler
-without a provider keeps every key it had. The key keeps member order, because the
+without a provider keeps every key it had; the calendar seam joins the key
+the same way, only when given. The key keeps member order, because the
 expression's `$let` binds in key order and an object constructor emits its
 members in key order: two profiles differing only in member order no longer
 share a compiled entry (the second compiled to the first one's closure, answering
