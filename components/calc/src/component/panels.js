@@ -127,7 +127,7 @@ export function financialView(calc, t, messages, symbols) {
     form,
     solveFor,
     result: solved ? money(result) : '—',
-    resultLabel: t('calc/financial/result', { solveFor: t(`calc/financial/solve-for#enum/${solveFor}`) }),
+    resultLabel: t('calc/financial/result', { solveFor: t(`calc/financial/${solveFor}#label`) }),
     noSolution: solved ? null : t('calc/financial/no-solution'),
     // what the panel is and how to use it, above the form
     help: [

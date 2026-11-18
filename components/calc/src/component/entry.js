@@ -128,23 +128,28 @@ export function untokenize(tokens) {
   return text;
 }
 
+/** The operators the display shows by their key's symbol. */
+const SHOWN_OPS = new Map([['*', '×'], ['/', '÷']]);
+
 /**
  * An entry as the display shows it to a reader whose decimal separator is
  * `symbols.decimal`: each number's point in that separator, and, where the
  * decimal separator is the comma, `;` between a function's arguments, as a
- * spreadsheet writes them (`max(1,5;2)`). The entry itself keeps the
- * engine's `.` and `,`.
+ * spreadsheet writes them (`max(1,5;2)`), with `×`, `÷` and `√` as the
+ * keys show them. The entry itself keeps the engine's spelling.
  * @param {string} entry
  * @param {{ decimal: string }} symbols
  * @returns {string}
  */
 export function localizeEntry(entry, symbols) {
-  if (symbols.decimal === '.') return entry;
-  const separator = symbols.decimal === ',' ? ';' : ',';
+  const comma = symbols.decimal === ',';
   return untokenize(tokenize(entry).map((token) => {
     const raw = token.raw ?? token.s;
-    if (token.t === 'num') return { ...token, raw: raw.replace('.', symbols.decimal) };
-    if (token.t === 'comma') return { ...token, raw: raw.replace(',', separator) };
+    if (token.t === 'num' && symbols.decimal !== '.') return { ...token, raw: raw.replace('.', symbols.decimal) };
+    if (token.t === 'comma' && comma) return { ...token, raw: raw.replace(',', ';') };
+    // the keys' own symbols, as the reader pressed them
+    if (token.t === 'op' && SHOWN_OPS.has(token.s)) return { ...token, raw: SHOWN_OPS.get(token.s) };
+    if (token.t === 'fn' && token.s === 'sqrt(') return { ...token, raw: '√(' };
     return token;
   }));
 }

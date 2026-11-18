@@ -186,7 +186,7 @@ describe('calc messages', () => {
       app.dispatch('calc/mode', { mode: 'financial' });
       const html = renderToString(sheet({ ui: { calculator: vm(app.getState()) } }));
       for (const label of ['Time Value of Money', 'N — number of periods', 'I/Y — interest % per period', 'PV — present value',
-        'PMT — payment', 'FV — future value', 'Solve for', '<span>Result (PMT (payment)): </span>', 'Mortgage payment',
+        'PMT — payment', 'FV — future value', 'Solve for', '<span>Result (PMT — payment): </span>', 'Mortgage payment',
         'Signs follow the money']) assert.ok(html.includes(label), label);
       app.dispatch('calc/mode', { mode: 'converter' });
       const converter = renderToString(sheet({ ui: { calculator: vm(app.getState()) } }));

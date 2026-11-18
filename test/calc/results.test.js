@@ -68,7 +68,7 @@ describe('#calc a result with no finite value leaves an entry that still evaluat
       app.dispatch('calc/equals');
       const vm = contributeCalcViewModel(app.getState());
       assert.equal(vm.display.error, 'The result is infinite: a division by zero or a number too large');
-      assert.equal(vm.display.entry, '1/0');
+      assert.equal(vm.display.entry, '1÷0');
       assert.equal(vm.display.result, '');
       assert.equal(app.getState().calc.tape.length, 0);
       app.dispatch('calc/key', { k: '+' });

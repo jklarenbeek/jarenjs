@@ -126,7 +126,7 @@ describe('#calc financial: help', () => {
         'Borrowing 200,000 (PV) at 6% a year over 30 years costs 1,199.10 a month, so the answer is PMT = −1,199.10.',
         'How it works:',
         'PMT (payment)',
-        'Result (PMT (payment)): ',
+        'Result (PMT — payment): ',
       ]) assert.ok(html.includes(text), text);
     }
     finally { app.destroy(); }

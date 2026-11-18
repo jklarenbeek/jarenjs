@@ -185,7 +185,7 @@ describe('#calc entry: results in the reader\'s separators', () => {
     const english = contributeCalcViewModel({ calc });
     assert.deepEqual([english.display.result, english.tape[0].result], ['3,703.5', '3,703.5']);
     const german = contributeCalcViewModel({ calc }, { messages: compileMessageCatalog(de) });
-    assert.deepEqual([german.display.result, german.tape[0].result, german.display.entry, german.tape[0].expr], ['3.703,5', '3.703,5', '3703,5', '1234,5*3']);
+    assert.deepEqual([german.display.result, german.tape[0].result, german.display.entry, german.tape[0].expr], ['3.703,5', '3.703,5', '3703,5', '1234,5×3']);
     assert.equal(calc.entry, '3703.5', 'the stored entry stays expression text');
     const french = contributeCalcViewModel({ calc: { ...calc, mode: 'financial' } }, { messages: compileMessageCatalog(fr) });
     assert.equal(french.financial.result, '-1\u202f199,10');
