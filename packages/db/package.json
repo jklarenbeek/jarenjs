@@ -14,6 +14,10 @@
       "types": "./types/async-live.d.ts",
       "default": "./src/async-live.js"
     },
+    "./temporals": {
+      "types": "./types/temporals.d.ts",
+      "default": "./src/temporals.js"
+    },
     "./schedules": {
       "types": "./types/schedules.d.ts",
       "default": "./src/schedules.js"

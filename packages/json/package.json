@@ -73,6 +73,10 @@
       "types": "./dist/types/query/index.d.ts",
       "default": "./src/query/index.js"
     },
+    "./query/calendar": {
+      "types": "./dist/types/query/calendar.d.ts",
+      "default": "./src/query/calendar.js"
+    },
     "./jslt": {
       "types": "./dist/types/jslt/index.d.ts",
       "default": "./src/jslt/index.js"

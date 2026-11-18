@@ -11,11 +11,11 @@
       "role": "physical discovery and preserve/refuse",
       "matches": [
         "3: * @file Database → model: `introspectModel(connection)` reads a live",
-        "213:export function readSchema(connection, options = undefined) {",
-        "228: * catalog where the dialect reads one, as {@link readSchema} reads them for",
-        "231: * `readSchema`'s shape and holds the one table asked for (none where the",
-        "1333:export function introspectModel(connection, options = undefined) {",
-        "1345:  return chain(readSchema(connection, options), (schema) => {"
+        "215:export function readSchema(connection, options = undefined) {",
+        "230: * catalog where the dialect reads one, as {@link readSchema} reads them for",
+        "233: * `readSchema`'s shape and holds the one table asked for (none where the",
+        "1255:export function introspectModel(connection, options = undefined) {",
+        "1267:  return chain(readSchema(connection, options), (schema) => {"
       ],
       "disposition": "retained"
     },
@@ -61,8 +61,8 @@
       "api": "@jarenjs/json/query",
       "role": "existing regex; lexical index pending",
       "matches": [
-        "693:// $match (anchored) / $search (free): I-Regexp (RFC 9485, D5). Literal",
-        "1633:  '$search': regexTestEntry(false),"
+        "692:// $match (anchored) / $search (free): I-Regexp (RFC 9485, D5). Literal",
+        "1632:  '$search': regexTestEntry(false),"
       ],
       "disposition": "retained"
     },
@@ -74,15 +74,15 @@
       "role": "existing compiler and limits; saved-profile conversion pending",
       "matches": [
         "69: * Compile options for {@link compileJsonQuery}.",
-        "127: * @property {boolean} [analysis] - On `compileJsonQuery`: additionally",
-        "135: * what `analyzeQuery` returns and `compileJsonQuery`'s `analysis`",
-        "169: * The compiled query returned by {@link compileJsonQuery}: the query",
-        "226: * const q = compileJsonQuery({",
-        "233:export function compileJsonQuery(doc, options = {}) {",
-        "345: * shared by `analyzeQuery` and `compileJsonQuery`'s `analysis` option",
-        "383: *   `compileJsonQuery`",
-        "396:const compileUncached = (/** @type {any} */ doc) => compileJsonQuery(doc);",
-        "419:    query = compileJsonQuery(doc);"
+        "132: * @property {boolean} [analysis] - On `compileJsonQuery`: additionally",
+        "140: * what `analyzeQuery` returns and `compileJsonQuery`'s `analysis`",
+        "174: * The compiled query returned by {@link compileJsonQuery}: the query",
+        "231: * const q = compileJsonQuery({",
+        "238:export function compileJsonQuery(doc, options = {}) {",
+        "350: * shared by `analyzeQuery` and `compileJsonQuery`'s `analysis` option",
+        "388: *   `compileJsonQuery`",
+        "401:const compileUncached = (/** @type {any} */ doc) => compileJsonQuery(doc);",
+        "424:    query = compileJsonQuery(doc);"
       ],
       "disposition": "retained"
     },

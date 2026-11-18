@@ -366,6 +366,7 @@ export const ko = {
   'query/series-zone-provider': "시간대 '{zone}'에는 시간대 공급자가 필요합니다: 이 제품군은 tzdb를 포함하지 않으므로 이름이 있는 시간대는 options.zoneProvider(toParts / toEpoch)로 컴파일됩니다. 'UTC'와 숫자 'offset'에는 필요하지 않습니다",
   'query/date-zone-unknown': "시간대 제공자가 '{zone}' 시간대를 알지 못합니다",
   'query/instant-policy-name': "'$instant'는 시간대가 있는 값을 정책 'rfc5545', 'later' 또는 'reject'로 해석하지만 {got}을(를) 받았습니다",
+  'query/calendar-seam': "'{operator}'는 달력 값을 읽습니다: options.calendar, 즉 queryCalendar() of '@jarenjs/json/query/calendar'로 컴파일하십시오 (저장소: temporals, 즉 storeTemporals() of '@jarenjs/db/temporals')",
   'query/series-calendar': '달력 컨텍스트: {detail}',
   'query/expected-string': '문자열이 필요하지만 받은 값은 {got}입니다',
   'query/expected-number': '숫자가 필요하지만 받은 값은 {got}입니다',

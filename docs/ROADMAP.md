@@ -34,6 +34,9 @@ delete it or fix it.
 
 ## @jarenjs/json — JSLT
 
+- [ ] **JSLT, JTLT and formulas cannot install the calendar seam.** `$instant` and `$wall` are in their grammars, and
+  a JSLT/JTLT stylesheet or a formula compiles its queries without a `calendar` option of its own (as JSLT/JTLT do
+  without a zone provider), so either operator there is `JQ0003`; `queryJson` takes no options at all.
 - [ ] **`renderQueryMessage` has no English default for a formula id.** A formula
   diagnostic's id renders through `queryMessagesEn` only, so English needs
   `formulaMessagesEn` passed (or the diagnostic's own `message`).
@@ -594,6 +597,10 @@ costs a descriptor plus examples and no UI code at all.
 - [ ] **A backlog read from the tick backwards is not counted.** A tick whose backlog is longer than one search reads
   under the limits fires exactly what `missed` says, but counts as skipped only the occurrences of the span it read;
   `counts.uncounted` says a tick did so. Wanted: the passed occurrences counted without enumerating them.
+- [ ] **A calendar operator in a model-declared expression is refused on a store with the temporal seam.** An
+  invariant, an entity's declared query, a replication filter and a document step compile with no options (as they do
+  for registered operators and the zone provider), so `$instant` or `$wall` there is `JQ0003` naming the seam the store
+  already has.
 - [ ] **PostgreSQL reads a collection's CHECKs only where the model declares one.** A collection declaring
   no interval and no temporal member opens on PostgreSQL over a table carrying a CHECK of someone else's
   (`ALTER TABLE … ADD CONSTRAINT x CHECK (…)`), where SQLite's CREATE-text comparison answers `JD0002`; the
@@ -1147,7 +1154,9 @@ what each does is its own documentation's job
 - [ ] **An entity member has no temporal column kind.** A collection declares a member a calendar kind
   (`temporals`, MODEL-FORMAT §2), refused, keyed and compared identically on SQLite and PostgreSQL; an entity
   member holding a calendar value stays in the entity's document, unkeyed. A zoned member takes no unique index
-  and is ordered by the engine, and a recurrence rule is stored as its JSON form (`…/rrule.schema.json`).
+  and is ordered by the engine, and a recurrence rule is stored as its JSON form (`…/rrule.schema.json`). A collection's
+  temporal members are keyed through the seam `@jarenjs/db/temporals` (MODEL-FORMAT §2), whose hooks an entity kind
+  would reuse.
 - [ ] **A zoned SECONDLY or MINUTELY walk stops skipping before the horizon at the first wall-clock hour holding a
   change.** Every later time before the horizon is then resolved one by one, so a long walk to a far horizon costs a
   provider call per time after the first change it meets (cost only; the answers are exact).

@@ -284,15 +284,6 @@ function doubleEqual(left, right, key = undefined) {
   return `(${nearDouble(left, right)} AND ${nearDouble(right, left)} AND ${doubleOf(left)} = ${doubleOf(right)})`;
 }
 
-/** The regular expression a calendar value's text matches, by form. */
-const TEMPORAL_DATE = '[0-9]{4}-[0-9]{2}-[0-9]{2}';
-/** @type {Record<string, string>} */
-const TEMPORAL_PATTERNS = {
-  date: `^${TEMPORAL_DATE}$`,
-  time: '^[0-9]{2}:[0-9]{2}(:[0-9]{2}([.][0-9]{1,3})?)?$',
-  instant: `^${TEMPORAL_DATE}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,3})?Z$`,
-};
-
 /**
  * The member at a path, read as the SQL type a comparison of the given
  * KIND needs. Every typed form is a `CASE` over `jsonb_typeof`, and the
@@ -877,31 +868,7 @@ export function postgresDialect(options = undefined) {
       `${start.sql} IS NOT NULL AND ${end.sql} IS NOT NULL AND `
       + `${start.sql} = trunc(${start.sql}) AND ${end.sql} = trunc(${end.sql})`,
     intervalSpelling,
-    // a declared temporal member's CHECK and keys (`temporal.js`): its JSON
-    // type by name, its text, a text held to one of the calendar's forms by
-    // a regular expression, no member beyond the kind's own, and a key's
-    // text in the byte order every text column here keys by
-    temporal: Object.freeze({
-      typeOf: (/** @type {string} */ doc, /** @type {string} */ path) => `jsonb_typeof((${doc} #> ${stringLiteral(path)}))`,
-      textType: "'string'",
-      textOf: (/** @type {string} */ doc, /** @type {string} */ path) => `(${doc} #>> ${stringLiteral(path)})`,
-      // spelled as the server keeps it, which reads it back so
-      is: (/** @type {string} */ a, /** @type {string} */ b) => `(NOT (${a} IS DISTINCT FROM ${b}))`,
-      matches: (/** @type {string} */ sql, /** @type {string} */ form) => `${sql} ~ '${TEMPORAL_PATTERNS[form]}'`,
-      rest: (/** @type {string} */ doc, /** @type {string} */ path, /** @type {string[]} */ members) =>
-        `(${members.reduce((held, member) => `(${held} - ${stringLiteral(member)})`, `(${doc} #> ${stringLiteral(path)})`)} = '{}'::jsonb)`,
-      keyText: (/** @type {string} */ sql) => `((${sql}) COLLATE "C")`,
-      epochType: 'bigint',
-      stampType: 'text COLLATE "C"',
-      booleanTrue: 'true',
-      // the member a temporal CHECK reads, out of the CHECK's first test, as
-      // this dialect writes it or the server keeps it (every step a name)
-      checkPath: (/** @type {string} */ sql) => {
-        const match = /^\s*CASE\s+WHEN\s+\(*jsonb_typeof\(\(\s*(?:"doc"|doc)\s*#>\s*'\{((?:[^']|'')*)\}'(?:::text\[\])?\s*\)\)\s*IS NULL/.exec(String(sql));
-        const elements = match === null ? null : pathElementsOf(`{${match[1].replace(/''/g, "'")}}`);
-        return elements === null ? null : elements.map((name) => ({ name }));
-      },
-    }),
+    pathOfText: (/** @type {string} */ text) => pathElementsOf(text)?.map((element) => ({ name: element })) ?? null,
     // Concurrent first opens can both observe an absent relation before
     // either CREATE commits. Ordinary unique violations remain failures. A
     // rule program's function and trigger race as measured: the function on

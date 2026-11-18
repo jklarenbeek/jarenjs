@@ -22,7 +22,6 @@ import { DbCompileError } from './errors.js';
 import { chain } from './driver.js';
 import { BBOX_COMPONENTS, BBOX_INDEX_ORDER, derivedMappingFor } from './derive.js';
 import { expressionSql, expressionStem, expressionFunctions, normalizeExpression } from './expression.js';
-import { planTemporal, temporalColumns } from './temporal.js';
 import { foldIdentifier } from './invariants.js';
 import { SCALAR_TYPES, columnKindFor } from './scalar-types.js';
 import { verifyRulePrograms } from './physical.js';
@@ -703,39 +702,11 @@ export function planCollection(name, collection, dialect, options = undefined) {
   // a declared temporal member: its key columns (generated over the
   // member's text, or written by the store for a zoned one) and its CHECK.
   // A date's and a date range's members ARE their keys, so a path to one
-  // reads that key column, as an indexed path reads its own
-  const temporals = (collection.temporals ?? []).map((/** @type {any} */ temporal) => {
-    const planned = planTemporal(temporal, dialect, DOC_COLUMN);
-    for (const column of planned.generated) {
-      refuseLongName(dialect, column.name, `the key column of the temporal member '${temporal.name}'`, `${temporal.docPath}/name`);
-      taken.add(column.name);
-      generated.push(column);
-    }
-    derived.push(...planned.derived);
-    const columns = temporalColumns(temporal);
-    if (temporal.kind === 'date') columnByCanonical.set(canonicalOf([...temporal.segments, { name: 'date' }]), columns.key);
-    if (temporal.kind === 'date-range') {
-      columnByCanonical.set(canonicalOf([...temporal.segments, { name: 'start' }]), columns.key);
-      columnByCanonical.set(canonicalOf([...temporal.segments, { name: 'end' }]), /** @type {string} */ (columns.end));
-    }
-    // a zoned key is a safe integer (an instant of years 0000 to 9999):
-    // it orders bare, as the double it is
-    if (temporal.kind === 'zoned') safeIntegerColumns.add(columns.key);
-    return { name: temporal.name, constraint: temporal.constraint, kind: temporal.kind,
-      ...(temporal.policy === undefined ? {} : { policy: temporal.policy }),
-      segments: temporal.segments, canonical: temporal.canonical, path: temporal.path, ...columns,
-      sql: planned.sql, shapeSql: planned.shapeSql, docPath: temporal.docPath };
-  });
-  /** The key columns an index over a declared temporal member covers, or `null`. @param {string} canonical */
-  const temporalIndexColumns = (canonical) => {
-    const temporal = temporals.find((/** @type {any} */ declared) => declared.canonical === canonical);
-    if (temporal === undefined) return null;
-    if (temporal.kind === 'date-range') return { temporal, columns: [temporal.key, temporal.end] };
-    // the stamp leads a zoned index: a fetch reads the rows a provider of
-    // this identity keyed, and seeks the others apart, by one index
-    if (temporal.kind === 'zoned') return { temporal, columns: [temporal.stamp, temporal.key] };
-    return { temporal, columns: [temporal.key] };
-  };
+  // reads that key column, as an indexed path reads its own. They are the
+  // seam's (`@jarenjs/db/temporals`): a model normalized without it declares none
+  const temporalPlan = collection.temporalHooks?.planCollection(collection, dialect,
+    { docColumn: DOC_COLUMN, taken, generated, derived, columnByCanonical, safeIntegerColumns, refuseLongName }) ?? null;
+  const temporals = temporalPlan?.temporals ?? [];
 
   for (const index of collection.indexes) {
     firstColumn.push(generated.length);
@@ -793,17 +764,9 @@ export function planCollection(name, collection, dialect, options = undefined) {
           `the index path '${index.paths[i]}' names a member the dialect's JSON path grammar cannot carry`,
           pathDocPath);
       }
-      const keyed = index.derive ? null : temporalIndexColumns(canonical);
+      const keyed = index.derive || temporalPlan === null ? null : temporalPlan.indexColumns(canonical, index);
       if (keyed !== null) {
-        // a unique zoned key would compare a row's key with keys another
-        // provider revision resolved, which can refuse a value that is no
-        // duplicate or admit one that is
-        if (keyed.temporal.kind === 'zoned' && index.unique) {
-          throw new DbCompileError('JD0004',
-            `index '${index.name}': a zoned member's key is the instant a zone provider resolves, and a unique index would `
-            + 'compare it with keys another provider revision resolved: a zoned member takes no unique index', `${index.docPath}/unique`);
-        }
-        columns.push(...keyed.columns);
+        columns.push(...keyed);
         continue;
       }
       if (index.derive) {
@@ -1060,6 +1023,7 @@ export function planCollection(name, collection, dialect, options = undefined) {
     intervals,
     /** The declared temporal members: each one's kind, key columns and CHECK. */
     temporals,
+    ...(temporalPlan === null ? {} : { temporalHooks: collection.temporalHooks }),
     expected: {
       columns: [
         { name: KEY_COLUMN, type: keyType, generated: false },
@@ -1953,17 +1917,8 @@ function verifyIntervalChecks(connection, plan, disagree) {
         }
       }
       // a declared temporal member's CHECK, read back as the planned one
-      for (const temporal of temporals) {
-        const row = stored.get(temporal.constraint);
-        if (row === undefined) {
-          disagree(`the model declares the ${temporal.kind} member '${temporal.name}' with CHECK '${temporal.constraint}', `
-            + 'which the database does not have');
-        }
-        if (Number(row.validated) !== 1)
-          disagree(`CHECK '${temporal.constraint}' is not validated: the rows it holds were never checked against it`);
-        const differs = dialect.readBack.check(String(row.expression ?? ''), temporal.sql, readsConforming(row));
-        if (differs !== null) disagree(`CHECK '${temporal.constraint}' ${differs}`);
-      }
+      for (const temporal of temporals)
+        plan.temporalHooks.verifyCheck(temporal, stored.get(temporal.constraint), dialect, readsConforming, disagree);
       for (const name of stored.keys()) {
         if (!intervals.some((interval) => interval.constraint === name)
           && !temporals.some((/** @type {any} */ temporal) => temporal.constraint === name))

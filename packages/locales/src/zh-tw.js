@@ -366,6 +366,7 @@ export const zhTW = {
   'query/series-zone-provider': "時區 '{zone}' 需要時區提供者：此套件未內建 tzdb，因此具名時區須透過 options.zoneProvider（toParts / toEpoch）編譯。'UTC' 與數值 'offset' 則不需要",
   'query/date-zone-unknown': "時區提供者不認識時區 '{zone}'",
   'query/instant-policy-name': "'$instant' 依政策 'rfc5545'、'later' 或 'reject' 解析帶時區的值，但收到 {got}",
+  'query/calendar-seam': "'{operator}' 讀取日曆值：請以 options.calendar 編譯，即 queryCalendar() of '@jarenjs/json/query/calendar'（儲存庫：temporals，即 storeTemporals() of '@jarenjs/db/temporals'）",
   'query/series-calendar': '日曆情境：{detail}',
   'query/expected-string': '預期為字串，但得到{got}',
   'query/expected-number': '預期為數字，但得到{got}',

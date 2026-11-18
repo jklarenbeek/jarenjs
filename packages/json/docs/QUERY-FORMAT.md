@@ -1638,6 +1638,12 @@ other kind is `JQ2001`. A value either operator reads is admitted as its
 constructor admits it, and one the calendar refuses is `JQ2001` naming the
 calendar's code (`JY0008` to `JY0013`). A `date` member and a `date-range`'s
 bounds have one spelling each, so they compare as their strings already.
+Both operators read their values through the **calendar seam**, the
+subpath `@jarenjs/json/query/calendar`, so a query that reads no calendar
+value carries no calendar: compile with the option `calendar:
+queryCalendar()` (a linq source takes it as `{ calendar }`, a store as its
+`temporals`, `storeTemporals()` of `@jarenjs/db/temporals`). Without it either
+operator is `JQ0003` when the query compiles, before any value is read.
 
 Every operator that *produces* a date produces it in the same canonical
 spelling, so one query can never emit two forms of one instant: a fractional

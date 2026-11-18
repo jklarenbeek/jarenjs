@@ -58,7 +58,7 @@ function chainStart(provider, members, options) {
  * (`fromAsync(handle)`) the zone provider its own chains compile under.
  * @param {any} handle @param {any} options - as {@link chainStart}'s
  */
-const lent = (handle, options) => (options === undefined ? handle : lendZoneProvider(handle, options.zoneProvider));
+const lent = (handle, options) => (options === undefined ? handle : lendZoneProvider(handle, options));
 
 /**
  * The handle's members that take a query document, which take a chain as

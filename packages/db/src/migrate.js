@@ -37,7 +37,8 @@ import { chain, attempt, useStatementOnce } from './driver.js';
 import { isThenable } from '@jarenjs/core/function';
 import { relationalEngine } from './relational.js';
 import { createCursor, createSyncCursor } from './cursor.js';
-import { normalizeModel } from './store.js';
+import { normalizeModel as normalizeStoreModel } from './store.js';
+import { TEMPORAL_HOOKS } from './temporal.js';
 import { planQuery } from './plan.js';
 import { createQueryEngine, createQueryState } from './query.js';
 import { HISTORY_TABLE, ENGINE_TABLES } from './engine-metadata.js';
@@ -65,6 +66,15 @@ import {
   MIGRATION_VERSION, isPerDocumentAssertion, compileDocumentStep, checkMigrationDocument, checkReplacement,
   stepFailure, normalizeAssertionBounds, ASSERTION_BOUNDS_DEFAULT, createAssertionBoundGuard,
 } from './document-steps.js';
+
+/**
+ * A model normalized as a migration reads it: with the temporal seam's
+ * hooks always, so a model declaring a temporal member plans — as history
+ * too — whether or not the host installed the seam on a store.
+ * @param {any} model @param {Record<string, any>} [expressions]
+ * @returns {Map<string, any>}
+ */
+const normalizeModel = (model, expressions = undefined) => normalizeStoreModel(model, expressions, TEMPORAL_HOOKS);
 
 export { MIGRATION_VERSION, isPerDocumentAssertion, ASSERTION_BOUNDS_DEFAULT };
 

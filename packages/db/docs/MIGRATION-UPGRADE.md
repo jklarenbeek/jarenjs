@@ -4043,6 +4043,14 @@ release refuses `latenessMs` in `schedule()` and `tick` in `createWorker()`
 - The query language gains `$instant` (a utc or zoned value to its epoch
   milliseconds, a zoned one under a named policy and the compilation's zone
   provider) and `$wall` (a floating value to its canonical wall clock).
+- Both are installed by the host, so an application that uses neither carries
+  no calendar: a store takes `temporals: storeTemporals()` from the subpath
+  `@jarenjs/db/temporals` (`prepareModel` and `introspectModel` take it too),
+  and a query compiled outside a store `calendar: queryCalendar()` from
+  `@jarenjs/json/query/calendar` (a linq source `{ calendar }`). Without it a
+  model declaring `temporals` is `JD0017` and a query calling `$instant` or
+  `$wall` is `JQ0003`, naming the subpath. A migration plans a model declaring
+  `temporals` without it.
 - Downgrade: the previous release refuses a model that declares `temporals`
   (`JD0005`), and a plain model over a table this release created with them
   (`JD0002`, the key columns it does not declare). Migrate the declaration away

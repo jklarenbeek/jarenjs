@@ -94,7 +94,7 @@ function availableSqlName(registered, stem) {
 export function deterministicFragment(fragment, operators = null, binding = 'it') {
   const analyzeOpts = operators === null
     ? undefined
-    : { functions: operators.functions, extensions: operators.extensions };
+    : { functions: operators.functions, extensions: operators.extensions, calendar: operators.calendar };
   const wrap = (/** @type {any} */ body) => ({ $let: { [binding]: '$' }, $return: body });
   let dependencies;
   try {

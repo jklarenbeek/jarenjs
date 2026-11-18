@@ -240,6 +240,19 @@ The store runs over SQLite — on Node (`@jarenjs/db/node`), on Bun
   where a stored member is no value of its kind's shape; a zoned member's
   keys arrive empty, every row a candidate, until `rekey()`.
 
+  The keying, the refusals and the calendar behind them are the **temporal
+  seam**, the subpath `@jarenjs/db/temporals`, so a store that declares no
+  temporal member carries none of them: open the store with
+  `temporals: storeTemporals()` (and pass it to `prepareModel` for a model
+  prepared once, and to `introspectModel` for a connection read without a
+  store). A model declaring a temporal member is `JD0017` without it, at
+  `openStore`, `prepareModel` and `normalizeModel`; a query calling
+  `$instant` or `$wall` is `JQ0003` without it, pushed or not. A migration
+  plans with the seam always, so a model declaring one plans — as the model
+  migrated from too — on any host; introspection without it reads such a
+  CHECK as one no model declares (`unmapped-constraint`), and a table holding
+  a zoned member's store-written key columns as no collection at all.
+
 What the declaration buys is measured by `benchmark/series.js` over a
 year of fifty thousand stored spans asked one one-hour question at three
 days of the year. The mapped pre-filter scans every window alike — the
@@ -2030,6 +2043,7 @@ undefined`, as on every coded error.*
 | `JD0014` | a transaction guarantee was requested where it cannot act |
 | `JD0015` | owner was asked of an adopted store whose database has no owner table |
 | `JD0016` | recurring job schedules were used without `jobs.schedules` from `@jarenjs/db/schedules`, or a tick met a schedule in a zone without the runtime's zone provider |
+| `JD0017` | a model declares a temporal member, and `openStore`, `prepareModel` or `normalizeModel` was given no `temporals` from `@jarenjs/db/temporals` |
 | `JD0030` | an unknown x-entity member was declared |
 | `JD0031` | relation declarations contradict each other, or two many-to-many declarations that are not inverses name one join table (§9.4) |
 | `JD0032` | the include specification is invalid |

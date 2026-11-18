@@ -10,11 +10,17 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { compileJsonQuery, queryJson } from '@jarenjs/json/query';
+import { compileJsonQuery as compileBare, queryJson as queryBare } from '@jarenjs/json/query';
+import { queryCalendar } from '@jarenjs/json/query/calendar';
 import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
 import { from } from '@jarenjs/linq';
 
 const zoneProvider = createIntlZoneProvider({ revision: 'test' });
+const calendar = queryCalendar();
+/** Compiled with the calendar seam installed. @param {any} query @param {any} [options] */
+const compileJsonQuery = (query, options) => compileBare(query, { calendar, ...options });
+/** queryJson takes no options: the seam is a compile option. @param {any} query @param {any} doc */
+const queryJson = (query, doc) => compileJsonQuery(query)(doc);
 /** @param {any} query @param {any} doc @param {any} [options] */
 const run = (query, doc, options) => compileJsonQuery(query, options)(doc);
 /** @param {() => unknown} fn @param {string} code @param {RegExp} [message] */
@@ -99,10 +105,32 @@ describe('the chain spells both', () => {
   it('instantOf and wallClock', () => {
     const rows = [{ id: 'a', on: utc('2026-01-01T00:00:00.5Z'), f: floating('2026-07-01', '10:00') },
       { id: 'b', on: utc('2026-01-01T00:00:00Z'), f: floating('2026-07-01', '09:00:00.000') }];
-    assert.deepEqual(from(rows).orderBy((r) => r.on.instantOf()).select((r) => r.id).toArray(), ['b', 'a']);
-    assert.deepEqual(from(rows).orderBy((r) => r.f.wallClock()).select((r) => r.f.wallClock()).toArray(),
+    assert.deepEqual(from(rows, { calendar }).orderBy((r) => r.on.instantOf()).select((r) => r.id).toArray(), ['b', 'a']);
+    assert.deepEqual(from(rows, { calendar }).orderBy((r) => r.f.wallClock()).select((r) => r.f.wallClock()).toArray(),
       ['2026-07-01T09:00:00.000', '2026-07-01T10:00:00.000']);
     const z = [{ id: 'z', on: zoned('2026-10-25', '02:30', 'Europe/Amsterdam') }];
-    assert.deepEqual(from(z, { zoneProvider }).select((r) => r.on.instantOf('later')).toArray(), [Date.parse('2026-10-25T01:30:00Z')]);
+    assert.deepEqual(from(z, { zoneProvider, calendar }).select((r) => r.on.instantOf('later')).toArray(), [Date.parse('2026-10-25T01:30:00Z')]);
+  });
+});
+
+describe('the calendar seam', () => {
+  const seamless = /reads a calendar value: compile with options\.calendar, queryCalendar\(\) of '@jarenjs\/json\/query\/calendar'/;
+  it('without it, either operator is JQ0003 naming the seam, when the query compiles', () => {
+    raises(() => compileBare({ $instant: ['$.v'] }), 'JQ0003', seamless);
+    raises(() => compileBare({ $wall: '$.v' }), 'JQ0003', seamless);
+    // the refusal is the compilation's, not the value's: no row is read
+    raises(() => queryBare({ $wall: '$.v' }, { v: floating('2026-07-01', '10:00') }), 'JQ0003', /'\$wall'/);
+    raises(() => from([{ v: utc('2026-01-01T00:00:00Z') }]).select((r) => r.v.instantOf()).toArray(), 'JQ0003', seamless);
+  });
+  it('is what queryCalendar() answers, and nothing else', () => {
+    assert.throws(() => compileBare({ $const: 1 }, { calendar: { instantOf: () => 0, wallOf: () => '' } }), TypeError);
+    assert.notEqual(queryCalendar(), calendar);
+    assert.equal(compileBare({ $instant: ['$.v'] }, { calendar: queryCalendar() })({ v: utc('2026-01-01T00:00:00Z') }), Date.parse('2026-01-01T00:00:00Z'));
+  });
+  it('a chain compiled with it is never reused by a chain without it', () => {
+    const rows = [{ v: floating('2026-07-01', '10:00') }];
+    assert.deepEqual(from(rows, { calendar }).select((r) => r.v.wallClock()).toArray(), ['2026-07-01T10:00:00.000']);
+    raises(() => from(rows).select((r) => r.v.wallClock()).toArray(), 'JQ0003', seamless);
+    assert.deepEqual(from(rows, { calendar: queryCalendar() }).select((r) => r.v.wallClock()).toArray(), ['2026-07-01T10:00:00.000']);
   });
 });

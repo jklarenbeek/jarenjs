@@ -366,6 +366,7 @@ export const es = {
   'query/series-zone-provider': "la zona '{zone}' necesita un proveedor de zonas horarias: esta suite no incluye ninguna tzdb, así que una zona con nombre se compila con options.zoneProvider (toParts / toEpoch). 'UTC' y un 'offset' numérico no lo necesitan",
   'query/date-zone-unknown': "el proveedor de zonas horarias no conoce la zona '{zone}'",
   'query/instant-policy-name': "'$instant' resuelve un valor con zona según la política 'rfc5545', 'later' o 'reject'; se obtuvo {got}",
+  'query/calendar-seam': "'{operator}' lee un valor de calendario: compile con options.calendar, queryCalendar() of '@jarenjs/json/query/calendar' (un almacén: temporals, storeTemporals() of '@jarenjs/db/temporals')",
   'query/series-calendar': 'el contexto de calendario: {detail}',
   'query/expected-string': 'se esperaba una cadena, se obtuvo {got}',
   'query/expected-number': 'se esperaba un número, se obtuvo {got}',

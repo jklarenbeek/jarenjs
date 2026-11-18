@@ -106,6 +106,11 @@ const hasOwn = Object.hasOwn;
  *   bundles no tzdb; `createIntlZoneProvider()` of
  *   `@jarenjs/locales/intl-zones` answers them over `Intl`. Without a
  *   provider a named zone is refused, never answered in UTC.
+ * @property {object} [calendar]
+ *   The calendar `$instant` and `$wall` read a calendar value through
+ *   (QUERY-FORMAT.md 8.13): what `queryCalendar()` of
+ *   `@jarenjs/json/query/calendar` answers. Without it either operator is
+ *   JQ0003 when the query compiles.
  * @property {import('@jarenjs/core/dates').DateNames} [dateNames]
  *   The month and weekday names `$date-format` writes `MMMM`, `EEEE`
  *   and `a` with (QUERY-FORMAT.md section 8.13):

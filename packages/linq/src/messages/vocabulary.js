@@ -539,6 +539,9 @@ export const CATALOGS = deepFreeze({
     "query/instant-policy-name": [
       "got"
     ],
+    "query/calendar-seam": [
+      "operator"
+    ],
     "query/series-calendar": [
       "detail"
     ],

@@ -149,6 +149,7 @@ export const queryMessagesEn = Object.freeze({
   'query/series-zone-provider': "the zone '{zone}' needs a time-zone provider: this suite bundles no tzdb, so a named zone is compiled with options.zoneProvider (toParts / toEpoch). 'UTC' and a numeric 'offset' need none",
   'query/date-zone-unknown': "the zone provider does not know the zone '{zone}'",
   'query/instant-policy-name': "'$instant' resolves a zoned value under the policy 'rfc5545', 'later' or 'reject', got {got}",
+  'query/calendar-seam': "'{operator}' reads a calendar value: compile with options.calendar, queryCalendar() of '@jarenjs/json/query/calendar' (a store: temporals, storeTemporals() of '@jarenjs/db/temporals')",
   'query/series-calendar': 'the calendar context: {detail}',
 
   // JQ2001–JQ2012: evaluation

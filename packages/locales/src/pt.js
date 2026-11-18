@@ -366,6 +366,7 @@ export const pt = {
   'query/series-zone-provider': "o fuso '{zone}' precisa de um provedor de fusos horários: esta suíte não inclui nenhuma tzdb, então um fuso nomeado é compilado com options.zoneProvider (toParts / toEpoch). 'UTC' e um 'offset' numérico não precisam de nenhum",
   'query/date-zone-unknown': "o provedor de fusos horários não conhece a zona '{zone}'",
   'query/instant-policy-name': "'$instant' resolve um valor com fuso sob a política 'rfc5545', 'later' ou 'reject', obteve {got}",
+  'query/calendar-seam': "'{operator}' lê um valor de calendário: compile com options.calendar, queryCalendar() of '@jarenjs/json/query/calendar' (um armazenamento: temporals, storeTemporals() of '@jarenjs/db/temporals')",
   'query/series-calendar': 'o contexto de calendário: {detail}',
   'query/expected-string': 'esperava-se um texto, obteve-se {got}',
   'query/expected-number': 'esperava-se um número, obteve-se {got}',

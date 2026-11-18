@@ -426,6 +426,7 @@ export const ar = {
   'query/series-zone-provider': "تحتاج المنطقة الزمنية ⁨'{zone}'⁩ إلى موفّر مناطق زمنية: لا تتضمن هذه المجموعة ⁨tzdb⁩، لذا تُصرَّف المنطقة المسمّاة باستخدام ⁨options.zoneProvider⁩ (⁨toParts / toEpoch⁩). لا يحتاج ⁨'UTC'⁩ ولا ⁨'offset'⁩ الرقمي إلى موفّر",
   'query/date-zone-unknown': "لا يعرف مزوّد المناطق الزمنية المنطقة ⁨'{zone}'⁩",
   'query/instant-policy-name': "يحلّ ⁨'$instant'⁩ القيمة ذات المنطقة الزمنية وفق السياسة ⁨'rfc5545'⁩ أو ⁨'later'⁩ أو ⁨'reject'⁩، لكن تم الحصول على ⁨{got}⁩",
+  'query/calendar-seam': "يقرأ ⁨'{operator}'⁩ قيمة تقويم: صرّف الاستعلام مع ⁨options.calendar⁩، أي ⁨queryCalendar() of '@jarenjs/json/query/calendar'⁩ (للمخزن: ⁨temporals⁩، أي ⁨storeTemporals() of '@jarenjs/db/temporals'⁩)",
   'query/series-calendar': 'سياق التقويم: ⁨{detail}⁩',
   'query/expected-string': 'كان المتوقع نصًا، لكن تم الحصول على ⁨{got}⁩',
   'query/expected-number': 'كان المتوقع رقمًا، لكن تم الحصول على ⁨{got}⁩',

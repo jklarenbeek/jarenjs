@@ -33,7 +33,7 @@ describe('from(), fromAsync() and fromDocument() options', () => {
     assert.throws(() => fromAsync(ROWS, { limit: {} }), refused(/^JL0005: fromAsync\(\) does not take 'limit'/));
     assert.throws(() => fromDocument(ROWS, '$[*]', { limit: {} }), refused(/^JL0005: fromDocument\(\) does not take 'limit'/));
     assert.throws(() => from(ROWS, { bogus: 1 }),
-      refused(/'bogus'; the options are compileTypeTest, functions, collations, pathFunctions, limits, zoneProvider, registry, runtime$/));
+      refused(/'bogus'; the options are compileTypeTest, functions, collations, pathFunctions, limits, zoneProvider, calendar, registry, runtime$/));
   });
 
   it('an options argument that is not a plain object is refused', () => {

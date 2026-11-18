@@ -29,7 +29,7 @@ const STRATEGIES = new Set(['hash']);
 /** The members a federation spec carries: a closed set, so a misspelt
  * budget is refused rather than silently replaced by its default. */
 const SPEC_MEMBERS = Object.freeze(['sources', 'maxRows', 'maxBytes', 'maxTotalRows', 'maxTotalBytes', 'strategy',
-  'zoneProvider', 'runtime']);
+  'zoneProvider', 'calendar', 'runtime']);
 
 /** The members a described source carries beside its provider. */
 const SOURCE_MEMBERS = Object.freeze(['provider', 'estimatedRows']);
@@ -355,7 +355,8 @@ function childDocument(side) {
  *
  * @param {{ sources: Record<string, any>, maxRows: number, maxBytes: number,
  *   maxTotalRows?: number, maxTotalBytes?: number, strategy?: string,
- *   zoneProvider?: any, runtime?: any }} spec - `zoneProvider` (or the
+ *   zoneProvider?: any, calendar?: any, runtime?: any }} spec - `calendar` (`queryCalendar()`) reads a
+ *   calendar value in what runs over the fetched sides; `zoneProvider` (or the
  *   `runtime` record's) reads a named zone in what runs over the fetched
  *   rows, as `from()`'s does; each side runs under its own provider's
  * @returns {{ source: (name: string) => any, names: readonly string[] }}
@@ -469,7 +470,8 @@ export function federate(spec) {
         sequenceItems: Math.min(options?.limits?.sequenceItems ?? Infinity, budget.maxRows),
         resultItems: Math.min(options?.limits?.resultItems ?? Infinity, budget.maxRows) } : options?.limits;
       const compiled = compileDocument(intermediate ? [current.resident] : current.resident,
-        { ...options, zoneProvider, limits, externals: options?.externalNames ?? [] });
+        { ...options, zoneProvider, ...(spec.calendar === undefined ? {} : { calendar: spec.calendar }), limits,
+          externals: options?.externalNames ?? [] });
       try { return compiled(input, options?.externals ?? {}); }
       catch (error) {
         if (intermediate && error.code === 'JQ2009' && /sequenceItems|resultItems/.test(error.message)) throw new LinqRuntimeError('JL2008',

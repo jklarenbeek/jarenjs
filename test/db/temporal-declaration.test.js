@@ -21,11 +21,16 @@ import { nodeDriver } from '@jarenjs/db/node';
 import { postgresDialect } from '@jarenjs/db/postgres';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
+import { storeTemporals } from '@jarenjs/db/temporals';
+import { queryCalendar } from '@jarenjs/json/query/calendar';
 
 import { ENGINES, skipFor, withStore, withPostgres } from './store-core-engines.js';
 import { tempDbPath } from './helpers.js';
 
 const zoneProvider = createIntlZoneProvider({ revision: 'test-a' });
+/** The temporal seam every store here is opened with. */
+const temporalSeam = storeTemporals();
+const calendar = queryCalendar();
 const laterProvider = createIntlZoneProvider({ revision: 'test-b' });
 const TEMPORALS = [
   { name: 'd', path: '$.d', kind: 'date' }, { name: 'f', path: '$.f', kind: 'floating' },
@@ -92,12 +97,12 @@ const QUERIES = /** @type {[string, any, boolean][]} */ ([
   ['zoned under another policy', F({ $lt: [{ $instant: ['$it.z', 'later'] }, at('2026-10-25T01:40:00Z')] }), false],
 ]);
 /** The engine's answer as a list. @param {any} doc @param {any[]} rows @param {any} provider */
-const engine = (doc, rows, provider = zoneProvider) => [compileJsonQuery(doc, { zoneProvider: provider })(rows)].flat().filter((x) => x !== undefined);
+const engine = (doc, rows, provider = zoneProvider) => [compileJsonQuery(doc, { zoneProvider: provider, calendar })(rows)].flat().filter((x) => x !== undefined);
 const list = (/** @type {any} */ answer) => (answer === undefined ? [] : [answer].flat());
 
 describe('a temporal declaration is held to its rules (JD0005, JD0004)', () => {
   /** @param {any} temporals @param {RegExp} message @param {string} [code] */
-  const refused = (temporals, message, code = 'JD0005') => assert.throws(() => normalizeModel(model({ temporals, indexes: [] })),
+  const refused = (temporals, message, code = 'JD0005') => assert.throws(() => normalizeModel(model({ temporals, indexes: [] }), undefined, temporalSeam.hooks),
     (/** @type {any} */ e) => e.code === code && message.test(e.message) && typeof e.docPath === 'string');
   it('refuses an unknown kind, a missing or a stray policy, an unknown member', () => {
     refused([{ name: 'a', path: '$.a', kind: 'instant' }], /kind is one of date, floating, utc, zoned, date-range/);
@@ -113,16 +118,16 @@ describe('a temporal declaration is held to its rules (JD0005, JD0004)', () => {
     refused([{ name: 'a', path: '$.a', kind: 'utc' }, { name: 'b', path: "$['a']", kind: 'date' }], /declared twice/);
     refused([{ name: 'a'.repeat(60), path: '$.a', kind: 'utc' }], /exceeds 63 bytes/);
     assert.throws(() => normalizeModel(model({ temporals: [{ name: 'a', path: '$.a', kind: 'utc' }], indexes: [],
-      schema: { type: 'object', properties: { a: { type: 'string' } } } })), /JD0005.*a calendar value is an object/);
+      schema: { type: 'object', properties: { a: { type: 'string' } } } }), undefined, temporalSeam.hooks), /JD0005.*a calendar value is an object/);
   });
   it('refuses a unique index over a zoned member, and a zoned member without a recorded provider', async () => {
-    const plan = (/** @type {any} */ doc) => planCollection('ev', normalizeModel(doc).get('ev'), sqliteDialect);
+    const plan = (/** @type {any} */ doc) => planCollection('ev', normalizeModel(doc, undefined, temporalSeam.hooks).get('ev'), sqliteDialect);
     assert.throws(() => plan(model({ indexes: [{ name: 'one', path: '$.z', unique: true }] })), /JD0004.*takes no unique index/);
     for (const provider of [undefined, createIntlZoneProvider()]) {
-      await assert.rejects(openStore(model(), { driver: nodeDriver(), ...(provider === undefined ? {} : { zoneProvider: provider }) }),
+      await assert.rejects(openStore(model(), { driver: nodeDriver(), temporals: temporalSeam, ...(provider === undefined ? {} : { zoneProvider: provider }) }),
         (/** @type {any} */ e) => e.code === 'JD0004' && /zoneProvider whose identity records/.test(e.message));
     }
-    const without = await openStore(model({ temporals: TEMPORALS.filter((t) => t.kind !== 'zoned'), indexes: [] }), { driver: nodeDriver() });
+    const without = await openStore(model({ temporals: TEMPORALS.filter((t) => t.kind !== 'zoned'), indexes: [] }), { driver: nodeDriver(), temporals: temporalSeam });
     await without.close();
   });
 });
@@ -131,7 +136,7 @@ describe('the planned DDL', () => {
   it('keys every kind by one generated column per value, a zoned one by two the store writes', () => {
     const doc = model({ indexes: [{ name: 'by_u', path: '$.u' }, { name: 'by_z', path: '$.z' }, { name: 'by_r', path: '$.r' }, { name: 'by_f', path: '$.f', unique: true }] });
     for (const dialect of [sqliteDialect, postgresDialect()]) {
-      const plan = planCollection('ev', normalizeModel(doc).get('ev'), dialect);
+      const plan = planCollection('ev', normalizeModel(doc, undefined, temporalSeam.hooks).get('ev'), dialect);
       const created = plan.createSql.join(';\n');
       assert.match(created, /"tk_u" (TEXT|text COLLATE "C") GENERATED ALWAYS AS/);
       assert.match(created, /"tk_z" (INTEGER|bigint), "tk_z\$rfc5545" (TEXT|text COLLATE "C")/);
@@ -140,7 +145,7 @@ describe('the planned DDL', () => {
       assert.match(created, /CREATE UNIQUE INDEX "ev_by_f" ON "ev" \("tk_f"\)/);
       for (const name of ['d', 'f', 'u', 'z', 'r']) assert.match(created, new RegExp(`CONSTRAINT "${name}_temporal" CHECK \\(CASE WHEN`));
     }
-    const sqlite = planCollection('ev', normalizeModel(doc).get('ev'), sqliteDialect).temporals.find((t) => t.name === 'u').sql;
+    const sqlite = planCollection('ev', normalizeModel(doc, undefined, temporalSeam.hooks).get('ev'), sqliteDialect).temporals.find((t) => t.name === 'u').sql;
     assert.equal(sqlite, 'CASE WHEN json_type("doc", \'$."u"\') IS NULL THEN 1 ELSE json_type("doc", \'$."u"\') = \'object\' '
       + 'AND json_extract("doc", \'$."u"."kind"\') IS \'utc\' AND json_remove(json_extract("doc", \'$."u"\'), \'$."kind"\', \'$."instant"\') = \'{}\' '
       + 'AND json_type("doc", \'$."u"."instant"\') IS \'text\' AND (json_extract("doc", \'$."u"."instant"\') GLOB '
@@ -148,7 +153,7 @@ describe('the planned DDL', () => {
       + '\'[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9]Z\' OR json_extract("doc", \'$."u"."instant"\') GLOB '
       + '\'[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9]Z\' OR json_extract("doc", \'$."u"."instant"\') GLOB '
       + '\'[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z\') END');
-    const postgres = planCollection('ev', normalizeModel(doc).get('ev'), postgresDialect()).temporals.find((t) => t.name === 'u').sql;
+    const postgres = planCollection('ev', normalizeModel(doc, undefined, temporalSeam.hooks).get('ev'), postgresDialect()).temporals.find((t) => t.name === 'u').sql;
     assert.equal(postgres, 'CASE WHEN jsonb_typeof(("doc" #> \'{"u"}\')) IS NULL THEN true ELSE jsonb_typeof(("doc" #> \'{"u"}\')) = \'object\' '
       + 'AND (NOT (("doc" #>> \'{"u","kind"}\') IS DISTINCT FROM \'utc\')) AND (((("doc" #> \'{"u"}\') - \'kind\') - \'instant\') = \'{}\'::jsonb) '
       + 'AND (NOT (jsonb_typeof(("doc" #> \'{"u","instant"}\')) IS DISTINCT FROM \'string\')) '
@@ -175,7 +180,7 @@ for (const engineName of ENGINES) {
         }
         const narrowed = await ev.explain(QUERIES.find(([name]) => name === 'zoned <')?.[1]);
         assert.deepEqual(narrowed.prefilters.map((/** @type {any} */ p) => p.columns), [['tk_z$rfc5545', 'tk_z']]);
-      }, { zoneProvider });
+      }, { zoneProvider, temporals: temporalSeam });
     });
 
     it('holds one key per value: a unique index refuses a second spelling of one wall clock or instant', async () => {
@@ -186,7 +191,7 @@ for (const engineName of ENGINES) {
         await assert.rejects(ev.put({ id: 'b', f: floating('2026-07-01', '10:00:00.000') }), /JD2005/);
         await assert.rejects(ev.put({ id: 'c', u: utc('2026-01-01T00:00:00.00Z') }), /JD2005/);
         await ev.put({ id: 'e', f: floating('2026-07-01', '10:00:00.001'), u: utc('2026-01-01T00:00:00.001Z') });
-      }, { zoneProvider });
+      }, { zoneProvider, temporals: temporalSeam });
     });
 
     it('refuses a value that is not its kind before the statement, hook or no hook (JD2003)', async () => {
@@ -208,7 +213,7 @@ for (const engineName of ENGINES) {
         assert.equal(await ev.get('x'), undefined);
         await ev.put({ id: 'p', u: utc('2026-01-01T00:00:00Z') });
         await assert.rejects(ev.patch('p', [{ op: 'replace', path: '/u/instant', value: '2026-01-01' }]), /JD2003/);
-      }, { zoneProvider });
+      }, { zoneProvider, temporals: temporalSeam });
     });
   });
 }
@@ -216,7 +221,7 @@ for (const engineName of ENGINES) {
 describe('the CHECK refuses every other writer, on SQLite', () => {
   it('a raw INSERT of a value of another kind, an extra member, a key the store did not write', async () => {
     const { dbPath: path, cleanup } = tempDbPath();
-    const store = await openStore(model(), { driver: nodeDriver(), path, zoneProvider });
+    const store = await openStore(model(), { driver: nodeDriver(), temporals: temporalSeam, path, zoneProvider });
     await store.collection('ev').put({ id: 'ok', z: zoned('2026-07-01', '10:00', 'Europe/Amsterdam') });
     await store.close();
     const raw = new DatabaseSync(path);
@@ -239,7 +244,7 @@ describe('the CHECK refuses every other writer, on SQLite', () => {
 describe('the CHECK refuses every other writer, on PostgreSQL', { skip: skipFor('postgres') }, () => {
   it('a raw INSERT of a value of another kind or a key the store did not write; a dropped CHECK is drift', async () => {
     await withPostgres(async ({ pool, schema, driver }) => {
-      const store = await openStore(model(), { driver: driver(), zoneProvider });
+      const store = await openStore(model(), { driver: driver(), temporals: temporalSeam, zoneProvider });
       await store.close();
       const insert = (/** @type {any} */ doc, /** @type {any[]} */ keys = [null, null]) =>
         pool.query(`INSERT INTO "${schema}"."ev" ("key", "doc", "tk_z", "tk_z$rfc5545") VALUES ($1, $2, $3, $4)`, [doc.id, JSON.stringify(doc), ...keys]);
@@ -251,10 +256,10 @@ describe('the CHECK refuses every other writer, on PostgreSQL', { skip: skipFor(
       await assert.rejects(insert({ id: '9', z: zoned('2026-07-01', '10:00', 'UTC') }, [253402300800000, '[]']), /z_temporal/);
       await insert({ id: '8', z: zoned('2026-07-01', '10:00', 'UTC') }, [Date.parse('2026-07-01T10:00:00Z'), '["x","y"]']);
       await pool.query(`ALTER TABLE "${schema}"."ev" DROP CONSTRAINT "u_temporal"`);
-      await assert.rejects(openStore(model(), { driver: driver(), zoneProvider }),
+      await assert.rejects(openStore(model(), { driver: driver(), temporals: temporalSeam, zoneProvider }),
         (/** @type {any} */ e) => e.code === 'JD0002' && /u_temporal/.test(e.message));
       await pool.query(`ALTER TABLE "${schema}"."ev" ADD CONSTRAINT "u_temporal" CHECK (true)`);
-      await assert.rejects(openStore(model(), { driver: driver(), zoneProvider }),
+      await assert.rejects(openStore(model(), { driver: driver(), temporals: temporalSeam, zoneProvider }),
         (/** @type {any} */ e) => e.code === 'JD0002' && /CHECK 'u_temporal' is declared as/.test(e.message));
     });
   });
@@ -282,8 +287,8 @@ for (const engineName of ENGINES) {
       };
       if (engineName === 'sqlite') {
         const { dbPath: path, cleanup } = tempDbPath();
-        const first = await openStore(doc, { driver: nodeDriver(), path, zoneProvider });
-        const second = await openStore(doc, { driver: nodeDriver(), path, zoneProvider: laterProvider });
+        const first = await openStore(doc, { driver: nodeDriver(), temporals: temporalSeam, path, zoneProvider });
+        const second = await openStore(doc, { driver: nodeDriver(), temporals: temporalSeam, path, zoneProvider: laterProvider });
         try { await check(first, second); }
         finally { await second.close(); await first.close(); }
         const raw = new DatabaseSync(path);
@@ -292,8 +297,8 @@ for (const engineName of ENGINES) {
       }
       else {
         await withPostgres(async ({ driver }) => {
-          const first = await openStore(doc, { driver: driver(), zoneProvider });
-          const second = await openStore(doc, { driver: driver(), zoneProvider: laterProvider });
+          const first = await openStore(doc, { driver: driver(), temporals: temporalSeam, zoneProvider });
+          const second = await openStore(doc, { driver: driver(), temporals: temporalSeam, zoneProvider: laterProvider });
           try { await check(first, second); }
           finally { await second.close(); await first.close(); }
         });
@@ -318,8 +323,8 @@ for (const engineName of ENGINES) {
       };
       if (engineName === 'sqlite') {
         const { dbPath: path, cleanup } = tempDbPath();
-        const older = await openStore(doc, { driver: nodeDriver(), path, zoneProvider });
-        const current = await openStore(doc, { driver: nodeDriver(), path, zoneProvider: laterProvider });
+        const older = await openStore(doc, { driver: nodeDriver(), temporals: temporalSeam, path, zoneProvider });
+        const current = await openStore(doc, { driver: nodeDriver(), temporals: temporalSeam, path, zoneProvider: laterProvider });
         try { await run(older, current); }
         finally { await current.close(); await older.close(); }
         const raw = new DatabaseSync(path);
@@ -329,8 +334,8 @@ for (const engineName of ENGINES) {
       }
       else {
         await withPostgres(async ({ driver }) => {
-          const older = await openStore(doc, { driver: driver(), zoneProvider });
-          const current = await openStore(doc, { driver: driver(), zoneProvider: laterProvider });
+          const older = await openStore(doc, { driver: driver(), temporals: temporalSeam, zoneProvider });
+          const current = await openStore(doc, { driver: driver(), temporals: temporalSeam, zoneProvider: laterProvider });
           try { await run(older, current); }
           finally { await current.close(); await older.close(); }
         });
@@ -341,7 +346,7 @@ for (const engineName of ENGINES) {
       await withStore(engineName, model({ temporals: [TEMPORALS[2]], indexes: [] }), async (store) => {
         await store.collection('ev').put({ id: 'a', u: utc('2026-01-01T00:00:00Z') });
         assert.equal(await store.collection('ev').rekey(), 0);
-      });
+      }, { temporals: temporalSeam });
     });
   });
 }
@@ -351,10 +356,10 @@ describe('rekey() on the synchronous surface', () => {
     const doc = model({ temporals: [TEMPORALS[3]], indexes: [] });
     const { dbPath: path, cleanup } = tempDbPath();
     try {
-      const older = await openStore(doc, { driver: nodeDriver(), path, zoneProvider });
+      const older = await openStore(doc, { driver: nodeDriver(), temporals: temporalSeam, path, zoneProvider });
       older.sync.collection('ev').put({ id: 'a', z: zoned('2026-10-25', '02:30', 'Europe/Amsterdam') });
       await older.close();
-      const current = await openStore(doc, { driver: nodeDriver(), path, zoneProvider: laterProvider });
+      const current = await openStore(doc, { driver: nodeDriver(), temporals: temporalSeam, path, zoneProvider: laterProvider });
       try {
         assert.equal(current.sync.collection('ev').rekey(), 1);
         assert.equal(current.sync.collection('ev').rekey(), 0);

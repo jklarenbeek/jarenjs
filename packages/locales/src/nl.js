@@ -367,6 +367,7 @@ export const nl = {
   'query/series-zone-provider': "de zone '{zone}' heeft een tijdzoneprovider nodig: deze suite bundelt geen tzdb, dus een benoemde zone wordt gecompileerd met options.zoneProvider (toParts / toEpoch). 'UTC' en een numerieke 'offset' hebben er geen nodig",
   'query/date-zone-unknown': "de tijdzoneprovider kent de zone '{zone}' niet",
   'query/instant-policy-name': "'$instant' herleidt een gezoneerde waarde volgens het beleid 'rfc5545', 'later' of 'reject', gekregen: {got}",
+  'query/calendar-seam': "'{operator}' leest een kalenderwaarde: compileer met options.calendar, queryCalendar() of '@jarenjs/json/query/calendar' (een store: temporals, storeTemporals() of '@jarenjs/db/temporals')",
   'query/series-calendar': 'de kalendercontext: {detail}',
   'query/expected-string': 'een tekst (string) verwacht, {got} gekregen',
   'query/expected-number': 'een getal verwacht, {got} gekregen',

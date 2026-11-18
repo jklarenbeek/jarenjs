@@ -18,11 +18,16 @@ import { nodeDriver } from '@jarenjs/db/node';
 import { postgresDialect } from '@jarenjs/db/postgres';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
+import { storeTemporals } from '@jarenjs/db/temporals';
+import { queryCalendar } from '@jarenjs/json/query/calendar';
 
 import { PG_URL, withPostgres } from './store-core-engines.js';
 import { tempDbPath } from './helpers.js';
 
 const zoneProvider = createIntlZoneProvider({ revision: 'migration' });
+/** The temporal seam every store here is opened with. */
+const temporalSeam = storeTemporals();
+const calendar = queryCalendar();
 const plain = { $model: '0.1', collections: { ev: { schema: { type: 'object' }, key: '/id', indexes: [{ name: 'by_x', path: '$.x' }] } } };
 /** @param {string} policy */
 const declared = (policy) => ({ $model: '0.1', collections: { ev: { schema: { type: 'object' }, key: '/id',
@@ -38,7 +43,7 @@ const byInstant = { $for: { it: '$[*]' }, $orderby: [{ $instant: ['$it.u'] }, '$
 /** @param {string} policy */
 const zonedBefore = (policy) => ({ $for: { it: '$[*]' }, $where: { $lt: [{ $instant: ['$it.z', policy] }, Date.parse('2026-10-25T00:45:00Z')] }, $return: '$it.id' });
 const list = (/** @type {any} */ answer) => (answer === undefined ? [] : [answer].flat());
-const expected = (/** @type {any} */ doc) => list(compileJsonQuery(doc, { zoneProvider })(ROWS));
+const expected = (/** @type {any} */ doc) => list(compileJsonQuery(doc, { zoneProvider, calendar })(ROWS));
 
 /**
  * @typedef {{ dialect: any, open: (model: any) => Promise<any>, run: (links: any[], model: any) => Promise<any>,
@@ -51,7 +56,7 @@ async function onSqlite(fn) {
   try {
     await fn({
       dialect: sqliteDialect,
-      open: (model) => openStore(model, { driver: nodeDriver(), path, zoneProvider }),
+      open: (model) => openStore(model, { driver: nodeDriver(), temporals: temporalSeam, path, zoneProvider }),
       run: (links, model) => migrate({ driver: nodeDriver(), path }, links, { baseline: plain, model }),
       connection: () => nodeDriver().open(path, {}),
       stamps: async () => {
@@ -68,7 +73,7 @@ async function onPostgres(fn) {
   await withPostgres(async ({ pool, schema, driver }) => {
     await fn({
       dialect: postgresDialect({ searchPath: schema }),
-      open: (model) => openStore(model, { driver: driver(), zoneProvider }),
+      open: (model) => openStore(model, { driver: driver(), temporals: temporalSeam, zoneProvider }),
       run: (links, model) => migrate({ driver: driver() }, links, { baseline: plain, model, shadow: false }),
       connection: () => driver().open(),
       stamps: async () => (await pool.query(`SELECT * FROM "${schema}"."ev" ORDER BY "key"`)).rows
@@ -145,7 +150,7 @@ for (const [name, on, skip] of ENGINES) {
         const connection = await engine.connection();
         let derived;
         try {
-          const read = await introspectModel(connection, { keys: { ev: '/id' } });
+          const read = await introspectModel(connection, { keys: { ev: '/id' }, temporals: temporalSeam });
           derived = read.model;
           assert.deepEqual(read.report.filter((/** @type {any} */ row) => /unmapped-(column|constraint|index)/.test(row.code)), []);
         }

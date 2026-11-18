@@ -43,6 +43,7 @@ export const DB_CODES = Object.freeze({
   JD0014: 'a transaction guarantee was requested where it cannot act',
   JD0015: 'owner was asked of an adopted store whose database has no owner table',
   JD0016: 'recurring job schedules were used without jobs.schedules from @jarenjs/db/schedules, or a tick met a schedule in a zone without the runtime\'s zone provider',
+  JD0017: 'a model declares a temporal member, and openStore, prepareModel or normalizeModel was given no temporals from @jarenjs/db/temporals',
   JD0030: 'an unknown x-entity member was declared',
   JD0031: 'relation declarations contradict each other, or two many-to-many declarations that are not inverses name one join table',
   JD0032: 'the include specification is invalid',
@@ -201,6 +202,10 @@ export const DB_CODES = Object.freeze({
  *    carries none), or a tick that met a schedule in a zone in a process
  *    whose runtime has no zone provider: the tick refuses and leaves
  *    every schedule as it was, because the fault is the process's
+ *  - `JD0017` — a model declaring a temporal member (`temporals`) opened,
+ *    prepared or normalized without `temporals: storeTemporals()` (the
+ *    calendar and the keying are the `@jarenjs/db/temporals` subpath, so
+ *    a store that declares none carries neither)
  *  - `JD0010` — `strict: true` and part of the query would have run
  *    outside the database; the reason names the forcing construct
  *  - `JD0011` — the active profile refused the document before any

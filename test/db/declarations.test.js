@@ -22,6 +22,7 @@ const SUBPATHS = [
   ['@jarenjs/db/typed', 'packages/db/types/typed.d.ts'],
   ['@jarenjs/db/app', 'packages/db/types/app.d.ts'],
   ['@jarenjs/db/schedules', 'packages/db/types/schedules.d.ts'],
+  ['@jarenjs/db/temporals', 'packages/db/types/temporals.d.ts'],
   ['@jarenjs/db/trigger-rules', 'packages/db/types/trigger-rules.d.ts'],
 ];
 

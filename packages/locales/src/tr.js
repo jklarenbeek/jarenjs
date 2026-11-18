@@ -365,6 +365,7 @@ export const tr = {
   'query/series-zone-provider': "'{zone}' saat dilimi bir saat dilimi sağlayıcısı gerektirir: bu paket hiçbir tzdb içermez, bu yüzden adlandırılmış bir saat dilimi options.zoneProvider (toParts / toEpoch) ile derlenir. 'UTC' ve sayısal bir 'offset' için sağlayıcı gerekmez",
   'query/date-zone-unknown': "saat dilimi sağlayıcısı '{zone}' dilimini tanımıyor",
   'query/instant-policy-name': "'$instant' saat dilimli bir değeri 'rfc5545', 'later' veya 'reject' ilkesiyle çözümler, alınan: {got}",
+  'query/calendar-seam': "'{operator}' bir takvim değeri okur: options.calendar ile, yani queryCalendar() of '@jarenjs/json/query/calendar' ile derleyin (bir depo: temporals, yani storeTemporals() of '@jarenjs/db/temporals')",
   'query/series-calendar': 'takvim bağlamı: {detail}',
   'query/expected-string': 'beklenen: metin, gelen: {got}',
   'query/expected-number': 'beklenen: sayı, gelen: {got}',

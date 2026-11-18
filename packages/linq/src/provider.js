@@ -46,11 +46,12 @@ const cacheFor = () => createBoundedCache(512);
  * @param {readonly string[]} externals
  * @param {any} limits
  * @param {readonly (string | number)[] | null} zones
+ * @param {boolean} calendar - whether the calendar seam is installed
  * @returns {string | null}
  */
-function compilationKey(document, externals, limits, zones) {
+function compilationKey(document, externals, limits, zones, calendar) {
   try {
-    return JSON.stringify([document, externals, limits ?? null, zones], function (key, value) {
+    return JSON.stringify([document, externals, limits ?? null, zones, calendar], function (key, value) {
       const raw = this[key];
       const type = typeof raw;
       if (type === 'function' || type === 'undefined' || type === 'symbol' || type === 'bigint'
@@ -107,16 +108,17 @@ function zoneIdentity(provider) {
 const HANDLE_ZONES = new WeakMap();
 
 /**
- * Lend a client handle's zone provider to every chain built over it with
- * `from(handle)` or `fromAsync(handle)` and no zone provider of its own,
- * so what such a chain runs in memory reads a named zone as the store does.
+ * Lend a client handle's zone provider and calendar seam to every chain
+ * built over it with `from(handle)` or `fromAsync(handle)` and none of its
+ * own, so what such a chain runs in memory reads a named zone and a
+ * calendar value as the store does.
  * @template {object} T
  * @param {T} handle
- * @param {any} zoneProvider
+ * @param {{ zoneProvider?: any, calendar?: any }} lent
  * @returns {T}
  */
-export function lendZoneProvider(handle, zoneProvider) {
-  HANDLE_ZONES.set(handle, zoneProvider);
+export function lendZoneProvider(handle, lent) {
+  HANDLE_ZONES.set(handle, lent);
   return handle;
 }
 
@@ -139,8 +141,11 @@ export function readRuntime(options, source) {
     if (rest.zoneProvider === undefined && zoneProvider !== null) rest.zoneProvider = zoneProvider;
     read = rest;
   }
-  if (read.zoneProvider === undefined && source !== null && typeof source === 'object' && HANDLE_ZONES.has(source))
-    read = { ...read, zoneProvider: HANDLE_ZONES.get(source) };
+  const lent = source !== null && typeof source === 'object' ? HANDLE_ZONES.get(source) : undefined;
+  if (lent !== undefined) {
+    if (read.zoneProvider === undefined && lent.zoneProvider !== undefined) read = { ...read, zoneProvider: lent.zoneProvider };
+    if (read.calendar === undefined && lent.calendar !== undefined) read = { ...read, calendar: lent.calendar };
+  }
   return read;
 }
 
@@ -158,7 +163,7 @@ const REGISTRY_TOKEN = Symbol('linq.registryToken');
  * engine's own option names, deliberately, so there is one vocabulary.
  */
 export const COMPILE_OPTION_KEYS = Object.freeze([
-  'compileTypeTest', 'functions', 'collations', 'pathFunctions', 'limits', 'zoneProvider',
+  'compileTypeTest', 'functions', 'collations', 'pathFunctions', 'limits', 'zoneProvider', 'calendar',
 ]);
 
 /** Every member `from()`/`fromAsync()`/`fromDocument()` options carry:
@@ -247,9 +252,11 @@ export function compileDocument(document, options) {
   // the externals, the limits and the zone provider are part of the
   // identity: the same document compiles differently against a different
   // set of declared names, differently again under a step or result
-  // bound, and a named zone reads the wall clock its provider answers
+  // bound, and a named zone reads the wall clock its provider answers;
+  // a calendar operator compiles only with the calendar seam installed
   const zones = zoneIdentity(options.zoneProvider);
-  const key = zones === undefined ? null : compilationKey(document, options.externals, options.limits, zones);
+  const key = zones === undefined ? null
+    : compilationKey(document, options.externals, options.limits, zones, options.calendar != null);
   return key === null ? compile() : cache.getOrCreate(key, compile);
 }
 

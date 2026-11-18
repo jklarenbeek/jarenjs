@@ -31,6 +31,7 @@ import { deepFreeze, isJsonObject, isPlainOptions, nearestName, refuseUnknownMem
 // referenced inside functions (never at module evaluation time), so the
 // import cycle normalize.js <-> operators.js is initialization-safe.
 import { OPERATORS } from './operators.js';
+import { CALENDAR_SEAMS, CALENDAR_OPERATORS } from './calendar-seam.js';
 
 //#region cardinality
 
@@ -704,6 +705,12 @@ function normalizeOperatorCall(key, entry, arg, docPath, opPath, scope, ctx) {
   // The provider is a compilation capability, like a
   // collation, so it reaches the entry the same way $range's guard does
   if (ctx.zoneProvider !== null && CLOCK_OPERATORS.has(key)) node.zoneProvider = ctx.zoneProvider;
+  // a calendar value is read through the seam the host installed
+  // (`@jarenjs/json/query/calendar`), never one the engine bundles
+  if (CALENDAR_OPERATORS.has(key)) {
+    if (ctx.calendar === null) raise('JQ0003', 'query/calendar-seam', { operator: key }, opPath);
+    node.calendar = ctx.calendar;
+  }
   // locale data is data the host hands the compilation, never a lookup:
   // the names $date-format spells, the decimal formats a number is
   // written and read with
@@ -1334,7 +1341,7 @@ function normalizeQuantifierPhrase(obj, docPath, scope, ctx) {
 
 //#region entry points
 
-const QUERY_OPTIONS = Object.freeze(['compileTypeTest', 'extensions', 'functions', 'collations', 'pathFunctions', 'zoneProvider', 'dateNames', 'decimalFormats', 'limits', 'externals', 'analysis', 'lexicalProviders']);
+const QUERY_OPTIONS = Object.freeze(['compileTypeTest', 'extensions', 'functions', 'collations', 'pathFunctions', 'zoneProvider', 'calendar', 'dateNames', 'decimalFormats', 'limits', 'externals', 'analysis', 'lexicalProviders']);
 
 /** Check the common compiler/analyzer host boundary before options are projected.
  * @param {Record<string, any>} options */
@@ -1405,6 +1412,15 @@ export function validateZoneProvider(value) {
     throw new TypeError('options.zoneProvider must be an object with'
       + ' toParts(epoch, zone) and toEpoch(parts, zone, disambiguation)');
   }
+  return value;
+}
+
+// Validate the calendar seam (options.calendar): only what queryCalendar()
+// of @jarenjs/json/query/calendar answered. A host programming error is a
+// TypeError, like options.zoneProvider.
+function validateCalendar(value) {
+  if (!CALENDAR_SEAMS.has(value))
+    throw new TypeError('options.calendar is what queryCalendar() answers');
   return value;
 }
 
@@ -1629,6 +1645,7 @@ export function normalizeQuery(doc, options = {}, analysis = options?.analysis =
   const functions = options.functions == null ? null : validateNamedFunctions(options.functions, 'functions');
   const collations = options.collations == null ? null : validateNamedFunctions(options.collations, 'collations');
   const zoneProvider = options.zoneProvider == null ? null : validateZoneProvider(options.zoneProvider);
+  const calendar = options.calendar == null ? null : validateCalendar(options.calendar);
   const dateNames = options.dateNames == null ? null : validateDateNames(options.dateNames);
   const decimalFormats = options.decimalFormats == null ? null : validateDecimalFormats(options.decimalFormats);
   const limits = options.limits == null ? null : validateLimits(options.limits);
@@ -1644,7 +1661,7 @@ export function normalizeQuery(doc, options = {}, analysis = options?.analysis =
     : { pathFunctions: options.pathFunctions };
   const ctx = {
     nextSlot: 1, depth: 0, externals: new Map(), compileTypeTest, extensions,
-    functions, collations, zoneProvider, dateNames, decimalFormats, limits, pathOptions, declaredExternals,
+    functions, collations, zoneProvider, calendar, dateNames, decimalFormats, limits, pathOptions, declaredExternals,
     lexicalProviders: options.lexicalProviders,
     // package-internal: set only by analyzeQuery (Appendix C.1); the
     // compile entry point never passes it

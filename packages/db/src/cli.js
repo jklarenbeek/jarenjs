@@ -24,6 +24,7 @@ import {
   migrateDocuments, streamDocuments, classifyAssertion,
 } from './index.js';
 import { nodeDriver } from './drivers/node.js';
+import { TEMPORAL_HOOKS } from './temporal.js';
 import { modelIdentity } from './migration-identity.js';
 import { prepareDocumentRun } from './documents.js';
 import { normalizeAssertionBounds, createAssertionBoundGuard } from './document-steps.js';
@@ -677,7 +678,7 @@ async function commandShape(options) {
   if (options.model === null) fail('shape needs --model');
   const model = await loadDocument(options.model, 'model', 'model');
   console.log(`shape hash: ${shapeHash(model)}`);
-  for (const collection of normalizeModel(model).values()) {
+  for (const collection of normalizeModel(model, undefined, TEMPORAL_HOOKS).values()) {
     for (const sql of planCollection(collection.name, collection, sqliteDialect).createSql)
       console.log(sql);
   }

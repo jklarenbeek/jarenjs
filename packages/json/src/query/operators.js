@@ -92,7 +92,6 @@ import {
   geoJsonToWkt,
   simplifyGeometry,
 } from '@jarenjs/core/geo';
-import { parseTemporal, toUtc } from '@jarenjs/core/calendar';
 import { queryCompileError, queryRuntimeError, messageRef } from './messages.js';
 import {
   EMPTY, Seq, seqOf, appendItem, ebv, firstItem,
@@ -2397,7 +2396,8 @@ export const OPERATORS = Object.freeze({
 
   '$instant': { // a calendar value's instant: utc as it is, zoned resolved
     // the value, then the policy a zoned value resolves its gap or fold
-    // under, captured verbatim: data the query compiles against
+    // under, captured verbatim: data the query compiles against. The
+    // calendar is the seam's (`@jarenjs/json/query/calendar`)
     params: Object.freeze({ kinds: Object.freeze(['expr', 'raw']), min: 1 }),
     result: resultEmptyPropagates,
     compile: (gets, args, docPath, node) => {
@@ -2405,6 +2405,7 @@ export const OPERATORS = Object.freeze({
       const valuePath = args[0].docPath;
       const policy = args.length === 2 ? instantPolicy(args[1]) : null;
       const provider = node.zoneProvider ?? null;
+      const { instantOf } = node.calendar;
       return (f) => {
         const v = get(f);
         return v === EMPTY ? EMPTY : instantOf(v, policy, provider, valuePath);
@@ -2415,17 +2416,13 @@ export const OPERATORS = Object.freeze({
   '$wall': { // a floating or zoned value's wall clock, in its one spelling
     params: UNARY,
     result: resultEmptyPropagates,
-    compile: (gets, args) => {
+    compile: (gets, args, docPath, node) => {
       const get = gets[0];
       const valuePath = args[0].docPath;
+      const { wallOf } = node.calendar;
       return (f) => {
         const v = get(f);
-        if (v === EMPTY)
-          return EMPTY;
-        const value = temporalArg('$wall', v, valuePath);
-        if (value.kind !== 'floating' && value.kind !== 'zoned')
-          throw runtimeError('JQ2001', 'query/temporal-expected', { operator: '$wall', kinds: 'floating, zoned', got: value.kind }, valuePath);
-        return canonicalWall(value.date, value.time);
+        return v === EMPTY ? EMPTY : wallOf(v, valuePath);
       };
     },
   },
@@ -2751,64 +2748,11 @@ function dynamicDateFormat(pattern, names, patternPath) {
   }
 }
 
-// The calendar value an `$instant` or `$wall` operand holds, admitted as
-// its constructor admits it (`@jarenjs/core/calendar`): an object of one of
-// the five kinds, or JQ2001 naming the calendar's own code.
-function temporalArg(operator, v, docPath) {
-  if (v === null || typeof v !== 'object' || Array.isArray(v))
-    throw runtimeError('JQ2001', 'query/temporal-expected', { operator, kinds: 'date, floating, utc, zoned, date-range', got: itemRef(v) }, docPath);
-  try {
-    return parseTemporal(v);
-  }
-  catch (e) {
-    if (typeof e?.code === 'string' && e.code.startsWith('JY'))
-      throw runtimeError('JQ2001', 'query/temporal-invalid', { operator, code: e.code, pointer: e.docPath ?? '' }, docPath);
-    throw e;
-  }
-}
-
 // The policy an `$instant` resolves a zoned value's gap or fold under.
 function instantPolicy(arg) {
   if (arg.value !== 'rfc5545' && arg.value !== 'later' && arg.value !== 'reject')
     throw queryCompileError('JQ0003', 'query/instant-policy-name', { got: itemRef(arg.value) }, arg.docPath);
   return arg.value;
-}
-
-// The epoch milliseconds a utc or zoned value names; a date, floating or
-// date-range value names none (it is bound to a zone first, never read as
-// one in UTC).
-function instantOf(v, policy, provider, docPath) {
-  const value = temporalArg('$instant', v, docPath);
-  if (value.kind === 'utc')
-    return toUtc(value).instant;
-  if (value.kind !== 'zoned')
-    throw runtimeError('JQ2001', 'query/temporal-expected', { operator: '$instant', kinds: 'utc, zoned', got: value.kind }, docPath);
-  if (policy === null)
-    throw runtimeError('JQ2001', 'query/instant-policy', {}, docPath);
-  if (provider === null)
-    throw runtimeError('JQ2001', 'query/series-zone-provider', { zone: value.zone }, docPath);
-  try {
-    return toUtc(value, { provider, policy }).instant;
-  }
-  catch (e) {
-    if (typeof e?.code === 'string' && e.code.startsWith('JY'))
-      throw runtimeError('JQ2001', 'query/instant-unresolved', { date: value.date, time: value.time, zone: value.zone, policy, code: e.code }, docPath);
-    throw e;
-  }
-}
-
-/**
- * A wall clock in its one spelling, `YYYY-MM-DDTHH:MM:SS.fff`: a time the
- * calendar admits (`HH:MM`, `HH:MM:SS`, `HH:MM:SS.f` to `.fff`) padded to
- * seconds and three fraction digits, so two spellings of one wall clock are
- * one string and its code-point order is the clock's.
- * @param {string} date
- * @param {string} time
- * @returns {string}
- */
-export function canonicalWall(date, time) {
-  const clock = time.length === 5 ? `${time}:00.000` : time.length === 8 ? `${time}.000` : `${time}00`.slice(0, 12);
-  return `${date}T${clock}`;
 }
 
 // Whether a pattern writes an offset (an `X` outside its quoted literals).

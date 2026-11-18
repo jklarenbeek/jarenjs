@@ -327,17 +327,6 @@ function parsePathText(text) {
   return segments.length === 0 ? null : segments;
 }
 
-/** The GLOB alternatives a calendar value's text is one of, by form. */
-const DIGIT2 = '[0-9][0-9]';
-const DATE_GLOB = `${DIGIT2}${DIGIT2}-${DIGIT2}-${DIGIT2}`;
-const FRACTIONS = ['', '.[0-9]', `.${DIGIT2}`, `.${DIGIT2}[0-9]`];
-/** @type {Record<string, string[]>} */
-const TEMPORAL_GLOBS = {
-  date: [DATE_GLOB],
-  time: [`${DIGIT2}:${DIGIT2}`, ...FRACTIONS.map((fraction) => `${DIGIT2}:${DIGIT2}:${DIGIT2}${fraction}`)],
-  instant: FRACTIONS.map((fraction) => `${DATE_GLOB}T${DIGIT2}:${DIGIT2}:${DIGIT2}${fraction}Z`),
-};
-
 /**
  * The JSON type name of the member at a path — `json_type`, which answers
  * `integer` and `real` apart, as the query layer and a declared interval's
@@ -521,29 +510,7 @@ export const sqliteDialect = createDialect({
     `json_type(${docColumnSql}, ${stringLiteral(start.pathText)}) IS 'integer' AND `
     + `json_type(${docColumnSql}, ${stringLiteral(end.pathText)}) IS 'integer'`,
   intervalSpelling: () => INTERVAL_SPELLING,
-  // a declared temporal member's CHECK and keys (`temporal.js`): its JSON
-  // type by name, its text, a text held to one of the calendar's forms by
-  // GLOB alternatives, and no member beyond the kind's own
-  temporal: Object.freeze({
-    typeOf: jsonTypeName,
-    textType: "'text'",
-    textOf: (/** @type {string} */ doc, /** @type {string} */ path) => `json_extract(${doc}, ${stringLiteral(path)})`,
-    is: (/** @type {string} */ a, /** @type {string} */ b) => `${a} IS ${b}`,
-    matches: (/** @type {string} */ sql, /** @type {string} */ form) =>
-      `(${TEMPORAL_GLOBS[form].map((glob) => `${sql} GLOB '${glob}'`).join(' OR ')})`,
-    rest: (/** @type {string} */ doc, /** @type {string} */ path, /** @type {string[]} */ members) =>
-      `json_remove(json_extract(${doc}, ${stringLiteral(path)}), ${members.map((member) => stringLiteral(jsonPathText([{ name: member }]))).join(', ')}) = '{}'`,
-    keyText: (/** @type {string} */ sql) => sql,
-    epochType: 'INTEGER',
-    stampType: 'TEXT',
-    booleanTrue: '1',
-    // the member a temporal CHECK reads, out of the CHECK's first test
-    checkPath: (/** @type {string} */ sql) => {
-      const match = /^CASE WHEN json_type\("doc", '((?:[^']|'')*)'\) IS NULL THEN /.exec(String(sql));
-      const segments = match === null ? null : parsePathText(match[1].replace(/''/g, "'"));
-      return segments === null || segments.some((segment) => !('name' in segment)) ? null : segments;
-    },
-  }),
+  pathOfText: (/** @type {string} */ text) => parsePathText(text),
   // a DERIVED column's expression: the member as JSON text handed to
   // the deterministic function the store registers at open. The
   // precision is a LITERAL, not a parameter — a generated column's

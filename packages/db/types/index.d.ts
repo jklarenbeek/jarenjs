@@ -1422,6 +1422,11 @@ export interface OpenStoreOptions {
    * where one was injected; without it the document is refused rather
    * than answered in UTC. No time-zone database is bundled. */
   zoneProvider?: unknown;
+  /** The temporal seam, `storeTemporals()` of `@jarenjs/db/temporals`: a
+   * model declaring a temporal member (`temporals`) opens only with it
+   * (`JD0017`), and a query's `$instant` and `$wall` compile only with it
+   * (`JQ0003`). */
+  temporals?: import('./temporals.js').StoreTemporals;
   /** The host's runtime record (`@jarenjs/core/runtime`): the clock the
    * capture log and the job queue stamp, the identifier a `uuid`
    * identity and a `default: 'uuid'` allocate, the job queue's backoff
@@ -1480,7 +1485,7 @@ export interface OpenStoreOptions {
 }
 
 export declare function openStore(model: unknown, options: OpenStoreOptions): Promise<Store>;
-export declare function normalizeModel(model: unknown, expressions?: Record<string, ExpressionFunction>): Map<string, unknown>;
+export declare function normalizeModel(model: unknown, expressions?: Record<string, ExpressionFunction>, temporals?: object | null): Map<string, unknown>;
 /** The brand only `prepareModel` gives: a hand-made `{ model }` is not one. */
 declare const preparedModelBrand: unique symbol;
 /**
@@ -1501,7 +1506,7 @@ export interface PreparedModel<M = unknown> {
  * refused at open (`JD0005`).
  */
 export declare function prepareModel<const M>(model: M,
-  options?: { expressions?: Record<string, ExpressionFunction> }): PreparedModel<M>;
+  options?: { expressions?: Record<string, ExpressionFunction>; temporals?: import('./temporals.js').StoreTemporals }): PreparedModel<M>;
 export declare const MODEL_VERSION: string;
 /**
  * The member every collection and entity view of a store carries its own
@@ -1731,6 +1736,8 @@ export declare function introspectModel(connection: unknown, options?: {
   keys?: Record<string, string>;
   /** Read application triggers back as database rules: `sqliteTriggers` from `@jarenjs/db/trigger-rules`. */
   triggers?: { read(dialect: unknown, schema: unknown, joinTables: ReadonlySet<string>): unknown };
+  /** Read a declared temporal member's CHECK back as its declaration: `storeTemporals()` from `@jarenjs/db/temporals`. */
+  temporals?: import('./temporals.js').StoreTemporals;
 }): unknown;
 
 /** The neutral IR one read produces: tables with their columns,

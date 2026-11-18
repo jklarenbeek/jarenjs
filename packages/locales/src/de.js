@@ -368,6 +368,7 @@ export const de = {
   'query/series-zone-provider': "die Zone '{zone}' benötigt einen Zeitzonen-Provider: diese Suite enthält keine tzdb, daher wird eine benannte Zone mit options.zoneProvider (toParts / toEpoch) kompiliert. 'UTC' und ein numerischer 'offset' benötigen keinen",
   'query/date-zone-unknown': "der Zeitzonen-Provider kennt die Zone '{zone}' nicht",
   'query/instant-policy-name': "'$instant' löst einen zonierten Wert unter der Richtlinie 'rfc5545', 'later' oder 'reject' auf, erhalten: {got}",
+  'query/calendar-seam': "'{operator}' liest einen Kalenderwert: kompilieren Sie mit options.calendar, queryCalendar() of '@jarenjs/json/query/calendar' (ein Store: temporals, storeTemporals() of '@jarenjs/db/temporals')",
   'query/series-calendar': 'der Kalenderkontext: {detail}',
   'query/expected-string': 'erwartet: eine Zeichenkette (string), erhalten: {got}',
   'query/expected-number': 'erwartet: eine Zahl, erhalten: {got}',

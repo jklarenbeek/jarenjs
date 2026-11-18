@@ -262,12 +262,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *     optimize: () => string },
  *   schemaTypeOf?: (declaredType: string) => string | undefined,
  *   jsonTypeName: (columnSql: string, pathText: string) => string,
- *   temporal: { typeOf: (doc: string, path: string) => string, textType: string,
- *     textOf: (doc: string, path: string) => string, is: (a: string, b: string) => string,
- *     matches: (sql: string, form: string) => string,
- *     rest: (doc: string, path: string, members: string[]) => string,
- *     keyText: (sql: string) => string, epochType: string, stampType: string, booleanTrue: string,
- *     checkPath: (sql: string) => { name: string }[] | null },
+ *   pathOfText: (text: string) => JsonPathSegment[] | null,
  *   integerBounds: (shape: { docColumnSql: string, start: { sql: string, pathText: string },
  *     end: { sql: string, pathText: string } }) => string,
  *   intervalSpelling: (conforming: boolean) => import('./dialects/check-read.js').IntervalSpelling,
@@ -929,8 +924,9 @@ export function createDialect(spec) {
     jsonTypeOf: spec.jsonTypeOf,
     /** A member's JSON type by the engine's own name (SQL NULL for an absent member). */
     jsonTypeName: spec.jsonTypeName,
-    /** A declared temporal member's CHECK and key spellings (`temporal.js`). */
-    temporal: spec.temporal,
+    /** A path back out of the text this dialect writes one as (`jsonPathText`
+     * on SQLite, an array literal on PostgreSQL), or `null`. */
+    pathOfText: spec.pathOfText,
     /**
      * The spellings {@link jsonTypeOf} answers for a JSON NUMBER. SQLite
      * discriminates the two it stores (`integer`, `real`); an engine with

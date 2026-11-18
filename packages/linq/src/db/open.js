@@ -201,10 +201,13 @@ export async function open(model, options) {
 
   // what a handle's chain runs in memory (a phase after a host callback, an
   // aggregate over it) reads a named zone through the store's own provider:
-  // the option, else the runtime record's, as the store reads them
+  // the option, else the runtime record's, as the store reads them; and a
+  // calendar value through the store's temporal seam's calendar
   const zoneProvider = storeOptions.zoneProvider !== undefined ? storeOptions.zoneProvider
     : storeOptions.runtime?.zoneProvider ?? null;
-  const chainOptions = zoneProvider === null ? undefined : Object.freeze({ zoneProvider });
+  const calendar = storeOptions.temporals?.calendar;
+  const chainOptions = zoneProvider === null && calendar === undefined ? undefined
+    : Object.freeze({ ...(zoneProvider === null ? {} : { zoneProvider }), ...(calendar === undefined ? {} : { calendar }) });
 
   // the names every record of this client has, in the store's order
   const entityMembers = lazyMembersOf(store.roots ?? []);

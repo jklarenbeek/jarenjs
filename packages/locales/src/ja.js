@@ -363,6 +363,7 @@ export const ja = {
   'query/series-zone-provider': "タイムゾーン '{zone}' にはタイムゾーンプロバイダーが必要です: このスイートは tzdb を同梱していないため、名前付きゾーンは options.zoneProvider（toParts / toEpoch）でコンパイルされます。'UTC' と数値の 'offset' には不要です",
   'query/date-zone-unknown': "タイムゾーンプロバイダーはゾーン '{zone}' を認識していません",
   'query/instant-policy-name': "'$instant' はゾーン付きの値をポリシー 'rfc5545'、'later'、'reject' のいずれかで解決しますが、{got}でした",
+  'query/calendar-seam': "'{operator}' はカレンダー値を読みます: options.calendar、つまり queryCalendar() of '@jarenjs/json/query/calendar' でコンパイルしてください (ストア: temporals、つまり storeTemporals() of '@jarenjs/db/temporals')",
   'query/series-calendar': 'カレンダーコンテキスト: {detail}',
   'query/expected-string': '文字列が必要ですが、{got}でした',
   'query/expected-number': '数値が必要ですが、{got}でした',

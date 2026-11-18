@@ -388,6 +388,7 @@ export const ru = {
   'query/series-zone-provider': "часовому поясу '{zone}' нужен провайдер часовых поясов: этот набор библиотек не включает tzdb, поэтому именованный пояс компилируется с помощью options.zoneProvider (toParts / toEpoch). 'UTC' и числовой 'offset' в провайдере не нуждаются",
   'query/date-zone-unknown': "поставщик часовых поясов не знает пояс '{zone}'",
   'query/instant-policy-name': "'$instant' разрешает значение с часовым поясом по политике 'rfc5545', 'later' или 'reject', получено {got}",
+  'query/calendar-seam': "'{operator}' читает календарное значение: компилируйте с options.calendar, то есть queryCalendar() of '@jarenjs/json/query/calendar' (хранилище: temporals, то есть storeTemporals() of '@jarenjs/db/temporals')",
   'query/series-calendar': 'календарный контекст: {detail}',
   'query/expected-string': 'ожидалась строка, получено: {got}',
   'query/expected-number': 'ожидалось число, получено: {got}',
