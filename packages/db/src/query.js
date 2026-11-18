@@ -53,7 +53,7 @@ import { readOptions, readControls, readYieldEvery, refuseYieldEvery, isPlainOpt
 import {
   planQuery, planEntityQuery, entityShape, keyHoldingColumns, planEntityPredicate, entityPathRef, bindsLoneSurrogate, LONE_SURROGATE_REFUSAL,
   isRootScanSource, isEntityRootSource, BIND_REASONS, PLANNER_REASONS, admitsMixedTypes,
-  predicateTerms, boundPredicateTerms, mapHops, hopsOf, scalarFamilies, entityRoot,
+  predicateTerms, boundPredicateTerms, mapHops, hopsOf, scalarFamilies, entityRoot, analyzeOptionsFor,
 } from './plan.js';
 import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath, UnrepresentableIdentity,
   entityTableColumns, physicalComparable, bindsAsWritten, bindsUnheldText, UNHELD_TEXT_REFUSAL,
@@ -1275,7 +1275,7 @@ export function profileComparedExternals(profile, roots, operators) {
     const expression = rootEntry(profile.predicates, root);
     if (expression === undefined) continue;
     const wrapper = predicateQuery(expression);
-    found.push(...comparedExternals(analyzeQuery(wrapper, operators).root, root, { document: wrapper, options: limitsOf(profile) }));
+    found.push(...comparedExternals(analyzeQuery(wrapper, analyzeOptionsFor(operators)).root, root, { document: wrapper, options: limitsOf(profile) }));
   }
   return found;
 }
@@ -1720,7 +1720,7 @@ function opaqueReading(value) {
  */
 export function liveComparedExternals(document, operators, profile, roots) {
   let root;
-  try { root = analyzeQuery(document, operators ?? undefined).root; }
+  try { root = analyzeQuery(document, analyzeOptionsFor(operators)).root; }
   catch { return []; }
   return [...comparedExternals(root, null, { document, options: limitsOf(profile) }),
     ...profileComparedExternals(profile, roots, operators ?? undefined)];
@@ -2076,7 +2076,7 @@ export function createQueryEngine(context) {
       // statement of this entry, diverted or not
       predicateExternals: mandatory === null ? [] : [...new Set(analyzeQuery(
         predicateQuery(rootEntry(profile.predicates, collection.name)),
-        operators ?? undefined).externals.map((/** @type {any} */ ref) => ref.name))],
+        analyzeOptionsFor(operators)).externals.map((/** @type {any} */ ref) => ref.name))],
       // the predicate's comparisons and memberships of an external, with
       // what each one's member can hold
       predicateLeaves: mandatory === null ? [] : leavesOf(mandatory),
@@ -3176,8 +3176,15 @@ export function createEntityQueryEngine(context) {
   const storeProfile = context.profile ?? null;
   const roots = context.roots ?? [...entities.keys()];
   const operators = state.operators ?? null;
-  const analyzeOpts = operators ?? undefined;
+  const analyzeOpts = analyzeOptionsFor(operators);
   const zoneProvider = state.zoneProvider ?? null;
+  // the stamp a zoned key this store writes carries, through the temporal
+  // seam of an entity that declares a calendar member: beside it a zoned
+  // comparison narrows a set residual's fetch (a key another provider
+  // stamped keeps its row a candidate)
+  const temporalHooks = [...entities.values()].find((entity) => entity.temporalHooks !== undefined)?.temporalHooks;
+  const zoneStamp = temporalHooks === undefined || zoneProvider?.identity === undefined || zoneProvider?.identity === null
+    ? null : temporalHooks.stampOf(zoneProvider.identity);
   /** Every driver failure this engine meets, classified under the
    * entity root. */
   const driverWrap = (/** @type {any} */ error) => wrapDriverError(error, { docPath: '/entities' });
@@ -3302,7 +3309,7 @@ export function createEntityQueryEngine(context) {
     }
     state.counters.misses++;
     refuseOpaqueValues(document);
-    let planned = planEntityQuery(document, entities, mapping, operators);
+    let planned = planEntityQuery(document, entities, mapping, operators, zoneStamp);
     if (planned.referenced.length === 0) {
       // `$[*]` over the entity MAP answered the rows of every entity,
       // mixed, and explain() named no table read; the root is the map
@@ -3310,6 +3317,12 @@ export function createEntityQueryEngine(context) {
       throw new DbCompileError('JD0033',
         'an entity query ranges over a declared entity array ($.<Entity>[*]); this '
         + 'document names none, so it has no rows to answer', '/entities');
+    }
+    // a narrowing the dialect cannot spell (a member name its JSON path
+    // grammar cannot carry, a text the server cannot hold) narrows nothing:
+    // the residual fetches every row of the root, as without one
+    if (!pushdown || (planned.narrowing !== undefined && !planned.narrowing.every(spelled))) {
+      planned = { ...planned, narrowing: undefined, prefilters: undefined };
     }
     if (!pushdown) {
       planned = { ...planned, mode: 'set', plan: null,
@@ -3505,6 +3518,21 @@ export function createEntityQueryEngine(context) {
       }), { readOnly: true });
   };
 
+  /** Whether the dialect spells a set residual's narrowing of one root
+   * (its fetch's WHERE). @param {{ entity: string, filter: any }} narrowed */
+  const spelled = (narrowed) => {
+    if (bindsUnheldText(dialect, narrowed.filter)) return false;
+    const table = dialect.tableName(mapping.entities[narrowed.entity].table, mapping.entities[narrowed.entity].schema);
+    // a narrowing holds no hop: a hop reads a root a second time, which keeps every root whole
+    const emitters = createEntityPredicateEmitters(dialect, () => '?');
+    try { emitters.emitPred(q('t'), `${q('t')}.${q('doc')}`, narrowed.filter, table); }
+    catch (error) {
+      if (!(error instanceof UnrepresentablePath)) throw error;
+      return false;
+    }
+    return true;
+  };
+
   /** The statements a residual fetches every referenced entity's rows
    * by, built on first use — each wearing the profile's mandatory
    * predicate for its entity and its row bound (`LIMIT maxRows + 1`,
@@ -3521,7 +3549,12 @@ export function createEntityQueryEngine(context) {
           slots.push(slot);
           return dialect.parameterRef(slots.length, 'v');
         }, { tableOf: (entity) => dialect.tableName(mapping.entities[entity].table, mapping.entities[entity].schema) });
-        const predicate = entry.mandatory.get(name);
+        // the profile's mandatory predicate, and the document's own implied
+        // conjuncts over this root (a zoned key beside its stamp), which
+        // narrow the rows the engine then decides
+        const mandatory = entry.mandatory.get(name);
+        const narrowed = entry.planned.narrowing?.find((/** @type {any} */ candidate) => candidate.entity === name)?.filter;
+        const predicate = narrowed === undefined ? mandatory : mandatory === undefined ? narrowed : conjoin(mandatory, narrowed);
         let where = '';
         if (predicate !== undefined) {
           try {
@@ -3917,6 +3950,9 @@ export function createEntityQueryEngine(context) {
       residual: mode === 'native'
         ? null
         : { mode: 'set', reasons },
+      // the implied conjuncts that narrow a set residual's fetch of a root
+      prefilters: mode === 'native' ? [] : (entry.planned.prefilters ?? []).map((/** @type {any} */ prefilter) =>
+        ({ ...prefilter, columns: [...prefilter.columns] })),
     };
     if (mode !== 'native') return base;
     const params = entry.slots.map((slot) => ('literal' in slot ? slot.literal : null));
@@ -3972,7 +4008,7 @@ export function createLoadEngine(context, entityName) {
   // a registered operator (Ring 2) is recognised as vocabulary so a
   // where/orderBy that uses one refuses cleanly (JD0032 — the load path
   // is all-SQL, with no residual), never as an unknown operator
-  const analyzeOpts = state.operators ?? undefined;
+  const analyzeOpts = analyzeOptionsFor(state.operators);
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
 

@@ -94,7 +94,9 @@ const positions = () => {
  *   edge per removal on that path, so the edges grow as the kept rows times
  *   the path's depth, both within `maxOperations`;
  * - the operation that releases a value of an entity's unique slot (a
- *   one-to-one key, a unique member, a unique index) runs before the
+ *   one-to-one key, a unique member, a unique calendar member — by the text
+ *   its key columns hold, so two spellings of one value are one value — a
+ *   unique index) runs before the
  *   operation that takes it. A partial index holds the rows its condition is
  *   true for as the query engine answers it, which is what both engines'
  *   indexes hold; an edge too many is not harmless, since it can close a
@@ -109,15 +111,17 @@ const positions = () => {
  * Collection documents and memberships meet neither rule and keep their order.
  * @param {any} mapping - the store's entity mapping, or `null`
  * @param {(table: string, column: string, value: any) => any} columnValue - a member as its column stores it
+ * @param {(table: string, property: string, value: any) => string[] | null} temporalKey - a calendar member
+ *   as its key columns hold it, or `null` where they hold none
  * @returns {(operations: any[]) => any[]} over `{ table, key, before, after }`, `before` being the replica's row
  */
-const replayOrder = (mapping, columnValue) => {
+const replayOrder = (mapping, columnValue, temporalKey) => {
   const { outbound } = foreignKeyEdges(mapping);
-  /** @type {Map<string, { cascades: any[], slots: { columns: string[], covers: ((doc: any) => boolean) | null }[] }>} */
+  /** @type {Map<string, { cascades: any[], slots: { columns: string[], covers: ((doc: any) => boolean) | null, temporal?: true }[] }>} */
   const tables = new Map();
   for (const [table, entity] of Object.entries(mapping?.entities ?? {})) {
     const cascades = (outbound.get(table) ?? []).filter((edge) => edge.kind === 'fk' && edge.onDelete === 'cascade');
-    /** @type {{ columns: string[], covers: ((doc: any) => boolean) | null }[]} */
+    /** @type {{ columns: string[], covers: ((doc: any) => boolean) | null, temporal?: true }[]} */
     const slots = [];
     const declared = new Set();
     /** @param {string[]} columns @param {any} [where] */
@@ -143,6 +147,9 @@ const replayOrder = (mapping, columnValue) => {
     };
     for (const fk of entity.foreignKeys ?? []) if (fk.unique) slot([fk.column]);
     for (const index of entity.indexes ?? []) if (index.unique) slot([index.property]);
+    // a unique calendar member keys the text its key columns hold, which
+    // no column of the row carries: its slot reads the member's value
+    for (const temporal of entity.temporals ?? []) if (temporal.unique) slots.push({ columns: [temporal.name], covers: null, temporal: true });
     // an index over an expression keys no column's value: it has no slot, so a
     // value its function folds together is not ordered by it (MODEL-FORMAT §7A)
     for (const index of entity.entityIndexes ?? []) if (index.unique && index.expression === undefined) slot(index.columns, index.where);
@@ -158,6 +165,11 @@ const replayOrder = (mapping, columnValue) => {
     if (doc === null) return values;
     for (const [at, slot] of plan.slots.entries()) {
       if (slot.covers !== null && !slot.covers(doc)) continue;
+      if (slot.temporal) {
+        const keys = temporalKey(table, slot.columns[0], doc[slot.columns[0]]);
+        if (keys !== null) values.add(JSON.stringify([table, at, keys]));
+        continue;
+      }
       const tuple = slot.columns.map((column) => (doc[column] === undefined || doc[column] === null ? null
         : columnValue(table, column, doc[column])));
       // NULL never collides
@@ -265,7 +277,7 @@ export function readReplicationOptions(options) {
 export function createReplicationEngine(options) {
   const { connection, rows, capture, model, now, bracket, mapping } = options;
   const config = readReplicationOptions(options.config);
-  const replay = replayOrder(mapping, rows.columnValue);
+  const replay = replayOrder(mapping, rows.columnValue, rows.temporalKey);
   const dialect = connection.dialect;
   const p = (i) => dialect.parameterRef(i, 'replica');
   const schema = replicationSchema(dialect);

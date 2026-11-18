@@ -47,7 +47,7 @@
  * rows, not database-internal work.
  */
 
-import { planQuery, collectMemberReads } from './plan.js';
+import { planQuery, collectMemberReads, analyzeOptionsFor } from './plan.js';
 import { conjoin } from './algebra.js';
 import { compileIndexPath } from './ddl.js';
 import { DbCompileError } from './errors.js';
@@ -662,7 +662,7 @@ export function pointReadFilter(profile, root, operators, zoneProvider, docPath,
     }
     if (keeps === null) {
       const wrapper = predicateQuery(expression);
-      names = [...new Set(analyzeQuery(wrapper, operators ?? undefined).externals.map((ref) => ref.name))];
+      names = [...new Set(analyzeQuery(wrapper, analyzeOptionsFor(operators)).externals.map((ref) => ref.name))];
       keeps = compileSetResidual(wrapper, undefined, operators, zoneProvider);
     }
     const bound = externals ?? {};

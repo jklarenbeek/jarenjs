@@ -711,6 +711,13 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       /** The zoned key and stamp a change of one member writes beside the
        * document: `[name, value]` of each, none for any other member. */
       zonedSets: (/** @type {any} */ doc, /** @type {string} */ property) => zonedValues(doc, property).map((value) => [value.name, value.value]),
+      /** The text each key column of a calendar member holds for its value
+       * (the seam's `keyValues`), or `null` (absent, zoned, not the kind).
+       * @param {string} property @param {unknown} value */
+      temporalKeyValues: (/** @type {string} */ property, /** @type {unknown} */ value) => {
+        const temporal = (entityMapping.temporals ?? []).find((/** @type {any} */ declared) => declared.name === property);
+        return temporal === undefined ? null : hooks.keyValues(temporal, value);
+      },
       split,
       merge,
       encodeColumn,

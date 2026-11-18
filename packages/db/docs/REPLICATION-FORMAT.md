@@ -139,9 +139,10 @@ to wait for another. A row the envelope keeps whose stored cascading key names
 a row it removes, directly or through removed rows whose own cascading keys
 lead there, is written before each of those removals, which the replica's own
 cascade would otherwise apply to it first. The write that releases a value of
-an entity's unique slot — a one-to-one key, a unique member, a unique index,
-composite or partial (a partial index holds the rows its condition is true
-for) — runs before the write that takes it, because uniqueness is checked as
+an entity's unique slot — a one-to-one key, a unique member, a unique calendar
+member (by the text its key columns hold, so two spellings of one value are
+one value), a unique index, composite or partial (a partial index holds the
+rows its condition is true for) — runs before the write that takes it, because uniqueness is checked as
 each write runs. An index over a declared expression is no such slot: its key
 is the host's function of the members (MODEL-FORMAT §7A), so a value it folds
 together keeps the envelope's order and refuses `JD2005` when the taking write

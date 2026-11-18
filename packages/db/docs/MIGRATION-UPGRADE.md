@@ -4074,6 +4074,26 @@ release refuses `latenessMs` in `schedule()` and `tick` in `createWorker()`
   Entity tables the previous release created open, read, query and explain
   unchanged, and `introspectModel` → `planModelMigration` plans over them what
   it planned before.
+- On a store opened with registered operators (`operators`) or the temporal
+  seam, an entity `load({ where })`, `load({ orderBy })`, a graph load's
+  include, `page()`, a profile's predicates (an `execute` or `explain` under a
+  profile, a point read and a live query under a store profile, on a
+  collection or an entity) answer as on a plain store, where they were refused
+  `JD0032` or threw `TypeError: unknown query option 'pushableScalar'` (a
+  store-level profile threw it at `store.collection(...)`).
+- Replay orders the release of a unique calendar member's value before the
+  write that takes it, by the text its key columns hold, as for a unique
+  column: an envelope handing such a value between entity rows, in any
+  spelling, applies and resets where it refused `JD2005`.
+- A comparison of a zoned entity member under its declared policy narrows the
+  rows the engine decides, as a collection's does (MODEL-FORMAT §9.3):
+  entity `explain()` names it in `prefilters` (a new member, `[]` otherwise).
+  The answers are the engine's, as before. A zoned comparison with a bound
+  that is no integer — a fraction of a millisecond, or past 64 bits — is
+  compared as the integers it admits, on a collection too, where PostgreSQL
+  refused it `JD2005` (`invalid input syntax for type bigint`).
+- The last three change no table, column, index or CHECK: a store either
+  release created opens and answers on the other as before.
 
 ## 78. Recurring schedules take sub-daily rules
 

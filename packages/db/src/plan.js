@@ -493,13 +493,16 @@ export function exactly(pred) {
 /**
  * The analyze options carrying the store's registered operators. A
  * registered operator is engine vocabulary, so the AST analysis must be
- * told its `{ functions, extensions }` or it rejects the document as an
- * unknown operator. `null`/absent operators → `undefined`, so a store
- * without a registry analyses byte-identically to before.
- * @param {{ functions?: any, extensions?: any } | null | undefined} operators
+ * told its `{ functions, extensions }` (and the calendar seam's
+ * `calendar`) or it rejects the document as an unknown operator. Only
+ * those members: the store's operator record also holds the planner's own
+ * (`pushableScalar`, `pushableAggregate`), which the query options refuse.
+ * `null`/absent operators → `undefined`, so a store without a registry
+ * analyses byte-identically to before.
+ * @param {{ functions?: any, extensions?: any, calendar?: any } | null | undefined} operators
  * @returns {any}
  */
-function analyzeOptionsFor(operators) {
+export function analyzeOptionsFor(operators) {
   if (operators == null) return undefined;
   /** @type {any} */
   const options = {};
@@ -4221,9 +4224,12 @@ export function keyHoldingColumns(entityMapping) {
  * phase-A guarded forms).
  * @param {any} entity - normalized entity (model.js)
  * @param {any} entityMapping - explainMapping(...).entities[name]
+ * @param {string | null} [zoneStamp] - the stamp of the zone provider the
+ *   store opened with, which a zoned key this store wrote is read beside:
+ *   only a query planned for a narrowed set-residual fetch passes it
  * @returns {any}
  */
-export function entityShape(entity, entityMapping) {
+export function entityShape(entity, entityMapping, zoneStamp = null) {
   /** @type {Map<string, any>} */
   const flavors = new Map();
   const keyHolding = keyHoldingColumns(entityMapping);
@@ -4277,10 +4283,10 @@ export function entityShape(entity, entityMapping) {
     entityFlavors: flavors,
     columnOnly: entityMapping.document === false,
     ...(temporals.length === 0 ? {} : { temporals, temporalPlanner: entity.temporalHooks.planner,
-      // a zoned key only narrows the rows the engine decides, and an entity
-      // query has no narrowed fetch (a conjunct it pushes is the answer):
-      // a zoned comparison, read beside no stamp, is the engine's
-      zoneStamp: null }),
+      // a zoned key only narrows the rows the engine decides: read beside
+      // the store's stamp, a zoned comparison narrows a set residual's
+      // fetch (planEntityQueryCore), and without one it is the engine's
+      zoneStamp }),
   };
 }
 
@@ -4736,7 +4742,7 @@ const INT64_EDGE = 2 ** 63;
  * @param {number} lit
  * @returns {null | 'none' | 'present' | { op: 'le' | 'ge', lit: number }}
  */
-function integerBound(op, lit) {
+export function integerBound(op, lit) {
   if (Number.isInteger(lit) && Math.abs(lit) < INT64_EDGE) return null;
   if (op === 'eq') return 'none';
   if (op === 'ne') return 'present';
@@ -4751,12 +4757,18 @@ function integerBound(op, lit) {
  * grammar as phase A, with entity-flavored refs. Reuses
  * {@link planPredicate} for the recognition, then re-resolves refs
  * through the flavor table.
+ * An IMPLIED predicate (a zoned key, read beside its stamp) only narrows the
+ * rows the engine decides: it is refused unless the caller narrows a fetch
+ * with it (`narrows`), and then answered with `exact: false` and the
+ * refinements the engine decides.
  * @param {any} node
  * @param {number} slot
  * @param {any} shape
- * @returns {{ pred: any } | { refusal: { construct: string, reason: string } }}
+ * @param {boolean} [narrows] - the caller takes an implied predicate as a narrowing
+ * @returns {{ pred: any, exact?: false, refinements?: any[], prefilters?: any[] }
+ *   | { refusal: { construct: string, reason: string } }}
  */
-export function planEntityPredicate(node, slot, shape) {
+export function planEntityPredicate(node, slot, shape, narrows = false) {
   const outcome = planPredicate(node, slot, shape);
   if ('refusal' in outcome) return outcome;
   /** @type {{ construct: string, reason: string } | null} */
@@ -4849,6 +4861,10 @@ export function planEntityPredicate(node, slot, shape) {
   };
   const pred = reflavor(outcome.pred);
   if (blocked !== null) return { refusal: blocked };
+  if (outcome.exact === false) {
+    return narrows ? { pred, exact: false, refinements: outcome.refinements, prefilters: outcome.prefilters }
+      : { refusal: outcome.refinements[0] };
+  }
   return { pred };
 }
 
@@ -4967,7 +4983,7 @@ function flattenEntityProjection(root) {
   return root;
 }
 
-function planEntityQueryCore(document, entities, mapping, operators) {
+function planEntityQueryCore(document, entities, mapping, operators, zoneStamp) {
   const analysis = analyzeQuery(document, analyzeOptionsFor(operators));
   let root = analysis.root;
   assertDecidedKind(root);
@@ -5034,7 +5050,7 @@ function planEntityQueryCore(document, entities, mapping, operators) {
       name: binding.name,
       slot: binding.slot,
       entity: sourceEntity,
-      shape: entityShape(entities.get(sourceEntity), mapping.entities[sourceEntity]),
+      shape: entityShape(entities.get(sourceEntity), mapping.entities[sourceEntity], zoneStamp),
     });
   }
   const byName = new Map(bindings.map((binding) => [binding.slot, binding]));
@@ -5102,6 +5118,16 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   };
   const reasons = [];
   let whereFullyPushed = true;
+  // the IMPLIED conjuncts (a zoned key beside its stamp), by binding: each
+  // narrows its root's set-residual fetch, which the engine then decides.
+  // The engine evaluates the conjuncts in order and stops at the first
+  // false one, so only a conjunct no earlier one can raise before narrows
+  // (a translated conjunct cannot raise; a refused or an implied one can),
+  // as the collection's planner narrows
+  /** @type {Map<number, any>} */
+  const narrowing = new Map();
+  const prefilters = [];
+  let narrowable = true;
   for (const conjunct of conjuncts) {
     // a column equality between two bindings is a join edge, whatever
     // the binding count — several between one pair simply conjoin — when
@@ -5131,16 +5157,28 @@ function planEntityQueryCore(document, entities, mapping, operators) {
       if (scoped !== null) { scopedFilters.push(scoped); continue; }
       reasons.push(refusal('$where', ENTITY_REASONS.conjunctBinding));
       whereFullyPushed = false;
+      narrowable = false;
       continue;
     }
     const slot = [...slots][0];
     const binding = byName.get(slot);
-    const planned = planEntityPredicate(conjunct, slot, binding.shape);
+    const planned = planEntityPredicate(conjunct, slot, binding.shape, true);
     const outcome = 'refusal' in planned || !bindsLoneSurrogate(planned.pred) ? planned
       : { refusal: refusal(conjunct.kind === 'op' ? conjunct.name : '$where', PREDICATE_REASONS.loneSurrogate) };
     if ('refusal' in outcome) {
       reasons.push(outcome.refusal);
       whereFullyPushed = false;
+      narrowable = false;
+      continue;
+    }
+    if (outcome.exact === false) {
+      reasons.push(...outcome.refinements);
+      whereFullyPushed = false;
+      if (narrowable) {
+        narrowing.set(slot, conjoin(narrowing.get(slot) ?? null, outcome.pred));
+        prefilters.push(...outcome.prefilters.map((prefilter) => ({ ...prefilter, entity: binding.entity })));
+      }
+      narrowable = false;
       continue;
     }
     filters.set(slot, conjoin(filters.get(slot), outcome.pred));
@@ -5296,7 +5334,8 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   const fullyPushed = whereFullyPushed && orderPushed
     && (retBinding !== undefined || projection !== null || group !== null || counted);
   if (!fullyPushed) {
-    return { analysis, mode: 'set', plan: null, referenced, reasons };
+    return { analysis, mode: 'set', plan: null, referenced, reasons,
+      ...entityNarrowing(analysis.root, bindings, narrowing, prefilters) };
   }
   for (const filter of scopedFilters) {
     const slot = bindings[0].slot;
@@ -5383,6 +5422,30 @@ function temporalOrderKey(key, bindings) {
 }
 
 /**
+ * The fetch narrowing a set residual may take: each binding's implied
+ * conjuncts as the WHERE of its root's fetch, where that root is read
+ * through that binding alone. A second read of the root — another binding
+ * over it, a hop or a subquery into it, the entity map itself — sees what
+ * the fetch kept, so any second read keeps every root whole. (`$some`'s
+ * test narrows as a `$where` does; `$every`'s is its negation, which no
+ * implied conjunct enters.)
+ * @param {any} root - the analysis root
+ * @param {any[]} bindings @param {Map<number, any>} narrowing
+ * @param {any[]} prefilters
+ * @returns {{ narrowing?: { entity: string, filter: any }[], prefilters?: any[] }}
+ */
+function entityNarrowing(root, bindings, narrowing, prefilters) {
+  if (narrowing.size === 0 || rootReads(root) !== bindings.length) return {};
+  const entries = [];
+  for (const [slot, filter] of narrowing) {
+    const binding = bindings.find((candidate) => candidate.slot === slot);
+    if (bindings.some((other) => other !== binding && other.entity === binding.entity)) return {};
+    entries.push({ entity: binding.entity, filter });
+  }
+  return { narrowing: entries, prefilters };
+}
+
+/**
  * Plan an ENTITY query document (one planner, two document kinds). The
  * store's registered operators (Ring 2) are recognised as vocabulary and
  * kept in the set residual over the fetched root, named in the reasons.
@@ -5390,11 +5453,14 @@ function temporalOrderKey(key, bindings) {
  * @param {Map<string, any>} entities - normalized entities
  * @param {any} mapping - explainMapping result
  * @param {{ functions?: any, extensions?: any } | null} [operators]
+ * @param {string | null} [zoneStamp] - the stamp of the store's zone
+ *   provider: a zoned comparison then narrows a set residual's fetch
+ *   (`narrowing`), and without one it is the engine's over every row
  * @returns {any}
  */
-export function planEntityQuery(document, entities, mapping, operators = null) {
+export function planEntityQuery(document, entities, mapping, operators = null, zoneStamp = null) {
   const peeled = peelWrappedResult(document);
-  const core = planEntityQueryCore(peeled.document, entities, mapping, operators);
+  const core = planEntityQueryCore(peeled.document, entities, mapping, operators, zoneStamp);
   const planned = {
     ...core,
     wrapped: peeled.wrapped,

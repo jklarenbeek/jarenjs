@@ -32,7 +32,7 @@ import { chain, attempt, useStatementOnce } from './driver.js';
 import { refuseUnknownModelMembers } from './options.js';
 import { IDENTIFIER } from './engine-metadata.js';
 import { compileIndexPath, schemaNodeAt, canonicalOf } from './ddl.js';
-import { memberPath, COMPARISONS, refusal, exactly, promotion, constantOf } from './plan.js';
+import { memberPath, COMPARISONS, refusal, exactly, promotion, constantOf, integerBound } from './plan.js';
 import { CONSTRAINT_NAME_BYTES } from './store.js';
 import { modelPath } from './model-path.js';
 import { temporalSpelling } from './dialects/temporal.js';
@@ -176,6 +176,44 @@ function canonicalInstantSql(instant) {
   return `CASE WHEN length(${instant}) = 20 THEN substr(${instant}, 1, 19) || '.000Z' `
     + `WHEN length(${instant}) = 22 THEN substr(${instant}, 1, 21) || '00Z' `
     + `WHEN length(${instant}) = 23 THEN substr(${instant}, 1, 22) || '0Z' ELSE ${instant} END`;
+}
+
+/** {@link canonicalTimeSql} over one time text. @param {string} time */
+const canonicalTime = (time) => (time.length === 5 ? `${time}:00.000` : time.length === 8 ? `${time}.000`
+  : time.length === 10 ? `${time}00` : time.length === 11 ? `${time}0` : time);
+
+/** {@link canonicalInstantSql} over one instant text. @param {string} instant */
+const canonicalInstant = (instant) => (instant.length === 20 ? `${instant.slice(0, 19)}.000Z`
+  : instant.length === 22 ? `${instant.slice(0, 21)}00Z` : instant.length === 23 ? `${instant.slice(0, 22)}0Z` : instant);
+
+/**
+ * The text each generated key column of a declared member holds for one
+ * value, in {@link temporalColumns}' order (`[key]`, or `[key, end]` for a
+ * date range): what the columns' expressions compute from the document, so
+ * two spellings of one value answer one key. `null` for a zoned member (a
+ * zone provider resolves its key; no expression spells it) and for a value
+ * that is absent or not the kind's shape (its CHECK refuses one stored).
+ * @param {{ kind: string }} temporal - the declaration, or its mapping entry
+ * @param {unknown} member - the member's value in the document
+ * @returns {string[] | null}
+ */
+function temporalKeyValues(temporal, member) {
+  if (!isJsonObject(member) || member.kind !== temporal.kind) return null;
+  /** @param {string[]} names */
+  const texts = (...names) => (names.every((name) => typeof member[name] === 'string') ? names.map((name) => /** @type {string} */ (member[name])) : null);
+  switch (temporal.kind) {
+    case 'date': return texts('date');
+    case 'date-range': return texts('start', 'end');
+    case 'floating': {
+      const parts = texts('date', 'time');
+      return parts === null ? null : [`${parts[0]}T${canonicalTime(parts[1])}`];
+    }
+    case 'utc': {
+      const parts = texts('instant');
+      return parts === null ? null : [canonicalInstant(parts[0])];
+    }
+    default: return null;
+  }
 }
 
 /**
@@ -853,7 +891,13 @@ function planZonedComparison(keyed, op, lit, shape, construct) {
     return { refusal: refusal(construct, TEMPORAL_REASONS.operand) };
   const { key, stamp } = keyed.temporal;
   const current = temporalBound(stamp, 'eq', shape.zoneStamp);
-  const pred = { p: 'or', items: [{ p: 'and', items: [current, temporalBound(key, op, lit)] }, { p: 'not', item: current }] };
+  // the key is an integer column (milliseconds): a bound that is no integer
+  // of its range — a fraction, an infinity — is the integers it admits, which
+  // PostgreSQL's bigint takes and SQLite compares alike
+  const bound = integerBound(op, /** @type {number} */ (lit));
+  const keyBound = bound === null ? temporalBound(key, op, lit) : bound === 'none' ? { p: 'const', value: false }
+    : bound === 'present' ? temporalBound(key, 'ge', INSTANT_MIN) : temporalBound(key, bound.op, bound.lit);
+  const pred = { p: 'or', items: [{ p: 'and', items: [current, keyBound] }, { p: 'not', item: current }] };
   return promotion(pred, { construct: '$instant', via: 'columns', columns: [stamp, key], exact: false },
     [refusal('$instant', TEMPORAL_REASONS.zoned)]);
 }
@@ -909,6 +953,7 @@ export const TEMPORAL_HOOKS = Object.freeze({
   verifyCheck,
   readTable,
   keyColumn: zonedKeyColumn,
+  keyValues: temporalKeyValues,
   refuse: refuseFaults,
   temporalColumns,
   zonedColumnsOf,

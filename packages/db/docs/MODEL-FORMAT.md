@@ -3165,11 +3165,25 @@ statement, `JD2005` from the CHECK). `index: true` and `unique: true` index the
 key columns (a zoned member takes no unique index, `JD0004`), so `unique`
 refuses a second spelling of one value. A comparison, an `$overlaps` of a date
 range and an ordering of the key plan as a collection's do, natively and
-exactly for every kind but `zoned`; a zoned comparison and ordering are the
-engine's, since an entity query has no narrowed fetch for a key that only
-narrows (the store still writes its key and stamp with every document, an
-edit of the member restamping it, and `index: true` on a zoned member builds
-an index over them that no entity query reads yet). The member takes no `key`, `column`,
+exactly for every kind but `zoned`. A zoned key only narrows, as a
+collection's does: the store writes it and its stamp with every document (an
+edit of the member restamping it), and a comparison of `$instant` under the
+declared policy fetches, in one statement, the rows of its entity this
+provider keyed whose key satisfies it and every row another provider keyed,
+or none did; the engine decides each one in the current provider. That
+narrowed fetch is the set residual's, taken where the entity is read through
+the comparison's binding alone and no conjunct before it can raise (a second
+read of the entity, a refused conjunct first: every row);
+`explain().prefilters` names it. It narrows the rows the engine decodes and
+decides, not the rows the database reads: a disjunction with every row
+another provider keyed seeks no index, so `index: true` on a zoned member
+builds one over its stamp and key that no entity query seeks yet. An
+ordering by a zoned key is the engine's.
+A zoned member takes no unique index (`JD0004`): one would compare a new
+row's key with keys another revision resolved. A recurrence rule is no
+calendar kind: a member holds it as its JSON form
+(`@jarenjs/core/schemas/calendar/rrule.schema.json`), a document member like
+any other. The member takes no `key`, `column`,
 `relation` or `version` beside it (`JD0005`), and its name is an identifier
 (it names the key columns). Declaring, dropping or changing the kind rebuilds
 the table (a stored member that is no value of the new kind refuses the link

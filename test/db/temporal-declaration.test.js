@@ -94,6 +94,11 @@ const QUERIES = /** @type {[string, any, boolean][]} */ ([
   ['$overlaps the year 9999', F({ $overlaps: ['$it.r', { $const: { start: '9999-12-30', end: '9999-12-31' } }] }), true],
   ['zoned <', F({ $lt: [{ $instant: ['$it.z', 'rfc5545'] }, at('2026-10-25T00:45:00Z')] }), false],
   ['zoned order (instant, not wall clock)', F(null, { $instant: ['$it.z', 'rfc5545'] }), false],
+  // a bound the integer key holds no value of: the integers it admits
+  ['zoned > a fraction', F({ $gt: [{ $instant: ['$it.z', 'rfc5545'] }, at('2026-10-25T00:40:00Z') + 0.5] }), false],
+  ['zoned = a fraction', F({ $eq: [{ $instant: ['$it.z', 'rfc5545'] }, at('2026-10-25T00:40:00Z') + 0.5] }), false],
+  ['zoned < past 64 bits', F({ $lt: [{ $instant: ['$it.z', 'rfc5545'] }, 1e300] }), false],
+  ['zoned >= past 64 bits', F({ $ge: [{ $instant: ['$it.z', 'rfc5545'] }, 1e300] }), false],
   ['zoned under another policy', F({ $lt: [{ $instant: ['$it.z', 'later'] }, at('2026-10-25T01:40:00Z')] }), false],
 ]);
 /** The engine's answer as a list. @param {any} doc @param {any[]} rows @param {any} provider */
