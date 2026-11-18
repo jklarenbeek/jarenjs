@@ -54,11 +54,14 @@ describe('#calc programmer ans and memory keep a word beyond 2^53', function () 
       const calc = app.getState().calc;
       assert.equal(calc.ans, 18446744073709552000);
       assert.equal(calc.ansExact, '18446744073709551615');
-      app.dispatch('calc/clear');
       assert.equal(shown(), '0xFFFF FFFF FFFF FFFF');
       const vm = comp.viewModel(app.getState());
       assert.equal(vm.bases.views.dec, '18446744073709551615');
       assert.equal(vm.bases.views.hex, 'FFFF FFFF FFFF FFFF');
+      // Clear clears the result line and the word with it
+      app.dispatch('calc/clear');
+      assert.equal(shown(), '');
+      assert.equal(comp.viewModel(app.getState()).bases.views.dec, '0');
       enter('ans');
       assert.equal(shown(), '0xFFFF FFFF FFFF FFFF');
       enter('ans & 0xFF');
@@ -103,7 +106,6 @@ describe('#calc programmer ans and memory keep a word beyond 2^53', function () 
       enter('0x7FFFFFFFFFFFFFFF');
       app.dispatch('calc/equals');
       assert.equal(app.getState().calc.ansExact, '9223372036854775807');
-      app.dispatch('calc/clear');
       assert.equal(shown(), '9223372036854775807');
       enter('ans');
       assert.equal(shown(), '9223372036854775807');
@@ -156,7 +158,8 @@ describe('#calc programmer ans and memory keep a word beyond 2^53', function () 
   });
 
   it('reads the Number when the exact text is not the word it rounds from', () => {
-    const base = { ...calcInitialState(), mode: 'programmer', base: 'DEC', wordBits: 64 };
+    // a result just committed (`fresh`): the result line shows `ans`
+    const base = { ...calcInitialState(), mode: 'programmer', base: 'DEC', wordBits: 64, fresh: true };
     const vm = (calc) => contributeCalcViewModel({ calc: { ...base, ...calc } });
     assert.equal(vm({ ans: 18446744073709552000, ansExact: '18446744073709551615' }).display.result, '18446744073709551615');
     // a host patched `ans` alone: the old text is another word's
@@ -165,7 +168,7 @@ describe('#calc programmer ans and memory keep a word beyond 2^53', function () 
     assert.equal(vm({ ans: 7, ansExact: 'abc' }).display.result, '7');
     assert.equal(vm({ ans: 7, ansExact: 7 }).display.result, '7');
     // outside the programmer mode the Number is all there is
-    const standard = (calc) => contributeCalcViewModel({ calc: { ...calcInitialState(), ans: 18446744073709552000, ...calc } }).display.result;
+    const standard = (calc) => contributeCalcViewModel({ calc: { ...calcInitialState(), fresh: true, ans: 18446744073709552000, ...calc } }).display.result;
     assert.equal(standard({ ansExact: '18446744073709551615' }), standard({}));
   });
 
@@ -229,7 +232,7 @@ describe('#calc a state slice a host patched by hand still renders', function ()
   it('renders a string ans or memory as it was rendered, in every mode', () => {
     for (const mode of ['standard', 'programmer']) {
       for (const held of ['1.5', 'abc', '0x10', '']) {
-        const calc = { ...calcInitialState(), mode, ans: held, memory: held };
+        const calc = { ...calcInitialState(), mode, fresh: true, ans: held, memory: held };
         const vm = contributeCalcViewModel({ calc });
         assert.equal(vm.memory, held, `${mode} memory ${JSON.stringify(held)}`);
         assert.equal(typeof vm.display.result, 'string');
@@ -239,8 +242,8 @@ describe('#calc a state slice a host patched by hand still renders', function ()
     const big = contributeCalcViewModel({ calc: { ...calcInitialState(), ans: '18446744073709551615', memory: '18446744073709551615' } });
     assert.equal(big.memory, '18446744073709551615');
     assert.equal(big.display.error, null);
-    assert.equal(contributeCalcViewModel({ calc: { ...calcInitialState(), ans: '1.5' } }).display.result, '1.5');
-    assert.equal(contributeCalcViewModel({ calc: { ...calcInitialState(), ans: 'abc' } }).display.result, 'NaN');
+    assert.equal(contributeCalcViewModel({ calc: { ...calcInitialState(), fresh: true, ans: '1.5' } }).display.result, '1.5');
+    assert.equal(contributeCalcViewModel({ calc: { ...calcInitialState(), fresh: true, ans: 'abc' } }).display.result, 'NaN');
   });
 
   it('adds a string memory as the Number it reads as, without throwing', () => {

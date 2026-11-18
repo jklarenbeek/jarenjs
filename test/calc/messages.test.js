@@ -101,22 +101,37 @@ describe('calc messages', () => {
       app.dispatch('calc/mode', { mode: 'programmer' });
       app.dispatch('calc/sign'); view('one sign');
       app.dispatch('calc/sign'); view('the other');
-      app.dispatch('calc/mode', { mode: 'standard' });
-      for (const entry of ERRORS.slice(1)) {
+      app.dispatch('calc/mode', { mode: 'scientific' });
+      // = on an expression with no result: each refusal is a localized sentence
+      for (const entry of [...ERRORS.slice(1).filter((e) => e !== '(1'), 'sqrt(-1)', '1/0']) {
         app.dispatch('calc/set-entry', entry);
+        assert.equal(view(`typing ${entry}`).display.error, null, `${entry} shows nothing while typed`);
+        app.dispatch('calc/equals');
         assert.ok(view(`entry ${entry}`).display.error.includes('⟦'), `${entry} is a localized diagnostic`);
       }
+      app.dispatch('calc/mode', { mode: 'programmer' });
+      app.dispatch('calc/set-entry', 'mod(1, 0)');
+      app.dispatch('calc/equals');
+      assert.ok(view('no result').display.error.includes('⟦'));
+      app.dispatch('calc/mode', { mode: 'scientific' });
       app.dispatch('calc/set-entry', '');
-      app.dispatch('calc/plot-expr', null, { target: { value: '1+' } });
-      view('plot error');
+      // the plot card names the engine's diagnostic and where it stands
+      for (const entry of ERRORS.slice(1)) {
+        app.dispatch('calc/plot-expr', null, { target: { value: entry } });
+        view(`plot error ${entry}`);
+      }
       app.dispatch('calc/mode', { mode: 'converter' });
       for (const dimension of ['length', 'area', 'volume', 'mass', 'temperature', 'time', 'speed', 'pressure', 'energy',
         'power', 'data', 'datarate', 'frequency', 'angle', 'fuel', 'currency']) {
         app.dispatch('calc/conv-dim', null, { target: { value: dimension } });
         view(`dimension ${dimension}`);
       }
-      app.dispatch('calc/rates-ok', { base: 'USD', rates: { USD: 1, EUR: 2 }, at: 5 }); view('rates ok');
+      app.dispatch('calc/rates-err'); view('rates error, never live');
+      app.dispatch('calc/rates-ok', { base: 'USD', rates: { USD: 1, EUR: 2 }, at: 5, source: 'CoinGecko' }); view('rates ok');
       app.dispatch('calc/rates-err'); view('rates error');
+      app.dispatch('calc/mode', { mode: 'financial' });
+      app.dispatch('calc/fin-example', { nper: 0, rate: 1, pv: 1000, pmt: -1, fv: 0, solveFor: 'nper' });
+      view('no solution');
     }
     finally { app.destroy(); }
     // the states no dispatch reaches: no rates state at all, and a stale table
@@ -153,8 +168,15 @@ describe('calc messages', () => {
     const app = calculator();
     try {
       const vm = (/** @type {any} */ state) => contributeCalcViewModel(state);
+      // typing shows no diagnostic; = closes the parenthesis, and an
+      // expression that cannot complete says so in one short sentence
       app.dispatch('calc/set-entry', '(1');
-      assert.equal(vm(app.getState()).display.error, 'expected \')\' (1:3)');
+      assert.equal(vm(app.getState()).display.error, null);
+      app.dispatch('calc/equals');
+      assert.equal(vm(app.getState()).display.result, '1');
+      app.dispatch('calc/set-entry', '1+');
+      app.dispatch('calc/equals');
+      assert.equal(vm(app.getState()).display.error, 'Incomplete expression');
       assert.deepEqual(vm(app.getState()).modes.map((/** @type {any} */ m) => m.label), ['Standard', 'Scientific', 'Programmer', 'Financial', 'Converter']);
       app.dispatch('calc/mode', { mode: 'programmer' });
       const sign = vm(app.getState()).bases.signLabel;
@@ -164,12 +186,12 @@ describe('calc messages', () => {
       app.dispatch('calc/mode', { mode: 'financial' });
       const html = renderToString(sheet({ ui: { calculator: vm(app.getState()) } }));
       for (const label of ['Time Value of Money', 'N — number of periods', 'I/Y — interest % per period', 'PV — present value',
-        'PMT — payment', 'FV — future value', 'Solve for', '<span>Result (pmt): </span>']) assert.ok(html.includes(label), label);
+        'PMT — payment', 'FV — future value', 'Solve for', '<span>Result (PMT (payment)): </span>', 'Mortgage payment',
+        'Signs follow the money']) assert.ok(html.includes(label), label);
       app.dispatch('calc/mode', { mode: 'converter' });
       const converter = renderToString(sheet({ ui: { calculator: vm(app.getState()) } }));
-      for (const label of ['Dimension ', '>length</option>', '>temperature</option>', '<span>rates: </span><span>fallback</span>']) assert.ok(converter.includes(label), label);
-      const stale = vm({ ...app.getState(), calc: { ...app.getState().calc, rates: { ...app.getState().calc.rates, stale: true } } });
-      assert.equal(stale.converter.rates.staleLabel, ' · static fallback');
+      for (const label of ['Dimension ', '>Length</option>', '>Temperature</option>', '>Data rate</option>', '<span>Built-in sample rates, not live</span>',
+        'aria-label="From unit"', 'aria-label="To unit"', 'aria-label="Swap units"']) assert.ok(converter.includes(label), label);
     }
     finally { app.destroy(); }
   });
@@ -188,9 +210,20 @@ describe('calc messages', () => {
   });
 
   it('uses every id of its catalog in the source', () => {
-    const source = ['messages.js', 'compile.js', 'parser/index.js', 'render/error.js', 'component/index.js', 'component/schema.js']
+    const source = ['messages.js', 'compile.js', 'parser/index.js', 'render/error.js', 'component/index.js', 'component/schema.js',
+      'component/entry.js', 'component/panels.js', 'modes/standard.js', 'modes/scientific.js', 'modes/programmer.js', 'modes/financial.js']
       .map((file) => readFileSync(new URL(`../../components/calc/src/${file}`, import.meta.url), 'utf8')).join('\n')
       .replace(/^[\s\S]*?export const calcMessagesEn[\s\S]*?\n\}\);/m, '');
-    for (const id of IDS) assert.ok(source.includes(`'${id.replace(/#label$/, '')}'`), `${id} is used`);
+    // a form text is the field's `x-msgid`, an option's value its own; an
+    // example's two texts are built from the example's id
+    const examples = [...source.matchAll(/\{ id: '([a-z]+)', perYear/g)].map((m) => m[1]);
+    const used = (/** @type {string} */ id) => {
+      const example = /^calc\/financial\/example\/([a-z]+)(\/text)?$/.exec(id);
+      if (example !== null) return examples.includes(example[1]) && source.includes('`calc/financial/example/${example.id}' + (example[2] ?? '') + '`');
+      const option = /^(.+)#enum\/(.+)$/.exec(id);
+      if (option !== null) return source.includes(`'${option[1]}'`) && source.includes(`'${option[2]}'`);
+      return source.includes(`'${id.replace(/#(label|description)$/, '')}'`);
+    };
+    for (const id of IDS) assert.ok(used(id), `${id} is used`);
   });
 });

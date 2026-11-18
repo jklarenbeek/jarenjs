@@ -19,15 +19,20 @@ import { fit, isFiniteValue, truncated } from '../exact.js';
 export const BASES = ['HEX', 'DEC', 'OCT', 'BIN'];
 export const WORD_SIZES = [8, 16, 32, 64];
 
-/** @type {Array<Array<{label:string,k:string,tone?:string,span?:number}>>} */
+/**
+ * The programmer keypad. `mod` and `xor` are written between two operands
+ * (the parser reads `a mod b` as `mod(a, b)`); Clear reads `AC`, so the one
+ * key reading `C` is the hex digit.
+ * @type {Array<Array<import('./standard.js').KeyDescriptor>>}
+ */
 export const KEYPAD = [
-  [{ label: 'C', k: 'clear', tone: 'clear' }, { label: '⌫', k: 'back', tone: 'clear' }, { label: '(', k: '(' }, { label: ')', k: ')' }, { label: '~', k: '~', tone: 'op' }],
-  [{ label: 'A', k: 'A' }, { label: 'B', k: 'B' }, { label: '&', k: '&', tone: 'op' }, { label: '|', k: '|', tone: 'op' }, { label: 'xor', k: 'xor(', tone: 'fn' }],
-  [{ label: 'C', k: 'C' }, { label: 'D', k: 'D' }, { label: '«', k: '<<', tone: 'op' }, { label: '»', k: '>>', tone: 'op' }, { label: 'mod', k: 'mod(', tone: 'fn' }],
-  [{ label: 'E', k: 'E' }, { label: 'F', k: 'F' }, { label: '0x', k: '0x' }, { label: '0b', k: '0b' }, { label: '0o', k: '0o' }],
-  [{ label: '7', k: '7' }, { label: '8', k: '8' }, { label: '9', k: '9' }, { label: '×', k: '*', tone: 'op' }, { label: '÷', k: '/', tone: 'op' }],
-  [{ label: '4', k: '4' }, { label: '5', k: '5' }, { label: '6', k: '6' }, { label: '+', k: '+', tone: 'op' }, { label: '−', k: '-', tone: 'op' }],
-  [{ label: '1', k: '1' }, { label: '2', k: '2' }, { label: '3', k: '3' }, { label: '0', k: '0' }, { label: '=', k: 'equals', tone: 'equals' }],
+  [{ label: 'AC', k: 'clear', tone: 'clear', aria: 'calc/key/clear' }, { label: '⌫', k: 'back', tone: 'clear', aria: 'calc/key/back' }, { label: '(', k: '(', aria: 'calc/key/open' }, { label: ')', k: ')', aria: 'calc/key/close' }, { label: '~', k: '~', tone: 'op', aria: 'calc/key/not' }],
+  [{ label: 'A', k: 'A' }, { label: 'B', k: 'B' }, { label: '&', k: '&', tone: 'op', aria: 'calc/key/and' }, { label: '|', k: '|', tone: 'op', aria: 'calc/key/or' }, { label: 'xor', k: 'xor', tone: 'op', aria: 'calc/key/xor' }],
+  [{ label: 'C', k: 'C' }, { label: 'D', k: 'D' }, { label: '«', k: '<<', tone: 'op', aria: 'calc/key/shl' }, { label: '»', k: '>>', tone: 'op', aria: 'calc/key/shr' }, { label: 'mod', k: 'mod', tone: 'op', aria: 'calc/key/mod' }],
+  [{ label: 'E', k: 'E' }, { label: 'F', k: 'F' }, { label: '0x', k: '0x', aria: 'calc/key/hex' }, { label: '0b', k: '0b', aria: 'calc/key/bin' }, { label: '0o', k: '0o', aria: 'calc/key/oct' }],
+  [{ label: '7', k: '7' }, { label: '8', k: '8' }, { label: '9', k: '9' }, { label: '×', k: '*', tone: 'op', aria: 'calc/key/multiply' }, { label: '÷', k: '/', tone: 'op', aria: 'calc/key/divide' }],
+  [{ label: '4', k: '4' }, { label: '5', k: '5' }, { label: '6', k: '6' }, { label: '+', k: '+', tone: 'op', aria: 'calc/key/plus' }, { label: '−', k: '-', tone: 'op', aria: 'calc/key/minus' }],
+  [{ label: '1', k: '1' }, { label: '2', k: '2' }, { label: '3', k: '3' }, { label: '0', k: '0' }, { label: '=', k: 'equals', tone: 'equals', aria: 'calc/key/equals' }],
 ];
 
 /**

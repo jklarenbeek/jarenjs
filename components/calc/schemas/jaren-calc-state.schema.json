@@ -7,6 +7,19 @@
   "properties": {
     "mode": { "enum": ["standard", "scientific", "programmer", "financial", "converter"] },
     "entry": { "type": "string" },
+    "fresh": {
+      "type": "boolean",
+      "description": "True while the entry is the result `=` just committed: an operator then continues from `ans`, any other key starts a new expression."
+    },
+    "error": {
+      "type": "string",
+      "description": "The message id of why the last `=` has no result (`calc/display/incomplete`, ...), the empty text when there is none. Any key dismisses it."
+    },
+    "errorParams": {
+      "type": "object",
+      "additionalProperties": { "type": ["string", "number"] },
+      "description": "The parameters `error` renders with."
+    },
     "ans": { "type": "number" },
     "ansExact": {
       "type": "string",
@@ -54,7 +67,8 @@
         "rates": { "type": "object" },
         "at": { "type": "number" },
         "stale": { "type": "boolean" },
-        "status": { "type": "string" }
+        "status": { "type": "string" },
+        "source": { "type": "string", "description": "The service the live table came from, the empty text when unnamed." }
       }
     }
   },

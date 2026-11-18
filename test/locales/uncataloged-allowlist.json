@@ -1,15 +1,21 @@
 {
   "components/calc/src/component/rules.js": [
+    ["$.converter.rates.refreshLabel", "not-prose"],
+    ["$.converter.swapLabel", "not-prose"],
+    ["$.memoryLabels.add", "not-prose"],
+    ["$.memoryLabels.clear", "not-prose"],
     ["calc-angle-btn active", "not-prose"],
     ["calc-mode calc-mode-active", "not-prose"],
     ["calc-plotkind active", "not-prose"],
     ["calc-word active", "not-prose"]
   ],
   "components/calc/src/modes/programmer.js": [
+    ["AC", "not-prose"],
     ["mod", "not-prose"],
     ["xor", "not-prose"]
   ],
   "components/calc/src/modes/scientific.js": [
+    ["AC", "not-prose"],
     ["acos", "not-prose"],
     ["ans", "not-prose"],
     ["asin", "not-prose"],
@@ -22,6 +28,7 @@
     ["tan", "not-prose"]
   ],
   "components/calc/src/modes/standard.js": [
+    ["AC", "not-prose"],
     ["ans", "not-prose"]
   ],
   "components/calc/src/theme.js": [

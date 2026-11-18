@@ -26,9 +26,16 @@ The schema `schemas/jaren-calc-ast.schema.json` (draft-neutral) validates it.
 
 ### Grammar / precedence (low → high)
 
-`|` → `&` → `<< >>` → `+ -` → `* /` → prefix `- + ~` → `^` (right-assoc) →
-postfix `! %` → primary. Power binds tighter than unary minus
+`|` → `xor` → `&` → `<< >>` → `+ -` → `* / mod` → prefix `- + ~` → `^`
+(right-assoc) → postfix `! %` → primary. Power binds tighter than unary minus
 (`-2^2 = -(2^2)`); `^` is exponentiation in **every** mode.
+
+`a mod b` and `a xor b` are the word operators a programmer keypad writes
+between two operands. The parser reads them as the calls `mod(a, b)` and
+`xor(a, b)`, so the AST has no node of its own for them and `toExpression`
+prints the call; `7 mod 3` is `1`, `5 xor 3` is `6`, and `mod(7, 3)` is still
+the call it always was. A name after a complete operand is an operator only
+when it is one of these two.
 
 ### Round-trip fixed point
 
@@ -48,8 +55,11 @@ environment compiles the printed text to the integer it compiled before.
 `compileExpr(ast, { env }) → (scope) => number` bakes every dispatch
 decision into a nested closure (second compiler stage). `evaluate(source,
 scope?, { env }?)` is the error-safe front door, returning
-`{ ok:true, value } | { ok:false, error:{ message, line?, column? } }` —
-it never throws into the app path. `scope` supplies variables (`x`, `y`,
+`{ ok:true, value } | { ok:false, error:{ message, line?, column?, id?, params? } }` —
+it never throws into the app path. `id` and `params` are the diagnostic's
+message id and the parameters it renders with (`calc/parse/end`,
+`calc/compile/function` with `{ name }`, …) for each of the engine's own
+diagnostics; an error a host function or a core kernel throws has neither. `scope` supplies variables (`x`, `y`,
 `ans`, …) and runtime flags (`angleMode`, `wordBits`, `signed`).
 
 **Environments** (the binding sets a mode resolves against): `defaultEnv()`
@@ -57,8 +67,19 @@ is float/scientific (angle-aware trig, `^` = power); `programmerEnv()`
 overrides `& | << >> ~` with word-masked BigInt math from
 `@jarenjs/core/math/word.js` and adds `and/or/xor/not/shl/shr/rol/ror/mod`.
 
-> Bitwise **XOR** is the `xor(a, b)` function (not an infix operator), so
-> `^` stays exponentiation everywhere.
+> Bitwise **XOR** is the word operator `a xor b` (the `xor(a, b)` function),
+> never `^`, so `^` stays exponentiation everywhere.
+
+**Percent reads as a desk calculator reads it.** A percent that is the whole
+right operand of a sum or a difference is that percent *of* the left operand:
+`a + b%` is `a + a·b/100` and `a − b%` is `a − a·b/100` (`200 + 10%` is `220`,
+`200 − 10%` is `180`). Every other percent is its value over 100, which is
+already what a desk calculator means: `a × b%` is `a·b/100` (`200 × 10%` is
+`20`), `a ÷ b%` is `a/(b/100)` (`200 ÷ 10%` is `2000`), and a lone `b%` is
+`b/100`. Parentheses leave no trace in the AST, so `a + (b%)` reads as
+`a + b%`; write `a + b/100` to add the plain fraction. The rule composes the
+environment's own `*` and `%`, so the programmer environment's exact
+arithmetic stays exact.
 
 **Programmer integers are exact.** In `programmerEnv()` a value is a
 `number`, or a `bigint` once it is a whole number beyond ±(2^53 − 1). An
@@ -150,15 +171,77 @@ environment without an `arity` table is not checked.
 
 Each mode (`standard`, `scientific`, `programmer`, `financial`,
 `converter`) is a data-driven descriptor: a keypad/panel (`{ label, k,
-tone?, span? }` rows, where `k` is the token appended to the expression
-entry or a command `clear`/`back`/`equals`), a function-binding env, and a
-formatter. `financial` holds **no formulas** (it orchestrates
+tone?, span?, aria? }` rows, where `k` is the token the key presses or a
+command `clear`/`back`/`equals`, and `aria` the message id of a symbol key's
+accessible name), a function-binding env, and a formatter. Only the three
+keypad modes show the display, keypad, memory row and tape; the financial and
+converter modes show their own panel alone, and the x·y / x·y·z plot belongs
+to the scientific mode (the standard mode is the plain calculator).
+
+The financial panel explains itself: what time value of money is, what each
+of N, I/Y, PV, PMT and FV means (I/Y is the rate per period: 6% a year paid
+monthly is 0.5), the sign convention (money received is positive, money paid
+negative, so a 200,000 loan's payment is negative), and the formula it
+solves. The unknown's field is read-only and shows the answer, and four
+worked examples (`FINANCIAL_EXAMPLES`: a mortgage payment, a savings goal, a
+loan's payoff time, an implied return) fill the five values in one click
+(`calc/fin-example`). Values with no solution say so instead of `NaN`. `financial` holds **no formulas** (it orchestrates
 `@jarenjs/core/finance` via `solveTvm`/`buildAmortization`/`npvOf`/`irrOf`);
 `converter` holds **no factors** of its own for the static and currency
 dimensions (it orchestrates `@jarenjs/core/convert` via `convertValue`,
 currency included); its `fuel` dimension (`l100km`, `mpgus`, `mpguk`, `kml`)
 is reciprocal and converts in `convertFuel`, which refuses a negative or
 non-finite value and zero across L/100km and the distance-per-fuel units.
+
+### Typing an expression (the component's entry editor)
+
+The calculator component edits the entry key by key (`component/entry.js`,
+exported as `pressKeys`, `keyChange`, `applyChange`, `previewOf`):
+
+- After `=`, an operator or a postfix key continues from the result (`ans +`,
+  so the next step uses the exact result, not the twelve digits the display
+  shows); a digit, `.`, a function, a constant or `ans` starts a new
+  expression.
+- A key that cannot follow the expression writes nothing: a second `.` in one
+  number, `)` with no parenthesis open, `%` or `!` with no operand, a digit the
+  number's base lacks (`2` after `0b`). A lone `0` is replaced by the next
+  digit. An operator after an operator replaces it, except a `−` that can be
+  the next operand's sign (`6 × −2`). A function, constant, `(` or number key
+  right after a complete operand multiplies (`2 sin` writes `2*sin(`,
+  `(2)(3` writes `(2)*(3`). So no key sequence writes a parse error.
+- While an expression is typed the result line is a live preview: the value of
+  its longest complete prefix with the open parentheses closed (`2 × (3 +`
+  previews `6`), or nothing when no prefix is complete or the value is not
+  finite. Typing never shows a diagnostic.
+- `=` closes every parenthesis still open (`sin 30 =` is `sin(30)`) and
+  evaluates. An expression that still cannot complete shows one message,
+  *Incomplete expression*; a value outside the real numbers (`√−4`,
+  `asin(2)`) *No real result*; `±∞` (`1 ÷ 0`, an overflow) *The result is
+  infinite*; a programmer division by zero *No result*; a function or name an
+  environment lacks its own sentence (`unknown function 'f'`). None carries a
+  parser position. The next key dismisses the message.
+- Clear (`AC`) clears the expression, the result line and the message.
+- The result line shows twelve significant digits with no zeros padding the
+  mantissa (`9.99e+22`), a safe integer in full, and grouped thousands
+  (`2,000`); the committed entry is the same value ungrouped, a literal the
+  parser reads back. The converter shows eight significant digits and a
+  currency in its minor units (two decimals, none for the yen, eight for a
+  crypto asset).
+
+In the programmer mode each result is truncated toward zero and wrapped to
+the selected word size when it is shown and committed; inside one expression
+`+ − ×` are exact and `÷` keeps the exact fraction (`7 ÷ 2 × 2` is `7`). The
+page says so under the four-base view.
+
+`bindCalcKeyboard(root, app)` (from `@jarenjs/calc/component`) is the host
+listener that types into the keypad while focus is inside it (`.calc-pad`,
+which takes focus): digits, `+ - * / ^ % ( ) .` (and `,` for the point),
+Enter or `=` for equals, Backspace, Escape (or Delete) to clear, and in the
+programmer mode `a`–`f` as hex digits, `%` as `mod` and `<`/`>` as the
+shifts. It suppresses the browser default of exactly the keys it takes, so
+Enter on a focused keypad button evaluates once, and leaves Tab, Space and
+every Ctrl/Meta/Alt shortcut alone; focus in a financial, converter or plot
+field never types into the calculator.
 
 ## Plotting
 

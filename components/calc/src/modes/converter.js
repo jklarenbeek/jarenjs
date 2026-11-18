@@ -12,7 +12,7 @@
 import {
   convert, unitsOf, dimensions, convertCurrency, currenciesOf,
 } from '@jarenjs/core/convert';
-import { formatNumber } from '@jarenjs/core/math';
+import { formatSignificant } from '../format.js';
 import { FUEL, FUEL_UNITS, convertFuel } from './fuel.js';
 
 /** Currency is a fifth, rate-table-backed dimension beside the static ones. */
@@ -63,10 +63,18 @@ export function convertValue(dimension, value, from, to, rates) {
   }
 }
 
-/** Format a converter result. @param {number} value */
+/**
+ * Format a converter result: eight significant digits, thousands grouped,
+ * a dash for a conversion with no value. Eight, because a few of core's
+ * factors (the US fluid ounce, tablespoon and teaspoon, the knot) are held
+ * to nine or ten digits, and between two of them a ninth digit already
+ * shows their rounding as a wrong answer (1 fl oz = 6.00000001 tsp).
+ * @param {number} value
+ * @returns {string}
+ */
 export function format(value) {
   if (!Number.isFinite(value)) return '—';
-  return formatNumber(value, { notation: 'auto', precision: 8, group: true });
+  return formatSignificant(value, { digits: 8, group: true });
 }
 
 export const converterMode = {

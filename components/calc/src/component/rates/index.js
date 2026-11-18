@@ -46,6 +46,18 @@ function resolveAdapter(provider) {
 }
 
 /**
+ * The name the rates line shows for a provider: the service a built-in
+ * adapter reads, none for a custom fetcher (whose table may name its own
+ * `source`).
+ * @param {unknown} provider
+ * @returns {string}
+ */
+function sourceOf(provider) {
+  if (typeof provider === 'function') return '';
+  return provider === 'binance' ? 'Binance' : 'CoinGecko';
+}
+
+/**
  * @typedef {object} RatesLayerOptions
  * @property {'coingecko'|'binance'|((codes:string[],o:any)=>Promise<any>)} [provider]
  * @property {number} [refreshMs] minimum interval between live fetches (debounce)
@@ -64,6 +76,7 @@ function resolveAdapter(provider) {
  */
 export function createRatesLayer(options = {}) {
   const adapter = resolveAdapter(options.provider ?? 'coingecko');
+  const source = sourceOf(options.provider ?? 'coingecko');
   const refreshMs = options.refreshMs ?? 60000;
   const codes = options.codes ?? CURRENCY_CODES;
   const now = options.now ?? (() => Date.now());
@@ -97,7 +110,8 @@ export function createRatesLayer(options = {}) {
         (table) => {
           if (request !== generation) return;
           inflight = false;
-          dispatch('calc/rates-ok', { ...table, at: t });
+          // the table says where it came from, so the rates line can
+          dispatch('calc/rates-ok', source === '' ? { ...table, at: t } : { source, ...table, at: t });
         },
         (err) => {
           if (request !== generation) return;

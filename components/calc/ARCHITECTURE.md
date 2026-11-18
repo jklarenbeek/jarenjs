@@ -71,6 +71,14 @@ constant-vs-variable factors.
   embedding host that also runs `@jarenjs/forms` (e.g. the site's schema
   playground, which spreads its own `createFormActions`) never collides on
   the default action names.
+- `entry.js` — the entry editor, pure: what each key writes into the
+  expression, the live preview, and what `=` commits or why it has no result
+  (a message id the view renders in the reader's language).
+- `keyboard.js` — `calcKeyOf` (a physical key to its keypad token) and
+  `bindCalcKeyboard`, the host listener that types into the keypad region.
+- `panels.js` — the financial panel (help, worked examples, the solved field
+  read-only) and the converter panel (dimension names, precision, the rates
+  line with its source and time).
 - `rules.js` — the `calculator` JSLT view.
 - `schema.js` / `schemas/*` — the financial form schema + AST/state schemas.
 - `rates/*` — CoinGecko + Binance adapters, the `rates-fetch` effect and
@@ -83,8 +91,10 @@ State (`$.calc`) is plain JSON, immutable, copy-on-write via
 `@jarenjs/json/patch`. Keys dispatch `{action, with}` bindings; actions
 return `patch`/`effects` transitions. The display string, four-base views,
 plot vnode and forms model are derived in the `viewModel` boundary — never
-stored in state. `=` and backspace route through JS effects (`calc-eval`,
-`calc-edit`) because evaluation is JS, and `M+` routes through `calc-mem-add`
+stored in state. Every key routes through the JS effect `calc-press` and `=`
+through `calc-eval`, both over the pure entry editor (`component/entry.js`:
+what a key writes, the live preview, what `=` commits or why it has no
+result), and `M+` routes through `calc-mem-add`
 because a word beyond 2^53 needs integer addition; everything else is a pure
 patch. `ans` and `memory` are JSON numbers; a programmer-mode word beyond 2^53
 is also held as its decimal text in `ansExact` / `memoryExact`, which the scope

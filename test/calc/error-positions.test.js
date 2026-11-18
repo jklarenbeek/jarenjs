@@ -15,18 +15,18 @@ describe('calc — compile errors carry the position of the call', function () {
   it('places an unknown function on its own line and column', () => {
     assert.deepEqual(evaluate('1 + 2 +\n  foo(3)'), {
       ok: false,
-      error: { message: "unknown function 'foo'", line: 2, column: 3 },
+      error: { message: "unknown function 'foo'", line: 2, column: 3, id: 'calc/compile/function', params: { name: 'foo' } },
     });
   });
 
   it('places an arity error at the function name', () => {
     assert.deepEqual(evaluate('2*pi + max()'), {
       ok: false,
-      error: { message: 'max() expected at least 1 argument, got 0', line: 1, column: 8 },
+      error: { message: 'max() expected at least 1 argument, got 0', line: 1, column: 8, id: 'calc/compile/arity-at-least', params: { name: 'max', count: 0, min: 1, max: Infinity } },
     });
     assert.deepEqual(evaluate('sin(1) + sin(1, 2)'), {
       ok: false,
-      error: { message: 'sin() expected 1 argument, got 2', line: 1, column: 10 },
+      error: { message: 'sin() expected 1 argument, got 2', line: 1, column: 10, id: 'calc/compile/arity-exactly', params: { name: 'sin', count: 2, min: 1, max: 1 } },
     });
   });
 

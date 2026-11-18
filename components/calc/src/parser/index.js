@@ -10,11 +10,12 @@
  * Grammar (low → high precedence), all left-associative except power
  * (right) and the prefix unaries:
  *
- *   or      := and    ('|' and)*
+ *   or      := xor    ('|' xor)*
+ *   xor     := and    ('xor' and)*
  *   and     := shift  ('&' shift)*
  *   shift   := add    (('<<'|'>>') add)*
  *   add     := mul    (('+'|'-') mul)*
- *   mul     := unary  (('*'|'/') unary)*
+ *   mul     := unary  (('*'|'/'|'mod') unary)*
  *   unary   := ('-'|'+'|'~') unary | power
  *   power   := postfix ('^' unary)?           // right-assoc via unary
  *   postfix := primary ('!' | '%')*
@@ -22,6 +23,13 @@
  *
  * Number bases (`0x`/`0o`/`0b`) and scientific notation are recognized at
  * the leaf; the AST keeps only the numeric value.
+ *
+ * `a mod b` and `a xor b` are the word operators a programmer keypad
+ * writes between two operands: the parser reads them as the calls
+ * `mod(a, b)` and `xor(a, b)`, so the AST and every environment see the
+ * function they always bound. In an operand's place `mod(`…`)` is still
+ * the call, and a name after an operand is an operator only when it is
+ * one of these two.
  */
 
 import { num, constant, variable, unary, postfix, binary, call, isConstant, setSite, setExact } from '../ast.js';
@@ -40,8 +48,11 @@ const RE_IDENT = /[A-Za-z_][A-Za-z0-9_]*|[πφτ]/y;
 
 /** Binary operator precedences (higher binds tighter); power is separate. */
 const BINOPS = {
-  '|': 1, '&': 2, '<<': 3, '>>': 3, '+': 4, '-': 4, '*': 5, '/': 5,
+  '|': 1, 'xor': 2, '&': 3, '<<': 4, '>>': 4, '+': 5, '-': 5, '*': 6, '/': 6, 'mod': 6,
 };
+
+/** The word operators, read as the call of the function they name. */
+const WORD_OPS = new Set(['mod', 'xor']);
 
 class Parser {
   /** @param {string} text */
@@ -80,6 +91,11 @@ class Parser {
     if (c === 0x2d) return '-';
     if (c === 0x2a) return '*';
     if (c === 0x2f) return '/';
+    if (c === 0x6d || c === 0x78) { // m x: a word operator, whole
+      RE_IDENT.lastIndex = this.p;
+      const word = RE_IDENT.exec(this.s);
+      if (word !== null && word.index === this.p && WORD_OPS.has(word[0])) return word[0];
+    }
     return null;
   }
 
@@ -101,9 +117,10 @@ class Parser {
       if (op === null) break;
       const prec = BINOPS[op];
       if (prec === undefined || prec < minPrec) break;
+      const start = this.p;
       this.p += op.length;
       const right = this.parseBinary(prec + 1); // all these are left-assoc
-      left = binary(op, left, right);
+      left = WORD_OPS.has(op) ? setSite(call(op, [left, right]), this.s, start) : binary(op, left, right);
     }
     return left;
   }

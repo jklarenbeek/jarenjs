@@ -86,13 +86,19 @@
 }
 .calc-mode-active { background: var(--calc-accent); color: var(--calc-accent-text); border-color: var(--calc-accent); }
 
+/* the keypad region takes focus so the keyboard types into it */
+.calc-pad { display: grid; gap: 12px; border-radius: 10px; }
+.calc-pad:focus-visible { outline: 2px solid var(--calc-accent); outline-offset: 4px; }
+
 .calc-display {
+  display: block;
   background: var(--calc-panel); border: 1px solid var(--calc-border); border-radius: 10px;
   padding: 12px 14px; text-align: right; min-height: 56px;
 }
-.calc-entry { color: var(--calc-muted); font-size: 15px; word-break: break-all; }
-.calc-result { font-size: 28px; font-weight: 700; }
-.calc-err { color: #dc2626; font-size: 13px; text-align: start; }
+.calc-entry { display: block; color: var(--calc-muted); font-size: 15px; word-break: break-all; }
+.calc-result { display: block; font-size: 28px; font-weight: 700; min-height: 1.2em; }
+.calc-err { display: block; color: #dc2626; font-size: 13px; text-align: start; }
+.calc-note { margin: 0; color: var(--calc-muted); font-size: 13px; line-height: 1.45; }
 
 .calc-keypad { display: grid; gap: 6px; }
 .calc-row { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
@@ -129,12 +135,18 @@
   border-radius: 10px; padding: 12px; display: grid; gap: 10px;
 }
 .calc-fin-result, .calc-conv-result { font-size: 18px; }
+.calc-fin-help { display: grid; gap: 6px; }
+.calc-fin-nosolution { margin: 0; color: #dc2626; font-size: 13px; }
+.calc-fin-examples-label { margin: 0; font-weight: 600; font-size: 13px; }
+.calc-fin-examples ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.calc-fin-examples li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.calc-fin-example { padding: 4px 10px; border: 1px solid var(--calc-border); border-radius: 6px; background: var(--calc-key); color: var(--calc-text); cursor: pointer; font-size: 13px; }
+.calc-fin-example-text { color: var(--calc-muted); font-size: 13px; }
 .calc-conv-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .calc-conv-input { flex: 1 1 100px; padding: 8px; border: 1px solid var(--calc-border); border-radius: 6px; background: var(--calc-bg); color: var(--calc-text); }
 .calc-dim, .calc-conv-from, .calc-conv-to { padding: 8px; border: 1px solid var(--calc-border); border-radius: 6px; background: var(--calc-bg); color: var(--calc-text); }
 .calc-swap, .calc-rates-refresh { padding: 8px 10px; border: 1px solid var(--calc-border); border-radius: 6px; background: var(--calc-key); cursor: pointer; }
 .calc-rates { color: var(--calc-muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
-.calc-rates-stale { color: #d97706; }
 
 .calc-plot-kinds { display: flex; gap: 6px; }
 .calc-plotkind { padding: 4px 12px; border: 1px solid var(--calc-border); border-radius: 6px; background: var(--calc-key); color: var(--calc-text); cursor: pointer; font-size: 13px; }

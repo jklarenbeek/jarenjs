@@ -201,12 +201,12 @@ describe('#calc programmer answers that were already right do not move', functio
     assert.deepEqual(evaluate('mod(5, 0)', U, { env }), {
       ok: false, error: { message: 'wMod: division by zero', line: undefined, column: undefined },
     });
-    assert.equal(commit('1/0', { base: 'DEC', ...U }).display, '—');
-    assert.equal(commit('2^1024', { base: 'DEC', ...U }).display, '—');
+    assert.equal(commit('1/0', { base: 'DEC', ...U }).error, 'calc/display/no-result');
+    assert.equal(commit('2^1024', { base: 'DEC', ...U }).error, 'calc/display/no-result');
     assert.equal(commit('7/2*2', { base: 'DEC', ...U }).display, '7');
     const huge = '0x' + 'F'.repeat(300);
     assert.equal(evaluate(huge, U, { env }).value, Infinity);
-    assert.equal(commit(huge, { base: 'DEC', ...U }).display, '—');
+    assert.equal(commit(huge, { base: 'DEC', ...U }).error, 'calc/display/no-result');
   });
 
   it('bounds a power so it cannot grow without limit', () => {

@@ -211,7 +211,12 @@ describe('website — the site as one app document', function () {
     assert.match(html, /calc-modes/);
     assert.match(html, /calc-display/);
     assert.match(html, /calc-keypad/);
+    // the plot belongs to the scientific mode
+    assert.doesNotMatch(html, /<svg/);
+    app.dispatch('calc/mode', { mode: 'scientific' });
+    html = serialize(container);
     assert.match(html, /<svg/, 'the x·y plot renders inline SVG');
+    app.dispatch('calc/mode', { mode: 'standard' });
 
     // typing evaluates through the expression engine
     app.dispatch('calc/key', { k: '6' });
@@ -225,6 +230,8 @@ describe('website — the site as one app document', function () {
     app.dispatch('calc/mode', { mode: 'converter' });
     html = serialize(container);
     assert.match(html, /calc-converter/);
+    // the converter shows its own panel alone: no keypad or memory row above it
+    assert.doesNotMatch(html, /calc-keypad|calc-mem/);
     const m = html.match(/calc-conv-result[^>]*><strong>([^<]*)</);
     assert.ok(m && Number.parseFloat(m[1].replace(/,/g, '')) > 0, 'offline currency conversion result');
   });

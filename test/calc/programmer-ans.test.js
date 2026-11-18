@@ -12,7 +12,8 @@ import { evaluate, programmerEnv } from '@jarenjs/calc';
 import { calcEditEffects } from '../../components/calc/src/component/index.js';
 
 /**
- * Run the `=` effect on `entry` and return what it commits.
+ * Run the `=` effect on `entry` and return what it commits (or, for a
+ * value with no result, the entry it keeps).
  * @param {string} entry @param {any} props
  * @returns {{ value: number, display: string, entry: string }}
  */
@@ -21,7 +22,7 @@ function commit(entry, props) {
   const seen = [];
   calcEditEffects['calc-eval']({ entry, base: 'DEC', ...props }, (name, payload) => seen.push([name, payload]));
   assert.equal(seen.length, 1);
-  assert.equal(seen[0][0], 'calc/commit');
+  assert.equal(seen[0][0], seen[0][1].kind === 'commit' ? 'calc/commit' : 'calc/entry');
   return seen[0][1];
 }
 
@@ -54,9 +55,10 @@ describe('#calc programmer ans is the word the display shows', function () {
   });
 
   it('leaves a value with no word, and every other mode, as it was', () => {
+    // a value with no word commits nothing: the entry stays, with the reason
     const infinite = commit('1/0', { mode: 'programmer', wordBits: 8, signed: false });
-    assert.equal(infinite.value, Infinity);
-    assert.equal(infinite.display, '—');
+    assert.equal(infinite.kind, 'entry');
+    assert.equal(infinite.error, 'calc/display/no-result');
     assert.equal(commit('7/2', { mode: 'standard' }).value, 3.5);
   });
 });

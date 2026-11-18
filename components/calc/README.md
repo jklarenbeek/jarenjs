@@ -44,6 +44,15 @@ const calc = createCalcComponent({ provider: 'coingecko' });
 const app = calc.createApp({ node: document.getElementById('calc') });
 ```
 
+Typing goes through the component's entry editor: an incomplete expression
+shows a live preview and never a diagnostic, `=` closes the parentheses the
+function keys opened, a result continues with an operator (`ans +`) and a
+digit starts anew, and `a + b%` adds b percent of a. `bindCalcKeyboard(document,
+app)` lets the keyboard type into the keypad while it has focus. The financial
+panel explains time value of money, each field and the sign convention, and
+offers four worked examples; the converter names each unit select and says
+where its rates came from and when. `docs/CALC-FORMAT.md` has the rules.
+
 `createCalcComponent({ codes, fallbackRates })` uses those currency choices and
 fallback rates for its exposed configuration and both initialization paths.
 Programmer Equals records the selected base on the tape; grouping spaces stay
@@ -52,13 +61,15 @@ out of the committed expression so it can be used in the next calculation.
 The words the calculator shows — the mode tabs, the panels' labels, the
 rates line, the financial form's field labels (by their `x-msgid`), the
 error card and every expression diagnostic in the display — are the
-English catalog `calcMessagesEn`. Pass a compiled locale catalog as
+English catalog `calcMessagesEn` (each symbol key's accessible name too:
+`calc/key/divide` is *Divide*). Pass a compiled locale catalog as
 `messages` to `contributeCalcViewModel(state, { messages })` (or to
 `createCalcComponent`, for its standalone app), to `calcToVnode`, or to
 `evaluate` (whose error `message` is then the reader's),
 and they render through it, falling back to English per id. The keypad's
-symbols and function names, the base and unit names, and the message of an
-error a host function throws are not translated.
+symbols and function names, the base and unit names, and the names of rate
+sources are not translated; an error a host function or a kernel throws
+shows on the display as the cataloged *No result*.
 
 ## The numeric kernel lives in `@jarenjs/core`
 

@@ -34,5 +34,7 @@ rates flow through an `@jarenjs/app` effect and a when-gated poll
 (CoinGecko/Binance), while the pure conversion stays in
 `@jarenjs/core/convert`. A static fallback keeps it working offline.
 
-**Try it.** [Open the Calculator](#/calculator), switch modes, and plot an
-expression — the whole page is an app document driving the same kernel.
+**Try it.** [Open the Calculator](#/calculator), type with the keys or the
+keyboard, switch to Scientific to plot an expression, or open Financial for a
+worked mortgage example — the whole page is an app document driving the same
+kernel.

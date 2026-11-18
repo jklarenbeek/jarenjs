@@ -22,7 +22,7 @@ describe('#calc component: state + viewModel', function () {
       assert.deepEqual(comp.initialState().rates, fallbackRates);
       assert.deepEqual(app.getState().calc.rates, fallbackRates);
       app.dispatch('calc/mode', { mode: 'converter' });
-      assert.equal(comp.viewModel(app.getState()).converter.result, '50');
+      assert.equal(comp.viewModel(app.getState()).converter.result, '50.00');
     }
     finally { app.destroy(); }
   });
@@ -39,7 +39,10 @@ describe('#calc component: state + viewModel', function () {
     const vm = contributeCalcViewModel({ calc: calcInitialState() });
     assert.equal(vm.mode, 'standard');
     assert.ok(vm.keypad.length > 0);
-    assert.ok(vm.plot && Array.isArray(vm.plot.svg));   // a vnode
+    // the plot belongs to the scientific mode
+    assert.equal(vm.plot, null);
+    const scientific = contributeCalcViewModel({ calc: { ...calcInitialState(), mode: 'scientific' } });
+    assert.ok(scientific.plot && Array.isArray(scientific.plot.svg));   // a vnode
     assert.equal(vm.display.entry, '0');
   });
 });
@@ -66,6 +69,7 @@ describe('#calc component: app integration (synchronous dispatch)', function () 
 
   it('renders keypad + display + plot through the view', () => {
     const { app } = makeApp();
+    app.dispatch('calc/mode', { mode: 'scientific' });
     const html = renderToString(app.getVnode());
     assert.match(html, /calc-modes/);
     assert.match(html, /calc-display/);
@@ -128,7 +132,7 @@ describe('#calc component: app integration (synchronous dispatch)', function () 
     for (const [dimension, from, to, result] of [
       ['length', 'nm', 'um', '0.1'],
       ['temperature', 'K', 'C', '-173.15'],
-      ['currency', 'USD', 'EUR', '92.592593'],
+      ['currency', 'USD', 'EUR', '92.59'],
     ]) {
       app.dispatch('calc/conv-dim', null, { target: { value: dimension } });
       assert.deepEqual(app.getState().calc.conv, { dimension, from, to, value: 100 });
@@ -158,8 +162,8 @@ describe('#calc component: app integration (synchronous dispatch)', function () 
     const { app } = makeApp();
     app.dispatch('calc/mode', { mode: 'converter' });
     for (const [rates, from, to, result] of [
-      [{ USD: 1, CHF: 2 }, 'USD', 'CHF', '50'],
-      [{ EUR: 1 }, 'EUR', 'EUR', '100'],
+      [{ USD: 1, CHF: 2 }, 'USD', 'CHF', '50.00'],
+      [{ EUR: 1 }, 'EUR', 'EUR', '100.00'],
     ]) {
       app.dispatch('calc/conv-dim', null, { target: { value: 'length' } });
       app.dispatch('calc/rates-ok', { base: 'USD', rates });

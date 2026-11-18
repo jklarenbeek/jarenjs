@@ -21,9 +21,10 @@ import {
 } from '../../components/calc/src/component/index.js';
 
 /**
- * Run the `=` effect and return what it commits.
+ * Run the `=` effect and return what it dispatches: the committed result,
+ * or the entry kept with the message id of why it has none.
  * @param {string} entry @param {any} props
- * @returns {{ value: number, display: string, entry: string, expr: string }}
+ * @returns {any}
  */
 function commit(entry, props) {
   /** @type {any[]} */
@@ -35,20 +36,22 @@ function commit(entry, props) {
 }
 
 describe('#calc a result with no finite value leaves an entry that still evaluates', function () {
-  it('standard mode keeps the expression the user typed', () => {
-    for (const [expr, display] of [['1/0', '∞'], ['-1/0', '-∞'], ['0/0', 'NaN']]) {
-      const committed = commit(expr, { mode: 'standard' });
-      assert.equal(committed.display, display, expr);
-      assert.equal(committed.entry, expr, expr);
-      assert.equal(evaluate(committed.entry).ok, true, expr);
+  it('standard mode keeps the expression the user typed and says why it has no result', () => {
+    for (const [expr, error] of [['1/0', 'calc/display/infinite'], ['-1/0', 'calc/display/infinite'], ['0/0', 'calc/display/not-real']]) {
+      const kept = commit(expr, { mode: 'standard' });
+      assert.equal(kept.kind, 'entry', expr);
+      assert.equal(kept.error, error, expr);
+      assert.equal(kept.entry, expr, expr);
+      assert.equal(evaluate(kept.entry).ok, true, expr);
     }
   });
 
   it('programmer mode keeps the expression instead of the em dash it displays', () => {
     for (const base of ['DEC', 'HEX']) {
-      const committed = commit('1/0', { mode: 'programmer', base, wordBits: 8, signed: false });
-      assert.equal(committed.entry, '1/0', base);
-      assert.equal(evaluate(committed.entry).ok, true, base);
+      const kept = commit('1/0', { mode: 'programmer', base, wordBits: 8, signed: false });
+      assert.equal(kept.entry, '1/0', base);
+      assert.equal(kept.error, 'calc/display/no-result', base);
+      assert.equal(evaluate(kept.entry).ok, true, base);
     }
   });
 
@@ -57,16 +60,19 @@ describe('#calc a result with no finite value leaves an entry that still evaluat
     assert.equal(commit('0xF+1', { mode: 'programmer', wordBits: 8, signed: false, base: 'HEX' }).entry, '0x10');
   });
 
-  it('the display shows no error after the commit', () => {
+  it('the display says why there is no result, and the next key dismisses it', () => {
     const comp = createCalcComponent({ fetch: async () => ({ ok: false, status: 503 }) });
     const app = comp.createApp({ schedule: (f) => f() });
     try {
       app.dispatch('calc/key', { k: '1/0' });
       app.dispatch('calc/equals');
       const vm = contributeCalcViewModel(app.getState());
-      assert.equal(vm.display.error, null);
+      assert.equal(vm.display.error, 'The result is infinite: a division by zero or a number too large');
       assert.equal(vm.display.entry, '1/0');
-      assert.equal(vm.display.result, '∞');
+      assert.equal(vm.display.result, '');
+      assert.equal(app.getState().calc.tape.length, 0);
+      app.dispatch('calc/key', { k: '+' });
+      assert.equal(contributeCalcViewModel(app.getState()).display.error, null);
     }
     finally { app.destroy(); }
   });

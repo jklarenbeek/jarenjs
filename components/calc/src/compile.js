@@ -95,6 +95,17 @@ function build(node, env) {
       const op = env.binops[node.op];
       if (op === undefined) throw new CalcParseError(`unknown operator '${node.op}'`);
       const l = build(node.left, env);
+      if (isPercentOf(node, env)) {
+        // `a + b%` adds b percent OF a (a desk calculator's percent):
+        // a + a·(b%), composed of the environment's own `*` and `%`
+        const times = env.binops['*'];
+        const percent = env.postops['%'];
+        const b = build(node.right.arg, env);
+        return (scope) => {
+          const a = l(scope);
+          return op(a, times(a, percent(b(scope), scope), scope), scope);
+        };
+      }
       const r = build(node.right, env);
       return (scope) => op(l(scope), r(scope), scope);
     }
@@ -109,6 +120,20 @@ function build(node, env) {
     default:
       throw new CalcParseError(`cannot compile node '${node.type}'`);
   }
+}
+
+/**
+ * Whether a binary node is `a + b%` or `a - b%`: a percent that is the whole
+ * right operand of a sum or a difference reads as that percent OF the left
+ * operand. Every other percent is its value over 100 (`a * b%`, `a / b%`,
+ * a lone `b%`, `(a + b)%`), which already reads that way.
+ * @param {any} node a binary node
+ * @param {any} env
+ * @returns {boolean}
+ */
+function isPercentOf(node, env) {
+  return (node.op === '+' || node.op === '-') && node.right.type === 'postfix' && node.right.op === '%'
+    && env.postops['%'] !== undefined && env.binops['*'] !== undefined;
 }
 
 /**
@@ -176,7 +201,11 @@ function checkArity(node, arity) {
 /**
  * @typedef {object} EvalErr
  * @property {false} ok
- * @property {{ message: string, line?: number, column?: number }} error
+ * @property {{ message: string, line?: number, column?: number, id?: string, params?: Record<string, unknown> }} error
+ *   the diagnostic: its message (in the reader's language with
+ *   `opts.messages`), where it was found, and its message id with the
+ *   parameters it renders (`calc/parse/end`, ...) when it is one of the
+ *   engine's own; an error a host function or a core kernel throws has no id
  */
 
 /**
@@ -214,15 +243,19 @@ export function evaluateExact(source, scope = {}, opts = {}) {
   }
   catch (err) {
     const e = /** @type {any} */ (err);
-    return {
-      ok: false,
-      error: {
-        message: e instanceof CalcParseError && e.msgid !== undefined && opts.messages != null
-          ? calcText(opts.messages)(e.msgid, e.params)
-          : e && e.message ? e.message : String(err),
-        line: e instanceof CalcParseError ? e.line : undefined,
-        column: e instanceof CalcParseError ? e.column : undefined,
-      },
+    const coded = e instanceof CalcParseError && e.msgid !== undefined;
+    /** @type {EvalErr['error']} */
+    const error = {
+      message: coded && opts.messages != null
+        ? calcText(opts.messages)(e.msgid, e.params)
+        : e && e.message ? e.message : String(err),
+      line: e instanceof CalcParseError ? e.line : undefined,
+      column: e instanceof CalcParseError ? e.column : undefined,
     };
+    if (coded) {
+      error.id = e.msgid;
+      error.params = e.params;
+    }
+    return { ok: false, error };
   }
 }

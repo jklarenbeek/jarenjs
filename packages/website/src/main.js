@@ -12,6 +12,7 @@ import '@jarenjs/studio/styles/studio.css';
 import '@jarenjs/studio/styles/flow.css';
 import '@jarenjs/studio/styles/data.css';
 import '@jarenjs/play/styles/play.css';
+import { bindCalcKeyboard } from '@jarenjs/calc/component';
 import { createSiteApp } from './app/createSiteApp.js';
 import { md } from './boundaries/markdown.js';
 import { parseHash } from './lib/route.js';
@@ -239,6 +240,9 @@ document.addEventListener('focusout', (event) => {
   const target = /** @type {any} */ (event.target);
   if (isSeamEditor(target)) document.body.classList.remove('kb-editing');
 });
+
+// the calculator's keypad takes typing while it holds focus (#/calculator)
+bindCalcKeyboard(document, app);
 
 // close the nav dropdown groups on Escape or a click outside the header nav
 // (the in-nav triggers own opening; route/set closes them on navigation)

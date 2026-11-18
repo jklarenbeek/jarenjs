@@ -11,7 +11,7 @@ import {
   pmt, pv, fv, nper, rate,
   npv, irr, amortizationSchedule,
 } from '@jarenjs/core/finance';
-import { formatNumber } from '@jarenjs/core/math';
+import { formatFixed } from '../format.js';
 
 /** The five TVM variables the panel exposes. */
 export const TVM_FIELDS = ['nper', 'rate', 'pv', 'pmt', 'fv'];
@@ -75,10 +75,28 @@ function parseFlows(flows) {
   return String(flows).split(/[\s,]+/).filter((s) => s !== '').map(Number);
 }
 
-/** Format a money-ish result. @param {number} value */
+/** Format a money-ish result: two decimals, thousands grouped. @param {number} value */
 export function format(value) {
-  return formatNumber(value, { notation: 'fixed', precision: 2, group: true });
+  return formatFixed(value, 2);
 }
+
+/**
+ * The worked examples the panel offers, each a full set of inputs one click
+ * writes into the form: the unknown is `solveFor`, its own value a
+ * placeholder the answer replaces. `perYear` is the periods per year the
+ * example's explanation counts in (12: monthly; 1: yearly).
+ * @type {ReadonlyArray<{ id: string, perYear: number, inputs: { nper: number, rate: number, pv: number, pmt: number, fv: number, solveFor: string } }>}
+ */
+export const FINANCIAL_EXAMPLES = Object.freeze([
+  // a 200,000 loan at 6% a year over 30 years, repaid monthly: the payment
+  { id: 'mortgage', perYear: 12, inputs: { nper: 360, rate: 0.5, pv: 200000, pmt: 0, fv: 0, solveFor: 'pmt' } },
+  // 200 saved each month for 10 years at 3% a year: the balance
+  { id: 'savings', perYear: 12, inputs: { nper: 120, rate: 0.25, pv: 0, pmt: -200, fv: 0, solveFor: 'fv' } },
+  // a 10,000 debt at 12% a year, repaid 300 a month: the months it takes
+  { id: 'payoff', perYear: 12, inputs: { nper: 0, rate: 1, pv: 10000, pmt: -300, fv: 0, solveFor: 'nper' } },
+  // 1,000 invested that returns 2,000 after 10 years: the yearly rate
+  { id: 'return', perYear: 1, inputs: { nper: 10, rate: 0, pv: -1000, pmt: 0, fv: 2000, solveFor: 'rate' } },
+].map((example) => Object.freeze({ ...example, inputs: Object.freeze(example.inputs) })));
 
 export const financialMode = {
   id: 'financial',
