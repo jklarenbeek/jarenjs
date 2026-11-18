@@ -535,9 +535,16 @@ export interface LinqOptions {
   pathFunctions?: Readonly<Record<string, unknown>>;
   /** Step, depth and sequence bounds — a SAVED document's guard. */
   limits?: Readonly<Record<string, number>>;
+  /** Reads a named zone (`dateFormat(pattern, zone)`, a series
+   * operator's `zone`), `JQ0003` without one; part of each compiled
+   * document's key by its declared `identity` (`{ name, revision }`). */
+  zoneProvider?: import('@jarenjs/core/series').ZoneProvider;
   /** An explicit cache-partition key, when the hooks above are rebuilt
    * per call: compiled documents are shared per registry combination. */
   registry?: object;
+  /** The host's runtime record: its `zoneProvider` stands in for an
+   * absent `zoneProvider`; nothing else of it is read. */
+  runtime?: Partial<import('@jarenjs/core/runtime').Runtime>;
 }
 
 export interface Explanation {
@@ -880,6 +887,10 @@ export function federate(spec: {
   /** Defaults to 2 * maxBytes. Buffered providers/intermediates are checked after production. */
   maxTotalBytes?: number;
   strategy?: 'hash';
+  /** Reads a named zone in what runs over the fetched sides. */
+  zoneProvider?: import('@jarenjs/core/series').ZoneProvider;
+  /** The host's runtime record, read for its `zoneProvider`. */
+  runtime?: Partial<import('@jarenjs/core/runtime').Runtime>;
 }): {
   source<T = unknown>(name: string): FederatedSource<T>;
   readonly names: readonly string[];

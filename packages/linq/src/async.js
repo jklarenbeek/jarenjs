@@ -42,7 +42,7 @@
 
 import {
   compileDocument, isProviderSource, providerRoot, providerRelations, sharesScope,
-  SOURCE_OPTION_KEYS,
+  SOURCE_OPTION_KEYS, readRuntime,
 } from './provider.js';
 import {
   emitDocument, wrapTerminal, rootPhrase, snapshot, fanProjection, isReservedBinding, RESERVED_BINDINGS_TEXT,
@@ -1026,7 +1026,8 @@ function validateParams(bindings) {
  * @param {any} source - async iterable, sync iterable, cursor, push
  *   queue, or a provider
  * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
- *   pathFunctions?: any, limits?: any, registry?: object }} [options] -
+ *   pathFunctions?: any, limits?: any, zoneProvider?: any, registry?: object,
+ *   runtime?: any }} [options] -
  *   the engine registries, as `from()` takes them — the same closed set
  * @param {...undefined} unread - reads nothing: an argument after `options` is `JL0005`
  * @returns {AsyncSequence}
@@ -1036,11 +1037,11 @@ export function fromAsync(source, options, ...unread) {
   if (isProviderSource(source)) {
     return new AsyncSequence(
       { kind: 'provider', source, root: providerRoot(source) },
-      [], new Map(), readOptions(options, SOURCE_OPTION_KEYS, 'fromAsync()'), providerRelations(source));
+      [], new Map(), readRuntime(readOptions(options, SOURCE_OPTION_KEYS, 'fromAsync()'), source), providerRelations(source));
   }
   const iterate = adaptAsyncSource(source);
   return new AsyncSequence({ kind: 'source', iterate, rows: source }, [], new Map(),
-    readOptions(options, SOURCE_OPTION_KEYS, 'fromAsync()'));
+    readRuntime(readOptions(options, SOURCE_OPTION_KEYS, 'fromAsync()'), source));
 }
 
 /**

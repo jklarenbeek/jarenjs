@@ -60,7 +60,9 @@ const REQUEUE_OPTIONS = ['signal', 'deadline'];
 const RESET_OPTIONS = ['expectedGeneration', 'signal', 'deadline'];
 const SWEEP_OPTIONS = ['settledBefore', 'limit', 'signal', 'deadline'];
 const WORKER_OPTIONS = ['handlers', 'concurrency', 'pollInterval', 'leaseMs', 'owner', 'renew', 'onOutcome',
-  'effectSafety', 'backoffBase', 'backoffCap', 'stopGraceMs'];
+  'effectSafety', 'backoffBase', 'backoffCap', 'stopGraceMs', 'tick'];
+/** What a worker's `tick` object reads: the tick's own (§11). */
+const WORKER_TICK_OPTIONS = ['limit'];
 /** The longest delay a timer keeps: a longer one fires at once. */
 const TIMER_MAX = 2 ** 31 - 1;
 
@@ -896,13 +898,38 @@ export function createJobEngine(options) {
     // the zone provider is the runtime's: never a host default
     provider: runtime.zoneProvider ?? null,
   }) ?? null;
+  /** The refusal of a schedule call on a store opened without them. @param {string} what */
+  const unscheduled = (what) => new DbCompileError('JD0016', `jobs.${what} needs recurring schedules enabled: open the store with `
+    + "jobs: { schedules: jobSchedules() } from '@jarenjs/db/schedules'", `/jobs/${what}`);
   /** @param {'schedule' | 'unschedule' | 'schedules' | 'tick'} what */
   const scheduleCall = (what) => (/** @type {any[]} */ ...args) => {
-    if (scheduling === null) {
-      throw new DbCompileError('JD0016', `jobs.${what} needs recurring schedules enabled: open the store with `
-        + "jobs: { schedules: jobSchedules() } from '@jarenjs/db/schedules'", `/jobs/${what}`);
-    }
+    if (scheduling === null) throw unscheduled(what);
     return scheduling[what](...args);
+  };
+
+  /**
+   * A worker's `tick` option read: `null` for none (absent, `null` or
+   * `false`, as every other worker option reads `null`),
+   * else the tick's own options. `true` is a tick at
+   * its default limit. Refused at `createWorker`: without `jobs.schedules`
+   * `JD0016`, as every schedule call is; a malformed one `TypeError`, or
+   * `JD0013` for a member the tick does not read.
+   * @param {unknown} tick
+   * @returns {{ limit?: number } | null}
+   */
+  const workerTick = (tick) => {
+    if (tick === undefined || tick === null || tick === false) return null;
+    const object = tick !== null && typeof tick === 'object' && !Array.isArray(tick);
+    if (tick !== true && !object) throw new TypeError('createWorker: "tick" is true, false or { limit }');
+    if (scheduling === null) throw unscheduled('createWorker({ tick })');
+    if (tick === true) return {};
+    readOptions(tick, WORKER_TICK_OPTIONS, 'jobs.createWorker tick');
+    const { limit } = /** @type {{ limit?: unknown }} */ (tick);
+    // `tick()` reads a null limit as its default, and so does this
+    if (limit === undefined || limit === null) return {};
+    if (!Number.isSafeInteger(limit) || /** @type {number} */ (limit) < 1)
+      throw new TypeError('tick: limit is a positive integer');
+    return { limit: /** @type {number} */ (limit) };
   };
 
   /** A settling refusal, as opposed to a storage failure: the three
@@ -922,7 +949,9 @@ export function createJobEngine(options) {
    * @param {{ handlers: Record<string, Function>, concurrency?: number,
    *   pollInterval?: number, leaseMs?: number, owner?: string,
    *   backoffBase?: number, backoffCap?: number, renew?: boolean,
-   *   onOutcome?: (event: any) => void, effectSafety?: (job: any, context: any) => any }} workerOptions
+   *   onOutcome?: (event: any) => void, effectSafety?: (job: any, context: any) => any,
+   *   tick?: boolean | { limit?: number } }} workerOptions - `tick` fires the due
+   *   recurring schedules before each claim (§11), as `jobs.tick()` would
    */
   const createWorker = (workerOptions) => {
     const handlers = workerOptions?.handlers;
@@ -946,6 +975,7 @@ export function createJobEngine(options) {
     requireMilliseconds('createWorker', 'backoffBase', workerOptions.backoffBase);
     requireMilliseconds('createWorker', 'backoffCap', workerOptions.backoffCap);
     requireMilliseconds('createWorker', 'stopGraceMs', workerOptions.stopGraceMs, { timer: true });
+    const tickOptions = workerTick(workerOptions.tick);
     const owner = workerOptions.owner ?? uuid();
     const concurrency = workerOptions.concurrency ?? 1;
     if (!(Number.isInteger(concurrency) && concurrency >= 1)) {
@@ -972,6 +1002,9 @@ export function createJobEngine(options) {
       cancellations: 0,
       /** Leases replaced while a handler was still running. */
       renewals: 0,
+      /** Schedule ticks run before a claim (`tick`), and the ones that failed. */
+      ticks: 0,
+      tickErrors: 0,
       /** Attempts whose lease was lost mid-flight: aborted, and NEVER
        * counted as a completion or a failure, because this attempt no
        * longer speaks for the job. */
@@ -1377,9 +1410,51 @@ export function createJobEngine(options) {
       }
     };
 
+    /**
+     * Whether this `start()` has probed for the schedule table. The probe
+     * runs once per start, so an idle poll over a store with no schedule
+     * table runs exactly the statements it would without `tick`; the
+     * store's own `schedule()`, `schedules()` and `tick()` make the table
+     * known without one.
+     */
+    let probed = false;
+    /** The tick in flight, which every loop polling meanwhile shares. @type {Promise<void> | null} */
+    let ticking = null;
+    /** Fire the due schedules before a claim. Never throws: a failure is counted, and the claim goes ahead. */
+    const tickSchedules = async () => {
+      const schedules = /** @type {any} */ (scheduling);
+      try {
+        if (!schedules.known()) {
+          if (probed) return;
+          probed = true;
+          let present;
+          try { present = await io(() => schedules.present(), 'a worker schedule probe', shutdown.signal); }
+          catch (error) {
+            probed = false; // unknown still: the next poll asks again
+            throw error;
+          }
+          if (!present) return;
+        }
+        await io(() => schedules.tick(tickOptions), 'a worker tick', shutdown.signal);
+        stats.ticks += 1;
+      }
+      catch (error) {
+        // a tick the shutdown cancelled out of the queue is the stop working
+        if (/** @type {any} */ (error)?.code !== 'JD2064') stats.tickErrors += 1;
+      }
+    };
+    const tickBeforeClaim = () => {
+      if (ticking === null) ticking = tickSchedules().finally(() => { ticking = null; });
+      return ticking;
+    };
+
     /** @param {{ cancelled: boolean }} loopSession */
     const loop = async (loopSession) => {
       while (running && !loopSession.cancelled) {
+        if (tickOptions !== null) {
+          await tickBeforeClaim();
+          if (!running || loopSession.cancelled) return;
+        }
         let job;
         try {
           job = await io(() => claim({ kinds, owner, leaseMs }),
@@ -1422,6 +1497,7 @@ export function createJobEngine(options) {
         running = true;
         shutdown = new AbortController();
         session = { cancelled: false };
+        probed = false;
         loops = Array.from({ length: concurrency }, () => loop(session));
         // a restart re-registers what stop() removed: the
         // wake-on-enqueue hook and the stopAll membership

@@ -22,6 +22,7 @@
 import { STORE_SOURCE } from '@jarenjs/db';
 
 import { fromAsync, AsyncSequence } from '../async.js';
+import { lendZoneProvider } from '../provider.js';
 import { Graph } from './include.js';
 import { requireMembership } from './membership.js';
 import { registerLive } from './live.js';
@@ -37,18 +38,27 @@ const CHAIN_SYMBOLS = Object.getOwnPropertySymbols(AsyncSequence.prototype);
 
 /**
  * Give a handle the chain start over a provider: each member is
- * `fromAsync(provider)`'s, so the handle and the chain are one surface.
+ * `fromAsync(provider, options)`'s, so the handle and the chain are one surface.
  * @param {any} provider - the store's handle (a collection or an entity set)
  * @param {Record<string | symbol, any>} members - the handle being built
+ * @param {any} options - the chain's options: the client's zone provider,
+ *   so what a chain runs in memory reads a named zone as the store does
  */
-function chainStart(provider, members) {
+function chainStart(provider, members, options) {
   for (const name of CHAIN_MEMBERS) {
-    members[name] = (...args) => fromAsync(provider)[name](...args);
+    members[name] = (...args) => fromAsync(provider, options)[name](...args);
   }
   for (const symbol of CHAIN_SYMBOLS) {
-    members[symbol] = () => fromAsync(provider)[symbol]();
+    members[symbol] = () => fromAsync(provider, options)[symbol]();
   }
 }
+
+/**
+ * A built handle, lending the chains a host builds over it
+ * (`fromAsync(handle)`) the zone provider its own chains compile under.
+ * @param {any} handle @param {any} options - as {@link chainStart}'s
+ */
+const lent = (handle, options) => (options === undefined ? handle : lendZoneProvider(handle, options.zoneProvider));
 
 /**
  * The handle's members that take a query document, which take a chain as
@@ -66,14 +76,15 @@ function chainStart(provider, members) {
  * @param {any} provider - the store's handle (a collection or an entity set)
  * @param {Record<string | symbol, any>} members - the handle being built
  * @param {readonly string[]} thrown - the members that throw a refusal
+ * @param {any} chainOptions - the chain's options, as {@link chainStart}'s
  */
-function acceptChains(provider, members, thrown) {
+function acceptChains(provider, members, thrown, chainOptions) {
   for (const method of ['execute', 'query', 'explain']) {
     const read = provider[method];
     if (read === undefined) continue;
     const onlyOwn = onlyOwnSource(provider, method);
     members[method] = (source, options) => {
-      if (method === 'explain' && source === undefined) return fromAsync(provider).explain();
+      if (method === 'explain' && source === undefined) return fromAsync(provider, chainOptions).explain();
       if (!isChain(source) && !(source instanceof Graph)) return read(source, options);
       let resolved;
       try { resolved = resolveSource(source, options, onlyOwn); }
@@ -93,9 +104,11 @@ function acceptChains(provider, members, thrown) {
  * `JL0005` (`source.js`).
  * @param {any} provider - the store's handle the chain is built over
  * @param {() => any} registration - the store member that registers it
+ * @param {any} chainOptions - the chain's options, as {@link chainStart}'s
  */
-const liveOver = (provider, registration) => (source = fromAsync(provider), options = undefined) =>
-  registerLive(registration(), source, options, onlyOwnSource(provider, 'live'));
+const liveOver = (provider, registration, chainOptions) =>
+  (source = fromAsync(provider, chainOptions), options = undefined) =>
+    registerLive(registration(), source, options, onlyOwnSource(provider, 'live'));
 
 /**
  * The read-only handle over one many-to-many join table, the query root
@@ -112,9 +125,10 @@ const liveOver = (provider, registration) => (source = fromAsync(provider), opti
  * @param {string} name - the join table
  * @param {string} entity - an entity the join table relates: its set lends
  *   the document members, which take any document over the store's roots
+ * @param {any} options - the chain's options, as {@link chainStart}'s
  * @returns {any}
  */
-export function createJoinHandle(store, name, entity) {
+export function createJoinHandle(store, name, entity, options) {
   const set = store.entity(entity);
   const provider = Object.freeze({
     execute: set.execute,
@@ -126,10 +140,10 @@ export function createJoinHandle(store, name, entity) {
   });
   /** @type {Record<string | symbol, any>} */
   const members = { ...provider };
-  chainStart(provider, members);
-  acceptChains(provider, members, ['execute']);
-  members.live = liveOver(provider, () => store.live);
-  return Object.freeze(members);
+  chainStart(provider, members, options);
+  acceptChains(provider, members, ['execute'], options);
+  members.live = liveOver(provider, () => store.live, options);
+  return lent(Object.freeze(members), options);
 }
 
 /**
@@ -138,14 +152,15 @@ export function createJoinHandle(store, name, entity) {
  * @param {string} name - the entity
  * @param {Readonly<Record<string, any>>} memberships - the join handle of
  *   each many-to-many member, by member name
+ * @param {any} options - the chain's options, as {@link chainStart}'s
  * @returns {any}
  */
-export function createEntityHandle(store, name, memberships) {
+export function createEntityHandle(store, name, memberships, options) {
   const set = store.entity(name);
   /** @type {Record<string | symbol, any>} */
   const members = { ...set };
-  chainStart(set, members);
-  acceptChains(set, members, ['execute']);
+  chainStart(set, members, options);
+  acceptChains(set, members, ['execute'], options);
   members.memberships = memberships;
   members.include = (pick, spec) => new Graph(set, name).include(pick, spec);
   // the graph with nothing included: the root clauses, the keyset and
@@ -160,22 +175,23 @@ export function createEntityHandle(store, name, memberships) {
     requireMembership(set.relations, name, member, 'unlink');
     set.unlink(own, member, target);
   };
-  members.live = liveOver(set, () => store.live);
-  return Object.freeze(members);
+  members.live = liveOver(set, () => store.live, options);
+  return lent(Object.freeze(members), options);
 }
 
 /**
  * The handle over one collection.
  * @param {any} store - the opened store
  * @param {string} name - the collection
+ * @param {any} options - the chain's options, as {@link chainStart}'s
  * @returns {any}
  */
-export function createCollectionHandle(store, name) {
+export function createCollectionHandle(store, name, options) {
   const collection = store.collection(name);
   /** @type {Record<string | symbol, any>} */
   const members = { ...collection };
-  chainStart(collection, members);
-  acceptChains(collection, members, ['execute', 'query']);
+  chainStart(collection, members, options);
+  acceptChains(collection, members, ['execute', 'query'], options);
   // `all` is two things on a collection handle, told apart by the
   // argument: a predicate is the chain's quantifier (does every document
   // satisfy it?); nothing, or all()'s options, is the collection's every
@@ -183,6 +199,6 @@ export function createCollectionHandle(store, name) {
   const quantifier = members.all;
   members.all = (/** @type {any} */ arg, /** @type {any[]} */ ...rest) =>
     (typeof arg === 'function' ? quantifier(arg, ...rest) : collection.all(arg));
-  members.live = liveOver(collection, () => collection.live);
-  return Object.freeze(members);
+  members.live = liveOver(collection, () => collection.live, options);
+  return lent(Object.freeze(members), options);
 }

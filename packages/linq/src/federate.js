@@ -18,7 +18,7 @@
  */
 
 import { LinqBuildError, LinqRuntimeError, spellValue } from './errors.js';
-import { compileDocument, isProviderSource, providerRoot } from './provider.js';
+import { compileDocument, isProviderSource, providerRoot, readRuntime } from './provider.js';
 import { memberSegment } from './expression.js';
 import { readOptions, rootPhrase } from './document.js';
 import { parseJSONPath } from '@jarenjs/json/path';
@@ -28,7 +28,8 @@ const STRATEGIES = new Set(['hash']);
 
 /** The members a federation spec carries: a closed set, so a misspelt
  * budget is refused rather than silently replaced by its default. */
-const SPEC_MEMBERS = Object.freeze(['sources', 'maxRows', 'maxBytes', 'maxTotalRows', 'maxTotalBytes', 'strategy']);
+const SPEC_MEMBERS = Object.freeze(['sources', 'maxRows', 'maxBytes', 'maxTotalRows', 'maxTotalBytes', 'strategy',
+  'zoneProvider', 'runtime']);
 
 /** The members a described source carries beside its provider. */
 const SOURCE_MEMBERS = Object.freeze(['provider', 'estimatedRows']);
@@ -353,7 +354,10 @@ function childDocument(side) {
  * An explicit federation boundary over two or more provider sources.
  *
  * @param {{ sources: Record<string, any>, maxRows: number, maxBytes: number,
- *   maxTotalRows?: number, maxTotalBytes?: number, strategy?: string }} spec
+ *   maxTotalRows?: number, maxTotalBytes?: number, strategy?: string,
+ *   zoneProvider?: any, runtime?: any }} spec - `zoneProvider` (or the
+ *   `runtime` record's) reads a named zone in what runs over the fetched
+ *   rows, as `from()`'s does; each side runs under its own provider's
  * @returns {{ source: (name: string) => any, names: readonly string[] }}
  * @example
  * const fed = federate({
@@ -373,6 +377,8 @@ export function federate(spec) {
       'federate() takes its sources as an object of name → provider');
   }
   readOptions(spec, SPEC_MEMBERS, 'federate()');
+  // what runs here, over the fetched sides, reads a named zone through this
+  const { zoneProvider } = readRuntime({ zoneProvider: spec.zoneProvider, runtime: spec.runtime }, null);
   const names = Object.keys(sources);
   if (names.length < 2) {
     throw new LinqBuildError('JL0005',
@@ -463,7 +469,7 @@ export function federate(spec) {
         sequenceItems: Math.min(options?.limits?.sequenceItems ?? Infinity, budget.maxRows),
         resultItems: Math.min(options?.limits?.resultItems ?? Infinity, budget.maxRows) } : options?.limits;
       const compiled = compileDocument(intermediate ? [current.resident] : current.resident,
-        { ...options, limits, externals: options?.externalNames ?? [] });
+        { ...options, zoneProvider, limits, externals: options?.externalNames ?? [] });
       try { return compiled(input, options?.externals ?? {}); }
       catch (error) {
         if (intermediate && error.code === 'JQ2009' && /sequenceItems|resultItems/.test(error.message)) throw new LinqRuntimeError('JL2008',

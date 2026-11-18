@@ -288,7 +288,7 @@ be reclaimed: the worker renews while it runs (§6).
 ## 6. Workers and concurrency
 
 `createWorker({ handlers, concurrency, pollInterval, leaseMs, owner,
-renew, onOutcome, effectSafety, backoffBase, backoffCap, stopGraceMs })`
+renew, onOutcome, effectSafety, backoffBase, backoffCap, stopGraceMs, tick })`
 returns `{ start(), stop(), stats(), leases() }`. The options are a closed
 set (any other member is `JD0013` naming the nearest, as for `enqueue`), and
 each is checked before the worker exists: `leaseMs` is a positive finite
@@ -310,6 +310,22 @@ a third of its lease, and at most every 2^31 − 1 milliseconds:
   store wakes every idle local loop immediately, so same-process
   latency is not poll-bound; **cross-process wake-up is polling**,
   plainly (§8);
+- `tick` (`true`, or `{ limit }` as `tick()` takes it; absent, `null` or
+  `false` by default) fires the due recurring schedules (§11) before each claim,
+  through `tick()` itself, so the jobs a tick fires are claimable by that
+  same claim and two workers ticking one schedule fire each occurrence
+  once. It needs `jobs.schedules` (`JD0016` at `createWorker` otherwise);
+  anything but `true`, `false` or `{ limit }` is a `TypeError`, and another
+  member `JD0013`. One tick runs at a time per worker, shared by its loops.
+  While the schedule table does not exist, each `start()` asks once
+  whether it does — then an idle poll runs exactly the statements it runs
+  without `tick`; this store's own `schedule()`, `schedules()` or `tick()`
+  finding the table starts the ticking at once, and a table another
+  process creates later is found at the worker's next `start()`. Once the
+  table exists, every poll pays one tick transaction (the due-row read)
+  before its claim. A tick that fails — a zone without the runtime's
+  provider (`JD0016`), a busy database — is counted in `stats().tickErrors`
+  (`stats().ticks` counts the ones that ran) and never stops the claim;
 - retry backoff is `min(backoffCap, backoffBase × 2^(attempts − 1))`,
   jittered to between half and all of itself (defaults 1 s and 60 s);
   `maxAttempts` belongs to the JOB (`enqueue(kind, payload,
@@ -692,10 +708,11 @@ await store.jobs.schedule({
   series: compileRecurrence({ dtstart: floatingValue('2026-03-02', '09:00'), rrule: 'FREQ=WEEKLY;BYDAY=MO' }),
   zone: 'Europe/Amsterdam', zoneSource: 'explicit', missed: 'skip',
 });
-await store.jobs.tick(); // on the host's own cadence
+await store.jobs.tick(); // on the host's own cadence, or:
+store.jobs.createWorker({ handlers: { report: async () => {} }, tick: true }).start(); // before each claim (§6)
 ```
 
-- **`schedule({ id, kind, payload?, series, zone?, zoneSource?, policy?, missed, limits? })`**
+- **`schedule({ id, kind, payload?, series, zone?, zoneSource?, policy?, missed, limits?, latenessMs? })`**
   validates and computes the definition before anything is stored, and
   answers the stored record:
   - `series` is a compiled recurrence (`compileRecurrence`) or a series
@@ -711,7 +728,11 @@ await store.jobs.tick(); // on the host's own cadence
     (`'rfc5545'`, `'later'`, `'reject'`); for a utc or zoned series it is
     the rule's own, and any other is refused. It defaults to the rule's.
   - `missed` is `'skip'`, `'once'` or `{ catchUp: n }` (below); `limits`
-    are the calendar's expansion limits for each search.
+    are the calendar's expansion limits for each search; `latenessMs`, a
+    positive whole number of milliseconds, is how late an occurrence may
+    fire (below). It is stored in the `limits` column's JSON beside the
+    calendar's limits, and surfaced as its own member (`null` when absent),
+    never in `limits`; a `latenessMs` inside `limits` is `JD0013`.
   - Any other member, or a malformed one, is `JD0013`.
   - Writing an existing id replaces its definition and keeps its history:
     the next occurrence is the first after its last fired one, or from its
@@ -728,11 +749,16 @@ await store.jobs.tick(); // on the host's own cadence
     guarded by the instant it was due at. On PostgreSQL the due rows are
     read `FOR UPDATE SKIP LOCKED`, as a claim reads jobs; SQLite's single
     writer serializes ticks. The answers are the same;
-  - an occurrence is **missed** when a later one was due too by the time
-    a tick saw it, after downtime or a tick that came late. The latest due
-    occurrences (every one at the latest instant) always fire; `'skip'`
-    fires no missed one, `'once'` the latest missed one, `{ catchUp: n }`
-    the latest n. The rest are counted as skipped;
+  - an occurrence due more than `latenessMs` before the tick's instant
+    (`runtime.now`) is skipped under every `missed` policy, the latest one
+    too; one exactly `latenessMs` late fires. Of the rest, an occurrence is
+    **missed** when a later one was due too by the time a tick saw it, after
+    downtime or a tick that came late. The latest due occurrences (every one
+    at the latest instant) fire; `'skip'` fires no missed one, `'once'` the
+    latest missed one, `{ catchUp: n }` the latest n. Every occurrence that
+    does not fire is counted as skipped, and the schedule passes it:
+    `lastRunAt` and `lastRecurrenceId` name the latest due occurrence,
+    fired or skipped;
   - a tick in a process whose runtime has no zone provider refuses
     `JD0016` when it meets a schedule in a zone, and leaves every schedule
     as it was: the fault is the process's, not the schedule's.

@@ -591,12 +591,11 @@ costs a descriptor plus examples and no UI code at all.
   in JS. Explain reports this honestly, so the cost is unbounded but nothing is hidden. Wanted:
   the `'$[*]'` operand of a top-level `$exists` or `$subsequence` planned as the `$for` scan it
   abbreviates, as `'$[*]'` alone and `{ $count: '$[*]' }` are.
-- [ ] **A job worker does not tick recurring schedules.** `store.jobs.tick()` fires due schedules only
-  when a host calls it on its own timer; a worker's poll does not. Wanted: a worker option that ticks
-  before it claims, leaving an idle poll's statements unchanged when no store schedules.
-- [ ] **A late occurrence under `missed: 'skip'` fires however late it is.** An occurrence counts as
-  missed only when a later one was also due, so a lone overdue occurrence still fires after a long
-  downtime. Wanted: an optional deadline past which even the latest due occurrence is skipped.
+- [ ] **A running worker does not see a schedule table another process creates.** A worker with
+  `tick` asks once per `start()` whether the schedule table exists, so its idle poll runs no extra
+  statement; a database's first schedule written by another process is ticked from that worker's
+  next `start()`, or once its own store reads schedules. Wanted: discovery without a statement per
+  idle poll.
 The fluent front door and the SQLite document store shipped as a pair;
 what each does is its own documentation's job
 ([linq](../packages/linq/README.md) ·
@@ -1125,12 +1124,6 @@ what each does is its own documentation's job
   is `JL0005` ("join takes another async sequence over a provider … as its inner side") while
   `A.join(P.where(…), …)` is accepted and `A.join(fromAsync(P), …)` is the native spelling; the
   handle could be read as `fromAsync(P)` ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
-
-- [ ] **A linq chain cannot pass a zone provider.** A chain's `dateFormat(pattern, zone)`
-  and a series operator's named `zone` compile only with a zone provider, and no chain or
-  `open()` option carries one, so `toArray()` refuses a named zone (`JQ0003`) while `'UTC'`
-  runs. The same document runs under `compileJsonQuery(doc, { zoneProvider })`. Wanted: the
-  runtime record's zone provider reaching a chain's compile.
 
 ## @jarenjs/josl
 

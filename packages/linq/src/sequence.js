@@ -27,7 +27,7 @@ import {
 } from './document.js';
 import {
   classifySource, compileDocument, executeInMemory, providerRoot, providerRelations, sharesScope,
-  SOURCE_OPTION_KEYS,
+  SOURCE_OPTION_KEYS, readRuntime,
 } from './provider.js';
 import { asyncFromSequence } from './async.js';
 import { LinqBuildError, LinqRuntimeError } from './errors.js';
@@ -777,12 +777,16 @@ export class Sequence {
  *   set), one carrying `relations` lets a relation member navigate (§3),
  *   one carrying `roots` and no `root` of its own is `JL0007`
  * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
- *   pathFunctions?: any, limits?: any, registry?: object }} [options] -
+ *   pathFunctions?: any, limits?: any, zoneProvider?: any, registry?: object,
+ *   runtime?: any }} [options] -
  *   the engine registries this sequence compiles against, under the
  *   engine's own option names: `compileTypeTest` enables `ofType`/`cast`,
  *   `collations` makes `orderBy(..., {collation})` executable in memory,
  *   `functions`/`pathFunctions` make `$call` and custom path functions
- *   resolvable, and `limits` bounds step and result counts. Pass
+ *   resolvable, `limits` bounds step and result counts, and `zoneProvider`
+ *   reads a named zone (`dateFormat(pattern, zone)`, a series operator's
+ *   `zone`); `runtime` is the host's runtime record, whose zone provider
+ *   stands in for an absent `zoneProvider`. Pass
  *   `registry` when the hooks are rebuilt per call, so compiled documents
  *   still share a cache partition. A closed set: any other member, or an
  *   argument that is not a plain object, is `JL0005`.
@@ -795,7 +799,7 @@ export function from(source, options, ...unread) {
   const root = kind === 'provider' ? providerRoot(source) : '$[*]';
   const relations = kind === 'provider' ? providerRelations(source) : null;
   return new Sequence(source, kind, root, [], new Map(),
-    readOptions(options, SOURCE_OPTION_KEYS, 'from()'), relations);
+    readRuntime(readOptions(options, SOURCE_OPTION_KEYS, 'from()'), source), relations);
 }
 
 /**
@@ -810,7 +814,8 @@ export function from(source, options, ...unread) {
  * @param {any} source - iterable or provider, as `from`
  * @param {any} document - a Jaren query document
  * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
- *   pathFunctions?: any, limits?: any, registry?: object }} [options] -
+ *   pathFunctions?: any, limits?: any, zoneProvider?: any, registry?: object,
+ *   runtime?: any }} [options] -
  *   as {@link from}. A SAVED document is the case `limits` exists for:
  *   bound its steps and results before running it.
  * @param {...undefined} unread - reads nothing: an argument after `options` is `JL0005`
@@ -818,7 +823,7 @@ export function from(source, options, ...unread) {
  */
 export function fromDocument(source, document, options, ...unread) {
   requireNoTrailingArgument(unread, 'fromDocument');
-  const read = readOptions(options, SOURCE_OPTION_KEYS, 'fromDocument()');
+  const read = readRuntime(readOptions(options, SOURCE_OPTION_KEYS, 'fromDocument()'), source);
   let root = document;
   if (root !== null && typeof root === 'object' && !Array.isArray(root)
     && (Object.hasOwn(root, '$expr') || Object.hasOwn(root, '$query'))) {

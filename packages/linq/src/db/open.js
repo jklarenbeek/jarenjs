@@ -199,6 +199,13 @@ export async function open(model, options) {
     }
   }
 
+  // what a handle's chain runs in memory (a phase after a host callback, an
+  // aggregate over it) reads a named zone through the store's own provider:
+  // the option, else the runtime record's, as the store reads them
+  const zoneProvider = storeOptions.zoneProvider !== undefined ? storeOptions.zoneProvider
+    : storeOptions.runtime?.zoneProvider ?? null;
+  const chainOptions = zoneProvider === null ? undefined : Object.freeze({ zoneProvider });
+
   // the names every record of this client has, in the store's order
   const entityMembers = lazyMembersOf(store.roots ?? []);
   const collectionMembers = lazyMembersOf(Object.keys(collectionsOf(model) ?? {}));
@@ -224,7 +231,7 @@ export async function open(model, options) {
         if (relation.kind !== 'manyToMany') continue;
         let join = joins.get(relation.joinTable);
         if (join === undefined) {
-          join = createJoinHandle(over, relation.joinTable, name);
+          join = createJoinHandle(over, relation.joinTable, name, chainOptions);
           joins.set(relation.joinTable, join);
         }
         setObjectMember(record, member, join);
@@ -232,8 +239,8 @@ export async function open(model, options) {
       return Object.freeze(record);
     };
     return {
-      entities: lazyRecord(entityMembers, (name) => createEntityHandle(over, name, membershipsOf(name))),
-      collections: lazyRecord(collectionMembers, (name) => createCollectionHandle(over, name)),
+      entities: lazyRecord(entityMembers, (name) => createEntityHandle(over, name, membershipsOf(name), chainOptions)),
+      collections: lazyRecord(collectionMembers, (name) => createCollectionHandle(over, name, chainOptions)),
     };
   };
 

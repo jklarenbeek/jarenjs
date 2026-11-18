@@ -27,7 +27,15 @@ import { SCHEDULE_SEAMS } from './job-schedules.js';
 const TICK_OPTIONS = Object.freeze(['limit']);
 
 /** The members a schedule definition reads. */
-const SCHEDULE_OPTIONS = Object.freeze(['id', 'kind', 'payload', 'series', 'zone', 'zoneSource', 'policy', 'missed', 'limits']);
+const SCHEDULE_OPTIONS = Object.freeze(['id', 'kind', 'payload', 'series', 'zone', 'zoneSource', 'policy', 'missed', 'limits',
+  'latenessMs']);
+/**
+ * Where a schedule's `latenessMs` is stored: a member of the `limits`
+ * column's JSON beside the calendar's own limits, so no column is added
+ * and a release that reads only the calendar's limits refuses the member
+ * by name (`JY0014`, the schedule `stalled`) rather than firing late.
+ */
+const LATENESS = 'latenessMs';
 const POLICIES = Object.freeze(['rfc5545', 'later', 'reject']);
 const DAY = 86400000;
 /** The horizons a search for the next occurrence widens through, in days; the last is the limit's whole horizon. */
@@ -93,6 +101,7 @@ function reviveSeries(value) {
  * @property {'rfc5545' | 'later' | 'reject'} policy
  * @property {'skip' | 'once' | { catchUp: number }} missed
  * @property {Record<string, number> | null} limits
+ * @property {number | null} latenessMs - how late a due occurrence may fire
  */
 
 /**
@@ -141,6 +150,9 @@ function readSchedule(spec, storedJson, provider) {
     }
     limits = { ...spec.limits };
   }
+  const latenessMs = spec.latenessMs ?? null;
+  if (latenessMs !== null && !(Number.isSafeInteger(latenessMs) && latenessMs >= 1))
+    throw refuse('latenessMs', 'is a positive whole number of milliseconds');
   return {
     id, kind,
     payload: spec.payload === undefined || spec.payload === null ? null : storedJson(spec.payload, 'schedule: "payload"'),
@@ -152,7 +164,32 @@ function readSchedule(spec, storedJson, provider) {
     policy,
     missed: isRecord(missed) ? { catchUp: missed.catchUp } : missed,
     limits,
+    latenessMs,
   };
+}
+
+/**
+ * The `limits` column's text for a definition: the calendar's limits and
+ * the lateness beside them, or NULL when there is neither.
+ * @param {ScheduleDefinition} definition
+ * @returns {string | null}
+ */
+function storedLimits(definition) {
+  if (definition.latenessMs === null)
+    return definition.limits === null ? null : JSON.stringify(definition.limits);
+  return JSON.stringify({ ...definition.limits, [LATENESS]: definition.latenessMs });
+}
+
+/**
+ * The `limits` column read back: the calendar's limits, and the lateness
+ * stored beside them.
+ * @param {unknown} text
+ * @returns {{ limits: Record<string, number> | null, latenessMs: number | null }}
+ */
+function readLimits(text) {
+  if (text === null || text === undefined) return { limits: null, latenessMs: null };
+  const { [LATENESS]: latenessMs = null, ...limits } = JSON.parse(String(text));
+  return { limits: Object.keys(limits).length === 0 ? null : limits, latenessMs };
 }
 
 /**
@@ -168,7 +205,7 @@ function definitionOfRow(row) {
     series: read.series, seriesText: row.series, seriesKind: read.kind,
     zone: row.zone ?? read.zone, zoneSource: row.zone_source ?? null,
     policy: row.policy, missed: JSON.parse(row.missed),
-    limits: row.limits === null || row.limits === undefined ? null : JSON.parse(row.limits),
+    ...readLimits(row.limits),
   };
 }
 
@@ -254,20 +291,26 @@ function occurrencesAfter(definition, provider, span) {
 }
 
 /**
- * Which due occurrences fire. An occurrence is missed when a later one
- * was due too by the time a tick saw it; the latest due ones (all those
- * at the latest instant) always fire. `skip` fires no missed one,
- * `once` the latest missed one, `{ catchUp: n }` the latest n.
+ * Which due occurrences fire. One due more than `latenessMs` before the
+ * tick's instant is skipped, whatever `missed` says - the latest one too.
+ * Of the rest, an occurrence is missed when a later one was due too by
+ * the time a tick saw it; the latest due ones (all those at the latest
+ * instant) fire. `skip` fires no missed one, `once` the latest missed
+ * one, `{ catchUp: n }` the latest n.
  * @param {{ recurrenceId: string, at: number }[]} due - in order
  * @param {'skip' | 'once' | { catchUp: number }} missed
+ * @param {number | null} latenessMs - how late an occurrence may fire, or no bound
+ * @param {number} at - the tick's instant
  */
-function firedOf(due, missed) {
-  if (due.length === 0) return { fire: [], skipped: 0 };
-  const latest = due[due.length - 1].at;
-  const late = due.filter((occurrence) => occurrence.at < latest);
-  const current = due.slice(late.length);
+function firedOf(due, missed, latenessMs, at) {
+  const timely = latenessMs === null ? due : due.filter((occurrence) => at - occurrence.at <= latenessMs);
+  const tooLate = due.length - timely.length;
+  if (timely.length === 0) return { fire: [], skipped: tooLate };
+  const latest = timely[timely.length - 1].at;
+  const late = timely.filter((occurrence) => occurrence.at < latest);
+  const current = timely.slice(late.length);
   const take = missed === 'skip' ? 0 : missed === 'once' ? Math.min(1, late.length) : Math.min(missed.catchUp, late.length);
-  return { fire: [...late.slice(late.length - take), ...current], skipped: late.length - take };
+  return { fire: [...late.slice(late.length - take), ...current], skipped: late.length - take + tooLate };
 }
 
 /** @param {unknown} value */
@@ -287,7 +330,7 @@ function publicSchedule(row) {
     zoneSource: row.zone_source ?? null,
     policy: row.policy,
     missed: JSON.parse(row.missed),
-    limits: row.limits === null || row.limits === undefined ? null : JSON.parse(row.limits),
+    ...readLimits(row.limits),
     state: row.state,
     nextRunAt: epoch(row.next_run_at),
     nextRecurrenceId: row.next_recurrence_id ?? null,
@@ -380,7 +423,7 @@ function attach(context) {
           lastRunAt === null ? from - 1 : from);
         const values = [definition.id, definition.kind, definition.payload, definition.seriesText,
           definition.zone, definition.zoneSource, definition.policy, JSON.stringify(definition.missed),
-          definition.limits === null ? null : JSON.stringify(definition.limits), state,
+          storedLimits(definition), state,
           next?.at ?? null, next?.recurrenceId ?? null, lastRunAt, existing?.last_recurrence_id ?? null,
           revisionOf(definition), existing?.counts ?? JSON.stringify({ fired: 0, skipped: 0 }),
           stall === null ? null : JSON.stringify(stall), createdAt, at];
@@ -446,7 +489,7 @@ function attach(context) {
               if (typeof failure?.code !== 'string' || !failure.code.startsWith('JY')) throw error;
               outcome = { state: 'stalled', due: [], next: null, stall: { code: failure.code, message: failure.message } };
             }
-            const { fire, skipped: passed } = firedOf(outcome.due, JSON.parse(row.missed));
+            const { fire, skipped: passed } = firedOf(outcome.due, JSON.parse(row.missed), readLimits(row.limits).latenessMs, at);
             const counts = JSON.parse(row.counts);
             counts.fired += fire.length;
             counts.skipped += passed;
@@ -477,7 +520,13 @@ function attach(context) {
       }));
   };
 
-  return { schedule, unschedule, schedules, tick };
+  return {
+    schedule, unschedule, schedules, tick,
+    // a worker's own view of the table (§6): whether it is known to
+    // exist, read without a statement, and the probe that learns it
+    known: () => schedulesExist,
+    present: schedulesPresent,
+  };
 }
 
 /**

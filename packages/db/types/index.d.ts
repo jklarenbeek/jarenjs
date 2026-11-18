@@ -2544,7 +2544,9 @@ export interface JobWorker {
      * never a failure. */
     lostSettlements: number;
     /** Attempts cancelled through `cancel()` while their handler ran. */
-    cancellations: number };
+    cancellations: number;
+    /** Schedule ticks run before a claim (`tick`), and the ones that failed. */
+    ticks: number; tickErrors: number };
   /** The leases this worker holds right now: one per in-flight attempt,
    * each the newest that attempt has been given. */
   leases(): readonly JobLease[];
@@ -2587,6 +2589,10 @@ export interface JobWorkerOptions {
   backoffCap?: number;
   /** How long `stop()` waits for in-flight handlers by default. */
   stopGraceMs?: number;
+  /** Fire the due recurring schedules before each claim (JOBS-FORMAT §6,
+   * §11): `true`, or the tick's own `{ limit }`. Needs `jobs.schedules`
+   * (`JD0016` otherwise). */
+  tick?: boolean | { limit?: number };
 }
 
 export interface JobsApi {
@@ -2701,6 +2707,9 @@ export interface JobScheduleDefinition {
   /** The calendar's expansion limits for each search; a search a limit stops
    * leaves the schedule `stalled`. */
   limits?: { maxOccurrences?: number; maxWork?: number; maxProviderCalls?: number; maxHorizonDays?: number } | null;
+  /** How late a due occurrence may fire, in whole milliseconds: one due
+   * longer before the tick is skipped under every `missed` policy. */
+  latenessMs?: number | null;
 }
 
 /** A stored schedule, as `schedule()` and `schedules()` answer it. */
@@ -2714,6 +2723,7 @@ export interface JobScheduleRecord {
   readonly policy: 'rfc5545' | 'later' | 'reject';
   readonly missed: 'skip' | 'once' | { catchUp: number };
   readonly limits: Record<string, number> | null;
+  readonly latenessMs: number | null;
   /** `active` waits for `nextRunAt`; `unresolved` has no zone; `stalled` was
    * stopped by a limit or its data (see `stall`); `ended` has no occurrence left. */
   readonly state: 'active' | 'unresolved' | 'stalled' | 'ended';

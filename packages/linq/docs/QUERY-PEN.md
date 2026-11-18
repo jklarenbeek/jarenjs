@@ -697,14 +697,32 @@ executable in memory:
 | `functions` | `$call` in a hand-written or saved document |
 | `pathFunctions` | custom RFC 9535 path function extensions |
 | `limits` | step, depth and sequence bounds — the reason a SAVED document can be run at all. `resultItems` does not bind a chain: a terminal reads ONE packed window (§6), so the bound that guards a chain's size is `sequenceItems` on its phrases; on the async surface only `steps`/`depth` and a barrier phase's `sequenceItems` apply, because streaming stages evaluate one item at a time |
+| `zoneProvider` | a named zone — `dateFormat(pattern, 'Europe/Amsterdam')`, a series operator's `zone` — which is `JQ0003` without one (`'UTC'` needs none) |
 | `registry` | an explicit cache-partition key, when the hooks above are rebuilt per call |
+| `runtime` | the host's runtime record (`@jarenjs/core/runtime`): its `zoneProvider` stands in for an absent `zoneProvider`, as `openStore` reads it, and nothing else of it is read; a record the runtime refuses is its `TypeError` |
 
 Compiled documents are cached per registry COMBINATION, not per document
 alone: the same document compiles to different code with and without a
 collation registry, so sharing one partition would answer a caller who
-passed no collations with the compiled-with version.
+passed no collations with the compiled-with version. The zone provider is
+part of each compiled document's key the way `@jarenjs/json/formula` keys
+it: `['zones', name, revision]` for the identity a provider declares
+(`createIntlZoneProvider({ revision })` and a compiled VTIMEZONE declare
+one), so two providers at different revisions never share a compiled
+document, and the provider object itself when it declares none. An
+`identity` that is not `{ name, revision }` with non-empty strings is a
+`TypeError`.
 
-The six are a CLOSED set, on `from`, `fromAsync` and `fromDocument`
+A client from `open()` (DB-CLIENT) hands its store's zone provider — the
+`zoneProvider` option, else the `runtime` record's — to every chain over
+its handles, and to a `from(handle)` / `fromAsync(handle)` that names none
+of its own, so the part of a chain that runs in memory (a phase after a
+`mapAsync`, an aggregate over it) reads a named zone as the store's
+statement does. `federate({ …, zoneProvider })` (or `runtime`) is the one
+what runs over the fetched sides reads; each side runs under its own
+provider's.
+
+The eight are a CLOSED set, on `from`, `fromAsync` and `fromDocument`
 alike: any other member is `JL0005`, naming the nearest one when it is
 close (`from(rows, { limit })` — `did you mean 'limits'?`), and an
 options argument that is not a plain object (a string, `null`, an array)
@@ -955,6 +973,8 @@ is exactly what admits the join. The federation is what executes it:
    retained for the engine to compare.
 4. The original query engine decides the result over those sets, in the
    original binding order. Fetch order never changes tuple or result order.
+   A named zone in that part reads the federation's own `zoneProvider` (or
+   its `runtime` record's, §8.1), never a side's.
    Packed joins emitted by successive `.join()` calls execute inside out;
    their projected results become bounded intermediate sides. Aliases of one
    source retain independent fetched sets.
@@ -1593,7 +1613,7 @@ that preserves it, so there is no spelling that is allowed to.
 | `from(rows).elementAtOrDefault(9, (r) => r.n > 3)`, or a third argument | `elementAtOrDefault() takes one default value, not a predicate — it reads no callback, so the one passed would be ignored or answered as the default; filter first: where(pred).elementAtOrDefault(index, value)` | `from(rows).where((r) => r.n.gt(3)).elementAtOrDefault(9, value)` |
 | `from(rows, { limit: { steps: 3 } })` | `from() does not take 'limit' — did you mean 'limits'?` | `{ limits: { steps: 3 } }` |
 | `from(rows, {}, 5)`; `fromAsync(rows, {}, 5)` and `fromDocument(rows, document, {}, 5)` likewise | `from() would ignore the argument past its last; pass the engine registries in the one options object` | `from(rows, { limits: { steps: 3 } })`; an `undefined` in that place is no argument |
-| `from(rows, { bogus: 1 })` | `from() does not take 'bogus'; the options are compileTypeTest, functions, collations, pathFunctions, limits, registry` | one of the six (§8.1); `fromAsync()` and `fromDocument()` refuse the same way, by their own names |
+| `from(rows, { bogus: 1 })` | `from() does not take 'bogus'; the options are compileTypeTest, functions, collations, pathFunctions, limits, zoneProvider, registry, runtime` | one of the eight (§8.1); `fromAsync()` and `fromDocument()` refuse the same way, by their own names |
 | `from(rows, 'x')`, `from(rows, null)` | `from() takes a plain options object` | an object literal, or no second argument |
 | `orderBy((u) => u.n, { emtpy: 'greatest' })` | `orderBy() does not take 'emtpy' — did you mean 'empty'?` | `{ empty: 'greatest' }` |
 | `orderBy((u) => u.n, null)` | `orderBy() takes a plain options object` | `{}`, or no second argument |

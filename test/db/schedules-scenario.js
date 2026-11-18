@@ -211,7 +211,7 @@ export function assertScenario(t, provider, assert) {
     id: 'weekly', kind: 'report', payload: { to: 'team' },
     series: { kind: 'recurrence', dtstart: { kind: 'floating', date: '2026-03-02', time: '09:00' }, duration: 'PT1H',
       rrule: { FREQ: 'WEEKLY', BYDAY: ['MO'] }, policy: 'rfc5545' },
-    zone: ZONE, zoneSource: 'explicit', policy: 'rfc5545', missed: 'skip', limits: null, state: 'active',
+    zone: ZONE, zoneSource: 'explicit', policy: 'rfc5545', missed: 'skip', limits: null, latenessMs: null, state: 'active',
     nextRunAt: Date.UTC(2026, 10, 2, 8), nextRecurrenceId: '2026-11-02T09:00:00',
     lastRunAt: Date.UTC(2026, 9, 26, 8), lastRecurrenceId: '2026-10-26T09:00:00', providerRevision: 'host ICU',
     counts: { fired: 5, skipped: 27 }, stall: null, createdAt: Date.UTC(2026, 2, 20, 12), updatedAt: Date.UTC(2026, 9, 26, 8),

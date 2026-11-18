@@ -3987,6 +3987,50 @@ plans that rebuilds the table drops the CHECK, which this release's
   schemas apart by identity compares them with `prepared.model`'s.
 - No table, column, index or CHECK changes.
 
+## 76. A worker ticks recurring schedules, a schedule bounds its lateness, and a linq chain takes a zone provider
+
+- `jobs.createWorker({ tick })` is new: `true`, or `{ limit }` as `jobs.tick()`
+  takes it, fires the due schedules before each claim
+  ([JOBS-FORMAT §6](JOBS-FORMAT.md#6-workers-and-concurrency)). A worker
+  without it (absent or `false`) runs exactly the statements it ran. With it,
+  an idle poll over a store with no schedule table runs the same statements
+  too: each `start()` asks once whether the table exists, and a table another
+  process creates later is found at the worker's next `start()` (this store's
+  own `schedule()`, `schedules()` or `tick()` finding it starts the ticking at
+  once). `tick` without `jobs.schedules` is `JD0016`, a malformed one a
+  `TypeError`. `worker.stats()` has two more members, `ticks` and
+  `tickErrors`.
+- A schedule takes `latenessMs`, a positive whole number of milliseconds: an
+  occurrence due longer than that before a tick is skipped under every
+  `missed` policy, the latest one too ([JOBS-FORMAT §11](JOBS-FORMAT.md#11-recurring-schedules)).
+  Without it a schedule fires as before. Every record `schedule()` and
+  `schedules()` answer has a `latenessMs` member, `null` when none was given;
+  a comparison of a whole record sees it.
+- It is stored as the member `latenessMs` of the `limits` column's JSON
+  beside the calendar's limits; `limits` in a record never shows it. No
+  table, column, index or CHECK changes: the schedule table's DDL and every
+  schedule statement are what they were, on both engines.
+- `from()`, `fromAsync()`, `fromDocument()` and `federate()` from
+  `@jarenjs/linq` take `zoneProvider`, and `runtime` (its `zoneProvider`
+  read, the option winning); a chain over a client's handle (`open()`)
+  compiles what it runs in memory — a phase after a `mapAsync`, an aggregate
+  over it, a `fromAsync(handle)` naming none of its own — under the store's
+  zone provider. Such a chain over a named zone answered `JQ0003` and now
+  answers what the store answers; the refusal of an unknown option names the
+  eight members (`… limits, zoneProvider, registry, runtime`).
+
+**Downgrade.** The previous release opens, reads, queries, plans, migrates and
+introspects every store this one writes as before, and ticks every schedule
+written without `latenessMs` as before. A schedule written with it reads, in
+the previous release's `schedules()`, as `limits: { latenessMs }`; its `tick()`
+fires nothing for it and leaves it `stalled` with `stall: { code: 'JY0014',
+message: 'JY0014: latenessMs is not a recurrence limit at
+/options/limits/latenessMs' }` — never a late fire. The stall stays after an
+upgrade: write the schedule again to resume it (its cursor then starts from
+its creation, and `latenessMs` skips what is already too late). The previous
+release refuses `latenessMs` in `schedule()` and `tick` in `createWorker()`
+(`JD0013`), and `zoneProvider` or `runtime` in `from()` (`JL0005`).
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

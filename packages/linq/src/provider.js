@@ -25,6 +25,7 @@
 
 import { compileJsonQuery, JsonQueryCompileError } from '@jarenjs/json/query';
 import { createBoundedCache, createWeakCache } from '@jarenjs/core/cache';
+import { resolveRuntime } from '@jarenjs/core/runtime';
 import { LinqBuildError } from './errors.js';
 
 /** Stands in for an absent hook while walking the identity chain. */
@@ -35,7 +36,8 @@ const cacheFor = () => createBoundedCache(512);
 
 /**
  * The cache identity of one compilation: the document's exact JSON text
- * beside the declared externals and the limits. `null` when the value
+ * beside the declared externals, the limits and the zone provider's part
+ * ({@link zoneIdentity}). `null` when the value
  * cannot be keyed injectively — a function, an `undefined`, a symbol, a
  * bigint, a non-finite number, `-0`, or a class instance whose `toJSON`
  * would otherwise stand in for it — which is a permanent miss, never
@@ -43,11 +45,12 @@ const cacheFor = () => createBoundedCache(512);
  * @param {any} document
  * @param {readonly string[]} externals
  * @param {any} limits
+ * @param {readonly (string | number)[] | null} zones
  * @returns {string | null}
  */
-function compilationKey(document, externals, limits) {
+function compilationKey(document, externals, limits, zones) {
   try {
-    return JSON.stringify([document, externals, limits ?? null], function (key, value) {
+    return JSON.stringify([document, externals, limits ?? null, zones], function (key, value) {
       const raw = this[key];
       const type = typeof raw;
       if (type === 'function' || type === 'undefined' || type === 'symbol' || type === 'bigint'
@@ -66,6 +69,81 @@ function compilationKey(document, externals, limits) {
   }
 }
 
+/** The number each zone provider that declares no identity keys under. */
+const ZONE_IDS = new WeakMap();
+let zoneCount = 0;
+
+/**
+ * The part of a compilation's key a zone provider adds, as the formula
+ * compiler of `@jarenjs/json/formula` keys it: `['zones', name, revision]`
+ * for the identity a provider declares (`{ name, revision }`, as
+ * `createIntlZoneProvider` and a compiled VTIMEZONE record it), so two
+ * providers that answer differently never share a compiled document, or
+ * `['zones', n]` for its object when it declares none. `null` without a
+ * provider, and `undefined` for a value that is no provider at all: the
+ * compile refuses that one, and it is never cached.
+ * @param {any} provider
+ * @returns {readonly (string | number)[] | null | undefined}
+ */
+function zoneIdentity(provider) {
+  if (provider === undefined || provider === null) return null;
+  if (typeof provider !== 'object') return undefined;
+  const declared = provider.identity;
+  if (declared === undefined) {
+    let n = ZONE_IDS.get(provider);
+    if (n === undefined) {
+      n = ++zoneCount;
+      ZONE_IDS.set(provider, n);
+    }
+    return ['zones', n];
+  }
+  if (declared === null || typeof declared !== 'object' || typeof declared.name !== 'string' || declared.name === ''
+    || typeof declared.revision !== 'string' || declared.revision === '')
+    throw new TypeError('options.zoneProvider.identity must be { name, revision } with non-empty strings');
+  return ['zones', declared.name, declared.revision];
+}
+
+/** The zone provider each client handle lends the chains built over it. */
+const HANDLE_ZONES = new WeakMap();
+
+/**
+ * Lend a client handle's zone provider to every chain built over it with
+ * `from(handle)` or `fromAsync(handle)` and no zone provider of its own,
+ * so what such a chain runs in memory reads a named zone as the store does.
+ * @template {object} T
+ * @param {T} handle
+ * @param {any} zoneProvider
+ * @returns {T}
+ */
+export function lendZoneProvider(handle, zoneProvider) {
+  HANDLE_ZONES.set(handle, zoneProvider);
+  return handle;
+}
+
+/**
+ * A source's options with its runtime record read: the record's zone
+ * provider stands in for an absent `zoneProvider`, by `openStore`'s
+ * precedence (an explicit option wins over the record's member), and the
+ * record itself is not kept, because a compile reads nothing else of it;
+ * with neither, a client handle's own ({@link lendZoneProvider}).
+ * A record the runtime refuses is its `TypeError`, as `openStore`'s is.
+ * @param {Record<string, any>} options - a source's options, already read
+ * @param {unknown} source - what the chain is built over
+ * @returns {Record<string, any>}
+ */
+export function readRuntime(options, source) {
+  let read = options;
+  if (options.runtime !== undefined) {
+    const { runtime, ...rest } = options;
+    const { zoneProvider } = resolveRuntime(runtime);
+    if (rest.zoneProvider === undefined && zoneProvider !== null) rest.zoneProvider = zoneProvider;
+    read = rest;
+  }
+  if (read.zoneProvider === undefined && source !== null && typeof source === 'object' && HANDLE_ZONES.has(source))
+    read = { ...read, zoneProvider: HANDLE_ZONES.get(source) };
+  return read;
+}
+
 /** The root of the hook-identity chain. */
 const REGISTRY_IDS = createWeakCache();
 /** The token minted for each distinct COMBINATION of hook identities. */
@@ -80,13 +158,14 @@ const REGISTRY_TOKEN = Symbol('linq.registryToken');
  * engine's own option names, deliberately, so there is one vocabulary.
  */
 export const COMPILE_OPTION_KEYS = Object.freeze([
-  'compileTypeTest', 'functions', 'collations', 'pathFunctions', 'limits',
+  'compileTypeTest', 'functions', 'collations', 'pathFunctions', 'limits', 'zoneProvider',
 ]);
 
 /** Every member `from()`/`fromAsync()`/`fromDocument()` options carry:
- * the forwarded compile options and the cache-partition key. A closed
+ * the forwarded compile options, the cache-partition key and the runtime
+ * record, read for its zone provider ({@link readRuntime}). A closed
  * set — a misspelt `limits` is refused, never a silently unbounded run. */
-export const SOURCE_OPTION_KEYS = Object.freeze([...COMPILE_OPTION_KEYS, 'registry']);
+export const SOURCE_OPTION_KEYS = Object.freeze([...COMPILE_OPTION_KEYS, 'registry', 'runtime']);
 
 /**
  * Pick the forwarded compile options out of a sequence's options bag.
@@ -137,7 +216,7 @@ function registryIdentity(options) {
  * Compile a query document, shared across equal documents.
  * @param {any} document - the emitted (or hand-written) query document
  * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
- *   pathFunctions?: any, limits?: any, registry?: object,
+ *   pathFunctions?: any, limits?: any, zoneProvider?: any, registry?: object,
  *   externals: readonly string[] }} options - `registry` is the cache
  *   partition key: one object identity per distinct set of hooks, since
  *   the hooks decide what a document compiles to
@@ -165,10 +244,12 @@ export function compileDocument(document, options) {
       throw err;
     }
   };
-  // the externals and the limits are part of the identity: the same
-  // document compiles differently against a different set of declared
-  // names, and differently again under a step or result bound
-  const key = compilationKey(document, options.externals, options.limits);
+  // the externals, the limits and the zone provider are part of the
+  // identity: the same document compiles differently against a different
+  // set of declared names, differently again under a step or result
+  // bound, and a named zone reads the wall clock its provider answers
+  const zones = zoneIdentity(options.zoneProvider);
+  const key = zones === undefined ? null : compilationKey(document, options.externals, options.limits, zones);
   return key === null ? compile() : cache.getOrCreate(key, compile);
 }
 
