@@ -9,7 +9,8 @@ export const AUTHORED_PEN_PROBES = {
   // core's deepFreeze freezing past 256 levels on its own frames took it to 25107;
   // the captured expression's coded refusal of a member read off a method read took it to 25499
   // and its refusal of a method read's own function members to 25628
-  jtlt: { source: "import { stylesheet, rule, query } from '@jarenjs/linq/jtlt'; export const doc = stylesheet([rule([query(v => v.get('name'))], { match: '$' })]).schema;", maxBytes: 25700 },
+  // and the captured expression's instantOf and wallClock (expression 107) to 25801
+  jtlt: { source: "import { stylesheet, rule, query } from '@jarenjs/linq/jtlt'; export const doc = stylesheet([rule([query(v => v.get('name'))], { match: '$' })]).schema;", maxBytes: 25900 },
   // the vocabulary lists every id of the four English catalogs; the query
   // catalog's 167 took the pen from 18321 bytes to 23735, its 192 to 24603
   messages: { source: "import { catalog } from '@jarenjs/linq/messages'; export const doc = catalog('forms').entry('form/required', 'Required').partial();", maxBytes: 25000 },

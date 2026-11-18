@@ -594,6 +594,10 @@ costs a descriptor plus examples and no UI code at all.
 - [ ] **A backlog read from the tick backwards is not counted.** A tick whose backlog is longer than one search reads
   under the limits fires exactly what `missed` says, but counts as skipped only the occurrences of the span it read;
   `counts.uncounted` says a tick did so. Wanted: the passed occurrences counted without enumerating them.
+- [ ] **The client bundle carries calendar-member plumbing without the seam.** The calendar code and the keying run
+  only when a host installs `@jarenjs/db/temporals`, but the declaration's reading, its DDL and introspection terms and
+  its refusals ship in every store client, about 11 KB of the client bundle that a store declaring no calendar member
+  never runs. Wanted: the declaration read behind the seam too, so a store without it keeps only the refusal.
 - [ ] **PostgreSQL reads a collection's CHECKs only where the model declares one.** A collection declaring
   no interval and no temporal member opens on PostgreSQL over a table carrying a CHECK of someone else's
   (`ALTER TABLE … ADD CONSTRAINT x CHECK (…)`), where SQLite's CREATE-text comparison answers `JD0002`; the

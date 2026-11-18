@@ -290,7 +290,8 @@ if (engineLeak.length > 0)
 // Raised to 47,500 (measured 47448): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 630, walk 597) add 1227.
 // Raised to 47,600 (measured 47577): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129) add 129.
 // Raised to 47,700 (measured 47615): the builder's date format taking a zone operand, which every pen shares (expression 38).
-if (schemaBytes > 47700)
+// Raised to 47,800 (measured 47750): the captured expression's instantOf and wallClock for the query language's $instant and $wall, which every pen shares (expression 107).
+if (schemaBytes > 47800)
   throw new Error(`The schema pen bundle grew to ${schemaBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${schemaBytes} byte schema-pen bundle; no chain module, no engine).`);
@@ -390,7 +391,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 251,500 (measured 251411): semanticKey's memo of a wholly frozen tree, which the chain carries (object 395) add 395.
 // Raised to 251,600 (measured 251544): an unknown operator's hint falling back to the suite's nearest-name rule over the operators the key extends or abbreviates (normalize 133).
 // Raised to 254,100 (measured 254002): `$date-format`'s zone operand, written on a zone provider's wall clock, with its refusals as catalog messages, and the builder's verbatim zone operand (operators 1673, messages 607, normalize 97, expression 66, civil 16).
-if (chainBytes > 254100)
+// Raised to 259,600 (measured 259579): the zone provider carried into a chain through from()'s runtime and zoneProvider options (runtime 1369, provider 951, option-variants 113, series 29, query index 23), $instant and $wall in the query language with their catalog messages and the calendar seam's brand (messages 803, operators 568, normalize 285, calendar-seam 52), unit factors held as exact definitions (convert registry 828, convert 473) and the captured expression's instantOf and wallClock (expression 107), net of the zone module's 52 saved.
+if (chainBytes > 259600)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -480,7 +482,8 @@ if (modelEngineLeak.length > 0)
 // Raised to 59,700 (measured 59645): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 629, walk 597, renames 4) add 1230.
 // Raised to 59,800 (measured 59774): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
 // Raised to 59,900 (measured 59812): the builder's date format taking a zone operand, which every pen shares (expression 38).
-if (modelBytes > 59900)
+// Raised to 60,100 (measured 60086): a collection's declared calendar members and an entity member's calendar kind (collection 128, entity 11), and the captured expression's instantOf and wallClock, which every pen shares (expression 107).
+if (modelBytes > 60100)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
@@ -543,7 +546,8 @@ if (jsltEngineLeak.length > 0)
 // Raised to 28,400 (measured 28392): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares (object 522) add 522.
 // Raised to 28,800 (measured 28784): the captured expression's coded refusal of a member read off a method read without its call, which every pen shares (expression 392) add 392.
 // Raised to 29,000 (measured 28913): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
-if (jsltBytes > 29000)
+// Raised to 29,100 (measured 29086): the captured expression's instantOf and wallClock, which every pen shares (expression 107).
+if (jsltBytes > 29100)
   throw new Error(`The JSLT pen bundle grew to ${jsltBytes} bytes.`);
 const chainJsltLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/jslt/') && info.bytesInOutput > 0);
@@ -622,7 +626,8 @@ if (migrationEngineLeak.length > 0)
 // Raised to 35,600 (measured 35577): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares (object 522) add 522.
 // Raised to 36,000 (measured 35969): the captured expression's coded refusal of a member read off a method read without its call, which every pen shares (expression 392) add 392.
 // Raised to 36,200 (measured 36098): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
-if (migrationBytes > 36200)
+// Raised to 36,300 (measured 36271): the captured expression's instantOf and wallClock, which every pen shares (expression 107).
+if (migrationBytes > 36300)
   throw new Error(`The migration pen bundle grew to ${migrationBytes} bytes.`);
 const chainMigrationLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/migration/') && info.bytesInOutput > 0);
@@ -852,7 +857,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,146,900 (measured 1146888): a hop's existence test refines its equality correlation by an order or inequality between two columns of one non-null family (plan 147, emit 6).
 // Raised to 1,149,400 (measured 1149355): `$date-format`'s zone operand and its refusals as catalog messages (operators 1681, messages 607, normalize 97, expression 66, civil 16).
 // Raised to 1,151,400 (measured 1151307): handle records built on first read and a model prepared once accepted by the open (open 1158, store 820).
-if (clientBytes > 1151400)
+// Raised to 1,168,800 (measured 1168749): calendar members on collections and entities the store refuses, keys and compares alike on SQLite and PostgreSQL, behind their seams, with an entity load or page answered with operators (ddl 2067, plan 1990, introspect 1480, model 1462, store 1447, entity 911, query 788, temporal-seam 81 and 685 across dialect, errors, emit, tracker, udf, residual, derive, invariants and sqlite), the zone provider carried through the client (provider 989, runtime 459, open 210, handle 91), $instant and $wall with their messages (messages 803, operators 573, normalize 286, calendar-seam 52), unit factors held exactly (convert 1396), a worker's schedule tick (jobs 1072) and a swap over a unique calendar member ordered in replay (replication 230, logical-rows 54).
+if (clientBytes > 1168800)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
@@ -915,7 +921,8 @@ if (contractPenLeak.length > 0)
 // Raised to 61,100 (measured 61021): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 630, walk 597) add 1227.
 // Raised to 61,200 (measured 61150): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
 // Raised to 61,300 (measured 61216): the builder's date format passing a zone operand verbatim, which every pen shares (expression 66).
-if (contractPenBytes > 61300)
+// Raised to 61,400 (measured 61323): the captured expression's instantOf and wallClock, which every pen shares (expression 107).
+if (contractPenBytes > 61400)
   throw new Error(`The contract pen bundle grew to ${contractPenBytes} bytes.`);
 const chainContractLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/contract/') && info.bytesInOutput > 0);
@@ -986,7 +993,8 @@ if (flowPenLeak.length > 0)
 // Raised to 28,900 (measured 28886): the captured expression's coded refusal of a member read off a method read without its call, which every pen shares (expression 392) add 392.
 // Raised to 30,200 (measured 30179): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 627, walk 595, string 66, renames 5) add 1293.
 // Raised to 30,400 (measured 30308): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
-if (flowPenBytes > 30400)
+// Raised to 30,500 (measured 30481): the captured expression's instantOf and wallClock, which every pen shares (expression 107).
+if (flowPenBytes > 30500)
   throw new Error(`The flow pen bundle grew to ${flowPenBytes} bytes.`);
 const chainFlowLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/flow/') && info.bytesInOutput > 0);
@@ -1053,7 +1061,8 @@ if (appPenLeak.length > 0)
 // Raised to 61,300 (measured 61278): the captured expression's coded refusal of a member read off a method read without its call, which every pen shares (expression 392) add 392.
 // Raised to 62,600 (measured 62505): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 630, walk 597) add 1227.
 // Raised to 62,700 (measured 62634): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
-if (appPenBytes > 62700)
+// Raised to 62,900 (measured 62807): the captured expression's instantOf and wallClock, which every pen shares (expression 107).
+if (appPenBytes > 62900)
   throw new Error(`The app pen bundle grew to ${appPenBytes} bytes.`);
 const chainAppLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/app/') && info.bytesInOutput > 0);
@@ -1119,7 +1128,8 @@ if (formsPenLeak.length > 0)
 // Raised to 51,800 (measured 51718): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 630, walk 597) add 1227.
 // Raised to 51,900 (measured 51847): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
 // Raised to 52,000 (measured 51913): the builder's date format passing a zone operand verbatim, which every pen shares (expression 66).
-if (formsPenBytes > 52000)
+// Raised to 52,100 (measured 52020): the captured expression's instantOf and wallClock, which every pen shares (expression 107).
+if (formsPenBytes > 52100)
   throw new Error(`The forms pen bundle grew to ${formsPenBytes} bytes.`);
 const chainFormsLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/forms/') && info.bytesInOutput > 0);
