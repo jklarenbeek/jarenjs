@@ -1129,10 +1129,10 @@ what each does is its own documentation's job
 
 ## @jarenjs/josl
 
-- [ ] **`@jarenjs/josl/ical` checks RFC 5546 §3's tables for presence only.** A table's comments on values (a CANCEL's
-  STATUS "MUST be CANCELLED", REQUEST-STATUS codes) are not checked, a METHOD written after the first component is not
-  applied to the components before it, and the writer checks each message against its table but not a calendar's counts
-  (ADD's one VEVENT).
+- [ ] **A CANCEL that removes attendees reads as a whole-event cancellation.** RFC 5546 §3.2.5 (and §3.4.5) leave
+  STATUS out of a CANCEL "If uninviting specific Attendees", but a CANCEL VEVENT without RECURRENCE-ID answers
+  `cancellation: { status: 'cancelled' }` whatever its STATUS and ATTENDEEs, so a host applying it cancels the event for
+  everyone. Wanted: a cancellation that names the attendees it removes when STATUS is absent and ATTENDEEs are given.
 - [ ] **A CSV dialect with `quote: null` does not round-trip.** The writers
   read `quote: null` as the default `"` and the reader reads it as no quoting,
   so `parseCsv(stringifyCsv([['x,y']], { quote: null }), { quote: null })`
@@ -1148,14 +1148,6 @@ what each does is its own documentation's job
 
 ## @jarenjs/core
 
-- [ ] **An RFC 7953 BUSYTYPE has no availability layer.** A bounded available layer marks the time outside its spans
-  `busy-unavailable` only (availability.js: `busyType` is refused off `mode: 'busy'`; a gap is `busy-unavailable`), so
-  `@jarenjs/josl/ical` withholds a VAVAILABILITY with BUSYTYPE:BUSY or BUSY-TENTATIVE (`ICAL1025`). RFC 7953 §4 also
-  orders equal-priority busy types BUSY > BUSY-UNAVAILABLE > BUSY-TENTATIVE, where `BUSY_STRENGTH` shows
-  busy-unavailable first.
-- [ ] **An EXDATE of a range override's own slot orphans the range.** Excluding the occurrence a RANGE=THISANDFUTURE
-  override starts at drops the range's changes for every later occurrence, so `@jarenjs/josl/ical`'s `patchIcal` moves
-  the range to the next slot instead of writing the exclusion beside the kept range.
 - [ ] **A zoned calendar member is compared and ordered by the engine on an entity.** A collection's zoned
   key narrows the rows the engine decides; an entity query has no narrowed fetch (a conjunct it pushes is its
   answer), so a comparison or an ordering of a zoned entity member (`x-entity.temporal`, MODEL-FORMAT §9.3)

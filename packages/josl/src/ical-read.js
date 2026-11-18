@@ -37,7 +37,7 @@
 
 import { CalendarError, compileRecurrence, dateValue, defineSeries, floatingValue, isZone, parseTemporal, toUtc, utcValue, zonedValue }
   from '@jarenjs/core/calendar';
-import { ITIP_KINDS, ITIP_METHODS, calendarEntries, componentEntries } from './ical-itip.js';
+import { ITIP_KINDS, ITIP_METHODS, calendarEntries, componentEntries, createTally, tallyComponent, timezoneEntries } from './ical-itip.js';
 import { IcalMachine } from './ical-machine.js';
 import { IANA_FORM, ZONE_HORIZON, ZoneTable } from './ical-vtimezone.js';
 import { IcalError, daysOf, formatDuration, readDuration, wallOf } from './ical-wire.js';
@@ -50,6 +50,8 @@ const DATE_FORM = /^(\d{4})(\d{2})(\d{2})$/;
 const DATE_TIME_FORM = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/;
 const STATUS = Object.freeze({ TENTATIVE: 'tentative', CONFIRMED: 'confirmed', CANCELLED: 'cancelled' });
 const FBTYPE = Object.freeze({ BUSY: 'busy', FREE: 'free', 'BUSY-UNAVAILABLE': 'busy-unavailable', 'BUSY-TENTATIVE': 'busy-tentative' });
+/** RFC 7953 §3.2's BUSYTYPE values: FBTYPE's, FREE aside. */
+const BUSYTYPES = Object.freeze(['BUSY', 'BUSY-UNAVAILABLE', 'BUSY-TENTATIVE']);
 const TEXT_PROPERTIES = /** @type {const} */ ([['SUMMARY', 'summary'], ['DESCRIPTION', 'description'], ['LOCATION', 'location']]);
 
 /** The value type each property of the subset takes, and the parameters it reads. */
@@ -116,7 +118,7 @@ const WITHHOLDING = Object.freeze(['ICAL1017', 'ICAL1018', 'ICAL1019', 'ICAL1020
  *   compilation's limits (the calendar layer's defaults when absent)
  * @property {boolean} [strict] - refuse at the first report entry, with its code
  * @property {boolean} [strictScheduling] - refuse at the first scheduling entry (a calendar with a METHOD whose
- *   component breaks RFC 5546 §3's table for it), with its code
+ *   component, or whose components together, break RFC 5546 §3's tables for it), with its code
  * @property {number} [maxOctets] - octets of input
  * @property {number} [maxComponents] - components, every BEGIN inside the calendar counted
  * @property {number} [maxLineOctets] - octets of one unfolded content line
@@ -144,7 +146,8 @@ const WITHHOLDING = Object.freeze(['ICAL1017', 'ICAL1018', 'ICAL1019', 'ICAL1020
  *   (`start` and `end`, epoch milliseconds, of a VFREEBUSY only)
  * @property {import('./ical-itip.js').SchedulingEntry[]} report - `ICAL1026` (a property or subcomponent the
  *   table requires is missing) and `ICAL1027` (one it excludes, or takes fewer times, is present; or a
- *   component the method does not take), in the order read
+ *   component the method does not take) and `ICAL1028` (a value outside what a comment of the table allows),
+ *   in the order read
  */
 
 /**
@@ -1025,7 +1028,8 @@ function readFreebusy(node, context) {
  * EXDATEs and RECURRENCE-ID overrides, which are AVAILABLEs of its UID).
  * Its times are UTC or zoned DATE-TIMEs (§3.1). What the availability
  * layers cannot hold is withheld whole (`ICAL1025`): a BUSYTYPE other than
- * BUSY-UNAVAILABLE, and AVAILABLE times of more than one kind.
+ * RFC 7953's BUSY, BUSY-UNAVAILABLE and BUSY-TENTATIVE, and AVAILABLE
+ * times of more than one kind.
  * @param {import('./ical-machine.js').IcalNode} node
  * @param {ReadContext} context
  * @returns {Record<string, any>}
@@ -1079,11 +1083,11 @@ function readAvailability(node, context) {
   if (busy !== undefined) {
     paramsOf(busy, ['TEXT'], context);
     const value = textOf(busy).toUpperCase();
-    if (value !== 'BUSY-UNAVAILABLE') {
-      withhold('ICAL1025', `BUSYTYPE:${value} marks the time outside its AVAILABLE components ${value.toLowerCase()}, and an availability layer `
-        + 'marks it busy-unavailable', busy);
+    if (!BUSYTYPES.includes(value)) {
+      withhold('ICAL1025', `BUSYTYPE:${value} names no busy type RFC 7953 §3.2 defines (BUSY, BUSY-UNAVAILABLE, BUSY-TENTATIVE), `
+        + 'so the time outside its AVAILABLE components has no type an availability layer holds', busy);
     }
-    component.busyType = 'busy-unavailable';
+    component.busyType = value.toLowerCase();
   }
   Object.assign(component, eventText(props, context));
   /** @type {Map<string, Master>} */
@@ -1266,6 +1270,15 @@ function messageOf(node, method, context, alone) {
  * @type {(reader: IcalReader) => import('./ical-machine.js').IcalNode | null}
  */
 let rootOf;
+/**
+ * The METHOD a first read found after the first component, which
+ * `parseIcal` reads again with that METHOD from the start; and the setter
+ * of that METHOD on a new reader.
+ * @type {(reader: IcalReader) => string | undefined}
+ */
+let lateMethodOf;
+/** @type {(reader: IcalReader, method: string) => void} */
+let presetMethod;
 
 /**
  * The incremental iCalendar reader: chunks in, components out. One
@@ -1274,6 +1287,11 @@ let rootOf;
 export class IcalReader {
   static {
     rootOf = (reader) => reader.#machine.calendar;
+    lateMethodOf = (reader) => reader.#late;
+    presetMethod = (reader, method) => {
+      reader.#head.method = method;
+      reader.#preset = true;
+    };
   }
 
   #machine;
@@ -1292,9 +1310,18 @@ export class IcalReader {
   #messages = [];
   /** @type {import('./ical-itip.js').SchedulingEntry[]} */
   #scheduling = [];
-  /** @type {Map<string, number>} */
-  #kinds = new Map();
+  #tally = createTally();
   #strictScheduling = false;
+  /** the entry that took the options: `parseIcal` reads a late METHOD again, the streaming entries cannot */
+  #owner;
+  /** components directly inside the calendar so far, and the names of those read as data before any METHOD */
+  #components = 0;
+  /** @type {Set<string>} */
+  #before = new Set();
+  /** @type {string | undefined} a METHOD found after the first component */
+  #late;
+  /** the METHOD was known from the start: `parseIcal`'s second read */
+  #preset = false;
 
   /**
    * @param {IcalReaderOptions} [options]
@@ -1305,6 +1332,7 @@ export class IcalReader {
     const admitted = admitOptions(options, table, owner);
     this.#report = new Report(admitted.strict === true, limitOption(admitted, 'maxReported'));
     this.#strictScheduling = admitted.strictScheduling === true;
+    this.#owner = owner;
     const provider = admitted.provider ?? null;
     const zoneTable = new ZoneTable(admitted.vtimezone ?? 'embedded', admitted.zoneHorizon ?? ZONE_HORIZON, admitted.zoneLimits ?? undefined, provider);
     this.#context = { provider, report: this.#report, zones: new Map(), zoneTable };
@@ -1381,7 +1409,7 @@ export class IcalReader {
     this.#context.zoneTable.compare(this.#report);
     if (method !== undefined) {
       const calendar = /** @type {import('./ical-machine.js').IcalNode} */ (this.#machine.calendar);
-      this.#schedule(calendarEntries(this.#kinds, method.toUpperCase(), calendar));
+      this.#schedule(calendarEntries(this.#tally, method.toUpperCase(), calendar));
     }
     return {
       calendar: { prodId, ...(method !== undefined ? { method: /** @type {IcalMethod} */ (method) } : {}), components: this.#ready.splice(0, this.#ready.length) },
@@ -1449,13 +1477,48 @@ export class IcalReader {
       if (prop.value.toUpperCase() !== 'GREGORIAN')
         fail(`the calendar's scale is GREGORIAN, not ${prop.value}`);
     }
-    else if (prop.name === 'METHOD' && ITIP_METHODS.includes(prop.value.toLowerCase()) && head.methods++ === 0)
-      head.method = prop.value.toLowerCase();
+    else if (prop.name === 'METHOD' && ITIP_METHODS.includes(prop.value.toLowerCase()) && head.methods++ === 0) {
+      const method = prop.value.toLowerCase();
+      if (this.#components !== 0)
+        this.#lateMethod(prop, method);
+      head.method = method;
+    }
     else {
       this.#report.add('ICAL1011', prop.name, prop.path, prop.line, prop.name === 'METHOD'
         ? `METHOD ${prop.value} is outside the subset (one of RFC 5546's eight methods, once); it is left out`
         : `${prop.name} in VCALENDAR is outside the subset; it is left out`);
     }
+  }
+
+  /**
+   * A METHOD after the first component. RFC 5545 §3.4 and §3.6 place the
+   * calendar's properties before its components, so the placement is
+   * reported (`ICAL1029`, refused under `strict`) and the METHOD applied
+   * to the whole calendar: `parseIcal` reads the text again with it from
+   * the start. A streaming read has handed the components before it out
+   * already: under a method whose components are messages, not calendar
+   * data, those were read as calendar data, and the read is refused
+   * (`ICAL1008`); under PUBLISH or REQUEST (and a VFREEBUSY's REPLY) they
+   * are calendar data either way, and only their messages and table
+   * checks are missing, which the entry says.
+   * @param {import('./ical-machine.js').IcalProperty} prop
+   * @param {string} method
+   */
+  #lateMethod(prop, method) {
+    const where = `METHOD:${method.toUpperCase()} follows ${this.#components} component${this.#components === 1 ? '' : 's'}, where RFC 5545 §3.6 places it before them`;
+    if (this.#preset) {
+      this.#report.add('ICAL1029', prop.name, prop.path, prop.line, `${where}; it is applied to the whole calendar`);
+      return;
+    }
+    const streaming = this.#owner !== 'parseIcal';
+    if (streaming && [...this.#before].some((name) => !(name === 'VFREEBUSY' ? FREEBUSY_DATA_METHODS : DATA_METHODS).includes(method))) {
+      throw new IcalError('ICAL1008', `${where}: the components before it were read as calendar data, which under METHOD:${method.toUpperCase()} `
+        + 'are scheduling messages; a streaming read cannot take them back (parseIcal reads it whole)', prop.path, undefined, prop.line);
+    }
+    this.#late = method;
+    this.#report.add('ICAL1029', prop.name, prop.path, prop.line, streaming
+      ? `${where}; the components before it are calendar data under it too, read without their scheduling messages and table checks (parseIcal reads them with it)`
+      : `${where}; it is applied to the whole calendar`);
   }
 
   /**
@@ -1465,11 +1528,14 @@ export class IcalReader {
   #component(node) {
     const { method } = this.#head;
     const kind = Object.hasOwn(ITIP_KINDS, node.name);
-    if (method !== undefined && (kind || node.name === 'VTIMEZONE')) {
-      this.#kinds.set(node.name, (this.#kinds.get(node.name) ?? 0) + 1);
-      if (kind)
-        this.#schedule(componentEntries(node, method.toUpperCase()));
-    }
+    this.#components++;
+    tallyComponent(this.#tally, node, method !== undefined);
+    if (method === undefined && kind)
+      this.#before.add(node.name);
+    if (method !== undefined && kind)
+      this.#schedule(componentEntries(node, method.toUpperCase()));
+    if (method !== undefined && node.name === 'VTIMEZONE')
+      this.#schedule(timezoneEntries(node));
     // under a method whose components are messages, not calendar data, the message is all that is read
     const data = method === undefined || (node.name === 'VFREEBUSY' ? FREEBUSY_DATA_METHODS : DATA_METHODS).includes(method);
     if (method !== undefined && kind) {
@@ -1544,9 +1610,18 @@ export class IcalReader {
  * report.unsupported[0].path; // '/VCALENDAR/VEVENT[0]/X-COLOR'
  */
 export function parseIcal(text, options = undefined) {
-  const reader = new IcalReader(options, 'parseIcal', ICAL_PARSE);
-  const first = reader.feed(text);
-  const { calendar, report, zones, scheduling } = reader.end();
+  let reader = new IcalReader(options, 'parseIcal', ICAL_PARSE);
+  let first = reader.feed(text);
+  let answer = reader.end();
+  const late = lateMethodOf(reader);
+  if (late !== undefined) {
+    // a METHOD after the first component: read again, with it from the start
+    reader = new IcalReader(options, 'parseIcal', ICAL_PARSE);
+    presetMethod(reader, late);
+    first = reader.feed(text);
+    answer = reader.end();
+  }
+  const { calendar, report, zones, scheduling } = answer;
   calendar.components = [...first, ...calendar.components];
   const root = rootOf(reader);
   if (/** @type {any} */ (options)?.mode !== 'lossless' || root === null)

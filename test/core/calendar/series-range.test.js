@@ -178,16 +178,69 @@ describe('RANGE=THISANDFUTURE', () => {
     ]);
   });
 
-  it('EXDATEs go first; a range on an excluded or unmade slot is an orphan and moves nothing', () => {
-    const series = defineSeries({ uid: 'a', base: daily, exdates: [f('2026-01-07', '09:00'), f('2026-01-09', '09:00')], overrides: [
+  it('EXDATEs go first; a range on an unmade slot is an orphan and moves nothing', () => {
+    const series = defineSeries({ uid: 'a', base: daily, exdates: [f('2026-01-07', '09:00')], overrides: [
       { recurrenceId: '2026-01-06T09:00:00', range: 'THISANDFUTURE', status: 'moved', start: f('2026-01-06', '10:00') },
-      { recurrenceId: '2026-01-09T09:00:00', range: 'THISANDFUTURE', status: 'cancelled' },
       { recurrenceId: '2026-01-11T10:00:00', range: 'THISANDFUTURE', status: 'cancelled' },
     ] });
     const got = expandSeries(series, JANUARY);
-    assert.deepStrictEqual(got.orphans, { count: 2, ids: ['2026-01-09T09:00:00', '2026-01-11T10:00:00'] });
-    assert.deepStrictEqual(got.occurrences.map((o) => o.recurrenceId.slice(5, 10)), ['01-05', '01-06', '01-08', '01-10', '01-11', '01-12', '01-13', '01-14']);
+    assert.deepStrictEqual(got.orphans, { count: 1, ids: ['2026-01-11T10:00:00'] });
+    assert.deepStrictEqual(got.occurrences.map((o) => o.recurrenceId.slice(5, 10)), ['01-05', '01-06', '01-08', '01-09', '01-10', '01-11', '01-12', '01-13', '01-14']);
     assert.ok(got.occurrences.slice(1).every((o) => /** @type {any} */ (o.start).time === '10:00:00' && /** @type {any} */ (o).moved));
+  });
+
+  it('an EXDATE of a range\'s own slot removes that slot only: the range still applies to every later one (RFC 5545 §3.8.5.1)', () => {
+    // EXDATE removes the one instance it names; RANGE=THISANDFUTURE still reschedules "all subsequent instances" (§3.8.4.4)
+    const moved = defineSeries({ uid: 'a', base: daily, exdates: [f('2026-01-07', '09:00')], overrides: [
+      { recurrenceId: '2026-01-07T09:00:00', range: 'THISANDFUTURE', status: 'moved', start: f('2026-01-07', '11:00'), end: f('2026-01-07', '11:30'), payload: 'p' },
+    ] });
+    const got = expandSeries(moved, JANUARY);
+    assert.deepStrictEqual(got.orphans, { count: 0, ids: [] });
+    assert.deepStrictEqual(rows(got), ['2026-01-05T09:00:2026-01-05T09:00-10:00', '2026-01-06T09:00:2026-01-06T09:00-10:00',
+      '2026-01-08T09:00:2026-01-08T11:00-11:30*#p', '2026-01-09T09:00:2026-01-09T11:00-11:30*#p', '2026-01-10T09:00:2026-01-10T11:00-11:30*#p',
+      '2026-01-11T09:00:2026-01-11T11:00-11:30*#p', '2026-01-12T09:00:2026-01-12T11:00-11:30*#p', '2026-01-13T09:00:2026-01-13T11:00-11:30*#p',
+      '2026-01-14T09:00:2026-01-14T11:00-11:30*#p']);
+    // a cancelled range on an excluded slot still cancels every later one
+    const cancelled = defineSeries({ uid: 'a', base: daily, exdates: [f('2026-01-09', '09:00')], overrides: [
+      { recurrenceId: '2026-01-09T09:00:00', range: 'THISANDFUTURE', status: 'cancelled' },
+    ] });
+    const gone = expandSeries(cancelled, JANUARY);
+    assert.deepStrictEqual([gone.orphans.count, gone.occurrences.map((o) => o.recurrenceId.slice(5, 10))], [0, ['01-05', '01-06', '01-07', '01-08']]);
+    // an RDATE's slot, excluded, under a range: the range applies to the rule's later slots
+    const extra = defineSeries({ uid: 'a', base: daily, rdates: [f('2026-01-07', '20:00')], exdates: [f('2026-01-07', '20:00')], overrides: [
+      { recurrenceId: '2026-01-07T20:00:00', range: 'THISANDFUTURE', status: 'moved', start: f('2026-01-07', '21:00') },
+    ] });
+    const shifted = expandSeries(extra, JANUARY);
+    assert.deepStrictEqual([shifted.orphans.count, rows(shifted).slice(2, 5)], [0, ['2026-01-07T09:00:2026-01-07T09:00-10:00',
+      '2026-01-08T09:00:2026-01-08T10:00-11:00*', '2026-01-09T09:00:2026-01-09T10:00-11:00*']]);
+    // two ranges, the later one's own slot excluded: it takes over from its slot on, as it would unexcluded
+    const two = defineSeries({ uid: 'a', base: daily, exdates: [f('2026-01-10', '09:00')], overrides: [
+      { recurrenceId: '2026-01-06T09:00:00', range: 'THISANDFUTURE', status: 'moved', start: f('2026-01-06', '10:00') },
+      { recurrenceId: '2026-01-10T09:00:00', range: 'THISANDFUTURE', status: 'moved', start: f('2026-01-10', '07:00') },
+    ] });
+    assert.deepStrictEqual(rows(expandSeries(two, JANUARY)).map((row) => row.slice(0, 33)), ['2026-01-05T09:00:2026-01-05T09:00',
+      '2026-01-06T09:00:2026-01-06T10:00', '2026-01-07T09:00:2026-01-07T10:00', '2026-01-08T09:00:2026-01-08T10:00', '2026-01-09T09:00:2026-01-09T10:00',
+      '2026-01-11T09:00:2026-01-11T07:00', '2026-01-12T09:00:2026-01-12T07:00', '2026-01-13T09:00:2026-01-13T07:00', '2026-01-14T09:00:2026-01-14T07:00']);
+    // a one-slot override of an excluded slot is still an orphan, as before
+    const single = defineSeries({ uid: 'a', base: daily, exdates: [f('2026-01-07', '09:00')], overrides: [
+      { recurrenceId: '2026-01-07T09:00:00', status: 'moved', start: f('2026-01-07', '11:00') },
+    ] });
+    assert.deepStrictEqual(expandSeries(single, JANUARY).orphans, { count: 1, ids: ['2026-01-07T09:00:00'] });
+  });
+
+  it('a zoned range whose own slot a utc EXDATE removes still moves every later slot', () => {
+    const z = (/** @type {string} */ date, /** @type {string} */ time) => ({ kind: /** @type {const} */ ('zoned'), date, time, zone: 'Europe/Amsterdam' });
+    const base = compileRecurrence({ dtstart: z('2026-03-26', '09:00:00'), duration: 'PT1H', rrule: 'FREQ=DAILY;COUNT=5' });
+    // 2026-03-27 09:00 in Amsterdam (CET, +01:00) is 08:00Z
+    const series = defineSeries({ uid: 'z', base, exdates: [utc('2026-03-27T08:00:00Z')], overrides: [
+      { recurrenceId: '2026-03-27T09:00:00', range: 'THISANDFUTURE', status: 'moved', start: z('2026-03-27', '10:30:00') },
+    ] });
+    const got = expandSeries(series, { horizon: [at('2026-03-20T00:00:00Z'), at('2026-04-10T00:00:00Z')], zoneProvider: amsterdam });
+    assert.strictEqual(got.orphans.count, 0);
+    // from 2026-03-29 Amsterdam is CEST (+02:00): 10:30 there is 08:30Z
+    assert.deepStrictEqual(got.occurrences.map((o) => [o.recurrenceId.slice(5, 16), /** @type {any} */ (o).instants.start]),
+      [['03-26T09:00', at('2026-03-26T08:00:00Z')], ['03-28T09:00', at('2026-03-28T09:30:00Z')], ['03-29T09:00', at('2026-03-29T08:30:00Z')],
+        ['03-30T09:00', at('2026-03-30T08:30:00Z')]]);
   });
 
   it('a range moves slots across the horizon both ways, from before it and from after it', () => {

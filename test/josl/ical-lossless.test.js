@@ -514,60 +514,60 @@ describe('RANGE=THISANDFUTURE is read into its series and edited around', () => 
     assert.deepStrictEqual(rows(out), [...before.slice(0, 3), '03-23 03-24 08:00-08:30', '03-30 03-31 08:00-08:30', '04-06 04-07 08:00-08:30']);
   });
 
-  it('cancels or excludes the range\'s own slot only: the range moves to the next slot by the same shift, beside an EXDATE', () => {
+  it('cancels or excludes the range\'s own slot only: an EXDATE of it beside the range, which still applies to every later slot', () => {
     const id = '2026-03-23T09:00:00';
     for (const op of /** @type {const} */ (['cancel', 'exdate'])) {
       const out = /** @type {string} */ (patchIcal(tree, [{ op, uid: 'r', recurrenceId: id }]));
-      const lines = (/** @type {string} */ t) => t.split('\r\n');
-      assert.deepStrictEqual([lines(text).filter((line) => !lines(out).includes(line)), lines(out).filter((line) => !lines(text).includes(line))],
-        [['RECURRENCE-ID;RANGE=THISANDFUTURE:20260323T090000', 'DTSTART:20260323T100000'],
-          ['EXDATE:20260323T090000', 'RECURRENCE-ID;RANGE=THISANDFUTURE:20260330T090000', 'DTSTART:20260330T100000']], op);
-      assert.strictEqual(lines(out).length, lines(text).length + 1, op);
+      // RFC 5545 §3.8.5.1: the EXDATE removes the one instance; the RANGE=THISANDFUTURE VEVENT stays as written
+      assert.deepStrictEqual(lineDiff(text, out), { removed: [], added: ['EXDATE:20260323T090000\r\n'] }, op);
+      assert.ok(out.includes('RECURRENCE-ID;RANGE=THISANDFUTURE:20260323T090000\r\nDTSTART:20260323T100000\r\n'), op);
       // the edited intent: the expansion before, less 03-23
       assert.deepStrictEqual(rows(out), before.filter((row) => !row.startsWith('03-23')), op);
+      // once excluded, a second exclusion changes nothing
+      const again = /** @type {string} */ (patchIcal(/** @type {any} */ (parseIcal(out, LOSSLESS)).tree, [{ op, uid: 'r', recurrenceId: id }]));
+      assert.strictEqual(again, out, op);
     }
   });
 
-  it('cancels a range whose own slot is the last, or whose next slot is another range\'s, whole', () => {
+  it('excludes a range\'s own slot the same way when it is the last, before another range, or before a slot with its own VEVENT', () => {
+    const exdated = (/** @type {string} */ source, /** @type {'cancel' | 'exdate'} */ op) => {
+      const out = /** @type {string} */ (patchIcal(/** @type {any} */ (parseIcal(source, LOSSLESS)).tree, [{ op, uid: 'r', recurrenceId: '2026-03-23T09:00:00' }]));
+      assert.deepStrictEqual(lineDiff(source, out), { removed: [], added: ['EXDATE:20260323T090000\r\n'] });
+      return out;
+    };
     const last = text.replace('RRULE:FREQ=WEEKLY;COUNT=6', 'RRULE:FREQ=WEEKLY;COUNT=4');
-    const out = /** @type {string} */ (patchIcal(/** @type {any} */ (parseIcal(last, LOSSLESS)).tree, [{ op: 'cancel', uid: 'r', recurrenceId: '2026-03-23T09:00:00' }]));
-    assert.deepStrictEqual(lineDiff(last, out), { removed: [], added: ['STATUS:CANCELLED\r\n'] });
-    assert.deepStrictEqual(rows(out), before.slice(0, 3));
+    assert.deepStrictEqual(rows(exdated(last, 'cancel')), before.slice(0, 3));
     const two = text.replace('END:VCALENDAR', ['BEGIN:VEVENT', 'UID:r', 'DTSTAMP:20260101T000000Z', 'RECURRENCE-ID;RANGE=THISANDFUTURE:20260330T090000',
       'DTSTART:20260330T120000', 'DURATION:PT1H', 'SUMMARY:Ronde', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n'));
-    const ended = /** @type {string} */ (patchIcal(/** @type {any} */ (parseIcal(two, LOSSLESS)).tree, [{ op: 'exdate', uid: 'r', recurrenceId: '2026-03-23T09:00:00' }]));
-    assert.deepStrictEqual(rows(ended), [...before.slice(0, 3), '03-30 03-30 12:00-13:00', '04-06 04-06 12:00-13:00']);
-  });
-
-  it('shifts the range\'s DTEND with it when it moves to the next slot', () => {
+    assert.deepStrictEqual(rows(exdated(two, 'exdate')), [...before.slice(0, 3), '03-30 03-30 12:00-13:00', '04-06 04-06 12:00-13:00']);
+    const next = text.replace('END:VCALENDAR', ['BEGIN:VEVENT', 'UID:r', 'DTSTAMP:20260101T000000Z', 'RECURRENCE-ID:20260330T090000',
+      'DTSTART:20260330T140000', 'DURATION:PT30M', 'SUMMARY:Ronde', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n'));
+    assert.deepStrictEqual(rows(exdated(next, 'cancel')), [...before.slice(0, 3), '03-30 03-30 14:00-14:30', '04-06 04-06 10:00-10:30']);
     const ended = text.replace('DTSTART:20260323T100000\r\nDURATION:PT30M', 'DTSTART:20260323T100000\r\nDTEND:20260323T103000');
-    const out = /** @type {string} */ (patchIcal(/** @type {any} */ (parseIcal(ended, LOSSLESS)).tree, [{ op: 'cancel', uid: 'r', recurrenceId: '2026-03-23T09:00:00' }]));
-    assert.ok(out.includes('RECURRENCE-ID;RANGE=THISANDFUTURE:20260330T090000\r\nDTSTART:20260330T100000\r\nDTEND:20260330T103000\r\n'), out);
-    assert.deepStrictEqual(rows(out), before.filter((row) => !row.startsWith('03-23')));
+    assert.deepStrictEqual(rows(exdated(ended, 'cancel')), before.filter((row) => !row.startsWith('03-23')));
+    const hourly = text.replace('RRULE:FREQ=WEEKLY;COUNT=6', 'RRULE:FREQ=HOURLY;COUNT=40').replace('DTSTART:20260302T090000', 'DTSTART:20260323T000000');
+    const sub = rows(exdated(hourly, 'cancel'));
+    assert.deepStrictEqual([sub.length, sub.slice(8, 10)], [39, ['03-23 03-23 08:00-09:00', '03-23 03-23 11:00-11:30']]);
   });
 
-  it('moves a zoned range to the next slot across the March change, by its wall-clock shift', () => {
+  it('excludes a zoned range\'s own slot by an EXDATE in its zone, the later slots still moved by its wall-clock shift', () => {
     const zonedText = text.replaceAll('DTSTART:2026', 'DTSTART;TZID=Europe/Amsterdam:2026').replace('RECURRENCE-ID;RANGE=THISANDFUTURE:', 'RECURRENCE-ID;RANGE=THISANDFUTURE;TZID=Europe/Amsterdam:');
     const instants = (/** @type {string} */ out) => expandSeries(/** @type {any} */ (parseIcal(out, { provider }).calendar.components[0]).series,
       { horizon: [Date.UTC(2026, 2, 1), Date.UTC(2026, 5, 1)], provider }).occurrences.map((o) => `${o.recurrenceId} ${new Date(/** @type {any} */ (o.instants).start).toISOString()}`);
     const out = /** @type {string} */ (patchIcal(/** @type {any} */ (parseIcal(zonedText, LOSSLESS)).tree, [{ op: 'exdate', uid: 'r', recurrenceId: '2026-03-23T09:00:00' }]));
-    assert.ok(out.includes('RECURRENCE-ID;RANGE=THISANDFUTURE;TZID=Europe/Amsterdam:20260330T090000\r\nDTSTART;TZID=Europe/Amsterdam:20260330T100000\r\n'), out);
+    assert.deepStrictEqual(lineDiff(zonedText, out), { removed: [], added: ['EXDATE;TZID=Europe/Amsterdam:20260323T090000\r\n'] });
     // the edited intent: 03-30 and 04-06 still start at 10:00 Amsterdam, now summer time (08:00Z)
     assert.deepStrictEqual(instants(out), instants(zonedText).filter((row) => !row.startsWith('2026-03-23')));
     assert.ok(instants(out).includes('2026-03-30T09:00:00 2026-03-30T08:00:00.000Z'));
   });
 
-  it('finds the next slot of a sub-daily series from the slot itself, not its day', () => {
-    const hourly = text.replace('RRULE:FREQ=WEEKLY;COUNT=6', 'RRULE:FREQ=HOURLY;COUNT=40').replace('DTSTART:20260302T090000', 'DTSTART:20260323T000000');
-    const out = /** @type {string} */ (patchIcal(/** @type {any} */ (parseIcal(hourly, LOSSLESS)).tree, [{ op: 'cancel', uid: 'r', recurrenceId: '2026-03-23T09:00:00' }]));
-    assert.ok(out.includes('RECURRENCE-ID;RANGE=THISANDFUTURE:20260323T100000\r\nDTSTART:20260323T110000\r\n'), out);
-  });
-
-  it('refuses a cancel of the range\'s own slot whose next slot has its own VEVENT (ICAL4005)', () => {
-    const next = text.replace('END:VCALENDAR', ['BEGIN:VEVENT', 'UID:r', 'DTSTAMP:20260101T000000Z', 'RECURRENCE-ID:20260330T090000',
-      'DTSTART:20260330T140000', 'DURATION:PT30M', 'SUMMARY:Ronde', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n'));
-    assert.throws(() => patchIcal(/** @type {any} */ (parseIcal(next, LOSSLESS)).tree, [{ op: 'cancel', uid: 'r', recurrenceId: '2026-03-23T09:00:00' }]),
-      { code: 'ICAL4005', docPath: '/edits/0/recurrenceId' });
+  it('refuses to exclude the slot of a range the series never makes (ICAL4004): it is an orphan, applied nowhere', () => {
+    const orphan = text.replace('RECURRENCE-ID;RANGE=THISANDFUTURE:20260323T090000', 'RECURRENCE-ID;RANGE=THISANDFUTURE:20260324T090000')
+      .replace('DTSTART:20260323T100000', 'DTSTART:20260324T100000');
+    for (const op of /** @type {const} */ (['cancel', 'exdate'])) {
+      assert.throws(() => patchIcal(/** @type {any} */ (parseIcal(orphan, LOSSLESS)).tree, [{ op, uid: 'r', recurrenceId: '2026-03-24T09:00:00' }]),
+        { code: 'ICAL4004', docPath: '/edits/0/recurrenceId' }, op);
+    }
   });
 
   it('edits the range\'s own text, or removes it, as written', () => {

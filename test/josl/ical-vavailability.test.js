@@ -63,7 +63,11 @@ describe('ical VAVAILABILITY: written and read back, it answers the same spans',
       const { calendar } = parseIcal(text(testCase.file), { provider });
       const out = stringifyIcal(calendar, { zones: 'embed', provider, horizon: [Date.parse('2011-09-01T00:00:00Z'), Date.parse('2012-01-01T00:00:00Z')] });
       assert.match(out, /BEGIN:VAVAILABILITY\r\n/);
-      assert.match(out, /BEGIN:VTIMEZONE\r\nTZID:America\/Montreal\r\n/);
+      // the RFC's own examples are zoned; the BUSYTYPE cases are UTC and need no VTIMEZONE
+      if (text(testCase.file).includes('TZID=America/Montreal'))
+        assert.match(out, /BEGIN:VTIMEZONE\r\nTZID:America\/Montreal\r\n/);
+      else
+        assert.doesNotMatch(out, /BEGIN:VTIMEZONE/);
       assert.deepStrictEqual(spans(out, testCase.horizon), testCase.spans);
     });
   }
@@ -105,6 +109,26 @@ describe('ical VAVAILABILITY: the model', () => {
     assert.deepStrictEqual(none.map((span) => span.slice(2, 4)), [['unknown', null], ['busy', 'busy-unavailable'], ['unknown', null]]);
   });
 
+  it('reads BUSYTYPE BUSY and BUSY-TENTATIVE into the layer, and writes each back (RFC 7953 §3.2)', () => {
+    const horizon = ['2026-03-02T00:00:00Z', '2026-03-03T00:00:00Z'];
+    for (const [line, type] of [['BUSYTYPE:BUSY', 'busy'], ['BUSYTYPE:busy-tentative', 'busy-tentative'], ['BUSYTYPE:BUSY-UNAVAILABLE', 'busy-unavailable']]) {
+      const source = wrap(['DTSTART:20260302T060000Z', 'DTEND:20260302T200000Z', line, ...available(['DTSTART:20260302T090000Z', 'DTEND:20260302T170000Z'])]);
+      const { calendar } = parseIcal(source, { provider });
+      const [component] = /** @type {any[]} */ (calendar.components);
+      assert.strictEqual(component.busyType, type);
+      assert.strictEqual(availabilityLayers(calendar.components)[0].busyType, type);
+      assert.deepStrictEqual(spans(source, horizon), [['2026-03-02T00:00:00Z', '2026-03-02T06:00:00Z', 'unknown', null, []],
+        ['2026-03-02T06:00:00Z', '2026-03-02T09:00:00Z', 'busy', type, ['v']], ['2026-03-02T09:00:00Z', '2026-03-02T17:00:00Z', 'available', null, ['v']],
+        ['2026-03-02T17:00:00Z', '2026-03-02T20:00:00Z', 'busy', type, ['v']], ['2026-03-02T20:00:00Z', '2026-03-03T00:00:00Z', 'unknown', null, []]]);
+      const out = stringifyIcal({ prodId: 'p', components: [component] });
+      assert.ok(out.includes(`\r\nBUSYTYPE:${type.toUpperCase()}\r\n`), out);
+      assert.deepStrictEqual(spans(out, horizon), spans(source, horizon));
+    }
+    // none: the layer carries no busyType and its gaps are RFC 7953's default, BUSY-UNAVAILABLE
+    const { calendar } = parseIcal(wrap(['DTSTART:20260302T060000Z', 'DTEND:20260302T200000Z']), { provider });
+    assert.deepStrictEqual([/** @type {any} */ (calendar.components[0]).busyType, 'busyType' in availabilityLayers(calendar.components)[0]], [undefined, false]);
+  });
+
   it('gives equal priorities\' overlap to busy, where an AVAILABLE of one meets the other\'s busy time (RFC 7953 §4 leaves it to their creator)', () => {
     const two = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:p',
       'BEGIN:VAVAILABILITY', 'UID:x', 'DTSTART:20260302T000000Z', 'DTEND:20260303T000000Z', ...available(['DTSTART:20260302T090000Z', 'DTEND:20260302T170000Z']), 'END:VAVAILABILITY',
@@ -115,7 +139,7 @@ describe('ical VAVAILABILITY: the model', () => {
 
   it('withholds what a layer cannot hold as the RFC reads it (ICAL1025), and a time that is not UTC or zoned (ICAL1018)', () => {
     for (const [lines, code] of /** @type {[string[], string][]} */ ([
-      [['BUSYTYPE:BUSY'], 'ICAL1025'], [['BUSYTYPE:BUSY-TENTATIVE'], 'ICAL1025'],
+      [['BUSYTYPE:X-OUT-OF-OFFICE'], 'ICAL1025'], [['BUSYTYPE:FREE'], 'ICAL1025'],
       [[...available(['DTSTART:20260302T090000Z', 'DTEND:20260302T100000Z']), 'BEGIN:AVAILABLE', 'UID:b', 'DTSTART;TZID=Europe/Amsterdam:20260302T090000', 'END:AVAILABLE'], 'ICAL1025'],
       [['DTSTART:20260302T000000'], 'ICAL1018'], [[...available(['DTSTART;VALUE=DATE:20260302'])], 'ICAL1018'], [['PRIORITY:10'], 'ICAL1018'],
       [['DURATION:PT1H'], 'ICAL1017'], [[...available(['RECURRENCE-ID:20260302T090000Z', 'DTSTART:20260302T100000Z'])], 'ICAL1021'],
@@ -141,7 +165,8 @@ describe('ical VAVAILABILITY: the model', () => {
 
   it('refuses to write what it cannot spell', () => {
     const write = (/** @type {Record<string, any>} */ component) => stringifyIcal({ prodId: 'p', components: [{ type: 'availability', uid: 'v', available: [], ...component }] });
-    assert.throws(() => write({ busyType: 'busy' }), { code: 'ICAL3003', docPath: '/components/0/busyType' });
+    assert.throws(() => write({ busyType: 'free' }), { code: 'ICAL3003', docPath: '/components/0/busyType' });
+    assert.throws(() => write({ busyType: 'BUSY' }), { code: 'ICAL3003', docPath: '/components/0/busyType' });
     assert.throws(() => write({ priority: 10 }), { code: 'ICAL3003', docPath: '/components/0/priority' });
     assert.throws(() => write({ start: { kind: 'floating', date: '2026-03-02', time: '09:00' } }), { code: 'ICAL3003', docPath: '/components/0/start' });
     assert.throws(() => write({ available: undefined }), { code: 'ICAL3001', docPath: '/components/0/available' });

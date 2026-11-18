@@ -26,7 +26,7 @@
 import { CalendarError, vtimezoneFor } from '@jarenjs/core/calendar';
 import { resolveRuntime } from '@jarenjs/core/runtime';
 import { utf8ByteLength } from '@jarenjs/core/string';
-import { writtenEntries } from './ical-itip.js';
+import { ITIP_KINDS, calendarEntries, componentEntries, createTally, tallyComponent, writtenNodes } from './ical-itip.js';
 import { horizonSpan, renderComponent } from './ical-map.js';
 import { renderVtimezone, ruledDefinition } from './ical-vtimezone.js';
 import { ICAL_CODES, ICAL_LIMIT_CODES, IcalError, escapeText, foldLine } from './ical-wire.js';
@@ -118,6 +118,8 @@ export class IcalWriter {
   #index = 0;
   /** @type {Set<string>} */
   #zones = new Set();
+  /** what the calendar-wide checks of a METHOD message keep of the components written */
+  #tally = createTally();
   #limits;
   /** @type {import('./ical-map.js').MapContext} */
   #context;
@@ -219,16 +221,22 @@ export class IcalWriter {
       const path = `/components/${this.#index}`;
       this.#context.used.clear();
       const rendered = renderComponent(component, this.#context, path);
-      // a scheduling message is written as RFC 5546 §3's table for its method has it (PUBLISH, whose
-      // events carry no ORGANIZER here, is written as before)
-      const { method } = this.#context;
-      if (method !== undefined && method !== 'publish') {
-        const [entry] = writtenEntries(rendered.lines, METHODS[/** @type {keyof typeof METHODS} */ (method)]);
-        if (entry !== undefined)
-          throw new IcalError('ICAL3021', `${entry.reason}; the component is no METHOD:${method.toUpperCase()} message`, path);
-      }
       const zones = [...this.#context.used].filter((zone) => !this.#zones.has(zone));
       const definitions = zones.map((zone) => this.#vtimezone(zone, path));
+      // a scheduling message is written as RFC 5546 §3's tables for its method have it, each component
+      // and the calendar's components so far (PUBLISH, whose events carry no ORGANIZER here, is written as before)
+      const { method } = this.#context;
+      if (method !== undefined && method !== 'publish') {
+        const name = METHODS[/** @type {keyof typeof METHODS} */ (method)];
+        // its own VTIMEZONEs are counted and define their TZIDs; their observances are the calendar layer's
+        const nodes = writtenNodes([...definitions.flat(), ...rendered.lines]);
+        const entries = nodes.flatMap((node) => (Object.hasOwn(ITIP_KINDS, node.name) ? componentEntries(node, name) : []));
+        for (const node of nodes)
+          tallyComponent(this.#tally, node, true);
+        const [entry] = [...entries, ...calendarEntries(this.#tally, name, { path: '/VCALENDAR', line: 0 })];
+        if (entry !== undefined)
+          throw new IcalError('ICAL3021', `${entry.reason}; the ${entries.length !== 0 ? 'component' : 'calendar'} is no METHOD:${method.toUpperCase()} message`, path);
+      }
       if (this.#components + rendered.components > this.#limits.maxComponents)
         throw new JoslLimitError('ICAL2002', ICAL_LIMIT_CODES.ICAL2002, this.#limits.maxComponents);
       if (this.#rdates + rendered.rdates > this.#limits.maxRdates)

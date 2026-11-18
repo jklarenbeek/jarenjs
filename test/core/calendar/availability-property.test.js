@@ -105,6 +105,12 @@ function randomCase(random, low) {
       }
       layer.bounds = [b0, b1];
       layer.bounded = true;
+      // a bounded available layer's RFC 7953 BUSYTYPE types the time outside its spans
+      if (mode === 'available') {
+        const type = pick(random, BUSY);
+        if (type !== undefined)
+          layer.busyType = type;
+      }
     }
     layers.push(layer);
   }

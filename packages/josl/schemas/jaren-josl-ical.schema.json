@@ -746,7 +746,11 @@
           "maximum": 9
         },
         "busyType": {
-          "const": "busy-unavailable"
+          "enum": [
+            "busy",
+            "busy-unavailable",
+            "busy-tentative"
+          ]
         },
         "summary": {
           "$ref": "#/$defs/text"

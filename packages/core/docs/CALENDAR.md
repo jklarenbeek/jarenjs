@@ -787,9 +787,13 @@ ordered by `recurrenceId`:
   the ranges: its start, and its `duration` or `end`, or else the
   length the range in force gives that slot, and its own `payload`. It can bring back a slot
   a cancelled range removed.
-- **EXDATEs** remove their slots before any range applies; a range
-  whose own slot is removed, or that names a slot the series never makes,
-  is an orphan: listed in `orphans`, it moves and cancels nothing.
+- **EXDATEs** remove their slots before any range applies. An EXDATE
+  of a range's own slot removes that one occurrence (RFC 5545 §3.8.5.1)
+  and the range still moves or cancels every later one. A range that
+  names a slot the series never makes is an orphan: listed in `orphans`,
+  it moves and cancels nothing. *Upgrade: a range whose own slot an
+  EXDATE removed was an orphan and every later slot lost its changes;
+  the range now applies to them.*
 
 A range whose distance is negative can move slots from past the horizon
 into it, and one whose distance is positive slots from before it; the
@@ -809,9 +813,9 @@ horizon that was moved into it appears, and the rule is asked about
 that one wall clock to confirm it makes the slot. A slot inside the
 horizon that was moved out disappears.
 
-**Orphans.** An override whose slot the series never makes, or whose
-slot an EXDATE removed, is listed in `orphans`. It is never applied and
-never dropped silently.
+**Orphans.** An override whose slot the series never makes, or a
+one-slot override whose slot an EXDATE removed, is listed in `orphans`.
+It is never applied and never dropped silently.
 
 **Budget.** Every RDATE costs one step of `maxWork`; a range override
 costs the walk that confirms its slot, and a moved one an expansion of
@@ -891,7 +895,7 @@ A layer is `{ id, priority, mode, busyType?, series | spans, bounds?, source, re
 | `id` | a non-empty name, unique in the stack |
 | `priority` | RFC 7953's PRIORITY, 0-9: 1 is the highest, 9 the lowest numbered, and 0 (undefined) is below them all |
 | `mode` | `'available'` or `'busy'`: what the layer's spans are |
-| `busyType` | a busy layer's kind of busy: `'busy'` (the default), `'busy-unavailable'` or `'busy-tentative'` |
+| `busyType` | `'busy'`, `'busy-unavailable'` or `'busy-tentative'`: a busy layer's kind of busy (default `'busy'`), or a bounded available layer's for the time outside its spans (RFC 7953 BUSYTYPE, default `'busy-unavailable'`); refused on an available layer without `bounds` |
 | `series` | a series `defineSeries` returned, or the list `weeklyPattern` returns |
 | `spans` | explicit spans: `{ start?, end? }` (an end left out or `null` is open), a date value or a date-range value |
 | `bounds` | `[start?, end?)` clipping the layer, either end open; on an available layer it also claims the whole period (below) |
@@ -904,15 +908,18 @@ reads as its first instant, and a floating or date value needs the zone.
 **Precedence.** At each instant the claims of the highest rank decide.
 Among equal ranks busy beats unknown, which beats available, so a tie
 never opens time. Of several busy layers at one rank, the strongest
-type is shown (`busy-unavailable`, then `busy`, then `busy-tentative`),
-and every one is named.
+type is shown, in RFC 7953 §4's order (`busy`, then `busy-unavailable`,
+then `busy-tentative`), and every one is named. *Upgrade: the order put
+`busy-unavailable` first, so a BUSY and a BUSY-UNAVAILABLE layer of one
+priority answered `busy-unavailable` where RFC 7953 §4 says BUSY; they
+now answer `busy`.*
 
 **What a layer claims.** `bounds` decides it:
 
 | Layer | Claims |
 |---|---|
 | without `bounds` | only its spans. The time between them falls through to the layers below, or the default |
-| `available`, with `bounds` | its whole bounded period, as an RFC 7953 VAVAILABILITY does: its spans are available, and the rest of the period is busy (`busy-unavailable`) at its rank, sourced to it |
+| `available`, with `bounds` | its whole bounded period, as an RFC 7953 VAVAILABILITY does: its spans are available, and the rest of the period is busy at its rank, of its `busyType` (BUSYTYPE; `busy-unavailable` by default, RFC 7953 §3.2), sourced to it |
 | `busy`, with `bounds` | only its spans, as busy. Its gaps inside the bounds claim nothing and fall through |
 
 So "available Monday to Friday 09:00-17:00 during this contract" with the

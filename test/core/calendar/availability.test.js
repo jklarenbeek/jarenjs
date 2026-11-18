@@ -83,13 +83,34 @@ describe('priorities follow RFC 7953, and ties go to busy', () => {
       '03-02T18:00 03-03T00:00 busy:busy undefined']);
   });
 
-  it('among equal busy layers the strongest busy type wins and both are named', () => {
+  it('among equal busy layers the strongest busy type wins and all are named', () => {
     const result = evaluateAvailability([
       span('x', 2, 'busy', '2026-03-02T00:00:00Z', '2026-03-03T00:00:00Z', { busyType: 'busy-tentative' }),
       span('y', 2, 'busy', '2026-03-02T00:00:00Z', '2026-03-03T00:00:00Z', { busyType: 'busy-unavailable', revision: 'v7' }),
       span('z', 2, 'busy', '2026-03-02T00:00:00Z', '2026-03-03T00:00:00Z'),
     ], { horizon: day });
-    assert.deepStrictEqual(result.spans.map((s) => [s.busyType, s.sources]), [['busy-unavailable', [{ id: 'x' }, { id: 'y', revision: 'v7' }, { id: 'z' }]]]);
+    assert.deepStrictEqual(result.spans.map((s) => [s.busyType, s.sources]), [['busy', [{ id: 'x' }, { id: 'y', revision: 'v7' }, { id: 'z' }]]]);
+  });
+
+  it('equal-priority busy types combine as RFC 7953 §4 orders them: BUSY > BUSY-UNAVAILABLE > BUSY-TENTATIVE', () => {
+    // RFC 7953 §4: "if one component has a BUSYTYPE set to BUSY and the other has BUSYTYPE set to
+    // BUSY-UNAVAILABLE, then the effective busy time type over the time range that they overlap would be BUSY"
+    const pair = (/** @type {string} */ a, /** @type {string} */ b) => evaluateAvailability([
+      span('a', 3, 'busy', '2026-03-02T00:00:00Z', '2026-03-02T12:00:00Z', { busyType: a }),
+      span('b', 3, 'busy', '2026-03-02T06:00:00Z', '2026-03-03T00:00:00Z', { busyType: b }),
+    ], { horizon: day });
+    assert.deepStrictEqual(brief(pair('busy', 'busy-unavailable')), ['03-02T00:00 03-02T06:00 busy:busy a', '03-02T06:00 03-02T12:00 busy:busy a,b',
+      '03-02T12:00 03-03T00:00 busy:busy-unavailable b']);
+    assert.deepStrictEqual(brief(pair('busy-unavailable', 'busy-tentative')), ['03-02T00:00 03-02T06:00 busy:busy-unavailable a',
+      '03-02T06:00 03-02T12:00 busy:busy-unavailable a,b', '03-02T12:00 03-03T00:00 busy:busy-tentative b']);
+    assert.deepStrictEqual(brief(pair('busy-tentative', 'busy')), ['03-02T00:00 03-02T06:00 busy:busy-tentative a', '03-02T06:00 03-02T12:00 busy:busy a,b',
+      '03-02T12:00 03-03T00:00 busy:busy b']);
+    // the order holds at one rank only: a higher rank's weaker type still decides
+    const ranked = evaluateAvailability([
+      span('a', 2, 'busy', '2026-03-02T00:00:00Z', '2026-03-03T00:00:00Z', { busyType: 'busy-tentative' }),
+      span('b', 3, 'busy', '2026-03-02T00:00:00Z', '2026-03-03T00:00:00Z'),
+    ], { horizon: day });
+    assert.deepStrictEqual(brief(ranked), ['03-02T00:00 03-03T00:00 busy:busy-tentative a']);
   });
 
   it('unknown at a rank beats available at that rank and below, and loses to busy at it', () => {
@@ -388,6 +409,8 @@ describe('evaluateAvailability refuses a malformed layer or option', () => {
     refuses(run({ ...ok, priority: 1.5 }), 'JY0014', '/layers/0/priority');
     refuses(run({ ...ok, mode: 'free' }), 'JY0014', '/layers/0/mode');
     refuses(run({ ...ok, mode: 'available', busyType: 'busy' }), 'JY0014', '/layers/0/busyType');
+    refuses(run({ ...ok, mode: 'available', busyType: 'busy', bounds: null }), 'JY0014', '/layers/0/busyType');
+    refuses(run({ ...ok, mode: 'available', busyType: 'tentative', bounds: [] }), 'JY0014', '/layers/0/busyType');
     refuses(run({ ...ok, busyType: 'tentative' }), 'JY0014', '/layers/0/busyType');
     refuses(run({ ...ok, revision: 3 }), 'JY0014', '/layers/0/revision');
     refuses(run({ id: 'a', priority: 1, mode: 'busy', spans: [] }), 'JY0014', '/layers/0/source');
@@ -576,6 +599,28 @@ describe('bounds: a bounded available layer claims its whole period, as RFC 7953
     const result = evaluateAvailability([span('desk', 5, 'available', '2026-03-02T09:00:00Z', '2026-03-02T17:00:00Z', { bounds: [] })], { horizon: day });
     assert.deepStrictEqual(brief(result), ['03-02T00:00 03-02T09:00 busy:busy-unavailable desk', '03-02T09:00 03-02T17:00 available desk',
       '03-02T17:00 03-03T00:00 busy:busy-unavailable desk']);
+  });
+
+  it('a bounded available layer\'s busyType (RFC 7953 BUSYTYPE) types the time outside its spans', () => {
+    const desk = (/** @type {any} */ extra) => span('desk', 5, 'available', '2026-03-02T09:00:00Z', '2026-03-02T17:00:00Z',
+      { bounds: [Z('2026-03-02T06:00:00Z'), Z('2026-03-02T20:00:00Z')], ...extra });
+    for (const type of ['busy', 'busy-unavailable', 'busy-tentative']) {
+      assert.deepStrictEqual(brief(evaluateAvailability([desk({ busyType: type })], { horizon: day })), ['03-02T00:00 03-02T06:00 unknown:default ',
+        `03-02T06:00 03-02T09:00 busy:${type} desk`, '03-02T09:00 03-02T17:00 available desk', `03-02T17:00 03-02T20:00 busy:${type} desk`,
+        '03-02T20:00 03-03T00:00 unknown:default ']);
+    }
+    // RFC 7953 §3.2: "Default is BUSY-UNAVAILABLE"
+    assert.deepStrictEqual(brief(evaluateAvailability([desk({})], { horizon: day }))[1], '03-02T06:00 03-02T09:00 busy:busy-unavailable desk');
+    // two equal-priority VAVAILABILITYs overlap: the stronger busy type is the time both leave busy (RFC 7953 §4)
+    const both = evaluateAvailability([
+      desk({ busyType: 'busy-tentative' }),
+      span('lab', 5, 'available', '2026-03-02T12:00:00Z', '2026-03-02T19:00:00Z', { bounds: [Z('2026-03-02T08:00:00Z'), Z('2026-03-02T22:00:00Z')], busyType: 'busy' }),
+    ], { horizon: day });
+    assert.deepStrictEqual(brief(both), ['03-02T00:00 03-02T06:00 unknown:default ', '03-02T06:00 03-02T08:00 busy:busy-tentative desk',
+      '03-02T08:00 03-02T09:00 busy:busy desk,lab', '03-02T09:00 03-02T12:00 busy:busy lab', '03-02T12:00 03-02T17:00 available desk,lab',
+      '03-02T17:00 03-02T19:00 busy:busy-tentative desk', '03-02T19:00 03-02T20:00 busy:busy desk,lab', '03-02T20:00 03-02T22:00 busy:busy lab',
+      '03-02T22:00 03-03T00:00 unknown:default ']);
+    assert.deepStrictEqual(freeBusy(both).periods.map((p) => p.fbtype), ['busy-unavailable', 'busy-tentative', 'busy', 'free', 'busy-tentative', 'busy', 'busy-unavailable']);
   });
 
   it('a bounded busy layer claims only its spans: its gaps fall through', () => {

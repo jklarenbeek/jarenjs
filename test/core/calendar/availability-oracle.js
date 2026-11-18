@@ -7,9 +7,11 @@
  * nothing but arithmetic and the transition table (oracle.js), never
  * the code under test or the host's ICU. A layer claims a minute when
  * one of its items covers it, and a bounded available layer also claims
- * every other minute inside its bounds as busy-unavailable; the highest
- * rank decides (priority 1 first, 0 last), and among equal ranks busy
- * beats unknown beats available. Without a zone a wall-clock item is
+ * every other minute inside its bounds as busy of its busy type (default
+ * busy-unavailable); the highest rank decides (priority 1 first, 0 last),
+ * and among equal ranks busy beats unknown beats available, the busy
+ * type the strongest of RFC 7953 §4's BUSY > BUSY-UNAVAILABLE >
+ * BUSY-TENTATIVE. Without a zone a wall-clock item is
  * unknown a day either side of its wall clock, and so is a wall-clock
  * bound (a bounded available layer is unknown wherever its bound may
  * fall).
@@ -23,7 +25,7 @@ import { oracleResolve, oracleDayStart } from './oracle.js';
 export const MINUTE = 60000;
 export const DAY = 86400000;
 const KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-const STRENGTH = { 'busy-tentative': 0, 'busy': 1, 'busy-unavailable': 2 };
+const STRENGTH = { 'busy-tentative': 0, 'busy-unavailable': 1, 'busy': 2 };
 
 /** @param {number} wall */
 const isoDate = (wall) => new Date(wall).toISOString().slice(0, 10);
@@ -192,7 +194,7 @@ export function oracleGrid(layers, { low, high, table, policy, fallback }) {
         claim = inSure ? layer.mode : 'no-zone';
       else if (holds) {
         claim = inSure ? 'busy' : 'no-zone';
-        type = 'busy-unavailable';
+        type = layer.busyType ?? 'busy-unavailable';
       }
       if (claim === null)
         return;

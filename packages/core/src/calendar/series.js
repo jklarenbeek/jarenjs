@@ -22,7 +22,8 @@
 // An override is looked up by its slot, not found by walking the whole
 // series: a slot outside the horizon moved into it is asked of the rule
 // at that one wall clock. An override whose slot the series never makes
-// is an orphan, reported and never applied.
+// is an orphan, reported and never applied; a range whose own slot an
+// EXDATE removes loses that one slot and still applies to the later ones.
 
 import { civilFromDays, daysFromCivil, isoWeekdayFromDays } from '../dates/civil.js';
 import { CalendarError } from './errors.js';
@@ -658,6 +659,20 @@ function seriesMakes(series, context, view, id, wall) {
   const away = awayExcludes(series, context, view, id, wall);
   if (away !== false)
     return away === undefined ? undefined : false;
+  return slotMade(series, context, view, id, wall);
+}
+
+/**
+ * Whether an RDATE or the base rule makes a slot, an EXDATE of it aside.
+ * `undefined` when the budget ran out.
+ * @param {SeriesPlan} series
+ * @param {Context} context
+ * @param {SeriesView} view
+ * @param {string} id
+ * @param {number} wall - the slot's wall clock
+ * @returns {boolean | undefined}
+ */
+function slotMade(series, context, view, id, wall) {
   if (view.rdates.has(id))
     return true;
   return series.plan === null ? false : baseMakes(series.plan, context, wall);
@@ -666,7 +681,9 @@ function seriesMakes(series, context, view, id, wall) {
 /**
  * The overrides of a series that range over this and future occurrences
  * and whose own slot it makes, in recurrenceId order; the others are
- * orphans. `undefined` when the budget ran out.
+ * orphans. An EXDATE of a range's own slot removes that one occurrence
+ * (RFC 5545 §3.8.5.1), and the range still applies to every later one.
+ * `undefined` when the budget ran out.
  * @param {SeriesPlan} series
  * @param {Context} context
  * @param {SeriesView} view
@@ -678,7 +695,7 @@ function rangesOf(series, context, view, orphans) {
   for (const [id, override] of series.overrides) {
     if (override.range === undefined)
       continue;
-    const made = seriesMakes(series, context, view, id, override.idWall);
+    const made = slotMade(series, context, view, id, override.idWall);
     if (made === undefined)
       return undefined;
     if (made)
@@ -980,7 +997,9 @@ function wallOfOccurrence(occurrence) {
  * zoned series' moved times resolve under its policy), with the length
  * its `end` gives (else each slot keeps its own) and its payload. An
  * override without a range still wins for its one slot. A range whose
- * own slot the series does not make is an orphan and moves nothing.
+ * own slot the series does not make is an orphan and moves nothing; an
+ * EXDATE of a range's own slot removes that slot only, and the range
+ * still applies to every later one.
  * A zoned series' RDATE in another zone or utc adds the slot the series'
  * wall clock names at its instant; such an EXDATE removes every slot
  * that starts at its instant (RFC 5545 §3.8.5.1).

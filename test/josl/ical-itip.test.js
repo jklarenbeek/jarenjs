@@ -14,7 +14,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import fs from 'node:fs';
 
-import { parseIcal, stringifyIcal } from '@jarenjs/josl/ical';
+import { createIcalReader, createIcalWriter, iterateIcal, parseIcal, stringifyIcal } from '@jarenjs/josl/ical';
 
 const FIXTURES = new URL('./fixtures/ical-itip/', import.meta.url);
 const read = (/** @type {string} */ name, /** @type {Record<string, any>} */ options = {}) => /** @type {any} */ (parseIcal(fs.readFileSync(new URL(name, FIXTURES), 'utf8'), options));
@@ -173,5 +173,204 @@ describe('ical iTIP: written and read back', () => {
       + 'ATTENDEE;PARTSTAT=DELEGATED;RSVP=FALSE;DELEGATED-TO="mailto:c@example.com":mailto:b@example.com\r\n'), out);
     assert.deepStrictEqual(/** @type {any} */ (parseIcal(out)).scheduling.messages[0].attendees,
       [{ address: 'mailto:b@example.com', partstat: 'delegated', rsvp: false, delegatedTo: ['mailto:c@example.com'] }]);
+  });
+});
+
+describe('ical iTIP: the tables\' comments on values and the calendar\'s counts (RFC 5546 §3)', () => {
+  const cal = (/** @type {string} */ method, /** @type {string[]} */ lines) => ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:p', `METHOD:${method}`, ...lines,
+    'END:VCALENDAR', ''].join('\r\n');
+  const component = (/** @type {string} */ name, /** @type {string[]} */ lines) => [`BEGIN:${name}`, ...lines, `END:${name}`];
+  const head = (/** @type {string} */ uid = 'u') => [`UID:${uid}`, 'DTSTAMP:20260101T000000Z', `ORGANIZER:${A}`];
+  const report = (/** @type {string} */ text) => /** @type {any} */ (parseIcal(text)).scheduling.report.map((/** @type {any} */ e) => `${e.code} ${e.name}`);
+  const event = (/** @type {string[]} */ extra, uid = 'u') => component('VEVENT', [...head(uid), 'SEQUENCE:1', 'SUMMARY:s', 'DTSTART:20260302T090000Z', ...extra]);
+
+  it('ADD: "SEQUENCE ... MUST be greater than 0" (§3.2.4, §3.4.4, §3.5.2)', () => {
+    const add = (/** @type {string} */ name, /** @type {string[]} */ lines) => report(cal('ADD', component(name, [...head(), 'SUMMARY:s', 'DTSTART:20260302T090000Z', ...lines])));
+    assert.deepStrictEqual(add('VEVENT', ['SEQUENCE:0']), ['ICAL1028 SEQUENCE']);
+    assert.deepStrictEqual(add('VEVENT', ['SEQUENCE:2']), []);
+    assert.deepStrictEqual(add('VTODO', ['SEQUENCE:0', 'PRIORITY:1']), ['ICAL1028 SEQUENCE']);
+    assert.deepStrictEqual(add('VJOURNAL', ['SEQUENCE:0', 'DESCRIPTION:d']), ['ICAL1028 SEQUENCE']);
+    assert.match(/** @type {any} */ (parseIcal(cal('ADD', event(['SEQUENCE:0']).filter((l) => l !== 'SEQUENCE:1')))).scheduling.report[0].reason,
+      /holds SEQUENCE greater than 0 \(RFC 5546 §3\), not '0'/);
+  });
+
+  it('CANCEL: STATUS "MUST be set to CANCELLED" where it is given; left out it is no entry (§3.2.5, §3.4.5, §3.5.3)', () => {
+    const cancel = (/** @type {string} */ name, /** @type {string[]} */ lines) => report(cal('CANCEL', component(name, [...head(), 'SEQUENCE:1', ...lines])));
+    assert.deepStrictEqual(cancel('VEVENT', ['STATUS:CONFIRMED']), ['ICAL1028 STATUS']);
+    assert.deepStrictEqual(cancel('VEVENT', ['STATUS:cancelled']), []);
+    assert.deepStrictEqual(cancel('VEVENT', ['ATTENDEE:mailto:b@example.com']), []);
+    assert.deepStrictEqual(cancel('VTODO', ['STATUS:NEEDS-ACTION']), ['ICAL1028 STATUS']);
+    assert.deepStrictEqual(cancel('VJOURNAL', ['STATUS:FINAL']), ['ICAL1028 STATUS']);
+    assert.deepStrictEqual(cancel('VJOURNAL', []), []);
+  });
+
+  it('COUNTER: a VEVENT\'s STATUS "must be one of CONFIRMED/TENATIVE/CANCELLED" (§3.2.7; TENATIVE is RFC 5545\'s TENTATIVE)', () => {
+    assert.deepStrictEqual(report(cal('COUNTER', event(['STATUS:TENTATIVE']))), []);
+    assert.deepStrictEqual(report(cal('COUNTER', event(['STATUS:NEEDS-ACTION']))), ['ICAL1028 STATUS']);
+    // "MAY be one of TENTATIVE/CONFIRMED" (REQUEST, ADD, DECLINECOUNTER) is a MAY: no entry
+    assert.deepStrictEqual(report(cal('REQUEST', event(['STATUS:CANCELLED', 'ATTENDEE:mailto:b@example.com']))), []);
+  });
+
+  it('REQUEST-STATUS: RFC 5545 §3.8.8.3\'s syntax, a class 1-5, and one class in a component and across them (§3.6)', () => {
+    const reply = (/** @type {string[]} */ statuses, uid = 'u') => component('VEVENT', [...head(uid), 'ATTENDEE;PARTSTAT=ACCEPTED:mailto:b@example.com',
+      ...statuses.map((status) => `REQUEST-STATUS:${status}`)]);
+    for (const status of ['2.0;Success', '2.0.1;ok;data', '3.14;Unsupported capability', '5.3;No scheduling support for user', '1.1;Sent'])
+      assert.deepStrictEqual(report(cal('REPLY', reply([status]))), [], status);
+    for (const status of ['2;Success', '6.1;Unknown class', '0.1;x', '2.0', 'Success', '2.0.1.1;deep'])
+      assert.deepStrictEqual(report(cal('REPLY', reply([status]))), ['ICAL1028 REQUEST-STATUS'], status);
+    // rule 1: "there cannot be a mixture of, e.g., 2.xx and 5.xx codes within a single component"
+    assert.deepStrictEqual(report(cal('REPLY', reply(['2.0;Success', '5.1;Unavailable']))), ['ICAL1028 REQUEST-STATUS']);
+    assert.deepStrictEqual(report(cal('REPLY', reply(['2.0;Success', '2.8;Ignored']))), []);
+    // rule 2: a 5.xx (else a 3.xx) in one component, so every component with one; 2.xx and 4.xx mix
+    const two = (/** @type {string} */ a, /** @type {string | undefined} */ b) => report(cal('REPLY', [...reply([a]), ...reply(b === undefined ? [] : [b])]));
+    assert.deepStrictEqual(two('5.1;Unavailable', '2.0;Success'), ['ICAL1028 REQUEST-STATUS']);
+    assert.deepStrictEqual(two('3.7;Invalid user', '2.0;Success'), ['ICAL1028 REQUEST-STATUS']);
+    assert.deepStrictEqual(two('5.1;Unavailable', '5.3;No support'), []);
+    assert.deepStrictEqual(two('5.1;Unavailable', undefined), []);
+    assert.deepStrictEqual(two('2.0;Success', '4.0;Event conflict'), []);
+  });
+
+  it('"All components MUST have the same UID" where the table says so; PUBLISH and CANCEL of VTODOs do not', () => {
+    assert.deepStrictEqual(report(cal('REQUEST', [...event(['ATTENDEE:mailto:b@example.com']), ...event(['ATTENDEE:mailto:b@example.com'], 'v')])), ['ICAL1028 UID']);
+    assert.deepStrictEqual(report(cal('REQUEST', [...event(['ATTENDEE:mailto:b@example.com']), ...event(['ATTENDEE:mailto:b@example.com', 'RECURRENCE-ID:20260302T090000Z'])])), []);
+    assert.deepStrictEqual(report(cal('CANCEL', [...component('VEVENT', [...head(), 'SEQUENCE:1']), ...component('VEVENT', [...head('v'), 'SEQUENCE:1'])])), ['ICAL1028 UID']);
+    assert.deepStrictEqual(report(cal('PUBLISH', [...event([]), ...event([], 'v')])), []);
+    assert.deepStrictEqual(report(cal('CANCEL', [...component('VTODO', [...head(), 'SEQUENCE:1']), ...component('VTODO', [...head('v'), 'SEQUENCE:1'])])), []);
+  });
+
+  it('DTEND or DUE beside DURATION (every VEVENT and VTODO table), and a VALARM\'s DURATION without REPEAT (§3.1.3)', () => {
+    assert.deepStrictEqual(report(cal('CANCEL', component('VEVENT', [...head(), 'SEQUENCE:1', 'DTEND:20260302T100000Z', 'DURATION:PT1H']))), ['ICAL1027 DURATION']);
+    assert.deepStrictEqual(report(cal('REPLY', component('VTODO', [...head(), 'ATTENDEE:mailto:b@example.com', 'DUE:20260302T100000Z', 'DURATION:PT1H']))),
+      ['ICAL1027 DURATION']);
+    const alarm = (/** @type {string[]} */ lines) => report(cal('REQUEST', event(['ATTENDEE:mailto:b@example.com', 'BEGIN:VALARM', 'ACTION:DISPLAY',
+      'DESCRIPTION:d', 'TRIGGER:-PT5M', ...lines, 'END:VALARM'])));
+    assert.deepStrictEqual(alarm(['DURATION:PT5M']), ['ICAL1026 REPEAT']);
+    assert.deepStrictEqual(alarm(['REPEAT:2']), ['ICAL1026 DURATION']);
+    assert.deepStrictEqual(alarm(['DURATION:PT5M', 'REPEAT:2']), []);
+  });
+
+  it('a VTIMEZONE for every TZID the message names, and §3.1.2\'s VTIMEZONE: local DTSTARTs, RDATE or RRULE', () => {
+    const zoned = component('VEVENT', [...head(), 'SEQUENCE:1', 'RECURRENCE-ID;TZID=Europe/Amsterdam:20260302T090000']);
+    const zone = (/** @type {string[]} */ onset) => component('VTIMEZONE', ['TZID:Europe/Amsterdam', ...component('STANDARD', ['TZOFFSETFROM:+0100',
+      'TZOFFSETTO:+0100', ...onset])]);
+    assert.deepStrictEqual(report(cal('CANCEL', zoned)), ['ICAL1026 VTIMEZONE']);
+    assert.deepStrictEqual(report(cal('CANCEL', [...zone(['DTSTART:19700101T000000']), ...zoned])), []);
+    assert.deepStrictEqual(report(cal('CANCEL', [...zone(['DTSTART:19700101T000000Z']), ...zoned])), ['ICAL1028 DTSTART']);
+    assert.deepStrictEqual(report(cal('CANCEL', [...zone(['DTSTART:19700101T000000', 'RRULE:FREQ=YEARLY', 'RDATE:19710101T000000']), ...zoned])),
+      ['ICAL1027 RRULE']);
+    assert.deepStrictEqual(report(cal('CANCEL', [...component('VTIMEZONE', ['TZID:Europe/Amsterdam']), ...zoned])), ['ICAL1026 STANDARD']);
+  });
+
+  it('a VFREEBUSY\'s "DateTime values must be in UTC" is the read\'s own rule already (ICAL1018)', () => {
+    const { report: own } = /** @type {any} */ (parseIcal(cal('REQUEST', component('VFREEBUSY', [...head(), 'ATTENDEE:mailto:b@example.com',
+      'DTSTART;TZID=Europe/Amsterdam:20260302T000000', 'DTEND:20260303T000000Z']))));
+    assert.deepStrictEqual(codes(own.unsupported), ['ICAL1018 DTSTART']);
+  });
+
+  it('the hand-written violating cases (fixtures/ical-itip/violating-*.ics) answer the entries their broken rows give', () => {
+    for (const [file, entries] of /** @type {[string, string[]][]} */ ([
+      ['violating-add.ics', ['ICAL1028 SEQUENCE', 'ICAL1027 VEVENT']],
+      ['violating-cancel.ics', ['ICAL1028 STATUS', 'ICAL1027 DURATION', 'ICAL1028 UID']],
+      ['violating-reply.ics', ['ICAL1028 REQUEST-STATUS', 'ICAL1028 REQUEST-STATUS']],
+      ['violating-late-method.ics', []],
+    ]))
+      assert.deepStrictEqual(codes(read(file).scheduling.report), entries, file);
+    const late = read('violating-late-method.ics');
+    assert.deepStrictEqual([codes(late.report.unsupported), late.calendar.components.length, late.scheduling.messages.length], [['ICAL1029 METHOD'], 0, 2]);
+    assert.throws(() => read('violating-add.ics', { strictScheduling: true }), { code: 'ICAL1028', line: 9 });
+  });
+
+  it('the writer checks the calendar\'s counts and its comments on values (ICAL3021)', () => {
+    const message = (/** @type {Record<string, any>} */ extra) => ({ type: 'message', uid: 'u', dtstamp: 0, organizer: { address: A },
+      attendees: [{ address: 'mailto:b@example.com', partstat: 'accepted' }], ...extra });
+    // ADD's one VEVENT: the second is refused where it is written
+    const added = { type: 'message', uid: 'u', dtstamp: 0, sequence: 1, organizer: { address: A },
+      event: { type: 'event', uid: 'u', dtstamp: 0, sequence: 1, summary: 's', start: utc('2026-03-02T09:00:00Z') } };
+    assert.ok(stringifyIcal({ prodId: 'p', method: 'add', components: [added] }));
+    assert.throws(() => stringifyIcal({ prodId: 'p', method: 'add', components: [added, added] }), (/** @type {any} */ error) =>
+      error.code === 'ICAL3021' && error.docPath === '/components/1' && /holds VEVENT exactly once/.test(error.message));
+    assert.throws(() => stringifyIcal({ prodId: 'p', method: 'reply', components: [message({}), message({ uid: 'v' })] }),
+      { code: 'ICAL3021', docPath: '/components/1' });
+    assert.throws(() => stringifyIcal({ prodId: 'p', method: 'reply', components: [message({ requestStatus: [{ code: '6.0', description: 'x' }] })] }),
+      { code: 'ICAL3021', docPath: '/components/0' });
+    assert.throws(() => stringifyIcal({ prodId: 'p', method: 'reply', components: [message({ requestStatus: [{ code: '5.1', description: 'x' }] }),
+      message({ requestStatus: [{ code: '2.0', description: 'Success' }] })] }), { code: 'ICAL3021', docPath: '/components/1' });
+    // the streaming writer refuses where the calendar stops being a message, and is closed after
+    const writer = createIcalWriter({ prodId: 'p', method: 'reply' });
+    writer.write(message({}));
+    assert.throws(() => writer.write(message({ uid: 'v' })), { code: 'ICAL3021' });
+    assert.throws(() => writer.end(), { code: 'ICAL3018' });
+  });
+});
+
+describe('ical iTIP: a METHOD after the first component (RFC 5545 §3.6 places it before them)', () => {
+  const late = (/** @type {string} */ method, /** @type {string[]} */ before, /** @type {string[]} */ after) => ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:p',
+    ...before, `METHOD:${method}`, ...after, 'END:VCALENDAR', ''].join('\r\n');
+  const early = (/** @type {string} */ text) => text.replace(/(METHOD:[A-Z]+\r\n)/, '').replace('PRODID:p\r\n', `PRODID:p\r\n${/METHOD:[A-Z]+\r\n/.exec(text)?.[0]}`);
+  const request = (/** @type {string} */ uid, /** @type {string[]} */ extra = []) => ['BEGIN:VEVENT', `UID:${uid}`, 'DTSTAMP:20260101T000000Z', `ORGANIZER:${A}`,
+    'ATTENDEE:mailto:b@example.com', 'SUMMARY:s', 'DTSTART:20260302T090000Z', ...extra, 'END:VEVENT'];
+  const cancel = (/** @type {string} */ id) => ['BEGIN:VEVENT', 'UID:u', 'DTSTAMP:20260101T000000Z', `ORGANIZER:${A}`, 'SEQUENCE:2', `RECURRENCE-ID:${id}`, 'END:VEVENT'];
+  /** a read without its ICAL1029 entry @param {any} read */
+  const without = (read) => {
+    const { ICAL1029: _late, ...counts } = read.report.counts;
+    return { ...read, report: { ...read.report, counts, unsupported: read.report.unsupported.filter((/** @type {any} */ e) => e.code !== 'ICAL1029') } };
+  };
+  const stream = async (/** @type {string} */ text, /** @type {any} */ options = {}) => {
+    const items = [];
+    for await (const item of iterateIcal([text.slice(0, 120), text.slice(120)], options))
+      items.push(item);
+    return items;
+  };
+
+  it('parseIcal reports it (ICAL1029) and applies it to the whole calendar, as if it were in its place', () => {
+    for (const text of [late('REQUEST', request('u'), request('u', ['RECURRENCE-ID:20260302T090000Z'])), late('CANCEL', cancel('20260302T090000Z'), cancel('20260303T090000Z')),
+      late('REQUEST', request('u', ['RRULE:FREQ=DAILY;COUNT=3']), request('u', ['RECURRENCE-ID:20260303T090000Z', 'SUMMARY:moved']).filter((l) => l !== 'SUMMARY:s'))]) {
+      const read = /** @type {any} */ (parseIcal(text));
+      assert.deepStrictEqual(read.report.unsupported.filter((/** @type {any} */ e) => e.code === 'ICAL1029').map((/** @type {any} */ e) => [e.name, e.line]),
+        [['METHOD', text.split('\r\n').indexOf(/METHOD:[A-Z]+/.exec(text)?.[0] ?? '') + 1]]);
+      assert.match(read.report.unsupported.find((/** @type {any} */ e) => e.code === 'ICAL1029').reason, /follows 1 component, .*applied to the whole calendar/);
+      // the same answer as with the METHOD in its place, lines aside
+      const placed = /** @type {any} */ (parseIcal(early(text)));
+      const plain = (/** @type {any} */ r) => [r.calendar, r.scheduling.messages, codes(r.scheduling.report), codes(r.report.unsupported), r.report.counts];
+      assert.deepStrictEqual(plain(without(read)), plain(placed));
+      // strict refuses the calendar at the first entry it meets: here an ORGANIZER the read before the METHOD leaves out (ICAL1011)
+      assert.throws(() => parseIcal(text, { strict: true }), { code: 'ICAL1011' });
+    }
+    // a CANCEL's messages are no events of the calendar, the one before the METHOD too
+    const cancelled = /** @type {any} */ (parseIcal(late('CANCEL', cancel('20260302T090000Z'), cancel('20260303T090000Z'))));
+    assert.deepStrictEqual([cancelled.calendar.components.length, cancelled.scheduling.messages.map((/** @type {any} */ m) => m.cancellation.recurrenceId)],
+      [0, ['2026-03-02T09:00:00Z', '2026-03-03T09:00:00Z']]);
+  });
+
+  it('a streaming read applies a data method to what follows and says what it could not; it refuses a method whose components are messages', async () => {
+    const text = late('REQUEST', request('u'), request('v'));
+    const reader = createIcalReader();
+    const first = reader.feed(text);
+    const end = /** @type {any} */ (reader.end());
+    assert.deepStrictEqual([[...first, ...end.calendar.components].map((c) => c.uid), end.scheduling.messages.map((/** @type {any} */ m) => m.uid)], [['u', 'v'], ['v']]);
+    assert.match(end.report.unsupported.find((/** @type {any} */ e) => e.code === 'ICAL1029').reason, /without their scheduling messages/);
+    // the component before it went unchecked, as the entry says: two UIDs, and no ICAL1028 (parseIcal has it)
+    assert.deepStrictEqual([codes(end.scheduling.report), codes(/** @type {any} */ (parseIcal(text)).scheduling.report)], [[], ['ICAL1028 UID']]);
+    const items = await stream(text);
+    assert.deepStrictEqual(items.at(-1).scheduling.messages.map((/** @type {any} */ m) => m.uid), ['v']);
+    const refused = late('CANCEL', cancel('20260302T090000Z'), cancel('20260303T090000Z'));
+    assert.throws(() => createIcalReader().feed(refused), { code: 'ICAL1008', docPath: '/VCALENDAR/METHOD' });
+    await assert.rejects(() => stream(refused), { code: 'ICAL1008' });
+    const plain = late('REQUEST', request('u').filter((line) => !/^(ORGANIZER|ATTENDEE)/.test(line)), request('v'));
+    assert.throws(() => createIcalReader({ strict: true }).feed(plain), { code: 'ICAL1029' });
+    await assert.rejects(() => stream(plain, { strict: true }), { code: 'ICAL1029' });
+    assert.throws(() => parseIcal(plain, { strict: true }), { code: 'ICAL1029' });
+    // a METHOD after a VTIMEZONE only is late too, and the VTIMEZONE still defines its TZID; one at the head is not late
+    assert.ok(!codes(/** @type {any} */ (parseIcal(early(text))).report.unsupported).includes('ICAL1029 METHOD'));
+    const zone = ['BEGIN:VTIMEZONE', 'TZID:Europe/Amsterdam', 'BEGIN:STANDARD', 'DTSTART:19700101T000000', 'TZOFFSETFROM:+0100', 'TZOFFSETTO:+0100',
+      'END:STANDARD', 'END:VTIMEZONE'];
+    const zoned = late('REQUEST', zone, request('u').map((line) => (line.startsWith('DTSTART') ? 'DTSTART;TZID=Europe/Amsterdam:20260302T090000' : line)));
+    const parsed = /** @type {any} */ (parseIcal(zoned, { strictScheduling: true }));
+    assert.deepStrictEqual([codes(parsed.report.unsupported), codes(parsed.scheduling.report), parsed.scheduling.messages.length],
+      [['ICAL1029 METHOD', 'ICAL1011 ORGANIZER', 'ICAL1011 ATTENDEE'], [], 1]);
+    const streamed = createIcalReader({ strictScheduling: true });
+    streamed.feed(zoned);
+    assert.deepStrictEqual(codes(/** @type {any} */ (streamed.end()).scheduling.report), []);
+    assert.deepStrictEqual(codes((await stream(zoned, { strictScheduling: true })).at(-1).scheduling.report), []);
   });
 });

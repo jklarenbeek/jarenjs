@@ -87,7 +87,7 @@ type Availability = {                    // RFC 7953 VAVAILABILITY
   type: 'availability', uid: string, dtstamp?: Instant,
   start?: TemporalValue, end?: TemporalValue, // utc or zoned; either left out is open
   priority?: number,                     // 0-9: 1 the highest, 0 (or none) the lowest
-  busyType?: 'busy-unavailable',         // the only one an availability layer holds
+  busyType?: 'busy' | 'busy-unavailable' | 'busy-tentative', // BUSYTYPE: the period outside its AVAILABLEs
   summary?: string, description?: string, location?: string,
   available: { series: Series | SeriesDefinition, dtstamp?: Instant,
     summary?: string, description?: string, location?: string }[], // each AVAILABLE, utc or zoned
@@ -335,9 +335,12 @@ const answer = evaluateAvailability(availabilityLayers(calendar.components), {
 ```
 
 - The layer is bounded by the period (`bounds`, an open end `null`), so
-  inside it time is available where an AVAILABLE says so and
-  busy-unavailable elsewhere (§3.1); a higher PRIORITY decides inside its
-  own period over a lower one (§4); 0 or none is the lowest.
+  inside it time is available where an AVAILABLE says so and busy
+  elsewhere (§3.1), of the component's BUSYTYPE (`busyType`;
+  busy-unavailable when it has none, §3.2); a higher PRIORITY decides
+  inside its own period over a lower one (§4); 0 or none is the lowest.
+  Where two of one PRIORITY are both busy, the stronger type shows, in
+  §4's order BUSY > BUSY-UNAVAILABLE > BUSY-TENTATIVE.
 - Time outside every VAVAILABILITY is `unknown`, as time no layer claims
   always is. §5 starts a free-busy request from free: a lowest-ranked
   layer `{ id, priority: 0, mode: 'available', spans: [{}], source }`
@@ -351,10 +354,10 @@ const answer = evaluateAvailability(availabilityLayers(calendar.components), {
   inside the horizon (`ICAL3022` otherwise: past the horizon the read
   would say busy-unavailable where the model says available); under
   `zones: 'embed'` it keeps its RRULE.
-- Withheld (`ICAL1025`): a BUSYTYPE other than BUSY-UNAVAILABLE (a
-  bounded available layer marks its gaps busy-unavailable, so BUSY or
-  BUSY-TENTATIVE has no layer), and AVAILABLE times both UTC and zoned
-  (one layer's series are of one kind). A DATE or floating time is
+- Withheld (`ICAL1025`): a BUSYTYPE other than BUSY, BUSY-UNAVAILABLE
+  and BUSY-TENTATIVE (an iana-token or x-name: §3.2 gives it no meaning,
+  so the time outside its AVAILABLEs has no type), and AVAILABLE times
+  both UTC and zoned (one layer's series are of one kind). A DATE or floating time is
   withheld (`ICAL1018`): RFC 7953 §3.1 takes UTC or zoned DATE-TIMEs.
 
 ## Scheduling (iTIP)
@@ -383,16 +386,48 @@ read answers `scheduling: { method, messages, report }` beside the model:
   for its method: a property or subcomponent the table requires and the
   component lacks (`ICAL1026`), one it excludes or takes fewer times, a
   component the method does not take, or more of a kind than it takes
-  (`ICAL1027`). Presence only: a table's comments on values are not
-  checked. The entries are reported, never dropped content, and apart
-  from `report.unsupported`: `strict` refuses none of them, and
-  `strictScheduling: true` refuses at the first, with its code.
+  (`ICAL1027`). The tables' comments that one message answers are
+  checked too: a value outside what a comment allows (`ICAL1028`: an
+  ADD's SEQUENCE of 0, a CANCEL's STATUS other than CANCELLED, a
+  COUNTER's VEVENT STATUS outside CONFIRMED, TENTATIVE and CANCELLED, a
+  REQUEST-STATUS that is no status code of RFC 5545 §3.8.8.3's syntax and
+  class 1 to 5 with its description, two classes of REQUEST-STATUS in one
+  component, a 5.xx or 3.xx in one component beside another class in
+  another (§3.6), components of more than one UID where the table says
+  "All components MUST have the same UID", a STANDARD or DAYLIGHT
+  DTSTART not in local time), DTEND or DUE beside DURATION and an
+  observance's RDATE beside its RRULE (`ICAL1027`), and a VALARM's
+  DURATION without REPEAT or the reverse, a TZID no VTIMEZONE of the
+  message defines, and a VTIMEZONE without STANDARD or DAYLIGHT
+  (`ICAL1026`). A comment that needs the message it answers (an UID,
+  ORGANIZER or SEQUENCE that "MUST echo" the original's, the attendee
+  replying, a RECURRENCE-ID only of a recurring event) is the host's; a
+  "MAY be one of" is no requirement; a CANCEL without STATUS is no entry. A VFREEBUSY's times are UTC as the read
+  always takes them (`ICAL1018` otherwise). The entries are reported,
+  never dropped content, and apart from `report.unsupported`: `strict`
+  refuses none of them, and `strictScheduling: true` refuses at the
+  first, with its code.
+- A METHOD after the first component is misplaced (RFC 5545 §3.6 puts
+  the calendar's properties before its components): it is reported
+  (`ICAL1029`, so `strict` refuses it) and applied to the whole
+  calendar, `parseIcal` reading the text again with it from the start.
+  `createIcalReader` and `iterateIcal` have handed the components before
+  it out already: under PUBLISH or REQUEST (and a VFREEBUSY's REPLY)
+  those are calendar data either way and are read without their messages
+  and table checks, which the entry says; under any other method they
+  were read as calendar data where they are messages, and the read is
+  refused (`ICAL1008`).
 - The writer writes `method` as METHOD, and a `message` component as its
   component (`event` or `suggested` written as the event, with the
   message's lines in each of its VEVENTs). Under any method but PUBLISH,
-  each component is checked against its method's table, and one the
-  table would not take is refused (`ICAL3021`); a PUBLISH calendar's
-  events, which carry no ORGANIZER here, are written as before.
+  each component is checked against its method's table and the comments
+  above, and the calendar's components against the counts, kinds, UID
+  and REQUEST-STATUS classes the tables allow: the component that breaks
+  either is refused where it is written (`ICAL3021`; an ADD's second
+  VEVENT, say). The writer's own VTIMEZONEs are counted and define
+  their TZIDs; their observances are the calendar layer's. A PUBLISH
+  calendar's events, which carry no ORGANIZER here, are written as
+  before.
 
 The organizer's and attendees' state machine (which SEQUENCE is current,
 whether a REPLY or COUNTER applies, applying a CANCEL to a stored series,
@@ -410,8 +445,7 @@ host's: this codec reads and writes the messages' data, nothing more.
   replaced.
 - Every parameter written is a fixed token (`VALUE=DATE`, `VALUE=PERIOD`,
   `FBTYPE=...`); none needs quoting.
-- `method` is `'publish'` or absent: the scheduling methods need
-  organizers and attendees, which are outside the subset.
+- `method` is one of RFC 5546's eight, or absent (Scheduling, above).
 
 ## Limits
 
@@ -731,14 +765,11 @@ edit is planned before anything is emitted, so a refusal returns nothing:
   own ends by the range's length, not the series' DURATION a copy would
   carry). A move of the range's own slot is a new DTSTART of the range,
   and so a new shift of every later slot (RFC 5545 §3.8.4.4). A cancel or
-  EXDATE of it removes that one slot and the later ones keep the range's
-  changes: the range's VEVENT names the next slot the series makes, with
-  its DTSTART (and DTEND) by the same shift, and the series gains an
-  EXDATE of the slot; a range whose slot is the series' last, or whose
-  next slot is another range's, is cancelled whole (STATUS:CANCELLED).
-  Only a cancel or EXDATE whose next slot has its own VEVENT, where the
-  range would have to move, is refused (`ICAL4005`). Its text and its
-  removal are edits like any other;
+  EXDATE of it is an EXDATE of the slot beside the range, which stays as
+  written: the EXDATE removes that one slot (§3.8.5.1) and every later
+  one keeps the range's changes. A range on a slot the series never
+  makes applies nowhere, so excluding its slot is refused (`ICAL4004`).
+  Its text and its removal are edits like any other;
 - a text with an alternate representation (ALTREP), a property held more
   than once, and an EXDATE over an occurrence's own VEVENT would lose or
   contradict content (`ICAL4007`);
@@ -772,7 +803,7 @@ refuses carries the writer's code for it (`ICAL3004`, `ICAL3006`,
 | `ICAL1005` | an END names a component other than the one open |
 | `ICAL1006` | the input ends inside a component |
 | `ICAL1007` | content outside the calendar: before BEGIN:VCALENDAR, after its END, or a calendar inside a calendar |
-| `ICAL1008` | the calendar is not iCalendar 2.0 in the Gregorian scale: VERSION or PRODID missing, repeated or other |
+| `ICAL1008` | the calendar is not iCalendar 2.0 in the Gregorian scale: VERSION or PRODID missing, repeated or other; or a streaming read meets a METHOD after components it read as calendar data that the METHOD makes messages |
 | `ICAL1009` | the reader has ended or stopped, and takes no more input |
 | `ICAL1010` | reported: a bare line feed, read as CRLF |
 | `ICAL1011` | reported: a property outside the subset, left out |
@@ -789,9 +820,11 @@ refuses carries the writer's code for it (`ICAL3004`, `ICAL3006`,
 | `ICAL1022` | withheld: what changes when the event occurs and this release does not read (EXRULE, EXDATE with no rule, a series of extra dates whose DTEND lies in another zone than its DTSTART) |
 | `ICAL1023` | reported: a VTIMEZONE of an IANA name and the provider give other offsets over the span the file uses it |
 | `ICAL1024` | reported: a value lies outside what the VTIMEZONE of its TZID covers |
-| `ICAL1025` | withheld: a VAVAILABILITY the availability layers cannot hold as RFC 7953 reads it (a BUSYTYPE other than BUSY-UNAVAILABLE, AVAILABLE times both UTC and zoned) |
+| `ICAL1025` | withheld: a VAVAILABILITY the availability layers cannot hold as RFC 7953 reads it (a BUSYTYPE other than BUSY, BUSY-UNAVAILABLE or BUSY-TENTATIVE, AVAILABLE times both UTC and zoned) |
 | `ICAL1026` | scheduling report: a component lacks a property or subcomponent RFC 5546 §3 requires of it under the calendar's METHOD |
 | `ICAL1027` | scheduling report: a component holds a property or subcomponent its method's table excludes, or more of one than it takes; or the method takes no such component, or fewer of a kind |
+| `ICAL1028` | scheduling report: a value outside what a comment of its method's table allows (a SEQUENCE, a STATUS, a REQUEST-STATUS code or its class, one UID, a local DTSTART) |
+| `ICAL1029` | METHOD follows a component, where RFC 5545 §3.6 places it before them; `parseIcal` applies it to the whole calendar (a streaming read refuses one whose components are messages, `ICAL1008`) |
 | `ICAL3001` | the calendar or a component is not an object of the documented model, or lacks a member it requires |
 | `ICAL3002` | a member or component type outside the documented subset; it is refused, never written raw |
 | `ICAL3003` | a member holds a value of a form it does not take |
@@ -812,13 +845,13 @@ refuses carries the writer's code for it (`ICAL3004`, `ICAL3006`,
 | `ICAL3018` | the writer has ended or refused, and takes no more components |
 | `ICAL3019` | `zones: 'embed'` and no horizon for a zone's VTIMEZONE |
 | `ICAL3020` | a zoned time outside the horizon its VTIMEZONE covers |
-| `ICAL3021` | under a METHOD other than PUBLISH, a component its method's RFC 5546 table would not take |
+| `ICAL3021` | under a METHOD other than PUBLISH, a component its method's RFC 5546 table would not take, or one after which the calendar's components break the tables' counts, kinds, UID or REQUEST-STATUS classes |
 | `ICAL3022` | under `zones: 'utc'`, a zoned recurring AVAILABLE whose VAVAILABILITY period the horizon does not hold |
 | `ICAL4001` | an edit is not one of the documented edits, or a member of it has a form it does not take |
 | `ICAL4002` | no VEVENT holds the UID, or the occurrence, an edit names |
 | `ICAL4003` | more than one VEVENT could be the one an edit names |
 | `ICAL4004` | the event is not recurring, its series makes no such occurrence, or a moved occurrence is excluded or cancelled |
-| `ICAL4005` | the occurrence is the slot of an override over this and future occurrences whose next slot has its own VEVENT, where cancelling or excluding it would move the range |
+| `ICAL4005` | Retired, no longer raised: a cancel or EXDATE of the slot of an override over this and future occurrences is an EXDATE beside the range |
 | `ICAL4006` | the read withheld the event, or the occurrence's own VEVENT, so the occurrence cannot be checked |
 | `ICAL4007` | the edit would lose content: a property held more than once, a text with an alternate representation, an occurrence with its own VEVENT |
 | `ICAL4008` | a moved occurrence's start or end is not of its series' kind and zone |
@@ -843,12 +876,12 @@ a calendar holding only that name is read and its code asserted. Under
 | `VEVENT` | supported | supported | preserved; the component `patchIcal` edits |
 | `VFREEBUSY` | supported | supported | preserved |
 | `VTIMEZONE`, `STANDARD`, `DAYLIGHT` | `zones: 'embed'` | compiled; one that cannot be is reported (`ICAL1014`) | preserved |
-| `VAVAILABILITY`, `AVAILABLE` | supported (`type: 'availability'`, RFC 7953) | supported; a BUSYTYPE other than BUSY-UNAVAILABLE, or AVAILABLE times both UTC and zoned, withheld (`ICAL1025`) | preserved |
+| `VAVAILABILITY`, `AVAILABLE` | supported (`type: 'availability'`, RFC 7953) | supported; a BUSYTYPE other than BUSY, BUSY-UNAVAILABLE or BUSY-TENTATIVE, or AVAILABLE times both UTC and zoned, withheld (`ICAL1025`) | preserved |
 | `VTODO`, `VJOURNAL`, X- and IANA components | refused (`ICAL3002`); a VTODO or VJOURNAL scheduling message written (`type: 'message'`) | reported (`ICAL1013`); under a METHOD also read as a message | preserved; a VTODO or VJOURNAL retitled, described, relocated (VTODO) or removed by `component` |
 | `VALARM` | refused (`ICAL3002`) | reported (`ICAL1013`) | preserved; copied into a new override; described, re-triggered or removed by `alarm` |
 | `VERSION`, `PRODID` | supported | supported, VERSION 2.0 (any other refused, `ICAL1008`) | preserved |
 | `CALSCALE` | not written | GREGORIAN; any other refused (`ICAL1008`) | preserved |
-| `METHOD` | RFC 5546's eight; a component of any but PUBLISH checked against its method's table (`ICAL3021`) | RFC 5546's eight, each component checked against its method's table in `scheduling.report` (`ICAL1026`, `ICAL1027`); any other reported (`ICAL1011`) | preserved |
+| `METHOD` | RFC 5546's eight; a component of any but PUBLISH, and the calendar's components, checked against its method's tables (`ICAL3021`) | RFC 5546's eight, each component checked against its method's table in `scheduling.report` (`ICAL1026`-`ICAL1028`); after the first component reported (`ICAL1029`) and applied; any other reported (`ICAL1011`) | preserved |
 | `UID`, `DTSTAMP` | supported | supported | preserved; a new override's DTSTAMP from the edit |
 | `DTSTART`, `DTEND`, `DURATION` | supported; an override's or RDATE period's `duration` written as DURATION | supported; a zoned length that ends in a repeated hour's second pass read as `duration` | preserved; written by `move` |
 | `SUMMARY`, `DESCRIPTION`, `LOCATION` | supported | supported | preserved; set or removed by `retitle`, `describe`, `relocate` |
@@ -872,7 +905,7 @@ a calendar holding only that name is read and its code asserted. Under
 | `CONFERENCE` (RFC 7986) | not written | reported (`ICAL1011`) | preserved |
 | X- and IANA properties | refused (`ICAL3002`) | reported (`ICAL1011`) | preserved |
 | `VALUE`, `TZID` (parameter) | supported | supported | preserved; spelled for every new time |
-| `RANGE` | THISANDFUTURE, on a series written with its rule (`ICAL3016` for a range of its own slot's length over later slots of another); expanded otherwise | THISANDFUTURE read into the series and expanded; any other withheld (`ICAL1018`) | preserved; a later occurrence edited as any other; a move of its own slot moves the range, a cancel or EXDATE moves it to the next slot (`ICAL4005` where that slot has its own VEVENT) |
+| `RANGE` | THISANDFUTURE, on a series written with its rule (`ICAL3016` for a range of its own slot's length over later slots of another); expanded otherwise | THISANDFUTURE read into the series and expanded; any other withheld (`ICAL1018`) | preserved; a later occurrence edited as any other; a move of its own slot moves the range, a cancel or EXDATE of it is an EXDATE beside the range |
 | `FBTYPE` | supported | supported | preserved |
 | `ALTREP` | not written | reported (`ICAL1012`) | preserved; a text edit of its property refused (`ICAL4007`) |
 | `LANGUAGE`, `CN`, `CUTYPE`, `DELEGATED-FROM`, `DELEGATED-TO`, `DIR`, `ENCODING`, `FMTTYPE`, `MEMBER`, `PARTSTAT`, `RELATED`, `RELTYPE`, `ROLE`, `RSVP`, `SENT-BY`, `DISPLAY`, `EMAIL`, `FEATURE`, `LABEL`, X- and IANA parameters | not written | reported on a property of the subset (`ICAL1012`) | preserved; a replaced line keeps its parameters |

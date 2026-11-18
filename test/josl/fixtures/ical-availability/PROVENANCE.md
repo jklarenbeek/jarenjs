@@ -52,3 +52,26 @@ decides, and the case says so:
   make (2011-10-02, 2011-10-23 and 2011-10-30 are Sundays), whose
   recurrence set RFC 5545 §3.8.5.3 leaves undefined; no case's span
   reaches one of those starts.
+
+## The BUSYTYPE cases (hand-written)
+
+None of the RFC's examples carries a BUSYTYPE, so two files are written
+by hand, every time in UTC (no zone data decides them):
+
+- `busytype-equal-priority.ics`: two VAVAILABILITY components of
+  PRIORITY:3 on 2026-11-02, `busy-a` 06:00Z-20:00Z with
+  BUSYTYPE:BUSY-TENTATIVE and an AVAILABLE 09:00Z-17:00Z, `busy-b`
+  08:00Z-22:00Z with BUSYTYPE:BUSY and an AVAILABLE 12:00Z-19:00Z.
+- `busytype-priority.ics`: on 2026-11-03, `avail-base` (no PRIORITY, no
+  BUSYTYPE: the default BUSY-UNAVAILABLE, §3.2) over the whole day with an
+  AVAILABLE 09:00Z-17:00Z; `avail-hold`, PRIORITY:1, BUSYTYPE:BUSY-TENTATIVE,
+  13:00Z-15:00Z with no AVAILABLE; `avail-lab`, PRIORITY:0, BUSYTYPE:BUSY,
+  16:00Z-18:00Z with no AVAILABLE.
+
+Their spans follow from §3.1 (inside a period, the time outside its
+AVAILABLEs is busy of its BUSYTYPE, §3.2), §4's priorities, and §4's
+order for one PRIORITY: "the overlapping busy time type is determined by
+the following order: BUSY > BUSY-UNAVAILABLE > BUSY-TENTATIVE". Where an
+AVAILABLE of one component meets the other's busy time at one PRIORITY,
+§4 leaves the result to their creator; the tie is busy, as for the
+examples above, and names only the busy component.

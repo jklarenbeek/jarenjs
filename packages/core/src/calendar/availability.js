@@ -25,8 +25,10 @@
 // claims only its own spans, so the time between them falls through to
 // the layers below or the default. A layer with bounds is an RFC 7953
 // VAVAILABILITY: an available one claims its whole bounded period, the
-// time outside its spans busy-unavailable at its rank; a busy one still
-// claims only its spans, and its gaps fall through.
+// time outside its spans busy at its rank, of its BUSYTYPE (default
+// busy-unavailable); a busy one still claims only its spans, and its
+// gaps fall through. Equal-ranked busy types combine as RFC 7953 §4
+// orders them: busy over busy-unavailable over busy-tentative.
 
 import { mergeIntervals, subtractIntervals, findSlots } from '../series/interval.js';
 import { parseDuration, durationToMs } from '../dates/duration.js';
@@ -43,7 +45,8 @@ const NO_ZONE_REACH = DAY;
 
 const BUSY_TYPES = /* @__PURE__ */ Object.freeze(['busy', 'busy-unavailable', 'busy-tentative']);
 /** @type {Readonly<Record<string, number>>} */
-const BUSY_STRENGTH = /* @__PURE__ */ Object.freeze({ 'busy-tentative': 0, 'busy': 1, 'busy-unavailable': 2 });
+/** RFC 7953 §4: at one priority BUSY > BUSY-UNAVAILABLE > BUSY-TENTATIVE. */
+const BUSY_STRENGTH = /* @__PURE__ */ Object.freeze({ 'busy-tentative': 0, 'busy-unavailable': 1, 'busy': 2 });
 /** The reason an unknown span names when two layers of one rank leave it unknown for different reasons. */
 const REASONS = /* @__PURE__ */ Object.freeze(['no-zone', 'incomplete']);
 const STATES = /* @__PURE__ */ Object.freeze(['available', 'busy', 'unknown']);
@@ -59,10 +62,12 @@ export const AVAILABILITY_LIMITS = /* @__PURE__ */ Object.freeze({ maxSlots: 100
  * One layer of availability. `priority` is RFC 7953's PRIORITY (1 is the
  * highest, 9 the lowest numbered, 0 below them all); `mode` says what
  * the layer's spans are; `busyType` is a busy layer's kind of busy
- * (default `'busy'`). The spans are a series (or the list
+ * (default `'busy'`), or a bounded available layer's for the time
+ * outside its spans (RFC 7953 BUSYTYPE, default `'busy-unavailable'`).
+ * The spans are a series (or the list
  * `weeklyPattern` returns) or explicit `spans`; `bounds` clips them,
  * either end open, and makes an available layer claim its whole bounded
- * period (busy-unavailable outside its spans), as RFC 7953 does. `source` is the caller's provenance token, carried
+ * period (busy outside its spans), as RFC 7953 does. `source` is the caller's provenance token, carried
  * and never read; `revision` is the caller's revision of the layer's
  * data, echoed on every span the layer decides.
  * @typedef {Object} AvailabilityLayer
@@ -342,8 +347,10 @@ function placeLayer(layer, index, context) {
     throw new CalendarError('JY0014', `priority is RFC 7953's 0-9 (1 the highest, 0 undefined and lowest), not ${String(priority)}`, `${path}/priority`);
   if (mode !== 'available' && mode !== 'busy')
     throw new CalendarError('JY0014', `mode is 'available' or 'busy', not ${String(mode)}`, `${path}/mode`);
-  if (busyType !== undefined && (mode !== 'busy' || !BUSY_TYPES.includes(busyType))) {
-    throw new CalendarError('JY0014', mode !== 'busy' ? 'busyType goes with mode \'busy\''
+  const bounded = layer.bounds !== undefined && layer.bounds !== null;
+  // an unbounded available layer has no time outside its spans to type
+  if (busyType !== undefined && ((mode !== 'busy' && !bounded) || !BUSY_TYPES.includes(busyType))) {
+    throw new CalendarError('JY0014', mode !== 'busy' && !bounded ? 'busyType goes with mode \'busy\', or with bounds on an available layer'
       : `busyType is one of ${BUSY_TYPES.join(', ')}, not ${String(busyType)}`, `${path}/busyType`);
   }
   if (revision !== undefined && (typeof revision !== 'string' || revision === ''))
@@ -352,7 +359,6 @@ function placeLayer(layer, index, context) {
     throw new CalendarError('JY0014', 'a layer carries its source, the caller\'s provenance token', `${path}/source`);
   if ((layer.series === undefined) === (layer.spans === undefined))
     throw new CalendarError('JY0014', 'a layer has series or spans, exactly one', path);
-  const bounded = layer.bounds !== undefined && layer.bounds !== null;
   const bounds = layer.bounds ?? [];
   if (!Array.isArray(bounds) || bounds.length > 2)
     throw new CalendarError('JY0014', 'bounds is [start?, end?), either end open', `${path}/bounds`);
@@ -388,7 +394,7 @@ function placeLayer(layer, index, context) {
   const tail = placed.incompleteFrom === undefined ? [] : clip([{ start: placed.incompleteFrom, end: Infinity }], reach.start, reach.end);
   const incomplete = tail.length === 0 ? [] : subtractIntervals(tail, unknownZone);
   const claimed = subtractIntervals(sureKnown, [...unknownZone, ...incomplete]);
-  // inside its bounds, an available layer's time outside its spans is busy-unavailable at its rank
+  // inside its bounds, an available layer's time outside its spans is busy at its rank, of its busy type
   const gaps = holds && sure.start < sure.end ? subtractIntervals([sure], [...sureKnown, ...unknownZone, ...incomplete]) : [];
   /** @type {{ start: number, end: number, claim: string }[]} */
   const pieces = [];
@@ -402,7 +408,7 @@ function placeLayer(layer, index, context) {
     pieces.push({ ...span, claim: 'incomplete' });
   const source = revision === undefined ? Object.freeze({ id }) : Object.freeze({ id, revision });
   return {
-    id, rank: priority === 0 ? 10 : priority, busyType: busyType ?? 'busy', source, pieces,
+    id, rank: priority === 0 ? 10 : priority, busyType: busyType ?? (mode === 'busy' ? 'busy' : 'busy-unavailable'), source, pieces,
     entry: Object.freeze({
       ...source, source: layer.source, status: placed.incompleteFrom === undefined ? 'complete' : 'incomplete',
       complete: placed.incompleteFrom === undefined,
@@ -422,12 +428,15 @@ const OPTION_KEYS = /* @__PURE__ */ Object.freeze(['horizon', 'zone', 'zoneSourc
  *
  * - At each instant the highest-ranked claims decide (RFC 7953: priority
  *   1 the highest, 9 the lowest numbered, 0 below them all); among
- *   equal ranks busy beats unknown beats available.
+ *   equal ranks busy beats unknown beats available, and busy types
+ *   combine as RFC 7953 §4 orders them: `busy` over `busy-unavailable`
+ *   over `busy-tentative`.
  * - A layer without `bounds` claims only its spans. A layer with
  *   `bounds` (either end open) is an RFC 7953 VAVAILABILITY: an
  *   available one claims its whole bounded period, the time outside its
- *   spans busy (`busy-unavailable`) at its rank and sourced to it; a busy
- *   one claims only its spans, and its gaps fall through.
+ *   spans busy at its rank, of its `busyType` (RFC 7953 BUSYTYPE,
+ *   default `busy-unavailable`), and sourced to it; a busy one claims
+ *   only its spans, and its gaps fall through.
  * - Open bounds are clipped to the horizon before any algebra.
  * - Floating and date layers bind through {@link bindFloating} to
  *   `zone` (recorded with `zoneSource`). Without a zone their spans are
@@ -590,9 +599,8 @@ function decide(placed, claims, ranks, byRank, fallback) {
     const layer = placed[l];
     if (claim === 'busy' || claim === 'gap') {
       found.busy.push(layer.source);
-      const own = claim === 'gap' ? 'busy-unavailable' : layer.busyType;
-      if (BUSY_STRENGTH[own] > BUSY_STRENGTH[busyType])
-        busyType = own;
+      if (BUSY_STRENGTH[layer.busyType] > BUSY_STRENGTH[busyType])
+        busyType = layer.busyType;
     }
     else if (claim === 'available')
       found.available.push(layer.source);

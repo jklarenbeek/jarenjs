@@ -17,13 +17,13 @@ import { CodedError } from '@jarenjs/core/errors';
  * The diagnoses of the iCalendar reader and the refusals of the writer,
  * one code each. The reader's are `ICAL1xxx`: `ICAL1001`-`ICAL1009`
  * stop the read (the text is not an iCalendar object it can follow),
- * `ICAL1010`-`ICAL1025` are entries of its report, `ICAL1026`-`ICAL1027` of its scheduling report (thrown instead under
- * `strict`). `ICAL2xxx` are the size limits (`ICAL_LIMIT_CODES`); the
+ * `ICAL1010`-`ICAL1025` and `ICAL1029` are entries of its report (thrown instead under `strict`), `ICAL1026`-`ICAL1028`
+ * of its scheduling report (thrown instead under `strictScheduling`). `ICAL2xxx` are the size limits (`ICAL_LIMIT_CODES`); the
  * writer's own refusals are `ICAL3xxx`.
  * @type {Readonly<Record<'ICAL1001' | 'ICAL1002' | 'ICAL1003' | 'ICAL1004' | 'ICAL1005' | 'ICAL1006'
  *   | 'ICAL1007' | 'ICAL1008' | 'ICAL1009' | 'ICAL1010' | 'ICAL1011' | 'ICAL1012' | 'ICAL1013'
  *   | 'ICAL1014' | 'ICAL1015' | 'ICAL1016' | 'ICAL1017' | 'ICAL1018' | 'ICAL1019' | 'ICAL1020'
- *   | 'ICAL1021' | 'ICAL1022' | 'ICAL1023' | 'ICAL1024' | 'ICAL1025' | 'ICAL1026' | 'ICAL1027'
+ *   | 'ICAL1021' | 'ICAL1022' | 'ICAL1023' | 'ICAL1024' | 'ICAL1025' | 'ICAL1026' | 'ICAL1027' | 'ICAL1028' | 'ICAL1029'
  *   | 'ICAL3001' | 'ICAL3002' | 'ICAL3003' | 'ICAL3004' | 'ICAL3005' | 'ICAL3006'
  *   | 'ICAL3007' | 'ICAL3008' | 'ICAL3009' | 'ICAL3010' | 'ICAL3011' | 'ICAL3012' | 'ICAL3013'
  *   | 'ICAL3014' | 'ICAL3015' | 'ICAL3016' | 'ICAL3017' | 'ICAL3018' | 'ICAL3019' | 'ICAL3020' | 'ICAL3021' | 'ICAL3022'
@@ -38,7 +38,7 @@ export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
   ICAL1005: 'an END names a component other than the one open',
   ICAL1006: 'the input ends inside a component',
   ICAL1007: 'content outside the calendar: before BEGIN:VCALENDAR, after its END, or a calendar inside a calendar',
-  ICAL1008: 'the calendar is not iCalendar 2.0 in the Gregorian scale: VERSION or PRODID missing, repeated or other',
+  ICAL1008: 'the calendar is not iCalendar 2.0 in the Gregorian scale: VERSION or PRODID missing, repeated or other; or a streaming read meets a METHOD after components it read as calendar data that the METHOD makes messages',
   ICAL1009: 'the reader has ended or stopped, and takes no more input',
   ICAL1010: 'a line ends in a bare line feed; it is read as CRLF',
   ICAL1011: 'a property outside the subset; it is left out of the model',
@@ -55,9 +55,11 @@ export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
   ICAL1022: 'what changes when the event occurs and this release does not read (EXRULE, EXDATE with no rule, extra dates whose DTEND lies in another zone); its component is withheld',
   ICAL1023: 'a VTIMEZONE of an IANA name and the provider give other offsets over the span the file uses it; the source vtimezone chose is used',
   ICAL1024: 'a value lies outside what the VTIMEZONE of its TZID covers; the provider answers there for an IANA name it knows, and it is refused when resolved otherwise',
-  ICAL1025: 'a VAVAILABILITY the availability layers cannot hold as RFC 7953 reads it: a BUSYTYPE other than BUSY-UNAVAILABLE, or AVAILABLE times both UTC and zoned; it is withheld',
+  ICAL1025: 'a VAVAILABILITY the availability layers cannot hold as RFC 7953 reads it: a BUSYTYPE other than BUSY, BUSY-UNAVAILABLE or BUSY-TENTATIVE, or AVAILABLE times both UTC and zoned; it is withheld',
   ICAL1026: 'scheduling: a component of a calendar with a METHOD lacks a property or subcomponent RFC 5546 §3 requires of it under that method',
   ICAL1027: 'scheduling: a component of a calendar with a METHOD holds a property or subcomponent RFC 5546 §3 excludes, or more of one than it takes, or the method takes no such component',
+  ICAL1028: 'scheduling: a value of a calendar with a METHOD is outside what a comment of RFC 5546 §3\'s table restricts it to (a status code, a SEQUENCE, a STATUS, one UID, one REQUEST-STATUS class)',
+  ICAL1029: 'METHOD follows a component, where RFC 5545 §3.6 places it before them; parseIcal applies it to the whole calendar',
   ICAL3001: 'the calendar or a component is not an object of the documented model, or lacks a member it requires',
   ICAL3002: 'a member or component type outside the documented subset; it is refused, never written raw',
   ICAL3003: 'a member holds a value of a form it does not take',
@@ -78,13 +80,13 @@ export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
   ICAL3018: 'the writer has ended or refused, and takes no more components',
   ICAL3019: "zones: 'embed' and no horizon for the VTIMEZONE of a zone",
   ICAL3020: "a zoned time outside the horizon its VTIMEZONE covers under zones: 'embed'",
-  ICAL3021: 'a component the writer would write is no message of the calendar\'s METHOD: RFC 5546 §3 requires, excludes or limits a property it holds',
+  ICAL3021: 'a component the writer would write is no message of the calendar\'s METHOD: RFC 5546 §3 requires, excludes or limits a property it holds or its value, or the calendar\'s components (their kinds, count or UID)',
   ICAL3022: 'under zones: \'utc\' a zoned recurring AVAILABLE whose VAVAILABILITY period the horizon does not hold, where its occurrences would end at the horizon',
   ICAL4001: 'an edit is not one of the documented edits, or a member of it has a form it does not take',
   ICAL4002: 'no VEVENT holds the UID, or the occurrence, an edit names',
   ICAL4003: 'more than one VEVENT could be the one an edit names',
   ICAL4004: 'the event is not recurring, or its series makes no such occurrence, or the occurrence is excluded or cancelled',
-  ICAL4005: 'the occurrence is the slot of an override over this and future occurrences whose next slot has its own VEVENT, where cancelling or excluding it would move the range',
+  ICAL4005: 'Retired, no longer raised: a cancel or EXDATE of the slot of an override over this and future occurrences is an EXDATE beside the range',
   ICAL4006: "the read withheld the event, or the occurrence's own VEVENT, so the occurrence cannot be checked",
   ICAL4007: 'the edit would lose content: a property held more than once, a text with an alternate representation, or an occurrence with its own VEVENT',
   ICAL4008: "a moved occurrence's start or end is not of its series' kind and zone",

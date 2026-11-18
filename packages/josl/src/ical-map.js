@@ -1149,9 +1149,9 @@ function renderAvailability(component, context, path) {
     lines.push(`PRIORITY:${priority}`);
   }
   if (busyType !== undefined) {
-    if (busyType !== 'busy-unavailable')
-      throw new IcalError('ICAL3003', `busyType is 'busy-unavailable', which an availability layer marks its period outside its spans, not ${String(busyType)}`, `${path}/busyType`);
-    lines.push('BUSYTYPE:BUSY-UNAVAILABLE');
+    if (busyType !== 'busy' && busyType !== 'busy-unavailable' && busyType !== 'busy-tentative')
+      throw new IcalError('ICAL3003', `busyType is 'busy', 'busy-unavailable' or 'busy-tentative' (RFC 7953 BUSYTYPE), not ${String(busyType)}`, `${path}/busyType`);
+    lines.push(`BUSYTYPE:${FBTYPE[busyType]}`);
   }
   lines.push(...eventProperties(component, undefined, path));
   if (!Array.isArray(component.available))
