@@ -233,6 +233,12 @@ export function derivedValue(column, member) {
       return deriveBboxEdge(member, /** @type {string} */ (column.component));
     case 'vector':
       return packedVector(member, /** @type {number} */ (column.dims));
+    // a zoned member's key and stamp (`temporal.js`): the store writes them
+    // through its zone provider; a backfill without one leaves them NULL,
+    // which keeps the row a candidate every read of the key re-decides
+    case 'zoned-instant':
+    case 'zoned-stamp':
+      return null;
     default:
       throw new TypeError(`derive: no value rule for derive kind '${column.derive}'`);
   }

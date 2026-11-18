@@ -605,6 +605,21 @@ export const postgresReadBack = (schema) => Object.freeze({
     const want = conditionForm(planned, true, typeOf);
     return have !== null && want !== null && JSON.stringify(have) !== JSON.stringify(want);
   },
+  /**
+   * How a declared temporal member's stored CHECK differs from the planned
+   * one, or `null`: both read into one form, with a condition's forms
+   * (`IS [NOT] DISTINCT FROM`, casts), so a text either side does not read is
+   * drift, never a match.
+   * @param {string} stored - the deparse @param {string} planned - the planned expression
+   * @param {boolean} conforming - the reading session's `standard_conforming_strings`
+   * @returns {string | null}
+   */
+  check(stored, planned, conforming) {
+    const have = namedCalls(expressionForm(stored, conforming, true), schema);
+    const want = namedCalls(expressionForm(planned, true, true), schema);
+    return have !== null && want !== null && JSON.stringify(have) === JSON.stringify(want)
+      ? null : `is declared as\n  ${stored}\nand the model declares\n  ${planned}`;
+  },
   /** Whether a planned generated column's expression reads back. @param {string} planned */
   expressionReads: (planned) => expressionForm(planned, true) !== null,
   /**

@@ -1788,6 +1788,11 @@ export function createQueryEngine(context) {
     // them `$overlaps` is exact, since no stored span is empty, reversed
     // or malformed
     intervals: physicalPlan.intervals ?? [],
+    // the DECLARED temporal members, each by its key columns, and the stamp
+    // a zoned key this store writes carries: a key another provider stamped
+    // only keeps its row a candidate
+    temporals: physicalPlan.temporals ?? [],
+    zoneStamp: zoneProvider?.identity === undefined || zoneProvider?.identity === null ? null : stampOf(zoneProvider.identity),
     // the R*Tree virtual tables this collection's `bbox` column sets are
     // realized as, by stem — empty under `physical: 'columns'`, and
     // empty on a driver whose build carries no R*Tree module, because
@@ -3036,6 +3041,7 @@ function refuseBuffered(options, classified, docPath) {
 import { mergeEntityRow, parseGraphRow } from './graph.js';
 import { decimalEdge, decimalIntervals, intervalEdge } from './double-interval.js';
 import { relationTables, joinTableRoots } from './model.js';
+import { stampOf } from './temporal.js';
 
 /** The default include depth bound (printed, never silent). */
 export const INCLUDE_DEPTH_DEFAULT = 3;

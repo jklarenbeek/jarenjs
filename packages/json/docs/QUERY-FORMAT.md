@@ -1616,6 +1616,28 @@ clock.
 | `$start-of` `$end-of` | `[date, unit]` → the unit's first / last instant, in the same lexical form; a sub-day unit on a `full-date`, or `week` and coarser on a `full-time`, is `JQ2001` |
 | `$date-diff` | `[from, to, unit]` → whole units, negative when `to` precedes `from`; a value with no date half is `JQ2001` for every unit |
 | `$date-format` | `[date, pattern]` → the value rendered through an LDML pattern; a token that reads a half the value has not got (`yyyy` of a `full-time`, `HH` of a `full-date`) is `JQ2001`, where it used to be written as a sentinel; `[date, pattern, zone]` → the instant rendered on the zone's wall clock |
+| `$instant` | `[value]` or `[value, policy]` → the epoch milliseconds a calendar `utc` or `zoned` value names; a zoned value resolves under `policy` (`rfc5545`, `later` or `reject`) in the compilation's `zoneProvider` |
+| `$wall` | a calendar `floating` or `zoned` value → its wall clock in one spelling, `YYYY-MM-DDTHH:MM:SS.fff` |
+
+**Calendar values.** The five kinds of `@jarenjs/core/calendar`
+(`date`, `floating`, `utc`, `zoned`, `date-range`) are plain objects, so a
+comparison between two of them is an object comparison (§8.4: `$lt` is false,
+`$eq` structural) and an `$orderby` over one is `JQ2005`. Two operators give a
+value its key. `$instant` answers the epoch milliseconds a `utc` value names,
+every spelling of one instant alike (`…T00:00:00Z` and `…T00:00:00.000Z`), and
+the instant a `zoned` value resolves to under the policy its second operand
+names, captured verbatim (anything but `rfc5545`, `later` or `reject` is
+`JQ0003`) and read in the compilation's `zoneProvider`; a zoned value with no
+policy, with no provider, in a zone the provider does not know or in a gap or
+fold its policy refuses is `JQ2001`. A `date`, `floating` or `date-range` value
+names no instant — it is bound to a zone first (`bindFloating`), never read as
+one in UTC — and is `JQ2001`. `$wall` answers a `floating` or `zoned` value's
+wall clock padded to seconds and three fraction digits, so `10:00` and
+`10:00:00.000` are one key and the key's code-point order is the clock's; any
+other kind is `JQ2001`. A value either operator reads is admitted as its
+constructor admits it, and one the calendar refuses is `JQ2001` naming the
+calendar's code (`JY0008` to `JY0013`). A `date` member and a `date-range`'s
+bounds have one spelling each, so they compare as their strings already.
 
 Every operator that *produces* a date produces it in the same canonical
 spelling, so one query can never emit two forms of one instant: a fractional

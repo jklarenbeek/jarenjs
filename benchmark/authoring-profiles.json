@@ -3,30 +3,30 @@
   "rows": [
     {
       "grammar": "model",
-      "sourceHash": "5c69c50109c316f270aa619e40de2f531ecd8815ae11fd6afce291270d384383",
+      "sourceHash": "42b07975d8b1956511a80326a41e9b8cf57a7bdec84d22755e484c7eeec1d32a",
       "seamHash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-      "profileHash": "f9ae965df4ac630fb7641cdbf8e357959210ec48f4e68054afca7f05f63b3740",
+      "profileHash": "4fbd32e15089e6e9813f0b1d11d956f880dc33ba8f787f4b745e45c092bc8626",
       "open": [],
       "full": {
-        "bytes": 16291,
+        "bytes": 17979,
         "branches": 15
       },
       "profile": {
-        "bytes": 16350,
+        "bytes": 18038,
         "branches": 15
       }
     },
     {
       "grammar": "query",
-      "sourceHash": "380bb0edd72206612bc1f28c07eb4a1467f400c74f8566fb52551f0244f4e88f",
+      "sourceHash": "d9fafe2174746795ace8fb7b89708ca1d9a0a4eec80e016ebad74104bd0d45f0",
       "seamHash": "f0d41be2c687a847bb30b6271a691b76477fbce80460d4aa7388e6a1469ea80e",
       "profileHash": "a69fa3a682767b6a5d287526566907e6d5fd615d314600a5d56abac22c6a6f8d",
       "open": [
         "objectExpression"
       ],
       "full": {
-        "bytes": 21749,
-        "branches": 49
+        "bytes": 22237,
+        "branches": 50
       },
       "profile": {
         "bytes": 3552,
@@ -35,15 +35,15 @@
     },
     {
       "grammar": "jslt",
-      "sourceHash": "cfe6d62d914668514b2112994fa2d4adf7088383e866f536a9979387090e872b",
+      "sourceHash": "b0bfbe5fdea980905a559beff53e52b1e80815989e97246cb381b09bbce63321",
       "seamHash": "05e477048a83ec7fd8b9c4578a0a33bc108da17e7043c35d73f420cefe1ec6fd",
       "profileHash": "2daa4807f70dd9191729479b3cfd17e7df0789082687b561989dc8df9fde30c6",
       "open": [
         "queryDocument"
       ],
       "full": {
-        "bytes": 24555,
-        "branches": 61
+        "bytes": 25043,
+        "branches": 62
       },
       "profile": {
         "bytes": 3633,
@@ -60,8 +60,8 @@
         "stylesheetDocument"
       ],
       "full": {
-        "bytes": 51115,
-        "branches": 112
+        "bytes": 52091,
+        "branches": 114
       },
       "profile": {
         "bytes": 4660,
@@ -77,8 +77,8 @@
         "queryDocument"
       ],
       "full": {
-        "bytes": 25180,
-        "branches": 53
+        "bytes": 25668,
+        "branches": 54
       },
       "profile": {
         "bytes": 3075,
@@ -95,8 +95,8 @@
         "stylesheetDocument"
       ],
       "full": {
-        "bytes": 51638,
-        "branches": 116
+        "bytes": 52614,
+        "branches": 118
       },
       "profile": {
         "bytes": 5228,
@@ -112,8 +112,8 @@
         "queryDocument"
       ],
       "full": {
-        "bytes": 24098,
-        "branches": 51
+        "bytes": 24586,
+        "branches": 52
       },
       "profile": {
         "bytes": 2875,
@@ -130,8 +130,8 @@
         "dagDocument"
       ],
       "full": {
-        "bytes": 54958,
-        "branches": 125
+        "bytes": 55934,
+        "branches": 127
       },
       "profile": {
         "bytes": 3794,

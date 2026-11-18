@@ -712,8 +712,15 @@ function deriveStep(collection, plan, columnNames, note) {
  * @returns {{ changed: boolean, dropped: any[], added: any[] }}
  */
 function intervalDifference(fromPlan, toPlan, disturbedColumns) {
-  const from = new Map((fromPlan.intervals ?? []).map((interval) => [interval.constraint, interval]));
-  const to = new Map((toPlan.intervals ?? []).map((interval) => [interval.constraint, interval]));
+  // a declared temporal member's CHECK is one more of the table's own, read
+  // and changed as an interval's is (its store-written key columns are the
+  // ones it reads)
+  /** @param {any} plan */
+  const checksOf = (plan) => [...(plan.intervals ?? []).map((/** @type {any} */ interval) => ({ ...interval, what: `interval '${interval.name}'` })),
+    ...(plan.temporals ?? []).map((/** @type {any} */ temporal) => ({ ...temporal, what: `${temporal.kind} member '${temporal.name}'`,
+      start: temporal.kind === 'zoned' ? temporal.key : undefined, end: temporal.kind === 'zoned' ? temporal.stamp : undefined }))];
+  const from = new Map(checksOf(fromPlan).map((interval) => [interval.constraint, interval]));
+  const to = new Map(checksOf(toPlan).map((interval) => [interval.constraint, interval]));
   // a CHECK whose table is known to hold the other spelling (`holds`) is that text
   const differs = (/** @type {any} */ a, /** @type {any} */ b) => (a.holds !== undefined ? a.holds !== b.sql
     : a.sql !== b.sql && a.sql !== b.alternate)
@@ -813,7 +820,8 @@ function intervalPreconditionsOf(migration, dialect, mapping) {
   // models declare none has no precondition, whatever else they hold
   const toModel = JSON.parse(identity.to);
   const declares = Object.values(toModel.collections ?? {})
-    .some((/** @type {any} */ collection) => Array.isArray(collection?.intervals) && collection.intervals.length > 0);
+    .some((/** @type {any} */ collection) => (Array.isArray(collection?.intervals) && collection.intervals.length > 0)
+      || (Array.isArray(collection?.temporals) && collection.temporals.length > 0));
   if (!declares) return [];
   const fromModel = JSON.parse(identity.from);
   const fromCollections = Object.keys(fromModel.collections ?? {}).length === 0
@@ -828,8 +836,18 @@ function intervalPreconditionsOf(migration, dialect, mapping) {
   for (const [name, toCollection] of toCollections) {
     const table = tableOf.get(name);
     const fromCollection = table === undefined ? undefined : fromCollections.get(table);
-    if (fromCollection === undefined || toCollection.intervals.length === 0) continue;
+    if (fromCollection === undefined || (toCollection.intervals.length === 0 && toCollection.temporals.length === 0)) continue;
     const plan = planCollection(name, toCollection, dialect, mapping);
+    // a temporal member the link declares, or declares otherwise: the rows
+    // whose member is no value of its kind's shape (the CHECK's terms over
+    // the document; the store-written keys arrive empty)
+    for (const temporal of plan.temporals) {
+      const before = fromCollection.temporals.find((/** @type {any} */ declared) => declared.name === temporal.name);
+      if (before !== undefined && before.canonical === temporal.canonical && before.kind === temporal.kind) continue;
+      checks.push({ collection: name, interval: temporal.name, what: `${temporal.kind} member`, table,
+        sql: `SELECT ${q(plan.keyColumn)} AS ${q('k')}, count(*) OVER () AS ${q('n')} FROM ${q(table)} `
+          + `WHERE NOT COALESCE(${temporal.shapeSql}, ${dialect.booleanLiteral(true)}) ORDER BY ${dialect.rowIdentity()} ${dialect.limitClause(10)}` });
+    }
     for (const interval of plan.intervals) {
       const before = fromCollection.intervals.find((/** @type {any} */ declared) => declared.name === interval.name);
       if (before !== undefined && before.canonical === interval.span.canonical && before.maxDuration === interval.maxDuration) continue;
@@ -859,7 +877,7 @@ function intervalPreconditions(connection, migration, options) {
   return sequentially(checks, (check) => chain(useStatementOnce(connection, check.sql, (statement) => statement.all([])), (rows) => {
     if (rows.length === 0) return;
     const keys = rows.map((/** @type {any} */ row) => `'${String(row.k)}'`).join(', ');
-    throw refuse('JD0021', `collection '${check.collection}': ${Number(rows[0].n)} stored document(s) violate interval `
+    throw refuse('JD0021', `collection '${check.collection}': ${Number(rows[0].n)} stored document(s) violate ${check.what ?? 'interval'} `
       + `'${check.interval}' (first keys: ${keys}) — repair them before declaring it`);
   }));
 }
@@ -1007,7 +1025,7 @@ function collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping)
   let backfilled = [];
   if (rebuilding) {
     const rebuilt = renderCollectionRebuild(name, fromPlan, toPlan, toCollection, dialect, mapping, columnChanged,
-      intervals.changed ? 'its declared intervals changed, and this engine adds or drops a CHECK by rebuilding the table'
+      intervals.changed ? 'its declared intervals or temporal members changed, and this engine adds or drops a CHECK by rebuilding the table'
         : 'the indexes over a container key column change, and a table an earlier release created does not hold the column');
     steps.push(...rebuilt.steps);
     backfilled = rebuilt.backfilled;
@@ -1015,7 +1033,7 @@ function collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping)
   else {
     for (const interval of intervals.dropped) {
       steps.push({ kind: 'ddl', sql: dialect.ddl.dropCheck({ table: name, name: interval.constraint }),
-        note: `drop the CHECK '${interval.constraint}' of interval '${interval.name}' on '${name}'` });
+        note: `drop the CHECK '${interval.constraint}' of ${interval.what} on '${name}'` });
     }
     for (const [indexName, fromIndex] of fromIndexes) {
       if (indexNeedsRebuild(indexName, fromIndex)) {
@@ -1115,7 +1133,7 @@ function collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping)
     }
     for (const interval of intervals.added) {
       steps.push({ kind: 'ddl', sql: dialect.ddl.addCheck({ table: name, name: interval.constraint, sql: interval.sql }),
-        note: `add the CHECK '${interval.constraint}' of interval '${interval.name}' on '${name}'` });
+        note: `add the CHECK '${interval.constraint}' of ${interval.what} on '${name}'` });
     }
   }
   return { steps, backfilled };
@@ -4517,7 +4535,7 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
               // the preconditions are listed, never counted: a dry run reads
               // no table's rows against a CHECK
               for (const check of intervalPreconditionsOf(migration, dialect, mappingFor(connection, runOptions.expressions)))
-                rendered.push(`-- precondition: interval '${check.interval}' on '${check.collection}'`);
+                rendered.push(`-- precondition: ${check.what ?? 'interval'} '${check.interval}' on '${check.collection}'`);
               for (const migrationStep of migration.steps) {
                 if (migrationStep.kind === 'ddl') rendered.push(migrationStep.sql);
                 else if (migrationStep.kind === 'sql') rendered.push(`-- data step (sql): ${migrationStep.note ?? ''}`, migrationStep.sql);

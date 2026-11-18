@@ -367,12 +367,15 @@ function keyPointer(key) {
 /** The members of a declared interval, and the JSON type each takes. */
 const INTERVAL_MEMBERS = ['name', 'path', 'maxDuration'];
 const INTERVAL_TYPES = Object.freeze({ name: 'string', path: 'string', maxDuration: 'number' });
+/** A declared temporal member's closed members, each of its one type. */
+const TEMPORAL_MEMBERS = Object.freeze(['name', 'path', 'kind', 'policy']);
+const TEMPORAL_TYPES = Object.freeze({ name: 'string', path: 'string', kind: 'string', policy: 'string' });
 
 /**
  * One collection declaration for `defineModel`.
  * @param {any} builder - the document schema
  * @param {{ key?: string | ((doc: any) => any) | null, identity?: 'caller' | 'uuid' | 'integer',
- *   indexes?: readonly any[], intervals?: readonly any[], renamedFrom?: string }} [options]
+ *   indexes?: readonly any[], intervals?: readonly any[], temporals?: readonly any[], renamedFrom?: string }} [options]
  * @returns {any} the frozen collection document
  */
 export function collection(builder, options = {}) {
@@ -385,9 +388,9 @@ export function collection(builder, options = {}) {
     throw new LinqBuildError('JL0101', 'collection() takes an options object');
   }
   for (const key of Object.keys(options)) {
-    if (!['key', 'identity', 'indexes', 'intervals', 'renamedFrom'].includes(key)) {
+    if (!['key', 'identity', 'indexes', 'intervals', 'temporals', 'renamedFrom'].includes(key)) {
       throw new LinqBuildError('JL0101',
-        `collection() does not take '${key}' — the options are key, identity, indexes, intervals, renamedFrom`);
+        `collection() does not take '${key}' — the options are key, identity, indexes, intervals, temporals, renamedFrom`);
     }
   }
   const out = { schema: builder.schema };
@@ -426,6 +429,27 @@ export function collection(builder, options = {}) {
       closedTo(one, INTERVAL_MEMBERS, what);
       for (const [key, type] of Object.entries(INTERVAL_TYPES)) {
         if (one[key] === undefined ? key === 'maxDuration' : typeof one[key] === type) continue;
+        throw new LinqBuildError('JL0101',
+          `${what} ${key} takes a ${key === 'path' ? 'JSONPath string' : type}, got ${describeValue(one[key])}`);
+      }
+      return requireOwnJson(one, what);
+    });
+  }
+  if (options.temporals !== undefined) {
+    if (!Array.isArray(options.temporals)) {
+      throw new LinqBuildError('JL0101', 'collection() temporals is an array of { name, path, kind, policy? } entries');
+    }
+    // a declared temporal member rides verbatim, held to its closed members
+    // and their types; its kind, its policy and its member are the store's
+    // model walk's to judge
+    out.temporals = options.temporals.map((one, i) => {
+      const what = `collection() temporals[${i}]`;
+      if (one === null || typeof one !== 'object' || Array.isArray(one)) {
+        throw new LinqBuildError('JL0101', `${what} is an object: { name, path, kind, policy? }`);
+      }
+      closedTo(one, TEMPORAL_MEMBERS, what);
+      for (const [key, type] of Object.entries(TEMPORAL_TYPES)) {
+        if (one[key] === undefined ? key === 'policy' : typeof one[key] === type) continue;
         throw new LinqBuildError('JL0101',
           `${what} ${key} takes a ${key === 'path' ? 'JSONPath string' : type}, got ${describeValue(one[key])}`);
       }

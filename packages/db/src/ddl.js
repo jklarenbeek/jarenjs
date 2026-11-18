@@ -22,6 +22,7 @@ import { DbCompileError } from './errors.js';
 import { chain } from './driver.js';
 import { BBOX_COMPONENTS, BBOX_INDEX_ORDER, derivedMappingFor } from './derive.js';
 import { expressionSql, expressionStem, expressionFunctions, normalizeExpression } from './expression.js';
+import { planTemporal, temporalColumns } from './temporal.js';
 import { foldIdentifier } from './invariants.js';
 import { SCALAR_TYPES, columnKindFor } from './scalar-types.js';
 import { verifyRulePrograms } from './physical.js';
@@ -699,6 +700,43 @@ export function planCollection(name, collection, dialect, options = undefined) {
   /** The `integer` columns whose member the schema bounds within ±(2^53 − 1). @type {Set<string>} */
   const safeIntegerColumns = new Set();
 
+  // a declared temporal member: its key columns (generated over the
+  // member's text, or written by the store for a zoned one) and its CHECK.
+  // A date's and a date range's members ARE their keys, so a path to one
+  // reads that key column, as an indexed path reads its own
+  const temporals = (collection.temporals ?? []).map((/** @type {any} */ temporal) => {
+    const planned = planTemporal(temporal, dialect, DOC_COLUMN);
+    for (const column of planned.generated) {
+      refuseLongName(dialect, column.name, `the key column of the temporal member '${temporal.name}'`, `${temporal.docPath}/name`);
+      taken.add(column.name);
+      generated.push(column);
+    }
+    derived.push(...planned.derived);
+    const columns = temporalColumns(temporal);
+    if (temporal.kind === 'date') columnByCanonical.set(canonicalOf([...temporal.segments, { name: 'date' }]), columns.key);
+    if (temporal.kind === 'date-range') {
+      columnByCanonical.set(canonicalOf([...temporal.segments, { name: 'start' }]), columns.key);
+      columnByCanonical.set(canonicalOf([...temporal.segments, { name: 'end' }]), /** @type {string} */ (columns.end));
+    }
+    // a zoned key is a safe integer (an instant of years 0000 to 9999):
+    // it orders bare, as the double it is
+    if (temporal.kind === 'zoned') safeIntegerColumns.add(columns.key);
+    return { name: temporal.name, constraint: temporal.constraint, kind: temporal.kind,
+      ...(temporal.policy === undefined ? {} : { policy: temporal.policy }),
+      segments: temporal.segments, canonical: temporal.canonical, path: temporal.path, ...columns,
+      sql: planned.sql, shapeSql: planned.shapeSql, docPath: temporal.docPath };
+  });
+  /** The key columns an index over a declared temporal member covers, or `null`. @param {string} canonical */
+  const temporalIndexColumns = (canonical) => {
+    const temporal = temporals.find((/** @type {any} */ declared) => declared.canonical === canonical);
+    if (temporal === undefined) return null;
+    if (temporal.kind === 'date-range') return { temporal, columns: [temporal.key, temporal.end] };
+    // the stamp leads a zoned index: a fetch reads the rows a provider of
+    // this identity keyed, and seeks the others apart, by one index
+    if (temporal.kind === 'zoned') return { temporal, columns: [temporal.stamp, temporal.key] };
+    return { temporal, columns: [temporal.key] };
+  };
+
   for (const index of collection.indexes) {
     firstColumn.push(generated.length);
     // an EXPRESSION index: one column over the declared computation,
@@ -754,6 +792,19 @@ export function planCollection(name, collection, dialect, options = undefined) {
         throw new DbCompileError('JD0004',
           `the index path '${index.paths[i]}' names a member the dialect's JSON path grammar cannot carry`,
           pathDocPath);
+      }
+      const keyed = index.derive ? null : temporalIndexColumns(canonical);
+      if (keyed !== null) {
+        // a unique zoned key would compare a row's key with keys another
+        // provider revision resolved, which can refuse a value that is no
+        // duplicate or admit one that is
+        if (keyed.temporal.kind === 'zoned' && index.unique) {
+          throw new DbCompileError('JD0004',
+            `index '${index.name}': a zoned member's key is the instant a zone provider resolves, and a unique index would `
+            + 'compare it with keys another provider revision resolved: a zoned member takes no unique index', `${index.docPath}/unique`);
+        }
+        columns.push(...keyed.columns);
+        continue;
       }
       if (index.derive) {
         const contributed = deriveColumns(index, {
@@ -894,7 +945,8 @@ export function planCollection(name, collection, dialect, options = undefined) {
     keyType,
     docColumn: DOC_COLUMN,
     generated,
-    checks: intervals.map((interval) => ({ name: interval.constraint, sql: interval.sql })),
+    checks: [...intervals.map((interval) => ({ name: interval.constraint, sql: interval.sql })),
+      ...temporals.map((/** @type {any} */ temporal) => ({ name: temporal.constraint, sql: temporal.sql }))],
   };
   const containers = containerKeysOf(dialect, name, indexes, generated);
   const kindIndexes = [...kindIndexesOf(collection.schema, dialect, indexes, generated), ...containers.indexes];
@@ -1006,6 +1058,8 @@ export function planCollection(name, collection, dialect, options = undefined) {
     conditionColumns,
     /** The declared intervals: each one's bound columns and the CHECK it installs. */
     intervals,
+    /** The declared temporal members: each one's kind, key columns and CHECK. */
+    temporals,
     expected: {
       columns: [
         { name: KEY_COLUMN, type: keyType, generated: false },
@@ -1066,7 +1120,8 @@ export function withoutContainerKeys(dialect, plan, absent) {
   ]);
   const table = dialect.ddl.createTable({ table: plan.table, keyColumn: plan.keyColumn, keyType: plan.keyType, docColumn: plan.docColumn,
     generated: plan.generated, plain: kept.map((/** @type {any} */ key) => ({ name: key.column, type: key.type })),
-    checks: (plan.intervals ?? []).map((/** @type {any} */ interval) => ({ name: interval.constraint, sql: interval.sql })) });
+    checks: [...(plan.intervals ?? []).map((/** @type {any} */ interval) => ({ name: interval.constraint, sql: interval.sql })),
+      ...(plan.temporals ?? []).map((/** @type {any} */ temporal) => ({ name: temporal.constraint, sql: temporal.sql }))] });
   const held = { ...plan, containerKeys: kept, kindIndexes: plan.kindIndexes.filter((/** @type {any} */ index) => !lacks(index)),
     createSql: [table, ...plan.createSql.slice(1).filter((/** @type {string} */ sql) => !dropped.has(sql))],
     expected: { ...plan.expected, columns: plan.expected.columns.filter((/** @type {any} */ column) => !absent.has(column.name)) } };
@@ -1875,7 +1930,8 @@ function verifyKindIndexes(connection, planned, rows, conditionColumns, disagree
 function verifyIntervalChecks(connection, plan, disagree) {
   const dialect = connection.dialect;
   const intervals = plan.intervals ?? [];
-  if (intervals.length === 0 || dialect.capabilities.declaredSqlText === true) return null;
+  const temporals = plan.temporals ?? [];
+  if ((intervals.length === 0 && temporals.length === 0) || dialect.capabilities.declaredSqlText === true) return null;
   return chain(connection.prepare(dialect.introspect.checks(plan.table)), (statement) =>
     chain(statement.all([]), (rows) => {
       /** @type {Map<string, any>} */
@@ -1896,8 +1952,21 @@ function verifyIntervalChecks(connection, plan, disagree) {
           disagree(`CHECK '${interval.constraint}' is declared as\n  ${row.expression}\nand the model declares\n  ${interval.sql}`);
         }
       }
+      // a declared temporal member's CHECK, read back as the planned one
+      for (const temporal of temporals) {
+        const row = stored.get(temporal.constraint);
+        if (row === undefined) {
+          disagree(`the model declares the ${temporal.kind} member '${temporal.name}' with CHECK '${temporal.constraint}', `
+            + 'which the database does not have');
+        }
+        if (Number(row.validated) !== 1)
+          disagree(`CHECK '${temporal.constraint}' is not validated: the rows it holds were never checked against it`);
+        const differs = dialect.readBack.check(String(row.expression ?? ''), temporal.sql, readsConforming(row));
+        if (differs !== null) disagree(`CHECK '${temporal.constraint}' ${differs}`);
+      }
       for (const name of stored.keys()) {
-        if (!intervals.some((interval) => interval.constraint === name))
+        if (!intervals.some((interval) => interval.constraint === name)
+          && !temporals.some((/** @type {any} */ temporal) => temporal.constraint === name))
           disagree(`the database has the CHECK '${name}', which the model does not declare`);
       }
       return null;

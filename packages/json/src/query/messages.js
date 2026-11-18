@@ -148,6 +148,7 @@ export const queryMessagesEn = Object.freeze({
   'query/series-zone': "'zone' is an IANA zone name, got {got}",
   'query/series-zone-provider': "the zone '{zone}' needs a time-zone provider: this suite bundles no tzdb, so a named zone is compiled with options.zoneProvider (toParts / toEpoch). 'UTC' and a numeric 'offset' need none",
   'query/date-zone-unknown': "the zone provider does not know the zone '{zone}'",
+  'query/instant-policy-name': "'$instant' resolves a zoned value under the policy 'rfc5545', 'later' or 'reject', got {got}",
   'query/series-calendar': 'the calendar context: {detail}',
 
   // JQ2001–JQ2012: evaluation
@@ -215,6 +216,10 @@ export const queryMessagesEn = Object.freeze({
   'query/expected-vector-item': 'expected a vector (an array of numbers), got {got} at index {index}',
   'query/expected-series': 'expected a series (records with an instant and a reading), got {got}',
   'query/expected-interval': 'expected an interval record {{ start, end }, got {got}',
+  'query/temporal-expected': "'{operator}' reads a calendar value of kind {kinds}, got {got}",
+  'query/temporal-invalid': "'{operator}' reads a calendar value, and this one is refused by the calendar ({code} at '{pointer}')",
+  'query/instant-policy': "'$instant' resolves a zoned value under a policy: pass 'rfc5545', 'later' or 'reject' as its second operand",
+  'query/instant-unresolved': "the zoned value {date} {time} in '{zone}' resolves to no instant under '{policy}' ({code})",
   'query/member-cardinality': "member '{name}' evaluated to {count} items; an object member takes exactly one",
   'query/groupby-key': 'a $groupby key must be the empty sequence or a single item, got {got}',
   'query/lexical-text': 'lexical text must be one string',

@@ -83,6 +83,13 @@
             "$ref": "#/$defs/interval"
           }
         },
+        "temporals": {
+          "description": "Declared temporal members: each names a member holding a calendar value of @jarenjs/core/calendar (date, floating, utc, zoned or date-range). Every stored value is then of its kind for every writer, enforced by the store before the statement and by a CHECK on the table, and the member is keyed by its value's one spelling: an index over its path seeks the key, and $instant, $wall, a date's members and $overlaps over a date range compare it natively. A zoned member's key is the instant it resolves to in the store's zone provider, stamped with that provider's identity.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/temporal"
+          }
+        },
         "x-rename": {
           "description": "Migration hint: this collection was previously named the given identifier. Read by the migration planner (a rename cannot be inferred from a diff); ignored by the store.",
           "type": "string",
@@ -91,6 +98,45 @@
       },
       "required": [
         "schema"
+      ],
+      "additionalProperties": false
+    },
+    "temporal": {
+      "description": "One declared temporal member: a name, unique within its collection, that names the table's CHECK constraint <name>_temporal and the key columns tk_<name>; the singular path of the member, by member names alone; its calendar kind; and, for a zoned member and only there, the policy a gap or fold resolves under.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "The temporal member name, unique within its collection; <name>_temporal, the constraint it names, fits 63 bytes.",
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "path": {
+          "description": "A singular JSONPath expression of member names selecting the calendar value.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "The calendar kind every stored value of the member is.",
+          "enum": [
+            "date",
+            "floating",
+            "utc",
+            "zoned",
+            "date-range"
+          ]
+        },
+        "policy": {
+          "description": "How a zoned member's gap or fold resolves: required for a zoned member, refused on any other.",
+          "enum": [
+            "rfc5545",
+            "later",
+            "reject"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "kind"
       ],
       "additionalProperties": false
     },

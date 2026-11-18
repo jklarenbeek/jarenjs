@@ -4031,6 +4031,25 @@ its creation, and `latenessMs` skips what is already too late). The previous
 release refuses `latenessMs` in `schedule()` and `tick` in `createWorker()`
 (`JD0013`), and `zoneProvider` or `runtime` in `from()` (`JL0005`).
 
+## 77. A collection declares calendar members
+
+- A collection may declare `temporals`: `[{ name, path, kind, policy? }]`, with
+  `kind` one of `date`, `floating`, `utc`, `zoned` and `date-range`, and `policy`
+  required for `zoned` (MODEL-FORMAT §2). The store refuses a write whose member
+  is not its declared kind, writes the member's sort keys beside the document,
+  and installs a CHECK named after the declaration on both engines; an index over
+  the declared path covers its keys. A model without `temporals` creates the same
+  tables, indexes and plans as before.
+- The query language gains `$instant` (a utc or zoned value to its epoch
+  milliseconds, a zoned one under a named policy and the compilation's zone
+  provider) and `$wall` (a floating value to its canonical wall clock).
+- Downgrade: the previous release refuses a model that declares `temporals`
+  (`JD0005`), and a plain model over a table this release created with them
+  (`JD0002`, the key columns it does not declare). Migrate the declaration away
+  first — `planModelMigration(declared, plain)` drops the CHECKs, indexes and key
+  columns on both engines — then open with the previous release. Stores the
+  previous release created open, read, query and explain unchanged.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

@@ -107,6 +107,10 @@ export function deterministicFragment(fragment, operators = null, binding = 'it'
   // over changing state — no externals, no collations, ever
   if (dependencies.externals.length > 0
     || dependencies.collations.length > 0) return null;
+  // `$instant` resolves a zoned value in the store's zone provider, a
+  // capability the residual compilation carries and a registered function
+  // does not: such a fragment runs in the residual
+  if (dependencies.operators.includes('$instant')) return null;
   // pushability: core operators are always fine; a REGISTERED operator or
   // host function is admitted only where the pack marked it
   // `pushable:'scalar'`. With no registry, any host function still

@@ -680,6 +680,10 @@ export interface Collection<T = unknown> {
   /** The same document as an item cursor — one item per pull. */
   query<R = unknown>(document: unknown, options?: CursorOptions): QueryCursor<R>;
   explain(document: unknown, options?: ExecuteOptions): Promise<unknown>;
+  /** Write the store's zone provider's key and stamp on every row whose
+   * declared zoned member another provider keyed, or none did (MODEL-FORMAT
+   * §2, `temporals`); answers how many rows it keyed. */
+  rekey(): Promise<number>;
   /** Register a live query (LIVE-FORMAT §7); requires capture. */
   live(document: unknown, options?: LiveOptions): Promise<LiveQuery>;
 }
@@ -694,6 +698,7 @@ export interface SyncCollection<T = unknown> {
   all(options?: AllOptions): T[];
   execute<R = unknown>(document: unknown, options?: ExecuteOptions): SequenceResult<R>;
   explain(document: unknown, options?: ExecuteOptions): unknown;
+  rekey(): number;
 }
 
 // ————— entities (phase B) —————

@@ -296,6 +296,9 @@
           "$ref": "#/$defs/geohashPhrase"
         },
         {
+          "$ref": "#/$defs/instantPhrase"
+        },
+        {
           "$ref": "#/$defs/ternaryOperatorPhrase"
         },
         {
@@ -693,6 +696,7 @@
           "$offset",
           "$epoch",
           "$datetime",
+          "$wall",
           "$week",
           "$week-year",
           "$quarter",
@@ -878,6 +882,33 @@
       },
       "required": [
         "$geohash"
+      ],
+      "additionalProperties": false
+    },
+    "instantPhrase": {
+      "description": "$instant [value] or [value, policy]: the epoch milliseconds a calendar utc or zoned value names. A zoned value resolves its gap or fold under the policy, in the compilation's zone provider.",
+      "type": "object",
+      "properties": {
+        "$instant": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/expression"
+            },
+            {
+              "enum": [
+                "rfc5545",
+                "later",
+                "reject"
+              ]
+            }
+          ],
+          "items": false,
+          "minItems": 1
+        }
+      },
+      "required": [
+        "$instant"
       ],
       "additionalProperties": false
     },

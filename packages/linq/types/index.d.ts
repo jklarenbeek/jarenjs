@@ -232,6 +232,9 @@ export interface AsOfMatch {
 }
 
 /** A half-open interval: `[start, end)`, in epoch milliseconds. */
+/** How a zoned calendar value's gap or fold resolves (`$instant`). */
+export type ResolutionPolicy = 'rfc5545' | 'later' | 'reject';
+
 export interface Interval {
   start: SeriesInstant;
   end: SeriesInstant;
@@ -342,6 +345,12 @@ export interface AggregatableExpr {
 export type ObjectExpr<T> = ExprBase<T> & EqExpr<T> & SpatialMethods & {
   /** Do two half-open `{start, end}` intervals share an instant? */
   overlaps(other: Interval | ExprBase<unknown>): BoolExpr;
+  /** The epoch milliseconds a calendar utc or zoned value names (`$instant`);
+   * a zoned value resolves under the policy, in the compilation's zone provider. */
+  instantOf(policy?: ResolutionPolicy): NumberExpr;
+  /** A floating or zoned value's wall clock in its one spelling,
+   * `YYYY-MM-DDTHH:MM:SS.fff` (`$wall`). */
+  wallClock(): StringExpr;
 } & {
   readonly [K in keyof T & string]-?: MemberExpr<T[K]>;
 };
@@ -392,6 +401,10 @@ export interface UnknownExpr
   at(index: number | NumberExpr): UnknownExpr;
   /** Do two half-open `{start, end}` intervals share an instant? */
   overlaps(other: Interval | ExprBase<unknown>): BoolExpr;
+  /** The epoch milliseconds a calendar utc or zoned value names (`$instant`). */
+  instantOf(policy?: ResolutionPolicy): NumberExpr;
+  /** A floating or zoned value's wall clock in its one spelling (`$wall`). */
+  wallClock(): StringExpr;
   /** Cosine similarity (§8.15) — wide, on the honest top. */
   similarity(other: unknown): NumberExpr;
 }

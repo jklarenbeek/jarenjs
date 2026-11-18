@@ -536,6 +536,9 @@ export const CATALOGS = deepFreeze({
     "query/date-zone-unknown": [
       "zone"
     ],
+    "query/instant-policy-name": [
+      "got"
+    ],
     "query/series-calendar": [
       "detail"
     ],
@@ -713,6 +716,24 @@ export const CATALOGS = deepFreeze({
     ],
     "query/expected-interval": [
       "got"
+    ],
+    "query/temporal-expected": [
+      "got",
+      "kinds",
+      "operator"
+    ],
+    "query/temporal-invalid": [
+      "code",
+      "operator",
+      "pointer"
+    ],
+    "query/instant-policy": [],
+    "query/instant-unresolved": [
+      "code",
+      "date",
+      "policy",
+      "time",
+      "zone"
     ],
     "query/member-cardinality": [
       "count",

@@ -174,6 +174,72 @@ The store runs over SQLite — on Node (`@jarenjs/db/node`), on Bun
   `JD0021` before any step where stored rows violate it
   ([MIGRATION-FORMAT §3](MIGRATION-FORMAT.md#3-planning-and-the-wideningnarrowing-rule)).
 
+- `temporals[]` declares a member a **calendar value** of
+  `@jarenjs/core/calendar` (CALENDAR.md, "Temporal values"): `{ "name",
+  "path", "kind", "policy"? }`. `kind` is `date`, `floating`, `utc`, `zoned`
+  or `date-range`; `policy` — `rfc5545`, `later` or `reject`, how a gap or a
+  fold resolves — is required for a `zoned` member and refused on any other;
+  `path` is a singular JSONPath of member names (an index step is refused) to
+  a member the schema leaves open or types `object`, declared once and no
+  interval's span. Every stored value of the member is then a value of its
+  kind as its constructor admits it, or the member is absent: the store
+  refuses anything else before the statement (`JD2003`, hook or no hook,
+  naming the calendar's code — `JY0008` to `JY0013` — or the kind it is), a
+  zoned value whose wall clock its policy does not resolve in the store's
+  zone provider included, and a CHECK named `<name>_temporal` refuses from
+  every other writer a member that is no object of the kind's members alone,
+  each a text of its form (`YYYY-MM-DD`, `HH:MM[:SS[.f{1,3}]]`,
+  `YYYY-MM-DDTHH:MM:SS[.f{1,3}]Z`), a date range that does not end after it
+  starts and a zoned key outside the years 0000 to 9999 (`JD2005`, class
+  `constraint`; a dropped or altered CHECK is `JD0002` at open, on both
+  engines). The CHECK reads the text alone, so a writer that bypasses the
+  store can hold a form whose day the calendar lacks (`2026-02-30`, a
+  `25:00`): the store, the query engine and the CHECK agree on every other
+  value. `name` is an identifier, unique among the collection's temporal
+  members, naming a constraint of at most 63 bytes and the key columns
+  `tk_<name>` (and `tk_<name>$end`, or a zoned member's `tk_<name>$<policy>`).
+
+  The member is **keyed by its value's one spelling**, so two spellings of
+  one value are one key, and the key's code-point order is the value's:
+
+  | kind | key column(s) | the engine expression it answers |
+  |---|---|---|
+  | `date` | `tk_<name>`, generated: the date | `$.d.date` |
+  | `date-range` | `tk_<name>`, `tk_<name>$end`, generated: the two dates | `$.r.start`, `$.r.end`, and `$overlaps` with a range of two dates |
+  | `floating` | `tk_<name>`, generated: `YYYY-MM-DDTHH:MM:SS.fff` | `{"$wall": "$.f"}` |
+  | `utc` | `tk_<name>`, generated: `YYYY-MM-DDTHH:MM:SS.fffZ` | `{"$instant": ["$.u"]}`, `{"$epoch": "$.u.instant"}` |
+  | `zoned` | `tk_<name>` (epoch milliseconds) and `tk_<name>$<policy>`, written by the store | `{"$instant": ["$.z", "<the declared policy>"]}` |
+
+  Each generated key pads the member's own text by its length alone — no
+  date or zone arithmetic runs in SQL — and both engines spell it alike, so
+  no writer leaves it stale. A comparison of such a key with a literal, and
+  an ordering by it, plan exactly: one comparison of the key column, no
+  residual, its index sought; a bound in milliseconds against a utc key is
+  the spelling of the nearest whole millisecond on its side, and a literal of
+  the other family is no witness, as the engine compares it (QUERY-FORMAT
+  §8.4). An index whose path is a declared member covers its key columns
+  (a date range's two, a zoned member's stamp then its key), and a unique one
+  holds one value once: `10:00` beside `10:00:00.000`, or `…00Z` beside
+  `…00.000Z`, is a duplicate (`JD2005`). A zoned key is the instant the
+  store's zone provider resolves under the declared policy, written beside
+  the provider's identity (`["<name>","<revision>"]`) in a column named after
+  the policy (a changed policy keys no row until `rekey()`), so a store declaring
+  one opens only with a `zoneProvider` whose identity records a name and a
+  revision (`JD0004`): a tzdata revision moves instants, and a key another
+  revision wrote is no key of this store's. It therefore only **narrows**:
+  a comparison of `$instant` under the declared policy fetches the rows this
+  provider keyed whose key satisfies it and every row another provider
+  keyed, or none did, in one statement, and the engine decides each one in
+  the current provider; an ordering by it is the engine's. A zoned member
+  takes no unique index (`JD0004`): one would compare a new row's key with
+  keys another revision resolved. `collection.rekey()` writes the current
+  provider's key and stamp on every row another provider keyed, which only
+  narrows the fetch further. Adding the declaration to an existing
+  collection is a planned migration (the key columns, then the CHECK — on
+  SQLite one rebuild of the collection), refused `JD0021` before any step
+  where a stored member is no value of its kind's shape; a zoned member's
+  keys arrive empty, every row a candidate, until `rekey()`.
+
 What the declaration buys is measured by `benchmark/series.js` over a
 year of fifty thousand stored spans asked one one-hour question at three
 days of the year. The mapped pre-filter scans every window alike — the
@@ -225,9 +291,10 @@ offending member. Model checking happens before any database work.
 schema (`schemas/jaren-model.schema.json`, `additionalProperties: false`
 at each) agree on it: the root takes `$model`, `collections` and
 `entities`; a collection `schema`, `key`, `identity`, `indexes`,
-`intervals` and `x-rename`; an index `name`, `path`, `expression`,
+`intervals`, `temporals` and `x-rename`; an index `name`, `path`, `expression`,
 `unique`, `where`, `derive`, `precision`, `dims` and `physical`; an
-interval `name`, `path` and `maxDuration`; an entity `schema`,
+interval `name`, `path` and `maxDuration`; a temporal member `name`, `path`,
+`kind` and `policy`; an entity `schema`,
 `indexes`, `physical`, `invariants` and `x-rename` (§9); an entity index
 `name`, `path`, `expression`, `unique` and `where` (§9.2); an invariant
 the members of §13. Any other member — `uniqe` for `unique`, a

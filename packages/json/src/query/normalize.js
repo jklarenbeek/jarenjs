@@ -678,9 +678,10 @@ function argCards(args) {
 
 // The operators that read a wall clock, and so may be given a named
 // zone: the calendar boundaries of the series operators, and the fields
-// `$date-format` writes in a zone. `$asof` and `$overlaps` are pure
+// `$date-format` writes in a zone, and the zone a zoned value `$instant`
+// resolves in. `$asof` and `$overlaps` are pure
 // instant arithmetic and have no clock to resolve.
-const CLOCK_OPERATORS = new Set(['$time-bucket', '$resample', '$rolling', '$date-format']);
+const CLOCK_OPERATORS = new Set(['$time-bucket', '$resample', '$rolling', '$date-format', '$instant']);
 
 // A registry operator call: arity and shape come uniformly from the
 // table's `params` descriptor (JQ0003), the static cardinality from its

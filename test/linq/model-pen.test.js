@@ -265,7 +265,7 @@ describe('the model pen — refusals, each with the fix in the message', () => {
     refused({ intervals: [{ name: 1, path: '$.span' }] }, /intervals\[0\] name takes a string/);
     refused({ intervals: [{ name: 'slot', path: (/** @type {any} */ b) => b.span }] }, /intervals\[0\] path takes a JSONPath string/);
     refused({ intervals: [{ name: 'slot', path: '$.span', maxDuration: '8h' }] }, /intervals\[0\] maxDuration takes a number/);
-    refused({ intervls: [] }, /does not take 'intervls' — the options are key, identity, indexes, intervals, renamedFrom/);
+    refused({ intervls: [] }, /does not take 'intervls' — the options are key, identity, indexes, intervals, temporals, renamedFrom/);
     // the pen document quotes each interval refusal as the pen spells it (the
     // document names a docPath beside the message rather than inside it)
     for (const options of [

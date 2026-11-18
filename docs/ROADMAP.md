@@ -591,6 +591,10 @@ costs a descriptor plus examples and no UI code at all.
   in JS. Explain reports this honestly, so the cost is unbounded but nothing is hidden. Wanted:
   the `'$[*]'` operand of a top-level `$exists` or `$subsequence` planned as the `$for` scan it
   abbreviates, as `'$[*]'` alone and `{ $count: '$[*]' }` are.
+- [ ] **PostgreSQL reads a collection's CHECKs only where the model declares one.** A collection declaring
+  no interval and no temporal member opens on PostgreSQL over a table carrying a CHECK of someone else's
+  (`ALTER TABLE … ADD CONSTRAINT x CHECK (…)`), where SQLite's CREATE-text comparison answers `JD0002`; the
+  CHECK changes which writes the table refuses.
 - [ ] **A running worker does not see a schedule table another process creates.** A worker with
   `tick` asks once per `start()` whether the schedule table exists, so its idle poll runs no extra
   statement; a database's first schedule written by another process is ticked from that worker's
@@ -1142,9 +1146,10 @@ what each does is its own documentation's job
 
 ## @jarenjs/core
 
-- [ ] **No store has a temporal column kind.** A caller stores the JSON forms
-  (`@jarenjs/core/schemas/calendar/temporal.schema.json`, `…/rrule.schema.json`) and binds floating occurrences with
-  `bindFloating`.
+- [ ] **An entity member has no temporal column kind.** A collection declares a member a calendar kind
+  (`temporals`, MODEL-FORMAT §2), refused, keyed and compared identically on SQLite and PostgreSQL; an entity
+  member holding a calendar value stays in the entity's document, unkeyed. A zoned member takes no unique index
+  and is ordered by the engine, and a recurrence rule is stored as its JSON form (`…/rrule.schema.json`).
 - [ ] **A zoned SECONDLY expansion through the Intl provider asks it about every time of the day before its horizon.**
   ICU exposes no list of offset changes, so `createIntlZoneProvider` carries no `offsetChanges`, and up to 86400
   provider calls precede the first occurrence (a compiled VTIMEZONE lists its changes and needs none of them).

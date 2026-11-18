@@ -41,6 +41,7 @@ import { MODEL_VERSION, ENGINE_TABLES, IDENTIFIER } from './engine-metadata.js';
 import { registeredName, expressionMembers } from './expression.js';
 import { memberNames, modelPath, readModelPath, readsAsIndex } from './model-path.js';
 import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
+import { TEMPORAL_KINDS, TEMPORAL_POLICIES, planTemporal, temporalColumns } from './temporal.js';
 
 /**
  * Every code the loss report uses, with what it means. Closed, and
@@ -332,9 +333,20 @@ function looksLikeCollection(dialect, table) {
     // a column a unique index keys a container by, beside its member's
     // generated column ({@link containerKeysHeld} reads it exactly)
     if (!column.generated && !(dialect.containerKey !== undefined && column.name.startsWith('kx_')
-      && byName.get(`gx_${column.name.slice(3)}`)?.generated === true)) return false;
+      && byName.get(`gx_${column.name.slice(3)}`)?.generated === true)
+      // a zoned member's key and stamp, beside the CHECK of its declaration
+      // ({@link temporalOf} reads them exactly)
+      && !zonedKeyColumn(column.name, table)) return false;
   }
   return true;
+}
+
+/** Whether a plain column is named as a zoned member's key or stamp beside the
+ * CHECK its declaration names (`tk_<name>`, `tk_<name>$<policy>`, `<name>_temporal`).
+ * @param {string} name @param {any} table */
+function zonedKeyColumn(name, table) {
+  const stem = /^tk_([A-Za-z_][A-Za-z0-9_]*?)(?:\$(?:rfc5545|later|reject))?$/.exec(name)?.[1];
+  return stem !== undefined && (table.checks ?? []).some((/** @type {any} */ check) => check.name === `${stem}_temporal`);
 }
 
 /**
@@ -542,7 +554,27 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
   /** The member columns whose type maps back to no schema type. */
   const untyped = [];
   const comparable = dialect.comparableColumnType;
+  // a declared temporal member: its CHECK, under the name the store gives
+  // it, read back as the one a declaration of a kind over its path plans,
+  // with the key columns that declaration plans — every one of them the
+  // member's, never a member path of its own
+  const temporals = [];
+  /** @type {Set<string>} */
+  const temporalChecks = new Set();
+  /** @type {Set<string>} */
+  const temporalKeys = new Set();
+  /** @type {Map<string, { path: string, columns: string[] }>} index columns → the member */
+  const temporalIndexes = new Map();
+  for (const check of table.checks) {
+    const temporal = temporalOf(dialect, check, byName);
+    if (temporal === null) continue;
+    temporals.push(temporal.declaration);
+    temporalChecks.add(check.name);
+    for (const column of temporal.columns) temporalKeys.add(column);
+    temporalIndexes.set(temporal.indexColumns.join('\u0000'), { path: temporal.declaration.path, columns: temporal.indexColumns });
+  }
   for (const column of table.columns) {
+    if (temporalKeys.has(column.name)) continue;
     if (!column.generated) continue;
     const expression = expressions.get(column.name);
     const segments = expression === undefined ? null : dialect.memberPathOf(expression);
@@ -595,7 +627,7 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
   for (const trigger of containers.triggers) owned.add(trigger);
   for (const column of table.columns) {
     if (column.generated || column.name === KEY_COLUMN || column.name === DOC_COLUMN || column.name === identity
-      || containers.columns.has(column.name)) continue;
+      || containers.columns.has(column.name) || temporalKeys.has(column.name)) continue;
     report(loss('unmapped-column', `${table.name}.${column.name}`,
       'a plain column beside the generated ones that is not a container key a unique index over the members the table holds keys'));
   }
@@ -605,6 +637,15 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
   const indexes = [];
   for (const index of table.indexes) {
     if (besides.has(index.name) || containers.indexes.has(index.name)) continue;
+    // a declared temporal member's key columns, in the order an index over
+    // its path covers them, are that one path
+    const keyed = index.partial ? null : temporalPathsOf(index.columns, [...temporalIndexes.values()], paths);
+    if (keyed !== null) {
+      const declared = { name: indexName(table.name, index.name), path: keyed.length === 1 ? keyed[0] : keyed };
+      if (index.unique) declared.unique = true;
+      indexes.push(declared);
+      continue;
+    }
     const columns = kindKeyedColumns(dialect, table, index, paths) ?? index.columns;
     if (index.partial || columns.some((/** @type {string | null} */ column) => column === null)) {
       report(loss('unmapped-index', `${table.name}.${index.name}`,
@@ -639,6 +680,7 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
   /** @type {{ span: import('./dialect.js').JsonPathSegment[], start: string, end: string }[]} */
   const spans = [];
   for (const check of table.checks) {
+    if (temporalChecks.has(check.name)) continue;
     const interval = intervalOf(dialect, check, paths, indexedColumns);
     if (typeof interval === 'string') {
       report(loss('unmapped-constraint', `${table.name}.${check.name}`, interval));
@@ -655,7 +697,7 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
   const keyColumn = byName.get(KEY_COLUMN);
   const keyType = dialect.schemaTypeOf(keyColumn.type);
   const collection = { schema: { type: 'object', properties: {} }, indexes,
-    ...(intervals.length === 0 ? {} : { intervals }) };
+    ...(intervals.length === 0 ? {} : { intervals }), ...(temporals.length === 0 ? {} : { temporals }) };
   const hinted = keys !== undefined && Object.hasOwn(keys, table.name) ? keys[table.name] : undefined;
   if (keyType === 'integer') {
     collection.key = null;
@@ -767,6 +809,71 @@ function placeType(node, segments, type, open = false) {
 function memberSegments(path) {
   const read = readModelPath(path);
   return 'segments' in read && read.segments.every((segment) => !('index' in segment) || segment.index >= 0) ? read.segments : null;
+}
+
+/**
+ * The paths an index over at least one declared temporal member covers —
+ * each member's key columns, in order, standing for its path, every other
+ * column for its own member — or `null` for an index over none, or over
+ * columns no path stands for.
+ * @param {string[]} columns
+ * @param {{ path: string, columns: string[] }[]} temporals
+ * @param {Map<string, { path: string }>} paths
+ * @returns {string[] | null}
+ */
+function temporalPathsOf(columns, temporals, paths) {
+  const out = [];
+  let any = false;
+  for (let at = 0; at < columns.length;) {
+    const temporal = temporals.find((entry) => entry.columns.every((column, i) => columns[at + i] === column));
+    if (temporal !== undefined) {
+      out.push(temporal.path);
+      at += temporal.columns.length;
+      any = true;
+      continue;
+    }
+    const entry = paths.get(columns[at]);
+    if (entry === undefined) return null;
+    out.push(entry.path);
+    at++;
+  }
+  return any ? out : null;
+}
+
+/**
+ * The temporal member a CHECK declares, or `null`: one named
+ * `<name>_temporal` whose text is, exactly, the CHECK a declaration of one
+ * kind (and, for a zoned member, of the policy its stamp column is named
+ * after) over the member its first test reads plans — with every key column
+ * that declaration plans on the table.
+ * @param {any} dialect
+ * @param {{ name: string, sql?: string, validated?: boolean, conforming?: boolean }} check
+ * @param {Map<string, any>} byName - the table's columns
+ * @returns {{ declaration: any, columns: string[], indexColumns: string[] } | null}
+ */
+function temporalOf(dialect, check, byName) {
+  const stem = /^(.*)_temporal$/.exec(check.name)?.[1];
+  if (stem === undefined || !IDENTIFIER.test(stem) || check.sql === undefined || check.validated === false
+    || dialect.temporal === undefined) return null;
+  const segments = dialect.temporal.checkPath(check.sql);
+  if (segments === null) return null;
+  const candidates = TEMPORAL_KINDS.flatMap((kind) => (kind === 'zoned' ? TEMPORAL_POLICIES.map((policy) => ({ kind, policy })) : [{ kind }]));
+  for (const { kind, policy } of candidates) {
+    const temporal = { name: stem, kind, ...(policy === undefined ? {} : { policy }), segments, canonical: canonicalOf(segments) };
+    const columns = temporalColumns(temporal);
+    const names = [columns.key, columns.end, columns.stamp].filter((name) => name !== undefined);
+    if (!names.every((name) => byName.has(name))) continue;
+    const planned = planTemporal(temporal, dialect, DOC_COLUMN).sql;
+    const same = dialect.readBack === undefined
+      ? String(check.sql).replace(/\s+/g, ' ').trim() === planned
+      : dialect.readBack.check(String(check.sql), planned, check.conforming !== false) === null;
+    if (!same) continue;
+    const declaration = { name: stem, path: modelPath(segments), kind, ...(policy === undefined ? {} : { policy }) };
+    const indexColumns = kind === 'date-range' ? [columns.key, /** @type {string} */ (columns.end)]
+      : kind === 'zoned' ? [/** @type {string} */ (columns.stamp), columns.key] : [columns.key];
+    return { declaration, columns: names, indexColumns };
+  }
+  return null;
 }
 
 /**

@@ -49,6 +49,7 @@ import { selectPlan, conjoin, plainFamily, PLAN_VERSION, bindsText, ranksGroupsA
 import { typeOfPath, isNumericType } from './types.js';
 import { schemaNodeAt, canonicalOf, unpinnedStep } from './ddl.js';
 import { columnKindFor } from './scalar-types.js';
+import { instantKey, isCalendarDate, INSTANT_MIN, INSTANT_MAX } from './temporal.js';
 import {
   BBOX_COMPONENTS, BBOX_INDEX_ORDER, PRECISION_MIN, PRECISION_MAX,
   probeBox, probePosition, probeCircleBox, cellNeighbourhood, probeVector,
@@ -633,7 +634,9 @@ function pathRef(node, itSlot, shape) {
   const column = shape.columnByCanonical.get(path.canonical) ?? null;
   return {
     segments: path.segments,
-    type: typeOfPath(shape.schema, path.segments),
+    // a declared date's or date range's member is its key, and the key
+    // column holds its text whatever the schema says of it
+    type: temporalMemberType(shape, path.canonical) ?? typeOfPath(shape.schema, path.segments),
     column,
     // a member of several kinds: its column holds the first type's, and
     // answers a value of that kind alone, unless it is an untyped column
@@ -1942,6 +1945,176 @@ export function intervalBounds(spanRef, shape) {
  *   prefilters: any[], refinements: { construct: string, reason: string }[] } |
  *   { refusal: { construct: string, reason: string } }}
  */
+// ————— Declared temporal members —————
+//
+// A declared calendar value (`temporals`, MODEL-FORMAT §2) compares by its
+// key: a utc value by `$instant` (or `$epoch` of its instant), a floating
+// value by `$wall`, a zoned value by `$instant` under its declared policy, a
+// date and a date range by their members. Each key but a zoned one is a
+// column generated from the member's text in the value's one spelling, so a
+// comparison of the key with a literal is the comparison of that column —
+// exact, no residual, the key's index sought. A zoned key is the instant a
+// zone provider resolved, stamped with its identity: it only NARROWS, keeping
+// every row another provider stamped, and the engine decides.
+
+/** Why a temporal key was not translated. */
+const TEMPORAL_REASONS = {
+  zonedOrder: 'a zoned key is the instant a zone provider resolved; the engine orders by it',
+  zoned: 'a zoned key narrows the rows: the engine resolves each candidate in the current zone provider and decides',
+  zoneStamp: 'a zoned key is read only beside the stamp of the zone provider the store opened with, and it has none',
+  operand: 'a temporal key is compared with one literal',
+};
+
+/**
+ * The type a declared date's or date range's member reads as: its key column
+ * holds it as text. `undefined` for any other path.
+ * @param {any} shape @param {string} canonical
+ * @returns {string | undefined}
+ */
+function temporalMemberType(shape, canonical) {
+  for (const temporal of shape.temporals ?? []) {
+    if (temporal.kind !== 'date' && temporal.kind !== 'date-range') continue;
+    const members = temporal.kind === 'date' ? ['date'] : ['start', 'end'];
+    if (members.some((member) => canonicalOf([...temporal.segments, { name: member }]) === canonical)) return 'string';
+  }
+  return undefined;
+}
+
+/** The declared temporal member a path node names, or `null`.
+ * @param {any} node @param {number} itSlot @param {any} shape */
+function declaredTemporal(node, itSlot, shape) {
+  const path = memberPath(node, itSlot);
+  if (path === null) return null;
+  return (shape.temporals ?? []).find((/** @type {any} */ temporal) => temporal.canonical === path.canonical) ?? null;
+}
+
+/**
+ * The key a key expression over a declared temporal member reads, or
+ * `null`: `$instant` of a utc member (or `$epoch` of its instant) and `$wall`
+ * of a floating one are exact over their generated key; `$instant` of a zoned
+ * member under its declared policy is its stored key, which narrows.
+ * @param {any} node @param {number} itSlot @param {any} shape
+ * @returns {{ temporal: any, ref: any, exact: boolean, family: 'instant' | 'text' } | null}
+ */
+function temporalKey(node, itSlot, shape) {
+  if (node?.kind !== 'op') return null;
+  let temporal = null;
+  if (node.name === '$instant') {
+    temporal = declaredTemporal(node.args[0], itSlot, shape);
+    if (temporal?.kind === 'zoned' && node.args[1]?.value !== temporal.policy) return null;
+    if (temporal !== null && temporal.kind !== 'utc' && temporal.kind !== 'zoned') return null;
+  }
+  else if (node.name === '$epoch') {
+    const path = memberPath(node.args[0], itSlot);
+    if (path === null || path.segments.length < 2) return null;
+    const last = path.segments[path.segments.length - 1];
+    if (!('name' in last) || last.name !== 'instant') return null;
+    const owner = canonicalOf(path.segments.slice(0, -1));
+    temporal = (shape.temporals ?? []).find((/** @type {any} */ declared) => declared.kind === 'utc' && declared.canonical === owner) ?? null;
+  }
+  else if (node.name === '$wall') {
+    temporal = declaredTemporal(node.args[0], itSlot, shape);
+    if (temporal !== null && temporal.kind !== 'floating') return null;
+  }
+  if (temporal === null) return null;
+  const zoned = temporal.kind === 'zoned';
+  const ref = { segments: temporal.segments, type: zoned ? 'integer' : 'string', column: temporal.key };
+  return { temporal, ref, exact: !zoned, family: temporal.kind === 'floating' ? 'text' : 'instant' };
+}
+
+/** A bound over a key column. @param {string} column @param {string} op @param {unknown} lit */
+const temporalBound = (column, op, lit) => ({ p: 'colCmp', op, column, operand: { lit } });
+
+/**
+ * A comparison of a temporal key with a literal, or `null` where neither
+ * side is a key over a declared member (the ordinary forms plan it).
+ * @param {any} node @param {number} itSlot @param {any} shape
+ * @returns {any}
+ */
+function planTemporalComparison(node, itSlot, shape) {
+  let op = /** @type {string} */ (COMPARISONS.get(node.name));
+  let [left, right] = node.args;
+  let keyed = temporalKey(left, itSlot, shape);
+  if (keyed === null) {
+    keyed = temporalKey(right, itSlot, shape);
+    if (keyed === null) return null;
+    [left, right] = [right, left];
+    op = /** @type {any} */ ({ lt: 'gt', le: 'ge', gt: 'lt', ge: 'le' })[op] ?? op;
+  }
+  if (right.kind !== 'literal')
+    return { refusal: refusal(node.name, TEMPORAL_REASONS.operand) };
+  const lit = right.value;
+  const present = { p: 'typeIs', ref: keyed.ref, types: [], positive: true };
+  if (!keyed.exact) return planZonedComparison(keyed, op, lit, shape, node.name);
+  // the engine compares a key with a literal of its own family only: any
+  // other pair is unequal and unordered (QUERY-FORMAT §8.4)
+  const family = keyed.family === 'text' ? typeof lit === 'string' : typeof lit === 'number' && !Number.isNaN(lit);
+  if (!family) return exactly(op === 'ne' ? present : { p: 'const', value: false });
+  if (keyed.family === 'text') {
+    return exactly(op === 'ne' ? { p: 'and', items: [present, { p: 'not', item: temporalBound(keyed.ref.column, 'eq', lit) }] }
+      : temporalBound(keyed.ref.column, op, lit));
+  }
+  // a utc key holds the instant's one spelling, whose order is the
+  // instant's: a bound in milliseconds is the spelling of the nearest whole
+  // millisecond on the bound's side, and one past the years a value spells
+  // holds every row or none
+  const n = /** @type {number} */ (lit);
+  if (op === 'eq') return exactly(Number.isInteger(n) && instantKey(n) !== null ? temporalBound(keyed.ref.column, 'eq', instantKey(n)) : { p: 'const', value: false });
+  if (op === 'ne') {
+    const key = Number.isInteger(n) ? instantKey(n) : null;
+    return exactly(key === null ? present : { p: 'and', items: [present, { p: 'not', item: temporalBound(keyed.ref.column, 'eq', key) }] });
+  }
+  const upper = op === 'lt' || op === 'le';
+  const whole = op === 'lt' || op === 'ge' ? Math.ceil(n) : Math.floor(n);
+  if (whole > INSTANT_MAX) return exactly(upper ? present : { p: 'const', value: false });
+  if (whole < INSTANT_MIN) return exactly(upper ? { p: 'const', value: false } : present);
+  return exactly(temporalBound(keyed.ref.column, op, instantKey(whole)));
+}
+
+/**
+ * A comparison of a zoned key: the rows the store's own provider keyed are
+ * narrowed by their key, every other row is a candidate, and the engine
+ * decides them all.
+ * @param {any} keyed @param {string} op @param {unknown} lit @param {any} shape @param {string} construct
+ * @returns {any}
+ */
+function planZonedComparison(keyed, op, lit, shape, construct) {
+  if (typeof shape.zoneStamp !== 'string') return { refusal: refusal(construct, TEMPORAL_REASONS.zoneStamp) };
+  if (typeof lit !== 'number' || Number.isNaN(lit) || op === 'ne')
+    return { refusal: refusal(construct, TEMPORAL_REASONS.operand) };
+  const { key, stamp } = keyed.temporal;
+  const current = temporalBound(stamp, 'eq', shape.zoneStamp);
+  const pred = { p: 'or', items: [{ p: 'and', items: [current, temporalBound(key, op, lit)] }, { p: 'not', item: current }] };
+  return promotion(pred, { construct: '$instant', via: 'columns', columns: [stamp, key], exact: false },
+    [refusal('$instant', TEMPORAL_REASONS.zoned)]);
+}
+
+/**
+ * `$overlaps` of a declared date range with a literal date range: the two
+ * bounds compared as the dates they are — exact, since a declared range is
+ * half-open and never empty, and two dates order as their text. A probe
+ * that is no pair of dates, or no range, plans as the engine's interval.
+ * @param {any} node @param {number} itSlot @param {any} shape
+ * @returns {any}
+ */
+function planDateRangeOverlap(node, itSlot, shape) {
+  if (node.args.length !== 2) return null;
+  let [subject, probeNode] = node.args;
+  let temporal = declaredTemporal(subject, itSlot, shape);
+  if (temporal === null) {
+    [subject, probeNode] = [probeNode, subject];
+    temporal = declaredTemporal(subject, itSlot, shape);
+  }
+  if (temporal === null || temporal.kind !== 'date-range') return null;
+  const probe = constantOf(probeNode)?.value;
+  const DATE = /^\d{4}-\d{2}-\d{2}$/;
+  if (probe === null || typeof probe !== 'object' || Array.isArray(probe)
+    || typeof probe.start !== 'string' || typeof probe.end !== 'string'
+    || !DATE.test(probe.start) || !DATE.test(probe.end) || !(probe.start < probe.end)
+    || !isCalendarDate(probe.start) || !isCalendarDate(probe.end)) return null;
+  return exactly({ p: 'and', items: [temporalBound(temporal.key, 'lt', probe.end), temporalBound(temporal.end, 'gt', probe.start)] });
+}
+
 function planPredicate(node, itSlot, shape) {
   assertDecidedKind(node);
   if (node.kind !== 'op') {
@@ -1990,7 +2163,16 @@ function planPredicate(node, itSlot, shape) {
   const spatial = planSpatial(node, itSlot, shape);
   if (spatial !== null) return spatial;
 
-  if (node.name === '$overlaps') return planIntervalOverlap(node, itSlot, shape);
+  if (node.name === '$overlaps') {
+    const ranged = planDateRangeOverlap(node, itSlot, shape);
+    if (ranged !== null) return ranged;
+    return planIntervalOverlap(node, itSlot, shape);
+  }
+
+  if (COMPARISONS.has(node.name)) {
+    const keyed = planTemporalComparison(node, itSlot, shape);
+    if (keyed !== null) return keyed;
+  }
 
   if (node.name === '$exists' || node.name === '$empty') {
     const ref = pathRef(node.args[0], itSlot, shape);
@@ -3535,6 +3717,19 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     const terms = [];
     let refused = null;
     for (const spec of node.orderby.specs) {
+      const keyed = temporalKey(spec.key, itSlot, shape);
+      if (keyed !== null && keyed.exact) {
+        if (spec.collation !== null || spec.collationName !== null) {
+          refused = refusal('$collation', FLWOR_REASONS.collation);
+          break;
+        }
+        terms.push({ ref: keyed.ref, desc: spec.desc === true, emptyGreatest: spec.emptyGreatest === true });
+        continue;
+      }
+      if (keyed !== null) {
+        refused = refusal('$orderby', TEMPORAL_REASONS.zonedOrder);
+        break;
+      }
       const ref = pathRef(spec.key, itSlot, shape);
       if (ref === null || !orderable(ref, shape.schema)) {
         refused = refusal('$orderby', FLWOR_REASONS.orderPath);

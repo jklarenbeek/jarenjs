@@ -420,12 +420,26 @@ export interface IntervalSpec {
   readonly maxDuration?: number;
 }
 
+/**
+ * One declared temporal member of a collection: `path` (member names alone)
+ * selects a calendar value of `@jarenjs/core/calendar` of `kind`; every stored
+ * value is then of that kind for every writer, keyed by its one spelling. A
+ * zoned member declares the `policy` its gap or fold resolves under.
+ */
+export interface TemporalSpec {
+  readonly name: string;
+  readonly path: string;
+  readonly kind: 'date' | 'floating' | 'utc' | 'zoned' | 'date-range';
+  readonly policy?: 'rfc5545' | 'later' | 'reject';
+}
+
 export interface CollectionOptions<D> {
   /** An RFC 6901 pointer, a captured member path (`(d) => d.id` → `/id`), or `null` (the store allocates). */
   key?: string | ((doc: Expr<D>) => unknown) | null;
   identity?: 'caller' | 'uuid' | 'integer';
   indexes?: readonly (IndexSpec<D> | ExpressionIndexSpec<D>)[];
   intervals?: readonly IntervalSpec[];
+  temporals?: readonly TemporalSpec[];
   renamedFrom?: string;
 }
 
@@ -437,6 +451,7 @@ export interface CollectionSpec<D = unknown> {
   readonly identity?: 'caller' | 'uuid' | 'integer';
   readonly indexes?: readonly IndexSpec<D>[];
   readonly intervals?: readonly IntervalSpec[];
+  readonly temporals?: readonly TemporalSpec[];
   readonly 'x-rename'?: string;
 }
 

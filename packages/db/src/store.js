@@ -34,7 +34,7 @@ import { chain, toPromise, isThenable, attempt, abortReason, createStatementOwne
 import { createSessionRouter } from './sessions.js';
 import { isPlainOptions, refuseUnknownMembers, refuseUnknownModelMembers, readOptions, readControls, refuseYieldEvery } from './options.js';
 import { canonicalKeyText, namesNoNumber, noNumberKeyReason, numericKeyValue } from './key-text.js';
-import { planCollection, planEntity, planJoinTable, refuseNameCollisions, verifyShape, compileIndexPath, canonicalOf, creationOrder, holdsKeyDigits } from './ddl.js';
+import { planCollection, planEntity, planJoinTable, refuseNameCollisions, verifyShape, compileIndexPath, canonicalOf, creationOrder, holdsKeyDigits, schemaNodeAt } from './ddl.js';
 import { guardsByColumn } from './dialects/check-read.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine, refuseNonDocument, refuseOpaqueValues, refuseOpaqueExternals, liveComparedExternals, profileComparedExternals } from './query.js';
@@ -71,6 +71,7 @@ import {
 import {
   normalizeExpression, canonicalExpression, expressionMembers, registerExpressionFunctions, expressionFunctions,
 } from './expression.js';
+import { TEMPORAL_KINDS, TEMPORAL_POLICIES, temporalFault, zonedValueFor, isZonedColumn, stampOf } from './temporal.js';
 
 /** The model format version this store implements. */
 import { MODEL_VERSION, IDENTIFIER } from './engine-metadata.js';
@@ -81,9 +82,11 @@ const IDENTITIES = new Set(['uuid', 'integer']);
  * §2): the canonical schema says `additionalProperties: false` at each, and
  * the runtime agrees. `x-rename` is the migration planner's hint. */
 const MODEL_MEMBERS = ['$model', 'collections', 'entities'];
-const COLLECTION_MEMBERS = ['schema', 'key', 'identity', 'indexes', 'intervals', 'x-rename'];
+const COLLECTION_MEMBERS = ['schema', 'key', 'identity', 'indexes', 'intervals', 'temporals', 'x-rename'];
 const INDEX_MEMBERS = ['name', 'path', 'expression', 'unique', 'where', 'derive', 'precision', 'dims', 'physical'];
 const INTERVAL_MEMBERS = ['name', 'path', 'maxDuration'];
+/** A declared temporal member's closed set (`temporals[]`, MODEL-FORMAT §2). */
+const TEMPORAL_MEMBERS = ['name', 'path', 'kind', 'policy'];
 /** The bytes a constraint name may take on either engine (PostgreSQL's identifier limit), so a model opens on both. */
 const CONSTRAINT_NAME_BYTES = 63;
 
@@ -399,6 +402,7 @@ export function normalizeModel(model, expressions = undefined) {
       });
     }
 
+    const intervals = normalizeIntervals(spec, docPath, indexes);
     normalized.set(name, {
       name,
       docPath,
@@ -407,7 +411,8 @@ export function normalizeModel(model, expressions = undefined) {
       keySegments,
       identity,
       indexes,
-      intervals: normalizeIntervals(spec, docPath, indexes),
+      intervals,
+      temporals: normalizeTemporals(spec, docPath, intervals),
     });
   }
   return normalized;
@@ -683,6 +688,123 @@ function spanFault(span, maxDuration) {
   if (maxDuration !== null && to - from > maxDuration)
     return `lasts ${to - from} ms, longer than its maxDuration of ${maxDuration} ms`;
   return null;
+}
+
+/**
+ * A zoned member's key is the instant its wall clock resolves to in the
+ * store's zone provider, stamped with that provider's identity so a key a
+ * later revision moves is known: a store that declares one opens only with a
+ * provider whose identity is recorded (`{ name, revision }`, neither
+ * `unrecorded`) — two unrecorded stamps would prove nothing (`JD0004`).
+ * @param {Map<string, any>} collections
+ * @param {any} provider
+ */
+function refuseUnrecordedZones(collections, provider) {
+  for (const collection of collections.values()) {
+    const zoned = collection.temporals.find((/** @type {any} */ temporal) => temporal.kind === 'zoned');
+    if (zoned === undefined) continue;
+    const identity = provider?.identity;
+    const recorded = identity !== null && typeof identity === 'object'
+      && typeof identity.name === 'string' && identity.name !== '' && identity.name !== 'unrecorded'
+      && typeof identity.revision === 'string' && identity.revision !== '' && identity.revision !== 'unrecorded';
+    if (provider === null || provider === undefined || !recorded) {
+      throw modelError('JD0004',
+        `the zoned member '${zoned.name}' is keyed by the instant it resolves to, stamped with the zone provider's identity: `
+        + 'open the store with a zoneProvider whose identity records its name and revision (createIntlZoneProvider({ revision }))',
+        zoned.docPath);
+    }
+  }
+}
+
+/**
+ * The declared temporal members (`temporals[]`): each a closed `{ name,
+ * path, kind, policy? }` naming a member by a path of member names alone, a
+ * kind of `@jarenjs/core/calendar` and — for a zoned member, and only there —
+ * the policy its gap or fold resolves under. The name is an identifier,
+ * unique among the collection's temporal members, naming a
+ * `<name>_temporal` constraint of at most 63 bytes, and a member is declared
+ * once, and is no declared interval's span.
+ * @param {any} spec - the collection declaration
+ * @param {string} docPath
+ * @param {any[]} intervals - the collection's normalized intervals
+ * @returns {any[]} each with its segments and canonical
+ */
+function normalizeTemporals(spec, docPath, intervals) {
+  const declared = spec.temporals ?? [];
+  if (!Array.isArray(declared))
+    throw modelError('JD0005', 'temporals must be an array', `${docPath}/temporals`);
+  const names = new Set();
+  /** @type {Set<string>} */
+  const members = new Set();
+  const temporals = [];
+  for (let i = 0; i < declared.length; i++) {
+    const temporal = declared[i];
+    const at = `${docPath}/temporals/${i}`;
+    if (!isJsonObject(temporal))
+      throw modelError('JD0005', 'a temporal member declaration must be an object', at);
+    refuseUnknownModelMembers(temporal, TEMPORAL_MEMBERS, at, 'temporal member');
+    if (typeof temporal.name !== 'string' || !IDENTIFIER.test(temporal.name))
+      throw modelError('JD0005', 'a temporal member needs an identifier name', `${at}/name`);
+    if (names.has(temporal.name))
+      throw modelError('JD0005', `duplicate temporal member name '${temporal.name}'`, `${at}/name`);
+    names.add(temporal.name);
+    const constraint = `${temporal.name}_temporal`;
+    if (utf8ByteLength(constraint) > CONSTRAINT_NAME_BYTES) {
+      throw modelError('JD0005',
+        `the constraint name '${constraint}' exceeds ${CONSTRAINT_NAME_BYTES} bytes`, `${at}/name`);
+    }
+    if (!TEMPORAL_KINDS.includes(temporal.kind)) {
+      throw modelError('JD0005',
+        `a temporal member's kind is one of ${TEMPORAL_KINDS.join(', ')}, got ${JSON.stringify(temporal.kind)}`, `${at}/kind`);
+    }
+    if (temporal.kind === 'zoned' && !TEMPORAL_POLICIES.includes(temporal.policy)) {
+      throw modelError('JD0005',
+        `a zoned member declares the policy its gap or fold resolves under, one of ${TEMPORAL_POLICIES.join(', ')}, `
+        + `got ${temporal.policy === undefined ? 'none' : JSON.stringify(temporal.policy)}`, `${at}/policy`);
+    }
+    if (temporal.kind !== 'zoned' && temporal.policy !== undefined) {
+      throw modelError('JD0005',
+        `a policy resolves a zoned member's wall clock; a ${temporal.kind} member has none to resolve`, `${at}/policy`);
+    }
+    if (typeof temporal.path !== 'string' || temporal.path === '') {
+      throw modelError('JD0005',
+        'a temporal member path is a singular JSONPath string selecting the member', `${at}/path`);
+    }
+    let compiled;
+    try {
+      compiled = compileIndexPath(temporal.path, `${at}/path`);
+    }
+    catch (cause) {
+      throw new DbCompileError('JD0005',
+        `the temporal member path '${temporal.path}' must be a singular JSONPath selecting the member`,
+        `${at}/path`, /** @type {Error} */ (cause));
+    }
+    if (compiled.segments.some((/** @type {any} */ segment) => !('name' in segment))) {
+      throw modelError('JD0005',
+        `the temporal member path '${temporal.path}' names members alone: an array index selects no one member of every document`, `${at}/path`);
+    }
+    if (members.has(compiled.canonical))
+      throw modelError('JD0005', `the member '${temporal.path}' is declared twice`, `${at}/path`);
+    members.add(compiled.canonical);
+    if (intervals.some((interval) => interval.canonical === compiled.canonical))
+      throw modelError('JD0005', `the member '${temporal.path}' is a declared interval's span`, `${at}/path`);
+    const type = schemaNodeAt(spec.schema, compiled.segments)?.type;
+    if (type !== undefined && type !== 'object' && !(Array.isArray(type) && type.includes('object'))) {
+      throw modelError('JD0005',
+        `the schema types '${temporal.path}' ${JSON.stringify(type)}: a calendar value is an object`, `${at}/path`);
+    }
+    temporals.push({
+      name: temporal.name,
+      constraint,
+      path: temporal.path,
+      kind: temporal.kind,
+      ...(temporal.kind === 'zoned' ? { policy: temporal.policy } : {}),
+      segments: compiled.segments,
+      canonical: compiled.canonical,
+      docPath: at,
+    });
+  }
+  return temporals;
 }
 
 /**
@@ -1299,7 +1421,7 @@ function patchAsJson(ops) {
  *   store-level profile and every root a member allow-list may name
  * @returns {any}
  */
-function collectionCore(connection, collection, plan, validate, queryState, storeProfileRef, runtime) {
+function collectionCore(connection, collection, plan, validate, queryState, storeProfileRef, runtime, zoneProvider = null) {
   const dialect = connection.dialect;
   // the STORED branch (a driver that cannot index a registered
   // function): the derived columns are ordinary ones, so every write
@@ -1332,7 +1454,9 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
         member = { value: storedMemberForm(memberAt(doc, column.segments)) };
         members.set(column.segments, member);
       }
-      return derivedValue(column, member.value);
+      // a zoned key is resolved in the store's zone provider, beside the
+      // identity of the provider that resolved it (`temporal.js`)
+      return isZonedColumn(column) ? zonedValueFor(column, member.value, zoneProvider) : derivedValue(column, member.value);
     });
   };
   /** @type {Map<string, any>} */
@@ -1378,6 +1502,17 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
       if (fault !== null) {
         throw new DbRuntimeError('JD2003',
           `collection '${collection.name}' rejected the document: the interval '${interval.name}' at ${interval.path} ${fault}`,
+          { docPath: collection.docPath, collection: collection.name });
+      }
+    }
+    // a declared temporal member holds a calendar value of its kind (a zoned
+    // one that resolves under its policy), or nothing: refused here, hook or
+    // no hook, as the CHECK refuses every other writer
+    for (const temporal of collection.temporals) {
+      const fault = temporalFault(temporal, storedMemberForm(memberAt(doc, temporal.segments)), zoneProvider);
+      if (fault !== null) {
+        throw new DbRuntimeError('JD2003',
+          `collection '${collection.name}' rejected the document: the ${temporal.kind} member '${temporal.name}' at ${temporal.path} ${fault}`,
           { docPath: collection.docPath, collection: collection.name });
       }
     }
@@ -1576,6 +1711,48 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
       [JSON.stringify(doc), ...derivedFor(doc)], undefined, true),
     (row) => row.key));
 
+  /**
+   * Write the current zone provider's key and stamp on every row whose
+   * zoned member another provider keyed, or none did (`temporal.js`): one
+   * read of their keys, then each row's read-modify-write under its own
+   * lock, so a concurrent write is never keyed from the document it
+   * replaced. Answers how many rows it keyed.
+   * @returns {any} value-or-promise of a count
+   */
+  const rekey = () => {
+    const zoned = storedDerived.filter(isZonedColumn);
+    const temporals = (plan.temporals ?? []).filter((/** @type {any} */ temporal) => temporal.kind === 'zoned');
+    if (temporals.length === 0) return 0;
+    const q = dialect.quoteIdentifier;
+    const current = stampOf(zoneProvider.identity);
+    const docSql = q(plan.docColumn);
+    const stale = temporals.map((/** @type {any} */ temporal, /** @type {number} */ i) =>
+      `(${dialect.jsonTypeName(docSql, dialect.jsonPathText(temporal.segments))} IS NOT NULL `
+      + `AND NOT (${q(temporal.stamp)} IS NOT NULL AND ${q(temporal.stamp)} = ${dialect.parameterRef(i + 1, `stamp${i}`)}))`);
+    const selectSql = `SELECT ${q(plan.keyColumn)} AS ${q('key')} FROM ${q(plan.table)} WHERE ${stale.join(' OR ')} `
+      + `ORDER BY ${dialect.rowIdentity()}`;
+    const updateSql = `UPDATE ${q(plan.table)} SET `
+      + `${zoned.map((column, i) => `${q(column.name)} = ${dialect.parameterRef(i + 1, column.name)}`).join(', ')} `
+      + `WHERE ${q(plan.keyColumn)} = ${dialect.parameterRef(zoned.length + 1, 'key')}`;
+    return chain(attempt(() => useStatementOnce(connection, selectSql, (statement) => statement.all(temporals.map(() => current))),
+      (error) => wrapDriverError(error, { docPath: collection.docPath, collection: collection.name })), (rows) => {
+      let keyed = 0;
+      /** @param {number} at @returns {any} */
+      const next = (at) => {
+        if (at >= rows.length) return keyed;
+        const key = rows[at].key;
+        return chain(atomically(key, (/** @type {any} */ doc) => (doc === undefined ? null
+          : runWrite('rekeyTemporal', updateSql, [...zoned.map((column) =>
+            zonedValueFor(column, storedMemberForm(memberAt(doc, column.segments)), zoneProvider)), whereKey(key)], key, false))),
+        (result) => {
+          if (result !== null) keyed++;
+          return next(at + 1);
+        });
+      };
+      return next(0);
+    });
+  };
+
   const core = {
     stats: () => ({ ...stats, ...engine.stats() }),
     model: collection,
@@ -1592,6 +1769,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
     execute: (document, options) => engine.execute(document, options),
     query: (document, options) => engine.query(document, options),
     explain: (document, options) => engine.explain(document, options),
+    rekey,
     get(key) {
       requireKey(key, collection.name, collection.docPath);
       // a point read meets the same failures a statement of the query
@@ -1888,6 +2066,7 @@ function asyncCollection(source, core, live, read) {
     execute: (document, options) => core.execute(document, options),
     query: (document, options) => core.query(document, options),
     explain: lift(core.explain),
+    rekey: lift(core.rekey),
     live: lift((document, liveOptions) => {
       if (live === null) {
         throw new DbCompileError('JD0050',
@@ -2472,6 +2651,7 @@ export function openStore(model, options) {
       throw modelError('JD0005',
         'the model must declare at least one collection or entity', '');
     }
+    refuseUnrecordedZones(collections, zoneProvider);
   }
   catch (error) {
     return Promise.reject(error);
@@ -3662,7 +3842,7 @@ export function openStore(model, options) {
                 : null);
               core = captureCollection(name, collectionCore(connection, collection,
                 plans.get(name), validate, queryState,
-                { profile: storeProfile, roots: declaredRoots }, runtime));
+                { profile: storeProfile, roots: declaredRoots }, runtime, zoneProvider));
               cores.set(name, core);
             }
             return core;
@@ -5672,6 +5852,7 @@ export function openStore(model, options) {
                     core.execute(document, o),
                   explain: (/** @type {any} */ document, /** @type {any} */ o) =>
                     core.explain(document, o),
+                  rekey: () => core.rekey(),
                 });
                 syncHandles.set(name, handle);
               }

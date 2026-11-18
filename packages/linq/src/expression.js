@@ -674,6 +674,16 @@ const METHODS = {
   // discipline - it is captured data, never an expression - and the
   // compiler owns every rule about what it may say.
   overlaps: /* @__PURE__ */ binary('$overlaps'),
+  // a calendar value (`@jarenjs/core/calendar`): the instant a utc or zoned
+  // value names, a zoned one under the policy captured verbatim, and the
+  // one spelling of a floating or zoned value's wall clock
+  instantOf(record, policy) {
+    const args = [record.doc];
+    if (policy !== undefined)
+      args.push(policy);
+    return makeExpr({ $instant: args }, record.epoch, false);
+  },
+  wallClock: /* @__PURE__ */ unary('$wall'),
   timeBucket(record, every, origin, context) {
     const args = [record.doc, toExpression(every)];
     if (origin !== undefined || context !== undefined)
