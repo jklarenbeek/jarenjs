@@ -1,6 +1,6 @@
 {
-  "generated": "2026-11-17T18:13:58+01:00",
-  "commit": "5bf8985f569e61ff27df9f0ef44f5f3b810601b3",
+  "generated": "2026-11-18T20:18:34+01:00",
+  "commit": "f41f5cbbd1fd83d6a5bd344bd58966304a0bfb7a",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -552,7 +552,7 @@
             "children": [
               {
                 "type": "text",
-                "value": "XQuery 3.1 semantics — FLWOR, joins, grouping, quantifiers, a 116-operator"
+                "value": "XQuery 3.1 semantics — FLWOR, joins, grouping, quantifiers, a 118-operator"
               },
               {
                 "type": "softBreak"
@@ -1584,7 +1584,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/json/site.md",
-          "hash": "1wqe05m",
+          "hash": "1u61a5o",
           "frontmatterLang": "yaml"
         }
       },
@@ -5009,21 +5009,35 @@
               },
               {
                 "type": "text",
-                "value": ", switch modes, and plot an"
+                "value": ", type with the keys or the"
               },
               {
                 "type": "softBreak"
               },
               {
                 "type": "text",
-                "value": "expression — the whole page is an app document driving the same kernel."
+                "value": "keyboard, switch to Scientific to plot an expression, or open Financial for a"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "worked mortgage example — the whole page is an app document driving the same"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "kernel."
               }
             ]
           }
         ],
         "meta": {
           "sourceUrl": "components/calc/site.md",
-          "hash": "1nbk9vz",
+          "hash": "1rub8h3",
           "frontmatterLang": "yaml"
         }
       },
