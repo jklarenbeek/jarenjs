@@ -56,3 +56,23 @@ break (`../../ical-itip.test.js`, "the hand-written violating cases"):
   where RFC 5545 §3.6 places the calendar's properties before its
   components — `ICAL1029` in the read's own report, and both VEVENTs
   read as CANCEL messages.
+
+## Hand-written uninvite cases (`uninvite-*.ics`)
+
+RFC 5546 §3.2.5 (VEVENT) and §3.4.5 (VTODO) give a CANCEL's STATUS the
+comment: "MUST be set to CANCELLED to cancel the entire event. If
+uninviting specific Attendees, then MUST NOT be included." (§3.4.5: "...
+to cancel the entire VTODO. If removing specific Attendees, then MUST NOT
+be included."), and its ATTENDEE: "MUST include some or all Attendees
+being removed from the event." So a CANCEL component without STATUS that
+names ATTENDEEs removes those attendees; the event stays for the others.
+§4.1.3's CANCEL of a published event names no ATTENDEE and holds no
+STATUS, and cancels the event. Two calendars, written by hand:
+
+- `uninvite-event.ics`: a VEVENT, no RECURRENCE-ID, no STATUS, ATTENDEEs
+  b and c — `cancellation: { status: 'uninvited', attendees:
+  ['mailto:b@example.com', 'mailto:c@example.com'] }`.
+- `uninvite-todo-instance.ics`: a VTODO with RECURRENCE-ID
+  20260302T090000Z, no STATUS, ATTENDEE d — `cancellation: { recurrenceId:
+  '2026-03-02T09:00:00Z', status: 'uninvited', attendees:
+  ['mailto:d@example.com'] }`.

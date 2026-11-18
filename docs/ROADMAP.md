@@ -1129,10 +1129,6 @@ what each does is its own documentation's job
 
 ## @jarenjs/josl
 
-- [ ] **A CANCEL that removes attendees reads as a whole-event cancellation.** RFC 5546 §3.2.5 (and §3.4.5) leave
-  STATUS out of a CANCEL "If uninviting specific Attendees", but a CANCEL VEVENT without RECURRENCE-ID answers
-  `cancellation: { status: 'cancelled' }` whatever its STATUS and ATTENDEEs, so a host applying it cancels the event for
-  everyone. Wanted: a cancellation that names the attendees it removes when STATUS is absent and ATTENDEEs are given.
 - [ ] **A CSV dialect with `quote: null` does not round-trip.** The writers
   read `quote: null` as the default `"` and the reader reads it as no quoting,
   so `parseCsv(stringifyCsv([['x,y']], { quote: null }), { quote: null })`

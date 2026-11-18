@@ -1,0 +1,13 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//jarenjs//iTIP uninvite case//EN
+METHOD:CANCEL
+BEGIN:VEVENT
+UID:uninvite-1
+DTSTAMP:20260101T000000Z
+ORGANIZER:mailto:a@example.com
+SEQUENCE:3
+ATTENDEE;CN=B:mailto:b@example.com
+ATTENDEE:mailto:c@example.com
+END:VEVENT
+END:VCALENDAR

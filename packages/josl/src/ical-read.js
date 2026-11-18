@@ -1176,7 +1176,7 @@ function personOf(prop, context, alone) {
  * its UID, DTSTAMP, SEQUENCE and RECURRENCE-ID, its organizer and
  * attendees (each attendee's PARTSTAT is a REPLY's answer), its
  * REQUEST-STATUS, and the method's own data - a CANCEL's cancellation, in
- * the series model's terms, and the event an ADD adds or a COUNTER
+ * the series model's terms (or the attendees it uninvites), and the event an ADD adds or a COUNTER
  * suggests. Under a method whose components are not calendar data, the
  * rest of the component is reported, as outside the subset.
  * @param {import('./ical-machine.js').IcalNode} node
@@ -1237,9 +1237,18 @@ function messageOf(node, method, context, alone) {
   const [status] = props('STATUS');
   if (status !== undefined)
     message.status = status.value.toLowerCase();
-  if (method === 'cancel')
-    message.cancellation = message.recurrenceId === undefined ? { status: 'cancelled' }
-      : { recurrenceId: slotId(message.recurrenceId), status: 'cancelled', ...(message.range !== undefined ? { range: message.range } : {}) };
+  if (method === 'cancel') {
+    // RFC 5546 §3.2.5, §3.4.5: STATUS "MUST be set to CANCELLED to cancel the entire event"; "If uninviting
+    // specific Attendees, then MUST NOT be included": a VEVENT or VTODO without STATUS that names attendees
+    // uninvites them, the event staying for everyone else (§4.1.3's CANCEL, naming none, cancels it)
+    const uninvite = status === undefined && message.attendees.length !== 0 && (node.name === 'VEVENT' || node.name === 'VTODO');
+    message.cancellation = {
+      ...(message.recurrenceId !== undefined ? { recurrenceId: slotId(message.recurrenceId) } : {}),
+      status: uninvite ? 'uninvited' : 'cancelled',
+      ...(message.recurrenceId !== undefined && message.range !== undefined ? { range: message.range } : {}),
+      ...(uninvite ? { attendees: message.attendees.map((/** @type {any} */ person) => person.address) } : {}),
+    };
+  }
   if (evented) {
     // the message's own people and status lines are read above, not left out of the event
     const read = readEvent({ ...node, props: node.props.filter((prop) => !['ORGANIZER', 'ATTENDEE', 'REQUEST-STATUS'].includes(prop.name)) }, context);

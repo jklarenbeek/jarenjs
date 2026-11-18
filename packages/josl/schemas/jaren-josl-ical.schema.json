@@ -929,7 +929,30 @@
           "$ref": "#/$defs/instant"
         },
         "cancellation": {
-          "type": "object"
+          "type": "object",
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "recurrenceId": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "cancelled",
+                "uninvited"
+              ]
+            },
+            "range": {
+              "const": "THISANDFUTURE"
+            },
+            "attendees": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
         },
         "event": {
           "$ref": "#/$defs/component"

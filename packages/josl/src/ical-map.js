@@ -1283,7 +1283,20 @@ function renderMessage(component, context, path) {
       throw new IcalError('ICAL3002', `a message's ${member} is a VFREEBUSY's span; a${kind === 'event' ? 'n' : ''} ${kind}'s is its event's`, `${path}/${member}`);
     own.unshift(`${name}:${formatUtc(readInstant(component[member], `${path}/${member}`))}`);
   }
-  const status = component.status ?? (component.cancellation !== undefined ? 'cancelled' : undefined);
+  const { cancellation } = component;
+  if (cancellation !== undefined && (!isRecord(cancellation) || (cancellation.status !== 'cancelled' && cancellation.status !== 'uninvited')))
+    throw new IcalError('ICAL3003', 'a cancellation is { status: \'cancelled\' } or { status: \'uninvited\', attendees }, with recurrenceId and range from its message', `${path}/cancellation`);
+  // an uninvite is a CANCEL without STATUS that names the attendees it removes (RFC 5546 §3.2.5, §3.4.5)
+  const uninvite = cancellation?.status === 'uninvited';
+  if (uninvite) {
+    const addresses = (component.attendees ?? []).map((/** @type {any} */ person) => person?.address);
+    if (component.status !== undefined)
+      throw new IcalError('ICAL3003', 'an uninvite is a CANCEL without STATUS; a STATUS cancels the event', `${path}/status`);
+    if (addresses.length === 0 || (cancellation.attendees !== undefined
+      && (!Array.isArray(cancellation.attendees) || cancellation.attendees.length !== addresses.length || cancellation.attendees.some((/** @type {unknown} */ a, /** @type {number} */ i) => a !== addresses[i]))))
+      throw new IcalError('ICAL3003', 'an uninvite names the attendees it removes, as its message\'s attendees', `${path}/cancellation/attendees`);
+  }
+  const status = component.status ?? (cancellation !== undefined && !uninvite ? 'cancelled' : undefined);
   if (data === undefined) {
     if (component.sequence !== undefined && (!Number.isSafeInteger(component.sequence) || component.sequence < 0))
       throw new IcalError('ICAL3003', 'sequence is a whole number from 0', `${path}/sequence`);

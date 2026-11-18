@@ -82,6 +82,27 @@ describe('ical iTIP: the RFC 5546 §4 examples, read', () => {
     assert.deepStrictEqual(read('rfc5546-4.1.3-1.ics').scheduling.messages[0].cancellation, { status: 'cancelled' });
   });
 
+  it('a CANCEL without STATUS that names attendees uninvites them; with STATUS:CANCELLED, or naming none, it cancels (§3.2.5, §3.4.5)', () => {
+    assert.deepStrictEqual(read('uninvite-event.ics').scheduling.messages[0].cancellation,
+      { status: 'uninvited', attendees: ['mailto:b@example.com', 'mailto:c@example.com'] });
+    assert.deepStrictEqual(read('uninvite-todo-instance.ics').scheduling.messages[0].cancellation,
+      { recurrenceId: '2026-03-02T09:00:00Z', status: 'uninvited', attendees: ['mailto:d@example.com'] });
+    assert.deepStrictEqual(codes(read('uninvite-event.ics').scheduling.report), []);
+    // §4.1.3: no STATUS and no ATTENDEE, the published event cancelled; §4.4.3: STATUS:CANCELLED beside ATTENDEEs
+    assert.deepStrictEqual(read('rfc5546-4.1.3-1.ics').scheduling.messages[0].cancellation, { status: 'cancelled' });
+    assert.strictEqual(read('rfc5546-4.4.3-1.ics').scheduling.messages[0].cancellation.status, 'cancelled');
+    const text = fs.readFileSync(new URL('uninvite-event.ics', FIXTURES), 'utf8');
+    assert.deepStrictEqual(/** @type {any} */ (parseIcal(text.replace('SEQUENCE:3', 'SEQUENCE:3\r\nSTATUS:CANCELLED'))).scheduling.messages[0].cancellation,
+      { status: 'cancelled' });
+    // a range of instances, uninvited from that one on
+    const ranged = /** @type {any} */ (parseIcal(text.replace('SEQUENCE:3', 'SEQUENCE:3\r\nRECURRENCE-ID;RANGE=THISANDFUTURE:20260302T090000Z')));
+    assert.deepStrictEqual(ranged.scheduling.messages[0].cancellation, { recurrenceId: '2026-03-02T09:00:00Z', status: 'uninvited', range: 'THISANDFUTURE',
+      attendees: ['mailto:b@example.com', 'mailto:c@example.com'] });
+    // a VJOURNAL's CANCEL takes no ATTENDEE (§3.5.3) and always cancels
+    const journal = /** @type {any} */ (parseIcal(text.replaceAll('VEVENT', 'VJOURNAL')));
+    assert.deepStrictEqual([journal.scheduling.messages[0].cancellation, codes(journal.scheduling.report)], [{ status: 'cancelled' }, ['ICAL1027 ATTENDEE']]);
+  });
+
   it('a COUNTER is the event it suggests and an ADD the event it adds, reported to the host, never read as events of the calendar', () => {
     const counter = read('rfc5546-4.2.4-2.ics').scheduling.messages[0];
     assert.deepStrictEqual([counter.suggested.start, counter.suggested.end, counter.suggested.location],
@@ -164,6 +185,23 @@ describe('ical iTIP: written and read back', () => {
     assert.throws(() => stringifyIcal({ prodId: 'p', method: 'x', components: [] }), { code: 'ICAL3002', docPath: '/method' });
     assert.throws(() => stringifyIcal({ prodId: 'p', components: [{ type: 'message', uid: 'u', attendees: [{ address: 'b@example' }] }] }),
       { code: 'ICAL3003', docPath: '/components/0/attendees/0/address' });
+  });
+
+  it('writes an uninvite back without STATUS, and refuses one with a STATUS or no attendee (ICAL3003)', () => {
+    for (const file of ['uninvite-event.ics', 'uninvite-todo-instance.ics']) {
+      const { calendar, scheduling } = read(file);
+      const out = stringifyIcal({ prodId: 'p', method: calendar.method, components: scheduling.messages.map((/** @type {any} */ m) => ({ type: 'message', ...m })) });
+      assert.ok(!out.includes('STATUS:'), out);
+      assert.deepStrictEqual(/** @type {any} */ (parseIcal(out, { strictScheduling: true })).scheduling.messages, scheduling.messages, file);
+    }
+    const base = { type: 'message', uid: 'u', dtstamp: 0, sequence: 1, organizer: { address: A }, attendees: [{ address: 'mailto:b@example.com' }] };
+    const write = (/** @type {any} */ message) => () => stringifyIcal({ prodId: 'p', method: 'cancel', components: [{ ...base, ...message }] });
+    assert.ok(write({ cancellation: { status: 'uninvited' } })().includes('ATTENDEE:mailto:b@example.com\r\nSEQUENCE:1\r\nEND:VEVENT'));
+    assert.ok(write({ cancellation: { status: 'cancelled' } })().includes('STATUS:CANCELLED'));
+    assert.throws(write({ cancellation: { status: 'uninvited' }, status: 'cancelled' }), { code: 'ICAL3003', docPath: '/components/0/status' });
+    assert.throws(write({ cancellation: { status: 'uninvited' }, attendees: [] }), { code: 'ICAL3003', docPath: '/components/0/cancellation/attendees' });
+    assert.throws(write({ cancellation: { status: 'uninvited', attendees: ['mailto:c@example.com'] } }), { code: 'ICAL3003', docPath: '/components/0/cancellation/attendees' });
+    assert.throws(write({ cancellation: { status: 'gone' } }), { code: 'ICAL3003', docPath: '/components/0/cancellation' });
   });
 
   it('spells a calendar user\'s parameters, quoting what holds a colon', () => {

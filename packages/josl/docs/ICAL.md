@@ -100,7 +100,8 @@ type Message = {                         // one RFC 5546 scheduling component
   organizer?: Person, attendees?: Person[],
   requestStatus?: { code: string, description?: string, data?: string }[],
   status?: string, start?: Instant, end?: Instant, // start/end: a VFREEBUSY's span
-  cancellation?: object, event?: Event | RecurringEvent, suggested?: Event | RecurringEvent,
+  cancellation?: { recurrenceId?: string, status: 'cancelled' | 'uninvited', range?: 'THISANDFUTURE', attendees?: string[] },
+  event?: Event | RecurringEvent, suggested?: Event | RecurringEvent,
 };
 
 type Person = { address: string /* a cal-address URI */, name?: string, partstat?: string, role?: string,
@@ -373,7 +374,16 @@ read answers `scheduling: { method, messages, report }` beside the model:
   `status`, and a VFREEBUSY's `start` and `end`. A CANCEL carries
   `cancellation`, the series model's own: `{ recurrenceId, status:
   'cancelled', range? }` for an instance, `{ status: 'cancelled' }` for
-  the whole event. An ADD carries the `event` it adds and a COUNTER the
+  the whole event. A CANCEL of a VEVENT or VTODO without STATUS that
+  names ATTENDEEs uninvites them and leaves the event to everyone else
+  (RFC 5546 §3.2.5, §3.4.5: STATUS "MUST be set to CANCELLED to cancel
+  the entire event. If uninviting specific Attendees, then MUST NOT be
+  included"): `{ recurrenceId?, status: 'uninvited', range?, attendees }`,
+  `attendees` their addresses. One with STATUS:CANCELLED, or naming no
+  ATTENDEE (§4.1.3's CANCEL of a published event), cancels the event or
+  its instance; a VJOURNAL's CANCEL always does. The writer writes an
+  uninvite back without STATUS, its message's `attendees` the ones it
+  names (`ICAL3003` for a STATUS beside it or no attendee). An ADD carries the `event` it adds and a COUNTER the
   `suggested` event it makes, each an event of the model, for the host to
   apply, accept or decline.
 - PUBLISH and REQUEST components (and PUBLISH and REPLY VFREEBUSYs) are
@@ -402,7 +412,8 @@ read answers `scheduling: { method, messages, report }` beside the model:
   (`ICAL1026`). A comment that needs the message it answers (an UID,
   ORGANIZER or SEQUENCE that "MUST echo" the original's, the attendee
   replying, a RECURRENCE-ID only of a recurring event) is the host's; a
-  "MAY be one of" is no requirement; a CANCEL without STATUS is no entry. A VFREEBUSY's times are UTC as the read
+  "MAY be one of" is no requirement; a CANCEL without STATUS is no entry
+  (it uninvites, above). A VFREEBUSY's times are UTC as the read
   always takes them (`ICAL1018` otherwise). The entries are reported,
   never dropped content, and apart from `report.unsupported`: `strict`
   refuses none of them, and `strictScheduling: true` refuses at the
@@ -411,12 +422,15 @@ read answers `scheduling: { method, messages, report }` beside the model:
   the calendar's properties before its components): it is reported
   (`ICAL1029`, so `strict` refuses it) and applied to the whole
   calendar, `parseIcal` reading the text again with it from the start.
-  `createIcalReader` and `iterateIcal` have handed the components before
-  it out already: under PUBLISH or REQUEST (and a VFREEBUSY's REPLY)
-  those are calendar data either way and are read without their messages
-  and table checks, which the entry says; under any other method they
-  were read as calendar data where they are messages, and the read is
-  refused (`ICAL1008`).
+  `createIcalReader` and `iterateIcal` read without going back, by
+  design: they have handed the components before it out already, so they
+  never apply a late METHOD to them. Under PUBLISH or REQUEST (and a
+  VFREEBUSY's REPLY) those components are calendar data either way and
+  stay read without their messages and table checks, which the entry
+  says; under any other method they were handed out as calendar data
+  where they are messages, and the read is refused (`ICAL1008`). Read
+  such a file with `parseIcal`, or move its METHOD before its first
+  component.
 - The writer writes `method` as METHOD, and a `message` component as its
   component (`event` or `suggested` written as the event, with the
   message's lines in each of its VEVENTs). Under any method but PUBLISH,
