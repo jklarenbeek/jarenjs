@@ -17,16 +17,16 @@ import { CodedError } from '@jarenjs/core/errors';
  * The diagnoses of the iCalendar reader and the refusals of the writer,
  * one code each. The reader's are `ICAL1xxx`: `ICAL1001`-`ICAL1009`
  * stop the read (the text is not an iCalendar object it can follow),
- * `ICAL1010`-`ICAL1024` are entries of its report (thrown instead under
+ * `ICAL1010`-`ICAL1025` are entries of its report, `ICAL1026`-`ICAL1027` of its scheduling report (thrown instead under
  * `strict`). `ICAL2xxx` are the size limits (`ICAL_LIMIT_CODES`); the
  * writer's own refusals are `ICAL3xxx`.
  * @type {Readonly<Record<'ICAL1001' | 'ICAL1002' | 'ICAL1003' | 'ICAL1004' | 'ICAL1005' | 'ICAL1006'
  *   | 'ICAL1007' | 'ICAL1008' | 'ICAL1009' | 'ICAL1010' | 'ICAL1011' | 'ICAL1012' | 'ICAL1013'
  *   | 'ICAL1014' | 'ICAL1015' | 'ICAL1016' | 'ICAL1017' | 'ICAL1018' | 'ICAL1019' | 'ICAL1020'
- *   | 'ICAL1021' | 'ICAL1022' | 'ICAL1023' | 'ICAL1024'
+ *   | 'ICAL1021' | 'ICAL1022' | 'ICAL1023' | 'ICAL1024' | 'ICAL1025' | 'ICAL1026' | 'ICAL1027'
  *   | 'ICAL3001' | 'ICAL3002' | 'ICAL3003' | 'ICAL3004' | 'ICAL3005' | 'ICAL3006'
  *   | 'ICAL3007' | 'ICAL3008' | 'ICAL3009' | 'ICAL3010' | 'ICAL3011' | 'ICAL3012' | 'ICAL3013'
- *   | 'ICAL3014' | 'ICAL3015' | 'ICAL3016' | 'ICAL3017' | 'ICAL3018' | 'ICAL3019' | 'ICAL3020'
+ *   | 'ICAL3014' | 'ICAL3015' | 'ICAL3016' | 'ICAL3017' | 'ICAL3018' | 'ICAL3019' | 'ICAL3020' | 'ICAL3021' | 'ICAL3022'
  *   | 'ICAL4001' | 'ICAL4002' | 'ICAL4003' | 'ICAL4004' | 'ICAL4005' | 'ICAL4006' | 'ICAL4007'
  *   | 'ICAL4008' | 'ICAL4009' | 'ICAL4010' | 'ICAL4011' | 'ICAL4012' | 'ICAL4013', string>>}
  */
@@ -52,9 +52,12 @@ export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
   ICAL1019: 'a TZID that names no IANA zone the provider knows, or no provider; its component is withheld, never guessed',
   ICAL1020: 'the calendar layer refused a value, rule or series; its CalendarError is the cause and the component is withheld',
   ICAL1021: 'an override with no series of its UID, or a second series of one UID; it is withheld',
-  ICAL1022: 'what changes when the event occurs and this release does not read (EXRULE, EXDATE with no rule, a zoned length); its component is withheld',
+  ICAL1022: 'what changes when the event occurs and this release does not read (EXRULE, EXDATE with no rule, extra dates whose DTEND lies in another zone); its component is withheld',
   ICAL1023: 'a VTIMEZONE of an IANA name and the provider give other offsets over the span the file uses it; the source vtimezone chose is used',
   ICAL1024: 'a value lies outside what the VTIMEZONE of its TZID covers; the provider answers there for an IANA name it knows, and it is refused when resolved otherwise',
+  ICAL1025: 'a VAVAILABILITY the availability layers cannot hold as RFC 7953 reads it: a BUSYTYPE other than BUSY-UNAVAILABLE, or AVAILABLE times both UTC and zoned; it is withheld',
+  ICAL1026: 'scheduling: a component of a calendar with a METHOD lacks a property or subcomponent RFC 5546 §3 requires of it under that method',
+  ICAL1027: 'scheduling: a component of a calendar with a METHOD holds a property or subcomponent RFC 5546 §3 excludes, or more of one than it takes, or the method takes no such component',
   ICAL3001: 'the calendar or a component is not an object of the documented model, or lacks a member it requires',
   ICAL3002: 'a member or component type outside the documented subset; it is refused, never written raw',
   ICAL3003: 'a member holds a value of a form it does not take',
@@ -70,16 +73,18 @@ export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
   ICAL3013: 'a series makes no occurrence to write',
   ICAL3014: 'two slots of a zoned series resolve to one UTC instant, which a UTC calendar cannot tell apart',
   ICAL3015: 'an override names a slot the series never makes',
-  ICAL3016: 'an override over this and future occurrences of a series with an RDATE period, whose own length the range would override',
+  ICAL3016: 'an override over this and future occurrences that names its own slot\'s length, in a series with an RDATE period, for later slots of another length',
   ICAL3017: 'a value iCalendar cannot spell here: a period of dates as an extra date, or a free/busy span that is not an instant',
   ICAL3018: 'the writer has ended or refused, and takes no more components',
   ICAL3019: "zones: 'embed' and no horizon for the VTIMEZONE of a zone",
   ICAL3020: "a zoned time outside the horizon its VTIMEZONE covers under zones: 'embed'",
+  ICAL3021: 'a component the writer would write is no message of the calendar\'s METHOD: RFC 5546 §3 requires, excludes or limits a property it holds',
+  ICAL3022: 'under zones: \'utc\' a zoned recurring AVAILABLE whose VAVAILABILITY period the horizon does not hold, where its occurrences would end at the horizon',
   ICAL4001: 'an edit is not one of the documented edits, or a member of it has a form it does not take',
   ICAL4002: 'no VEVENT holds the UID, or the occurrence, an edit names',
   ICAL4003: 'more than one VEVENT could be the one an edit names',
   ICAL4004: 'the event is not recurring, or its series makes no such occurrence, or the occurrence is excluded or cancelled',
-  ICAL4005: 'the occurrence is the slot of an override over this and future occurrences; moving, cancelling or excluding it would change every later one',
+  ICAL4005: 'the occurrence is the slot of an override over this and future occurrences whose next slot has its own VEVENT, where cancelling or excluding it would move the range',
   ICAL4006: "the read withheld the event, or the occurrence's own VEVENT, so the occurrence cannot be checked",
   ICAL4007: 'the edit would lose content: a property held more than once, a text with an alternate representation, or an occurrence with its own VEVENT',
   ICAL4008: "a moved occurrence's start or end is not of its series' kind and zone",

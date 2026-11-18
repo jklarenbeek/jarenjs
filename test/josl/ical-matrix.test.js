@@ -75,7 +75,7 @@ function probe(name, onCalendar = false) {
       return { text: calendar([], [`BEGIN:${name}`, 'UID:c', 'DTSTAMP:20260101T000000Z', `END:${name}`]), reported: name };
     case 'AVAILABLE':
       return { text: calendar([], ['BEGIN:VAVAILABILITY', 'UID:c', 'DTSTAMP:20260101T000000Z', 'BEGIN:AVAILABLE', 'UID:d',
-        'DTSTAMP:20260101T000000Z', 'END:AVAILABLE', 'END:VAVAILABILITY']), reported: 'VAVAILABILITY' };
+        'DTSTAMP:20260101T000000Z', 'DTSTART:20260302T090000Z', 'DTEND:20260302T170000Z', 'END:AVAILABLE', 'END:VAVAILABILITY']), reported: 'AVAILABLE' };
     case 'VALARM': case 'ACTION': case 'REPEAT': case 'TRIGGER':
       return { text: calendar([], event([...EVENT, 'BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:-PT5M', 'REPEAT:1', 'DURATION:PT1M',
         'DESCRIPTION:r', 'END:VALARM'])), reported: 'VALARM' };

@@ -23,9 +23,12 @@
 // or contradicting content is refused with a code, before anything is
 // emitted. A RANGE=THISANDFUTURE override is read into its series,
 // which the calendar layer expands: a later occurrence is edited as any
-// other (one moved without an end lasts what the range gives), and an
-// edit of the range's own slot, which would move every later one, is
-// refused.
+// other (one moved without an end lasts what the range gives). A move of
+// the range's own slot is a new DTSTART of the range, and so a new shift
+// of every later slot (RFC 5545 §3.8.4.4); a cancel or EXDATE of it
+// removes that one slot, and the later ones keep the range's changes:
+// the range moves to the next slot, by the same shift, beside an EXDATE
+// of its own.
 // Every edit reads the input as it was read: two edits that reach one
 // line, one occurrence, or an event another removes are refused; read
 // the output again to edit further. The output is read once more, under
@@ -34,10 +37,10 @@
 // DURATION only the zone's offsets can place, say) is refused, so
 // editing never takes an event out of the model.
 
-import { CalendarError, defineSeries, expandSeries, parseTemporal } from '@jarenjs/core/calendar';
+import { CalendarError, defineSeries, expandSeries, parseTemporal, toUtc } from '@jarenjs/core/calendar';
 import { TREES, parseIcal, slotId, textOf } from './ical-read.js';
 import { tzidParam } from './ical-vtimezone.js';
-import { IcalError, daysOf, escapeText, foldLine, formatDate, formatFloating, formatUtc, instantOf, readDuration, wallOf }
+import { IcalError, daysOf, escapeText, foldLine, formatDate, formatDuration, formatFloating, formatUtc, instantOf, readDuration, wallOf }
   from './ical-wire.js';
 
 const CR = 0x0D;
@@ -46,6 +49,8 @@ const SP = 0x20;
 const HTAB = 0x09;
 const ID_FORM = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(Z)?)?$/;
 const COMPACT_FORM = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/;
+/** The last instant of the calendar's range: 9999-12-31T23:59:59Z. */
+const LAST_INSTANT = 253402300799000;
 const TEXT_EDITS = /** @type {const} */ ({ retitle: ['SUMMARY', 'summary'], describe: ['DESCRIPTION', 'description'],
   relocate: ['LOCATION', 'location'] });
 /** The members each edit takes, `op` and `uid` with them. */
@@ -405,12 +410,13 @@ function groupOf(plan, edit, at) {
 
 /**
  * The series an occurrence edit reaches, checked: read by the canonical
- * read, of one series VEVENT, and not the slot of a THISANDFUTURE override.
+ * read, of one series VEVENT; `range` is the override over this and
+ * future occurrences whose own slot the edit names, if any.
  * @param {Plan} plan
  * @param {Group} group
  * @param {Record<string, any>} edit
  * @param {string} at
- * @returns {{ series: any, master: Node, shape: Shape }}
+ * @returns {{ series: any, master: Node, shape: Shape, range: any }}
  */
 function seriesOf(plan, group, edit, at) {
   const { uid, recurrenceId: id } = edit;
@@ -421,15 +427,9 @@ function seriesOf(plan, group, edit, at) {
   if (component.series === undefined)
     refuse('ICAL4004', `the event '${uid}' is not recurring; it has no occurrence ${id}`, `${at}/recurrenceId`);
   const { series } = component;
-  // the slot of an override over this and future occurrences is that
-  // override's own VEVENT, and moving, cancelling or excluding it would
-  // change every later occurrence too; a later slot is edited as any other
-  if (series.overrides.some((/** @type {any} */ override) => override.range !== undefined && override.recurrenceId === id)) {
-    refuse('ICAL4005', `the occurrence ${id} is the slot of an override over this and future occurrences; editing it would change every later one`,
-      `${at}/recurrenceId`);
-  }
+  const range = series.overrides.find((/** @type {any} */ override) => override.range !== undefined && override.recurrenceId === id);
   const starts = named(master, 'DTSTART');
-  return { series, master, shape: shapeOf(starts[0]) };
+  return { series, master, shape: shapeOf(starts[0]), range };
 }
 
 /**
@@ -646,12 +646,16 @@ function lengthOf(edit, shape, wall, at) {
  * @param {Shape} shape
  * @param {string} id
  * @param {number} wall - the new start
- * @returns {{ name: 'DTEND', value: string, line: string } | undefined}
+ * @returns {{ name: 'DTEND' | 'DURATION', value: string, line: string } | undefined}
  */
 function rangedEnd(series, shape, id, wall) {
   const over = rangeOver(series, id);
-  if (over === undefined || over.status === 'cancelled' || over.end === undefined)
+  if (over === undefined || over.status === 'cancelled' || (over.end === undefined && over.duration === undefined))
     return undefined;
+  if (over.end === undefined) {
+    const value = formatDuration(readDuration(over.duration, ''));
+    return { name: 'DURATION', value, line: `DURATION:${value}` };
+  }
   const place = (/** @type {any} */ value) => timeOf(value, shape, '').wall;
   const end = wall + place(over.end) - place(over.start);
   const text = shape.kind === 'date' ? formatDate(end / 86400000) : shape.kind === 'utc' ? formatUtc(end) : formatFloating(end);
@@ -832,8 +836,12 @@ function cancel(plan, group, edit, at) {
       setValue(plan, node, 'STATUS', 'CANCELLED', at);
     return;
   }
-  const { series, master, shape } = seriesOf(plan, group, edit, at);
+  const { series, master, shape, range } = seriesOf(plan, group, edit, at);
   const own = ownOf(plan, group, series, edit, at);
+  if (range !== undefined) {
+    cancelRangeSlot(plan, series, master, shape, range, /** @type {Node} */ (own), edit, at);
+    return;
+  }
   if (own !== null) {
     if (!named(own, 'STATUS').some((prop) => prop.value.toUpperCase() === 'CANCELLED'))
       setValue(plan, own, 'STATUS', 'CANCELLED', at);
@@ -847,6 +855,129 @@ function cancel(plan, group, edit, at) {
 }
 
 /**
+ * Where a slot id lies: days times a day, a wall clock, or an instant.
+ * @param {string} id
+ * @returns {number}
+ */
+function placeOfId(id) {
+  const form = /** @type {RegExpExecArray} */ (ID_FORM.exec(id));
+  if (form[4] === undefined)
+    return daysOf(id) * 86400000;
+  return form[7] === 'Z' ? Date.parse(id) : wallOf(id.slice(0, 10), id.slice(11, 19), '');
+}
+
+/**
+ * A place spelled as a time of the series' kind.
+ * @param {Shape} shape
+ * @param {number} at
+ * @returns {string}
+ */
+const spellAt = (shape, at) => (shape.kind === 'date' ? formatDate(at / 86400000) : shape.kind === 'utc' ? formatUtc(at) : formatFloating(at));
+
+/**
+ * The first slot after a slot that the series makes and does not
+ * exclude, overrides aside: the calendar layer's answer, from a probe
+ * series without overrides.
+ * @param {Plan} plan
+ * @param {any} series
+ * @param {Shape} shape
+ * @param {string} id
+ * @param {string} at
+ * @returns {string | undefined} undefined when the series makes none
+ */
+function nextSlot(plan, series, shape, id, at) {
+  const { provider } = plan.tree.zones;
+  const place = placeOfId(id);
+  // a floating slot's horizon starts at its own wall clock, a date's at its day
+  const day = (/** @type {number} */ at) => (shape.kind === 'floating'
+    ? { kind: 'floating', date: new Date(at).toISOString().slice(0, 10), time: new Date(at).toISOString().slice(11, 19) }
+    : { kind: 'date', date: new Date(Math.floor(at / 86400000) * 86400000).toISOString().slice(0, 10) });
+  let low;
+  if (shape.kind === 'utc')
+    low = place;
+  else if (shape.kind === 'zoned') {
+    try {
+      low = toUtc(/** @type {any} */ ({ kind: 'zoned', date: id.slice(0, 10), time: id.slice(11, 19), zone: shape.tzid }),
+        { provider, policy: 'rfc5545' }).instant;
+    }
+    catch (error) {
+      if (error instanceof CalendarError)
+        refuse('ICAL4006', `the calendar layer cannot place the occurrence ${id}`, at, error);
+      throw error;
+    }
+  }
+  // a hundred years on, the calendar layer's whole reach, and two slots: this one and the next
+  const reach = 36500;
+  const horizon = shape.kind === 'utc' || shape.kind === 'zoned'
+    ? [low, Math.min(LAST_INSTANT, /** @type {number} */ (low) + reach * 86400000)] : [day(place), day(Math.min(LAST_INSTANT, place + reach * 86400000))];
+  let answer;
+  try {
+    const probe = defineSeries({ uid: series.uid, base: series.base, rdates: series.rdates, exdates: series.exdates, overrides: [] });
+    answer = expandSeries(probe, { horizon, provider, limits: { maxOccurrences: 2 } });
+  }
+  catch (error) {
+    if (error instanceof CalendarError)
+      refuse('ICAL4006', `the calendar layer cannot tell which occurrence of '${series.uid}' follows ${id}`, at, error);
+    throw error;
+  }
+  const later = answer.occurrences.map((occurrence) => occurrence.recurrenceId).filter((other) => other > id).sort();
+  if (later.length === 0 && answer.status !== 'complete')
+    refuse('ICAL4005', `the occurrence after ${id}, which the override over this and future occurrences would move to, lies past the calendar layer's reach`, at);
+  return later[0];
+}
+
+/**
+ * Cancel or exclude the own slot of an override over this and future
+ * occurrences: that one slot goes, and every later one keeps the range's
+ * changes. The range's VEVENT names the next slot the series makes,
+ * starts by the same shift from it (its DTEND too), and the series
+ * excludes the slot by an EXDATE. A range with no later slot of its own
+ * (the series' last, or the next is another range's) is cancelled whole.
+ * @param {Plan} plan
+ * @param {any} series
+ * @param {Node} master
+ * @param {Shape} shape
+ * @param {any} range - the override the slot is the own slot of
+ * @param {Node} own - its VEVENT
+ * @param {Record<string, any>} edit
+ * @param {string} at
+ */
+function cancelRangeSlot(plan, series, master, shape, range, own, edit, at) {
+  const id = edit.recurrenceId;
+  if (range.status === 'cancelled')
+    return;
+  const next = nextSlot(plan, series, shape, id, at);
+  const after = next === undefined ? undefined : series.overrides.find((/** @type {any} */ override) => override.recurrenceId === next);
+  if (next === undefined || after?.range !== undefined) {
+    setValue(plan, own, 'STATUS', 'CANCELLED', at);
+    return;
+  }
+  if (after !== undefined) {
+    refuse('ICAL4005', `the occurrence ${id} is the slot of an override over this and future occurrences, and the next one, ${next}, has its own VEVENT, `
+      + 'where the range would have to move to keep the later ones', `${at}/recurrenceId`);
+  }
+  const by = placeOfId(next) - placeOfId(id);
+  replaceValue(plan, named(own, 'RECURRENCE-ID')[0], compactOf(next));
+  const dtstart = named(own, 'DTSTART')[0];
+  replaceValue(plan, dtstart, spellAt(shape, timeOf(range.start, shape, at).wall + by));
+  for (const dtend of named(own, 'DTEND'))
+    replaceValue(plan, dtend, spellAt(shape, compactPlace(dtend.value) + by));
+  addExdate(plan, master, shape, id);
+}
+
+/**
+ * Where a compact time value lies: `20260302T090000` as a wall clock,
+ * `...Z` as an instant, `20260302` as days times a day.
+ * @param {string} text
+ * @returns {number}
+ */
+function compactPlace(text) {
+  const form = /** @type {RegExpExecArray} */ (COMPACT_FORM.exec(text));
+  const date = `${form[1]}-${form[2]}-${form[3]}`;
+  return placeOfId(form[4] === undefined ? date : `${date}T${form[4]}:${form[5]}:${form[6]}${form[7] ?? ''}`);
+}
+
+/**
  * Exclude one occurrence by an EXDATE.
  * @param {Plan} plan
  * @param {Group} group
@@ -855,7 +986,11 @@ function cancel(plan, group, edit, at) {
  */
 function exdate(plan, group, edit, at) {
   const id = edit.recurrenceId;
-  const { series, master, shape } = seriesOf(plan, group, edit, at);
+  const { series, master, shape, range } = seriesOf(plan, group, edit, at);
+  if (range !== undefined) {
+    cancelRangeSlot(plan, series, master, shape, range, /** @type {Node} */ (ownOf(plan, group, series, edit, at)), edit, at);
+    return;
+  }
   if (nodeOf(plan, group, edit.uid, id, at) !== null)
     refuse('ICAL4007', `the occurrence ${id} has its own VEVENT, which an EXDATE would leave behind; cancel or remove it`, `${at}/recurrenceId`);
   if (series.exdates.some((/** @type {any} */ value) => names(series, value, id)) || rangeOver(series, id)?.status === 'cancelled')
@@ -1093,6 +1228,13 @@ function verify(plan, out, edits) {
     if (plan.model.has(edit.uid) && !held.has(edit.uid)) {
       const entry = read.report.unsupported.find((item) => item.withheld === true);
       refuse('ICAL4012', `after the edit the read would withhold the event '${edit.uid}'${entry === undefined ? '' : `: ${entry.code} ${entry.reason}`}`,
+        `/edits/${i}`, entry);
+    }
+    // a move the read would not hold (its VEVENT withheld) leaves the occurrence where it was
+    if (edit.op === 'move' && !read.calendar.components.some((component) => component.series?.uid === edit.uid
+      && component.series.overrides.some((/** @type {any} */ override) => override.recurrenceId === edit.recurrenceId && override.status === 'moved'))) {
+      const entry = read.report.unsupported.find((item) => item.withheld === true);
+      refuse('ICAL4012', `after the edit the read would withhold the move of ${edit.recurrenceId}${entry === undefined ? '' : `: ${entry.code} ${entry.reason}`}`,
         `/edits/${i}`, entry);
     }
   }

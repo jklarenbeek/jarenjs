@@ -137,7 +137,7 @@ describe('ical sub-daily: zoned, through the file\'s VTIMEZONE', () => {
     assert.ok(through.includes(at('2026-03-10T01:50:00Z')));
   });
 
-  it('the read\'s provider lists the compiled offset changes, so a zoned SECONDLY walk asks it per hour, not per second', () => {
+  it('the read\'s provider lists the compiled offset changes, so a zoned SECONDLY walk asks it per hour, not per second, as the Intl provider\'s list does', () => {
     assert.strictEqual(typeof zones.provider.offsetChanges, 'function');
     assert.deepStrictEqual(zones.provider.offsetChanges(at('2026-03-01T00:00:00Z'), at('2026-03-31T00:00:00Z'), 'Europe/Amsterdam')
       .map((/** @type {any} */ change) => [new Date(change.at).toISOString(), change.before, change.after]),
@@ -150,10 +150,10 @@ describe('ical sub-daily: zoned, through the file\'s VTIMEZONE', () => {
     const options = { horizon: span, limits: { maxProviderCalls: 200 } };
     const read = expandSeries(secondly, { ...options, provider: zones.provider });
     assert.strictEqual(read.status, 'complete');
-    // the Intl provider lists no changes: the same walk resolves each second before the horizon and stops at the limit
+    // the Intl provider lists its changes too: the same walk, under the same limit, completes with the same instants
     const intl = expandSeries(secondly, { ...options, provider });
-    assert.strictEqual(intl.status, 'incomplete');
-    assert.strictEqual(intl.limit, 'maxProviderCalls');
+    assert.strictEqual(intl.status, 'complete');
+    assert.deepStrictEqual(instants(intl), instants(read));
     const roomy = expandSeries(secondly, { horizon: span, provider, limits: { maxProviderCalls: 1000000 } });
     assert.deepStrictEqual(instants(read), instants(roomy));
   });

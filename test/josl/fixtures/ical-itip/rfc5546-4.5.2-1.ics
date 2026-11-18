@@ -1,0 +1,14 @@
+BEGIN:VCALENDAR
+PRODID:-//Example/ExampleCalendarClient//EN
+METHOD:REPLY
+VERSION:2.0
+BEGIN:VTODO
+ORGANIZER:mailto:a@example.com
+ATTENDEE;PARTSTAT=ACCEPTED:mailto:b@example.com
+UID:calsrv.example.com-873970198738777-00@example.com
+COMMENT:I'll send you my input by email
+SEQUENCE:0
+DTSTAMP:19970717T203000Z
+REQUEST-STATUS:2.0;Success
+END:VTODO
+END:VCALENDAR

@@ -525,12 +525,15 @@ describe('ical series: refused where a calendar would be wrong', () => {
       overrides: [{ ...off, start: zoned('2026-03-03', '10:00') }] }], { zones: 'utc', provider, horizon: YEAR_2026 }), 'ICAL3015');
   });
 
-  it('an override over this and future occurrences of a series with an RDATE period', () => {
-    refuses(() => write([{ uid: 's', base: { dtstart: floating('2026-03-02', '09:00'), duration: 'PT1H', rrule: 'FREQ=DAILY;COUNT=3' },
+  it('an override over this and future occurrences of its own slot\'s length, over a later RDATE period of another', () => {
+    const series = (/** @type {Record<string, any>} */ own) => [{ uid: 's', base: { dtstart: floating('2026-03-02', '09:00'), duration: 'PT1H', rrule: 'FREQ=DAILY;COUNT=3' },
       rdates: [{ start: floating('2026-03-10', '09:00'), end: floating('2026-03-10', '09:15') }],
       overrides: [{ recurrenceId: '2026-03-02T09:00:00', status: 'cancelled' },
-        { recurrenceId: '2026-03-03T09:00:00', status: 'moved', start: floating('2026-03-03', '10:00'), range: 'THISANDFUTURE' }] }]),
-    'ICAL3016', '/components/0/series/overrides/1/range');
+        { recurrenceId: '2026-03-03T09:00:00', status: 'moved', start: floating('2026-03-03', '10:00'), range: 'THISANDFUTURE', ...own }] }];
+    refuses(() => write(series({ end: floating('2026-03-03', '11:00') })), 'ICAL3016', '/components/0/series/overrides/1/range');
+    // without a length of its own the period keeps its quarter hour, which RECURRENCE-ID;RANGE says too
+    const text = stringifyIcal({ prodId: 'p', components: series({}).map((s) => ({ type: 'event', series: s })) }, { runtime });
+    assert.ok(text.includes('RECURRENCE-ID;RANGE=THISANDFUTURE:20260303T090000\r\nDTSTART:20260303T100000\r\nDURATION:PT1H\r\n'));
   });
 
   it('a period of dates, which no RDATE spells', () => {

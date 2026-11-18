@@ -82,10 +82,10 @@ describe('ical: the calendar head and a minimal event', () => {
     assert.strictEqual(prop(vevent, 'DTSTAMP')?.value, '20260115T102030Z');
   });
 
-  it('writes METHOD:PUBLISH and refuses every other method by name', () => {
+  it('writes METHOD:PUBLISH and refuses a method outside RFC 5546\'s eight by name', () => {
     const text = stringifyIcal({ prodId: 'p', method: 'publish', components: [] }, { runtime });
     assert.strictEqual(text, 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:p\r\nMETHOD:PUBLISH\r\nEND:VCALENDAR\r\n');
-    for (const method of ['request', 'PUBLISH', 'cancel', 1])
+    for (const method of ['x-push', 'PUBLISH', 'Cancel', 1])
       refuses(() => stringifyIcal({ prodId: 'p', method, components: [] }), 'ICAL3002', '/method');
   });
 
@@ -274,7 +274,7 @@ describe('ical: the documented subset, and nothing else', () => {
   it('refuses a member, a component type or a calendar member outside it', () => {
     for (const member of ['attendee', 'organizer', 'xFoo', 'alarm', 'tzid', 'rrule'])
       refuses(() => roundTrip([event({ start: date('2026-03-02'), [member]: 'x' })]), 'ICAL3002', `/components/0/${member}`);
-    for (const type of ['todo', 'journal', 'alarm', 'availability', 'EVENT'])
+    for (const type of ['todo', 'journal', 'alarm', 'vavailability', 'EVENT'])
       refuses(() => roundTrip([{ type, uid: 'x' }]), 'ICAL3002', '/components/0/type');
     refuses(() => stringifyIcal({ prodId: 'p', components: [], timezones: [] }), 'ICAL3002', '/timezones');
     refuses(() => roundTrip([{ type: 'freebusy', uid: 'f', periods: [], organizer: 'x' }]), 'ICAL3002', '/components/0/organizer');
@@ -373,7 +373,7 @@ describe('ical: the incremental writer', () => {
   it('refuses a missing or malformed head at once', () => {
     refuses(() => createIcalWriter(/** @type {any} */ ({})), 'ICAL3001', '/options/prodId');
     refuses(() => createIcalWriter(/** @type {any} */ (undefined)), 'ICAL3001', '/options/prodId');
-    refuses(() => createIcalWriter(/** @type {any} */ ({ prodId: 'p', method: 'request' })), 'ICAL3002', '/options/method');
+    refuses(() => createIcalWriter(/** @type {any} */ ({ prodId: 'p', method: 'x-push' })), 'ICAL3002', '/options/method');
   });
 });
 

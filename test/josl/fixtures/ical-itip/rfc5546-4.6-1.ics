@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+METHOD:PUBLISH
+PRODID:-//Example/ExampleCalendarClient//EN
+VERSION:2.0
+BEGIN:VJOURNAL
+DTSTART:19971002T200000Z
+DTSTAMP:19970717T233100Z
+ORGANIZER:mailto:a@example.com
+SUMMARY:Phone conference minutes
+DESCRIPTION:The editors meeting was held on October 1, 1997.
+ Details are in the attached document.
+UID:0981234-1234234-2410@example.com
+RELATED-TO:0981234-1234234-2402-35@example.com
+ATTACH:ftp://ftp.example.com/pub/ed/minutes100197.txt
+END:VJOURNAL
+END:VCALENDAR

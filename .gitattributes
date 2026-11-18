@@ -18,3 +18,5 @@ test/adoption/trusted-bodies.js -text whitespace=blank-at-eol,blank-at-eof,space
 test/josl/fixtures/ical/*.ics -text
 test/josl/fixtures/ical-vtimezone/*.ics -text
 test/josl/fixtures/ical-rfc/*.ics -text
+test/josl/fixtures/ical-availability/*.ics -text
+test/josl/fixtures/ical-itip/*.ics -text

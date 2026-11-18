@@ -1,0 +1,433 @@
+{
+ "spanForm": "[start, end, state, busyType | null, source layer ids]",
+ "cases": [
+  {
+   "name": "3.1 example 1, Monday 2011-10-10 (UTC day)",
+   "file": "rfc7953-3.1-example-1.ics",
+   "horizon": [
+    "2011-10-10T00:00:00Z",
+    "2011-10-11T00:00:00Z"
+   ],
+   "spans": [
+    [
+     "2011-10-10T00:00:00Z",
+     "2011-10-10T13:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "0428C7D2-688E-4D2E-AC52-CD112E2469DF"
+     ]
+    ],
+    [
+     "2011-10-10T13:00:00Z",
+     "2011-10-10T21:00:00Z",
+     "available",
+     null,
+     [
+      "0428C7D2-688E-4D2E-AC52-CD112E2469DF"
+     ]
+    ],
+    [
+     "2011-10-10T21:00:00Z",
+     "2011-10-11T00:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "0428C7D2-688E-4D2E-AC52-CD112E2469DF"
+     ]
+    ]
+   ]
+  },
+  {
+   "name": "3.1 example 2, Thursday and Friday 2011-10-13/14 (UTC days)",
+   "file": "rfc7953-3.1-example-2.ics",
+   "horizon": [
+    "2011-10-13T00:00:00Z",
+    "2011-10-15T00:00:00Z"
+   ],
+   "spans": [
+    [
+     "2011-10-13T00:00:00Z",
+     "2011-10-13T13:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "84D0F948-7FC6-4C1D-BBF3-BA9827B424B5"
+     ]
+    ],
+    [
+     "2011-10-13T13:00:00Z",
+     "2011-10-13T21:00:00Z",
+     "available",
+     null,
+     [
+      "84D0F948-7FC6-4C1D-BBF3-BA9827B424B5"
+     ]
+    ],
+    [
+     "2011-10-13T21:00:00Z",
+     "2011-10-15T00:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "84D0F948-7FC6-4C1D-BBF3-BA9827B424B5"
+     ]
+    ]
+   ]
+  },
+  {
+   "name": "3.1 example 2, the end of its period 2011-12-02T00:00 Montreal (05:00Z)",
+   "file": "rfc7953-3.1-example-2.ics",
+   "horizon": [
+    "2011-12-01T00:00:00Z",
+    "2011-12-03T00:00:00Z"
+   ],
+   "spans": [
+    [
+     "2011-12-01T00:00:00Z",
+     "2011-12-01T14:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "84D0F948-7FC6-4C1D-BBF3-BA9827B424B5"
+     ]
+    ],
+    [
+     "2011-12-01T14:00:00Z",
+     "2011-12-01T22:00:00Z",
+     "available",
+     null,
+     [
+      "84D0F948-7FC6-4C1D-BBF3-BA9827B424B5"
+     ]
+    ],
+    [
+     "2011-12-01T22:00:00Z",
+     "2011-12-02T05:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "84D0F948-7FC6-4C1D-BBF3-BA9827B424B5"
+     ]
+    ],
+    [
+     "2011-12-02T05:00:00Z",
+     "2011-12-03T00:00:00Z",
+     "unknown",
+     null,
+     []
+    ]
+   ],
+   "outside": [
+    [
+     "2011-12-02T05:00:00Z",
+     "2011-12-03T00:00:00Z",
+     "available",
+     null,
+     [
+      "outside"
+     ]
+    ]
+   ],
+   "lowest": true
+  },
+  {
+   "name": "3.1 example 3, Sunday 2011-10-23 00:00Z-12:00Z: Montreal's period ends at 07:00Z, Denver's begins at 06:00Z",
+   "file": "rfc7953-3.1-example-3.ics",
+   "horizon": [
+    "2011-10-23T00:00:00Z",
+    "2011-10-23T12:00:00Z"
+   ],
+   "spans": [
+    [
+     "2011-10-23T00:00:00Z",
+     "2011-10-23T06:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "BE082249-7BDD-4FE0-BDBA-DE6598C32FC9"
+     ]
+    ],
+    [
+     "2011-10-23T06:00:00Z",
+     "2011-10-23T07:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "A1FF55E3-555C-433A-8548-BF4864B5621E",
+      "BE082249-7BDD-4FE0-BDBA-DE6598C32FC9"
+     ]
+    ],
+    [
+     "2011-10-23T07:00:00Z",
+     "2011-10-23T12:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "A1FF55E3-555C-433A-8548-BF4864B5621E"
+     ]
+    ]
+   ]
+  },
+  {
+   "name": "3.1 example 3, Monday 2011-10-24 (UTC day), in Denver",
+   "file": "rfc7953-3.1-example-3.ics",
+   "horizon": [
+    "2011-10-24T00:00:00Z",
+    "2011-10-25T00:00:00Z"
+   ],
+   "spans": [
+    [
+     "2011-10-24T00:00:00Z",
+     "2011-10-24T15:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "A1FF55E3-555C-433A-8548-BF4864B5621E"
+     ]
+    ],
+    [
+     "2011-10-24T15:00:00Z",
+     "2011-10-24T23:00:00Z",
+     "available",
+     null,
+     [
+      "A1FF55E3-555C-433A-8548-BF4864B5621E"
+     ]
+    ],
+    [
+     "2011-10-24T23:00:00Z",
+     "2011-10-25T00:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "A1FF55E3-555C-433A-8548-BF4864B5621E"
+     ]
+    ]
+   ]
+  },
+  {
+   "name": "3.1 example 3, Sunday 2011-10-30 00:00Z-12:00Z: Denver's period ends at 06:00Z, Montreal's begins at 07:00Z",
+   "file": "rfc7953-3.1-example-3.ics",
+   "horizon": [
+    "2011-10-30T00:00:00Z",
+    "2011-10-30T12:00:00Z"
+   ],
+   "spans": [
+    [
+     "2011-10-30T00:00:00Z",
+     "2011-10-30T06:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "A1FF55E3-555C-433A-8548-BF4864B5621E"
+     ]
+    ],
+    [
+     "2011-10-30T06:00:00Z",
+     "2011-10-30T07:00:00Z",
+     "unknown",
+     null,
+     []
+    ],
+    [
+     "2011-10-30T07:00:00Z",
+     "2011-10-30T12:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "1852F9E1-E0AA-4572-B4C4-ED1680A4DA40"
+     ]
+    ]
+   ],
+   "outside": [
+    [
+     "2011-10-30T06:00:00Z",
+     "2011-10-30T07:00:00Z",
+     "available",
+     null,
+     [
+      "outside"
+     ]
+    ]
+   ],
+   "lowest": true
+  },
+  {
+   "name": "5.1.1 step 3, on Monday 2011-11-07, midnight to midnight in Montreal (EST)",
+   "file": "rfc7953-appendix-a.ics",
+   "horizon": [
+    "2011-11-07T05:00:00Z",
+    "2011-11-08T05:00:00Z"
+   ],
+   "spans": [
+    [
+     "2011-11-07T05:00:00Z",
+     "2011-11-07T13:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "452DFCA7-3203-4A3D-9A9A-99753A383B41"
+     ]
+    ],
+    [
+     "2011-11-07T13:00:00Z",
+     "2011-11-07T23:00:00Z",
+     "available",
+     null,
+     [
+      "452DFCA7-3203-4A3D-9A9A-99753A383B41"
+     ]
+    ],
+    [
+     "2011-11-07T23:00:00Z",
+     "2011-11-08T05:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "452DFCA7-3203-4A3D-9A9A-99753A383B41"
+     ]
+    ]
+   ]
+  },
+  {
+   "name": "5.1.1 on the day it names, 2011-11-06 (a Sunday, 25 hours in Montreal), with its meeting as step 4",
+   "file": "rfc7953-appendix-a.ics",
+   "horizon": [
+    "2011-11-06T04:00:00Z",
+    "2011-11-07T05:00:00Z"
+   ],
+   "spans": [
+    [
+     "2011-11-06T04:00:00Z",
+     "2011-11-07T05:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "452DFCA7-3203-4A3D-9A9A-99753A383B41"
+     ]
+    ]
+   ],
+   "events": [
+    [
+     "meeting",
+     "2011-11-06T17:00:00Z",
+     "2011-11-06T19:00:00Z"
+    ]
+   ],
+   "withEvents": [
+    [
+     "2011-11-06T04:00:00Z",
+     "2011-11-06T17:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "452DFCA7-3203-4A3D-9A9A-99753A383B41"
+     ]
+    ],
+    [
+     "2011-11-06T17:00:00Z",
+     "2011-11-06T19:00:00Z",
+     "busy",
+     "busy",
+     [
+      "meeting"
+     ]
+    ],
+    [
+     "2011-11-06T19:00:00Z",
+     "2011-11-07T05:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "452DFCA7-3203-4A3D-9A9A-99753A383B41"
+     ]
+    ]
+   ]
+  },
+  {
+   "name": "5.1.2 step 3.P1, Monday 2011-10-24, midnight to midnight in Montreal (EDT)",
+   "file": "rfc7953-appendix-b.ics",
+   "horizon": [
+    "2011-10-24T04:00:00Z",
+    "2011-10-25T04:00:00Z"
+   ],
+   "spans": [
+    [
+     "2011-10-24T04:00:00Z",
+     "2011-10-24T14:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "F01411E3-38B8-4490-8A1F-0CCEC57A0943"
+     ]
+    ],
+    [
+     "2011-10-24T14:00:00Z",
+     "2011-10-25T00:00:00Z",
+     "available",
+     null,
+     [
+      "F01411E3-38B8-4490-8A1F-0CCEC57A0943"
+     ]
+    ],
+    [
+     "2011-10-25T00:00:00Z",
+     "2011-10-25T04:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "F01411E3-38B8-4490-8A1F-0CCEC57A0943"
+     ]
+    ]
+   ]
+  },
+  {
+   "name": "Appendix B across the end of the PRIORITY:1 period, 2011-10-30T00:00 Denver (06:00Z)",
+   "file": "rfc7953-appendix-b.ics",
+   "horizon": [
+    "2011-10-29T00:00:00Z",
+    "2011-11-01T00:00:00Z"
+   ],
+   "spans": [
+    [
+     "2011-10-29T00:00:00Z",
+     "2011-10-30T06:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "F01411E3-38B8-4490-8A1F-0CCEC57A0943"
+     ]
+    ],
+    [
+     "2011-10-30T06:00:00Z",
+     "2011-10-31T12:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "627A87FA-E5F1-43C0-B3B1-567DA10F2A83"
+     ]
+    ],
+    [
+     "2011-10-31T12:00:00Z",
+     "2011-10-31T22:00:00Z",
+     "available",
+     null,
+     [
+      "627A87FA-E5F1-43C0-B3B1-567DA10F2A83"
+     ]
+    ],
+    [
+     "2011-10-31T22:00:00Z",
+     "2011-11-01T00:00:00Z",
+     "busy",
+     "busy-unavailable",
+     [
+      "627A87FA-E5F1-43C0-B3B1-567DA10F2A83"
+     ]
+    ]
+   ]
+  }
+ ],
+ "outsideForm": "outside: the spans an open available layer at PRIORITY 0 turns free; lowest: the case's VAVAILABILITY components are of PRIORITY 0 too, so that layer is named beside each of their free spans"
+}

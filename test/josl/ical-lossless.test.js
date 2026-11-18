@@ -506,13 +506,72 @@ describe('RANGE=THISANDFUTURE is read into its series and edited around', () => 
     assert.deepStrictEqual(rows(given), before.map((row) => (row.startsWith('03-30') ? '03-30 04-01 08:00-09:00' : row)));
   });
 
-  it('refuses a move, cancel or exclusion of the range\'s own slot, which would change every later one (ICAL4005)', () => {
+  it('moves the range\'s own slot: a new DTSTART of the range, and so a new shift of every later slot', () => {
     const id = '2026-03-23T09:00:00';
-    assert.throws(() => patchIcal(tree, [{ op: 'cancel', uid: 'r', recurrenceId: id }]), { code: 'ICAL4005', docPath: '/edits/0/recurrenceId' });
-    assert.throws(() => patchIcal(tree, [{ op: 'exdate', uid: 'r', recurrenceId: id }]), { code: 'ICAL4005' });
-    assert.throws(() => patchIcal(tree, [{ op: 'move', uid: 'r', recurrenceId: id, start: { kind: 'floating', date: '2026-04-01', time: '09:00' } }]),
-      { code: 'ICAL4005' });
-    // its own text, or its removal, is edited as written
+    const out = /** @type {string} */ (patchIcal(tree, [{ op: 'move', uid: 'r', recurrenceId: id, start: { kind: 'floating', date: '2026-03-24', time: '08:00' } }]));
+    assert.deepStrictEqual(lineDiff(text, out), { removed: ['DTSTART:20260323T100000\r\n'], added: ['DTSTART:20260324T080000\r\n'] });
+    // the edited intent: 03-23 and every later slot a day less an hour after their own
+    assert.deepStrictEqual(rows(out), [...before.slice(0, 3), '03-23 03-24 08:00-08:30', '03-30 03-31 08:00-08:30', '04-06 04-07 08:00-08:30']);
+  });
+
+  it('cancels or excludes the range\'s own slot only: the range moves to the next slot by the same shift, beside an EXDATE', () => {
+    const id = '2026-03-23T09:00:00';
+    for (const op of /** @type {const} */ (['cancel', 'exdate'])) {
+      const out = /** @type {string} */ (patchIcal(tree, [{ op, uid: 'r', recurrenceId: id }]));
+      const lines = (/** @type {string} */ t) => t.split('\r\n');
+      assert.deepStrictEqual([lines(text).filter((line) => !lines(out).includes(line)), lines(out).filter((line) => !lines(text).includes(line))],
+        [['RECURRENCE-ID;RANGE=THISANDFUTURE:20260323T090000', 'DTSTART:20260323T100000'],
+          ['EXDATE:20260323T090000', 'RECURRENCE-ID;RANGE=THISANDFUTURE:20260330T090000', 'DTSTART:20260330T100000']], op);
+      assert.strictEqual(lines(out).length, lines(text).length + 1, op);
+      // the edited intent: the expansion before, less 03-23
+      assert.deepStrictEqual(rows(out), before.filter((row) => !row.startsWith('03-23')), op);
+    }
+  });
+
+  it('cancels a range whose own slot is the last, or whose next slot is another range\'s, whole', () => {
+    const last = text.replace('RRULE:FREQ=WEEKLY;COUNT=6', 'RRULE:FREQ=WEEKLY;COUNT=4');
+    const out = /** @type {string} */ (patchIcal(/** @type {any} */ (parseIcal(last, LOSSLESS)).tree, [{ op: 'cancel', uid: 'r', recurrenceId: '2026-03-23T09:00:00' }]));
+    assert.deepStrictEqual(lineDiff(last, out), { removed: [], added: ['STATUS:CANCELLED\r\n'] });
+    assert.deepStrictEqual(rows(out), before.slice(0, 3));
+    const two = text.replace('END:VCALENDAR', ['BEGIN:VEVENT', 'UID:r', 'DTSTAMP:20260101T000000Z', 'RECURRENCE-ID;RANGE=THISANDFUTURE:20260330T090000',
+      'DTSTART:20260330T120000', 'DURATION:PT1H', 'SUMMARY:Ronde', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n'));
+    const ended = /** @type {string} */ (patchIcal(/** @type {any} */ (parseIcal(two, LOSSLESS)).tree, [{ op: 'exdate', uid: 'r', recurrenceId: '2026-03-23T09:00:00' }]));
+    assert.deepStrictEqual(rows(ended), [...before.slice(0, 3), '03-30 03-30 12:00-13:00', '04-06 04-06 12:00-13:00']);
+  });
+
+  it('shifts the range\'s DTEND with it when it moves to the next slot', () => {
+    const ended = text.replace('DTSTART:20260323T100000\r\nDURATION:PT30M', 'DTSTART:20260323T100000\r\nDTEND:20260323T103000');
+    const out = /** @type {string} */ (patchIcal(/** @type {any} */ (parseIcal(ended, LOSSLESS)).tree, [{ op: 'cancel', uid: 'r', recurrenceId: '2026-03-23T09:00:00' }]));
+    assert.ok(out.includes('RECURRENCE-ID;RANGE=THISANDFUTURE:20260330T090000\r\nDTSTART:20260330T100000\r\nDTEND:20260330T103000\r\n'), out);
+    assert.deepStrictEqual(rows(out), before.filter((row) => !row.startsWith('03-23')));
+  });
+
+  it('moves a zoned range to the next slot across the March change, by its wall-clock shift', () => {
+    const zonedText = text.replaceAll('DTSTART:2026', 'DTSTART;TZID=Europe/Amsterdam:2026').replace('RECURRENCE-ID;RANGE=THISANDFUTURE:', 'RECURRENCE-ID;RANGE=THISANDFUTURE;TZID=Europe/Amsterdam:');
+    const instants = (/** @type {string} */ out) => expandSeries(/** @type {any} */ (parseIcal(out, { provider }).calendar.components[0]).series,
+      { horizon: [Date.UTC(2026, 2, 1), Date.UTC(2026, 5, 1)], provider }).occurrences.map((o) => `${o.recurrenceId} ${new Date(/** @type {any} */ (o.instants).start).toISOString()}`);
+    const out = /** @type {string} */ (patchIcal(/** @type {any} */ (parseIcal(zonedText, LOSSLESS)).tree, [{ op: 'exdate', uid: 'r', recurrenceId: '2026-03-23T09:00:00' }]));
+    assert.ok(out.includes('RECURRENCE-ID;RANGE=THISANDFUTURE;TZID=Europe/Amsterdam:20260330T090000\r\nDTSTART;TZID=Europe/Amsterdam:20260330T100000\r\n'), out);
+    // the edited intent: 03-30 and 04-06 still start at 10:00 Amsterdam, now summer time (08:00Z)
+    assert.deepStrictEqual(instants(out), instants(zonedText).filter((row) => !row.startsWith('2026-03-23')));
+    assert.ok(instants(out).includes('2026-03-30T09:00:00 2026-03-30T08:00:00.000Z'));
+  });
+
+  it('finds the next slot of a sub-daily series from the slot itself, not its day', () => {
+    const hourly = text.replace('RRULE:FREQ=WEEKLY;COUNT=6', 'RRULE:FREQ=HOURLY;COUNT=40').replace('DTSTART:20260302T090000', 'DTSTART:20260323T000000');
+    const out = /** @type {string} */ (patchIcal(/** @type {any} */ (parseIcal(hourly, LOSSLESS)).tree, [{ op: 'cancel', uid: 'r', recurrenceId: '2026-03-23T09:00:00' }]));
+    assert.ok(out.includes('RECURRENCE-ID;RANGE=THISANDFUTURE:20260323T100000\r\nDTSTART:20260323T110000\r\n'), out);
+  });
+
+  it('refuses a cancel of the range\'s own slot whose next slot has its own VEVENT (ICAL4005)', () => {
+    const next = text.replace('END:VCALENDAR', ['BEGIN:VEVENT', 'UID:r', 'DTSTAMP:20260101T000000Z', 'RECURRENCE-ID:20260330T090000',
+      'DTSTART:20260330T140000', 'DURATION:PT30M', 'SUMMARY:Ronde', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n'));
+    assert.throws(() => patchIcal(/** @type {any} */ (parseIcal(next, LOSSLESS)).tree, [{ op: 'cancel', uid: 'r', recurrenceId: '2026-03-23T09:00:00' }]),
+      { code: 'ICAL4005', docPath: '/edits/0/recurrenceId' });
+  });
+
+  it('edits the range\'s own text, or removes it, as written', () => {
+    const id = '2026-03-23T09:00:00';
     assert.ok(/** @type {string} */ (patchIcal(tree, [{ op: 'retitle', uid: 'r', recurrenceId: id, summary: 'Later' }]))
       .includes('RANGE=THISANDFUTURE'));
     const removed = /** @type {string} */ (patchIcal(tree, [{ op: 'remove', uid: 'r', recurrenceId: id }]));
@@ -627,10 +686,13 @@ describe('an edit the tree cannot hold is refused with its code', () => {
   });
 
   it('ICAL4012: an edit after which the read would withhold the event', () => {
-    // a zoned override's own DURATION that ends in the second pass of a repeated hour: a zoned end names the first,
-    // so the canonical read withholds it
-    refuses([{ op: 'move', uid: S, recurrenceId: '2026-03-30T09:00:00', start: zoned('2026-10-25', '01:30'), duration: 'PT2H' }], 'ICAL4012', '/edits/0');
-    // one that ends anywhere else reads, as does an end
+    // a date series' occurrence moved with a time's duration: the read withholds an event on a date that lasts PT1H
+    const dates = /** @type {any} */ (parseIcal(['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:p', 'BEGIN:VEVENT', 'UID:d', 'DTSTAMP:20260101T000000Z',
+      'DTSTART;VALUE=DATE:20260302', 'RRULE:FREQ=DAILY;COUNT=3', 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n'), LOSSLESS)).tree;
+    refuses([{ op: 'move', uid: 'd', recurrenceId: '2026-03-03', start: { kind: 'date', date: '2026-03-05' }, duration: 'PT1H' }], 'ICAL4012', '/edits/0', dates);
+    // a zoned override's own DURATION that ends in the second pass of a repeated hour now reads, as its duration
+    assert.ok(patchIcal(tree, [{ op: 'move', uid: S, recurrenceId: '2026-03-30T09:00:00', start: zoned('2026-10-25', '01:30'), duration: 'PT2H' }]));
+    // as does one that ends anywhere else, and an end
     assert.ok(patchIcal(tree, [{ op: 'move', uid: S, recurrenceId: '2026-03-30T09:00:00', start: zoned('2026-03-31', '10:00'), duration: 'PT30M' }]));
     assert.ok(patchIcal(tree, [{ op: 'move', uid: S, recurrenceId: '2026-03-30T09:00:00', start: zoned('2026-03-31', '10:00'), end: zoned('2026-03-31', '10:30') }]));
   });

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://jarenjs.dev/schemas/jaren-josl-ical/0.1",
   "title": "iCalendar writer model (@jarenjs/josl/ical)",
-  "description": "The calendar stringifyIcal writes: a product id, an optional method and a list of components - single events, recurring events (a series: a rule, extra dates, excluded dates and overrides) and free/busy spans. Times are the temporal values of @jarenjs/core/calendar (register the temporal and rrule schemas first). Not expressible here, and refused by the writer only: a zoned value with no zones mode, provider or policy (ICAL3008-ICAL3010), a zoned recurring series with no horizon (ICAL3011), an end not after its start or of another kind (ICAL3007), a fraction of a second (ICAL3006), a lone surrogate in text (ICAL3004), and what the calendar layer refuses of a series (ICAL3005, ICAL3015-ICAL3017).",
+  "description": "The calendar stringifyIcal writes: a product id, an optional method and a list of components - single events, recurring events (a series: a rule, extra dates, excluded dates and overrides), free/busy spans, availability (RFC 7953: a period of available series) and scheduling messages (RFC 5546). Times are the temporal values of @jarenjs/core/calendar (register the temporal and rrule schemas first). Not expressible here, and refused by the writer only: a zoned value with no zones mode, provider or policy (ICAL3008-ICAL3010), a zoned recurring series with no horizon (ICAL3011), an end not after its start or of another kind (ICAL3007), a fraction of a second (ICAL3006), a lone surrogate in text (ICAL3004), what the calendar layer refuses of a series (ICAL3005, ICAL3015-ICAL3017), and a message its method's RFC 5546 table would not take (ICAL3021).",
   "type": "object",
   "required": [
     "prodId",
@@ -14,7 +14,16 @@
       "$ref": "#/$defs/text"
     },
     "method": {
-      "const": "publish"
+      "enum": [
+        "publish",
+        "request",
+        "reply",
+        "add",
+        "cancel",
+        "refresh",
+        "counter",
+        "declinecounter"
+      ]
     },
     "components": {
       "type": "array",
@@ -64,7 +73,9 @@
         "type": {
           "enum": [
             "event",
-            "freebusy"
+            "freebusy",
+            "availability",
+            "message"
           ]
         }
       },
@@ -111,6 +122,30 @@
           },
           "then": {
             "$ref": "#/$defs/freebusy"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "availability"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/availability"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "message"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/message"
           }
         }
       ]
@@ -421,10 +456,22 @@
       }
     },
     "period": {
+      "description": "A period an RDATE names: a start and an exclusive end, a start and an RFC 5545 duration, or both (naming one end).",
       "type": "object",
       "required": [
-        "start",
-        "end"
+        "start"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "end"
+          ]
+        },
+        {
+          "required": [
+            "duration"
+          ]
+        }
       ],
       "additionalProperties": false,
       "properties": {
@@ -466,6 +513,9 @@
               }
             }
           ]
+        },
+        "duration": {
+          "$ref": "#/$defs/duration"
         }
       }
     },
@@ -526,7 +576,13 @@
             }
           ]
         },
-        "payload": true
+        "payload": true,
+        "duration": {
+          "$ref": "#/$defs/duration"
+        },
+        "range": {
+          "const": "THISANDFUTURE"
+        }
       },
       "allOf": [
         {
@@ -562,6 +618,11 @@
                 {
                   "required": [
                     "end"
+                  ]
+                },
+                {
+                  "required": [
+                    "duration"
                   ]
                 }
               ]
@@ -622,6 +683,262 @@
             }
           }
         }
+      }
+    },
+    "availability": {
+      "description": "A VAVAILABILITY (RFC 7953): available inside its period where an available series says so, busy-unavailable elsewhere; a start or end left out is open.",
+      "type": "object",
+      "required": [
+        "type",
+        "uid",
+        "available"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "availability"
+        },
+        "uid": {
+          "$ref": "#/$defs/uid"
+        },
+        "dtstamp": {
+          "$ref": "#/$defs/instant"
+        },
+        "start": {
+          "description": "A utc or zoned time (RFC 7953 §3.1).",
+          "allOf": [
+            {
+              "$ref": "https://jarenjs.dev/schemas/jaren-core/calendar/temporal/0.1"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "utc",
+                    "zoned"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "end": {
+          "description": "A utc or zoned time (RFC 7953 §3.1).",
+          "allOf": [
+            {
+              "$ref": "https://jarenjs.dev/schemas/jaren-core/calendar/temporal/0.1"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "utc",
+                    "zoned"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9
+        },
+        "busyType": {
+          "const": "busy-unavailable"
+        },
+        "summary": {
+          "$ref": "#/$defs/text"
+        },
+        "description": {
+          "$ref": "#/$defs/text"
+        },
+        "location": {
+          "$ref": "#/$defs/text"
+        },
+        "available": {
+          "type": "array",
+          "items": {
+            "description": "An AVAILABLE: a utc or zoned series and its own text.",
+            "type": "object",
+            "required": [
+              "series"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "series": {
+                "$ref": "#/$defs/series"
+              },
+              "dtstamp": {
+                "$ref": "#/$defs/instant"
+              },
+              "summary": {
+                "$ref": "#/$defs/text"
+              },
+              "description": {
+                "$ref": "#/$defs/text"
+              },
+              "location": {
+                "$ref": "#/$defs/text"
+              }
+            }
+          }
+        }
+      }
+    },
+    "person": {
+      "type": "object",
+      "required": [
+        "address"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:\\S+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "partstat": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cutype": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rsvp": {
+          "type": "boolean"
+        },
+        "delegatedTo": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "delegatedFrom": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "sentBy": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "description": "A calendar user of an ORGANIZER or ATTENDEE: its cal-address and the parameters scheduling reads."
+    },
+    "message": {
+      "description": "A scheduling message (RFC 5546): one VEVENT, VTODO, VJOURNAL or VFREEBUSY of a calendar with a method, its people and status lines, and an event (an ADD's) or a suggested event (a COUNTER's) written with them.",
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "message"
+        },
+        "component": {
+          "enum": [
+            "event",
+            "todo",
+            "journal",
+            "freebusy"
+          ]
+        },
+        "uid": {
+          "$ref": "#/$defs/uid"
+        },
+        "dtstamp": {
+          "$ref": "#/$defs/instant"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recurrenceId": {
+          "$ref": "https://jarenjs.dev/schemas/jaren-core/calendar/temporal/0.1"
+        },
+        "range": {
+          "const": "THISANDFUTURE"
+        },
+        "organizer": {
+          "$ref": "#/$defs/person"
+        },
+        "attendees": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/person"
+          }
+        },
+        "requestStatus": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "code"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string",
+                "pattern": "^\\d\\.\\d{1,3}(\\.\\d{1,3})?$"
+              },
+              "description": {
+                "type": "string"
+              },
+              "data": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "status": {
+          "enum": [
+            "tentative",
+            "confirmed",
+            "cancelled",
+            "needs-action",
+            "completed",
+            "in-process",
+            "draft",
+            "final"
+          ]
+        },
+        "start": {
+          "$ref": "#/$defs/instant"
+        },
+        "end": {
+          "$ref": "#/$defs/instant"
+        },
+        "cancellation": {
+          "type": "object"
+        },
+        "event": {
+          "$ref": "#/$defs/component"
+        },
+        "suggested": {
+          "$ref": "#/$defs/component"
+        }
+      },
+      "not": {
+        "required": [
+          "event",
+          "suggested"
+        ]
       }
     }
   }

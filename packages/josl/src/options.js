@@ -194,6 +194,7 @@ function icalReadTable(entry) {
     zoneHorizon: rule((v) => v === null || (Array.isArray(v) && v.length === 2), 'a [start, end) pair'),
     zoneLimits: rule((v) => v === null || (typeof v === 'object' && !Array.isArray(v)), 'an object of zone limits'),
     strict: BOOLEAN,
+    strictScheduling: BOOLEAN,
     ...limits(['maxOctets', 'maxComponents', 'maxLineOctets', 'maxParameters', 'maxDepth', 'maxProperties', 'maxReported']),
     ...(entry === 'iterate' ? { signal: SIGNAL } : {}),
   });

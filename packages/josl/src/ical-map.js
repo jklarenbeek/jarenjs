@@ -42,10 +42,18 @@ const EVENT_KEYS = Object.freeze(['type', 'uid', 'dtstamp', 'start', 'end', 'dur
 const SERIES_EVENT_KEYS = Object.freeze(['type', 'series', 'dtstamp', 'summary', 'description', 'location', 'status']);
 const FREEBUSY_KEYS = Object.freeze(['type', 'uid', 'dtstamp', 'start', 'end', 'periods']);
 const PERIOD_KEYS = Object.freeze(['start', 'end', 'fbtype']);
+const AVAILABILITY_KEYS = Object.freeze(['type', 'uid', 'dtstamp', 'start', 'end', 'priority', 'busyType', 'summary', 'description', 'location', 'available']);
+const AVAILABLE_KEYS = Object.freeze(['series', 'dtstamp', 'summary', 'description', 'location']);
+const MESSAGE_KEYS = Object.freeze(['type', 'component', 'uid', 'dtstamp', 'sequence', 'recurrenceId', 'range', 'organizer', 'attendees',
+  'requestStatus', 'status', 'start', 'end', 'cancellation', 'event', 'suggested']);
+const PERSON_KEYS = Object.freeze(['address', 'name', 'partstat', 'role', 'cutype', 'rsvp', 'delegatedTo', 'delegatedFrom', 'sentBy']);
+const MESSAGE_KINDS = Object.freeze({ event: 'VEVENT', todo: 'VTODO', journal: 'VJOURNAL', freebusy: 'VFREEBUSY' });
 const TEXT_PROPERTIES = /** @type {const} */ ([['summary', 'SUMMARY'], ['description', 'DESCRIPTION'], ['location', 'LOCATION']]);
 const STATUS = Object.freeze({ tentative: 'TENTATIVE', confirmed: 'CONFIRMED', cancelled: 'CANCELLED' });
 const FBTYPE = Object.freeze({ busy: 'BUSY', free: 'FREE', 'busy-unavailable': 'BUSY-UNAVAILABLE', 'busy-tentative': 'BUSY-TENTATIVE' });
 const POLICIES = Object.freeze(['rfc5545', 'later', 'reject']);
+const MESSAGE_STATUS = Object.freeze({ ...STATUS, 'needs-action': 'NEEDS-ACTION', completed: 'COMPLETED', 'in-process': 'IN-PROCESS',
+  draft: 'DRAFT', final: 'FINAL' });
 
 /**
  * What a component's mapping reads from the writer.
@@ -57,6 +65,7 @@ const POLICIES = Object.freeze(['rfc5545', 'later', 'reject']);
  *   and under `zones: 'embed'` the span each VTIMEZONE covers
  * @property {[number, number] | undefined} [span] - the horizon in epoch milliseconds, once read
  * @property {Set<string>} used - the zones the component being mapped writes by TZID
+ * @property {string} [method] - the calendar's METHOD, as the model spells it
  * @property {object | undefined} limits - the expansion's limits
  * @property {() => number} now - the DTSTAMP instant, whole seconds
  */
@@ -557,7 +566,8 @@ function floatingTwin(series, zone, provider, path) {
     ...(series.sequence !== undefined ? { sequence: series.sequence } : {}),
     base: twinBase,
     rdates: series.rdates.map((/** @type {any} */ entry) => (entry.kind === undefined
-      ? { start: wall(entry.start), end: wall(entry.end) }
+      ? { start: wall(entry.start), ...(entry.end !== undefined ? { end: wall(entry.end) } : {}),
+        ...(entry.duration !== undefined ? { duration: entry.duration } : {}) }
       : wall(entry))),
     exdates: series.exdates.map(wall),
     overrides: series.overrides.map((/** @type {any} */ override) => {
@@ -605,17 +615,24 @@ function expandWhole(series, horizon, context, provider, path) {
  */
 function ownHorizon(series, kind, path) {
   const places = [];
-  for (const entry of series.rdates) {
+  // a duration reaches as far on the wall clock as its days and time do
+  const reach = (/** @type {any} */ entry, /** @type {string} */ at) => {
+    const length = readDuration(entry.duration, at);
+    return placeOf(entry.start) + length.days * DAY + length.ms;
+  };
+  for (const [i, entry] of series.rdates.entries()) {
     if (entry.kind === undefined)
-      places.push(placeOf(entry.start), placeOf(entry.end));
+      places.push(placeOf(entry.start), entry.end !== undefined ? placeOf(entry.end) : reach(entry, `${path}/series/rdates/${i}/duration`));
     else
       places.push(placeOf(entry));
   }
-  for (const entry of series.overrides) {
+  for (const [i, entry] of series.overrides.entries()) {
     for (const value of [entry.start, entry.end]) {
       if (value !== undefined)
         places.push(placeOf(value));
     }
+    if (entry.start !== undefined && entry.duration !== undefined)
+      places.push(reach(entry, `${path}/series/overrides/${i}/duration`));
   }
   const low = Math.max(FIRST_INSTANT, Math.min(...places) - MARGIN);
   const last = Math.max(...places);
@@ -756,7 +773,7 @@ function renderRule(series, kind, head, shared, context, path, embed = null) {
   // one RDATE per slot, the first given winning as it does in the series
   /** @type {Map<string, { days: number, ms: number }>} */
   const periods = new Map();
-  /** @type {Map<string, { from: Written, to: Written }>} */
+  /** @type {Map<string, { from: Written, line: string }>} */
   const onRule = new Map();
   const seen = new Set();
   let rdates = rule.length - 1;
@@ -775,6 +792,19 @@ function renderRule(series, kind, head, shared, context, path, embed = null) {
     }
     if (kind === 'date')
       throw new IcalError('ICAL3017', 'a period of dates is no RDATE; an RDATE period runs between two date-times', `${path}/series/rdates/${i}`);
+    if (entry.end === undefined) {
+      // a period of a start and a duration keeps its duration, from its own start
+      const length = readDuration(entry.duration, `${path}/series/rdates/${i}/duration`);
+      periods.set(id, length);
+      const spelled = formatDuration(length);
+      if (ruleMakes(base, kind, from.at, context, path))
+        onRule.set(id, { from, line: `DURATION:${spelled}` });
+      else {
+        lines.push(`RDATE;VALUE=PERIOD${(own ?? from).param}:${(own ?? from).text}/${spelled}`);
+        rdates++;
+      }
+      continue;
+    }
     const to = tz(written(form, placeOf(entry.end)));
     const ownEnd = embed?.own(embed.rdates[i].end);
     periods.set(id, { days: 0, ms: to.at - from.at });
@@ -782,7 +812,7 @@ function renderRule(series, kind, head, shared, context, path, embed = null) {
     // whose length a reader may take from either: it is written as that
     // slot's own VEVENT instead
     if (ruleMakes(base, kind, from.at, context, path))
-      onRule.set(id, { from, to });
+      onRule.set(id, { from, line: `DTEND${to.param}:${to.text}` });
     else {
       // a period outside the series' zone keeps its own when both ends share it, and is two UTC instants otherwise
       const [a, b] = own === undefined && ownEnd === undefined ? [from, to]
@@ -806,9 +836,24 @@ function renderRule(series, kind, head, shared, context, path, embed = null) {
   // with RANGE=THISANDFUTURE (a cancelled one with STATUS:CANCELLED); an
   // override after it without an end lasts what the range gives
   const ranges = series.overrides.filter((/** @type {any} */ override) => override.range !== undefined);
-  if (ranges.length !== 0 && periods.size !== 0) {
-    throw new IcalError('ICAL3016', `the override of ${ranges[0].recurrenceId} ranges over this and future occurrences of a series with an RDATE period, `
-      + 'whose own length a RECURRENCE-ID;RANGE cannot keep apart from the range\'s', `${path}/series/overrides/${series.overrides.indexOf(ranges[0])}/range`);
+  // a range's DTEND or DURATION carries to its later slots only where it
+  // changes its own slot's length (RFC 5545 §3.8.4.4): one that names its
+  // own slot's length for later slots of other lengths has no spelling
+  const lengthOf = (/** @type {any} */ override) => (override.end !== undefined ? lengthBetween(override.start, override.end, kind)
+    : override.duration !== undefined ? readDuration(override.duration, `${path}/series/overrides`) : undefined);
+  const same = (/** @type {any} */ a, /** @type {any} */ b) => (a?.days ?? 0) === (b?.days ?? 0) && (a?.ms ?? 0) === (b?.ms ?? 0);
+  for (const range of ranges) {
+    const given = range.status === 'cancelled' ? undefined : lengthOf(range);
+    const ownSlot = periods.get(range.recurrenceId) ?? length;
+    if (given === undefined || !same(given, ownSlot) || periods.size === 0)
+      continue;
+    const next = ranges.filter((/** @type {any} */ other) => other.recurrenceId > range.recurrenceId)
+      .reduce((/** @type {string | undefined} */ a, /** @type {any} */ b) => (a === undefined || b.recurrenceId < a ? b.recurrenceId : a), undefined);
+    const later = [...periods].filter(([id]) => id > range.recurrenceId && (next === undefined || id < next)).map(([, own]) => own);
+    if (!same(ownSlot, length) || later.some((own) => !same(own, given))) {
+      throw new IcalError('ICAL3016', `the override of ${range.recurrenceId} ranges over this and future occurrences with its own slot's length, `
+        + 'which a RECURRENCE-ID;RANGE gives no later slot of another length', `${path}/series/overrides/${series.overrides.indexOf(range)}/range`);
+    }
   }
   for (const override of series.overrides) {
     overridden.add(override.recurrenceId);
@@ -829,19 +874,22 @@ function renderRule(series, kind, head, shared, context, path, embed = null) {
       const end = tz(written(form, placeOf(override.end)));
       endLine = `DTEND${end.param}:${end.text}`;
     }
+    else if (override.duration !== undefined)
+      endLine = `DURATION:${formatDuration(readDuration(override.duration, `${path}/series/overrides/${series.overrides.indexOf(override)}/duration`))}`;
     else {
       // the range in force is the latest at or before the slot, in whatever order the overrides are listed
       const over = range === '' ? ranges.filter((/** @type {any} */ other) => other.recurrenceId <= override.recurrenceId)
         .reduce((/** @type {any} */ a, /** @type {any} */ b) => (a === undefined || b.recurrenceId > a.recurrenceId ? b : a), undefined) : undefined;
-      const own = over?.end !== undefined ? lengthBetween(over.start, over.end, kind) : periods.get(override.recurrenceId) ?? length;
+      const own = (over?.status === 'cancelled' ? undefined : over === undefined ? undefined : lengthOf(over))
+        ?? periods.get(override.recurrenceId) ?? length;
       if (own !== undefined)
         endLine = `DURATION:${formatDuration(own)}`;
     }
     moved.push(movedEvent(head, shared, slot, start, endLine, range));
   }
-  for (const [id, { from, to }] of onRule) {
+  for (const [id, { from, line }] of onRule) {
     if (!overridden.has(id) && !excluded.has(id))
-      moved.push(movedEvent(head, shared, from, from, `DTEND${to.param}:${to.text}`));
+      moved.push(movedEvent(head, shared, from, from, line));
   }
   return {
     lines: ['BEGIN:VEVENT', ...lines, ...shared, 'END:VEVENT', ...moved.flat()],
@@ -1070,6 +1118,194 @@ function renderFreebusy(component, context, path) {
 //#endregion
 
 /**
+ * One VAVAILABILITY (RFC 7953): its period, PRIORITY, BUSYTYPE and text,
+ * and each available series as an AVAILABLE (its overrides AVAILABLEs
+ * with a RECURRENCE-ID), written as a recurring event's VEVENTs are. Its
+ * times are utc or zoned (§3.1).
+ * @param {Record<string, any>} component
+ * @param {MapContext} context
+ * @param {string} path
+ * @returns {Rendered}
+ */
+function renderAvailability(component, context, path) {
+  admitKeys(component, AVAILABILITY_KEYS, path, 'an availability');
+  const lines = ['BEGIN:VAVAILABILITY', uidLine(component.uid, `${path}/uid`), dtstamp(component, context, path)];
+  const times = /** @type {const} */ ([['start', 'DTSTART'], ['end', 'DTEND']]).map(([member, name]) => {
+    if (component[member] === undefined)
+      return undefined;
+    const value = readTemporal(component[member], member, `${path}/${member}`);
+    if (value.kind !== 'utc' && value.kind !== 'zoned')
+      throw new IcalError('ICAL3003', `an availability's ${member} is a utc or zoned time (RFC 7953 §3.1), not ${value.kind}`, `${path}/${member}`);
+    const at = writeTime(value, member, context, 'rfc5545', `${path}/${member}`);
+    lines.push(`${name}${at.param}:${at.text}`);
+    return at;
+  });
+  if (times[0] !== undefined && times[1] !== undefined && times[1].at <= times[0].at)
+    throw new IcalError('ICAL3007', 'the end is after the start', `${path}/end`);
+  const { priority, busyType } = component;
+  if (priority !== undefined) {
+    if (!Number.isInteger(priority) || priority < 0 || priority > 9)
+      throw new IcalError('ICAL3003', 'priority is RFC 7953\'s 0-9 (1 the highest, 0 undefined and lowest)', `${path}/priority`);
+    lines.push(`PRIORITY:${priority}`);
+  }
+  if (busyType !== undefined) {
+    if (busyType !== 'busy-unavailable')
+      throw new IcalError('ICAL3003', `busyType is 'busy-unavailable', which an availability layer marks its period outside its spans, not ${String(busyType)}`, `${path}/busyType`);
+    lines.push('BUSYTYPE:BUSY-UNAVAILABLE');
+  }
+  lines.push(...eventProperties(component, undefined, path));
+  if (!Array.isArray(component.available))
+    throw new IcalError(component.available === undefined ? 'ICAL3001' : 'ICAL3003', 'available is a list of { series, dtstamp?, summary?, description?, location? }', `${path}/available`);
+  let components = 1;
+  let rdates = 0;
+  // under zones: 'utc' a zoned rule is written as its occurrences over the horizon, which must hold the whole period
+  const [low, high] = context.zones === 'embed' || context.horizon === undefined ? [0, 0] : horizonSpan(context);
+  const held = times[0] !== undefined && times[1] !== undefined && low <= times[0].at && times[1].at <= high;
+  for (const [i, available] of component.available.entries()) {
+    const at = `${path}/available/${i}`;
+    if (!isRecord(available))
+      throw new IcalError('ICAL3001', 'an available entry is { series, dtstamp?, summary?, description?, location? }', at);
+    admitKeys(available, AVAILABLE_KEYS, at, 'an available series');
+    const kind = seriesKind(seriesOf(available.series, `${at}/series`));
+    if (kind !== 'utc' && kind !== 'zoned')
+      throw new IcalError('ICAL3003', `an available series is utc or zoned (RFC 7953 §3.1), not ${kind}`, `${at}/series`);
+    if (kind === 'zoned' && context.zones !== 'embed' && context.horizon !== undefined && available.series.base != null && !held) {
+      throw new IcalError('ICAL3022', 'under zones: \'utc\' a zoned recurring AVAILABLE is written as its occurrences over the horizon, '
+        + 'which does not hold the whole period of its VAVAILABILITY', `${at}/series`);
+    }
+    const rendered = renderSeries({ type: 'event', ...available }, context, at);
+    lines.push(...rendered.lines.map((line) => (line === 'BEGIN:VEVENT' ? 'BEGIN:AVAILABLE' : line === 'END:VEVENT' ? 'END:AVAILABLE' : line)));
+    components += rendered.components;
+    rdates += rendered.rdates;
+  }
+  lines.push('END:VAVAILABILITY');
+  return { lines, components, rdates };
+}
+
+/**
+ * A parameter value, quoted where it holds a colon, semicolon or comma.
+ * @param {unknown} value
+ * @param {string} path
+ * @returns {string}
+ */
+function paramValue(value, path) {
+  if (typeof value !== 'string' || value === '' || /["\p{Cc}]/u.test(value))
+    throw new IcalError('ICAL3003', 'a parameter value is a non-empty string with no double quote or control character', path);
+  return /[:;,]/.test(value) ? `"${value}"` : value;
+}
+
+/**
+ * The ORGANIZER or ATTENDEE line of a calendar user.
+ * @param {string} name
+ * @param {unknown} person
+ * @param {string} path
+ * @returns {string}
+ */
+function personLine(name, person, path) {
+  if (!isRecord(person))
+    throw new IcalError('ICAL3001', 'a calendar user is { address, name?, partstat?, role?, cutype?, rsvp?, delegatedTo?, delegatedFrom?, sentBy? }', path);
+  admitKeys(person, PERSON_KEYS, path, 'a calendar user');
+  const { address } = person;
+  if (typeof address !== 'string' || !/^[A-Za-z][A-Za-z0-9+.-]*:\S+$/.test(address))
+    throw new IcalError(address === undefined ? 'ICAL3001' : 'ICAL3003', 'a calendar user\'s address is a URI, such as mailto:a@example.com', `${path}/address`);
+  let line = name;
+  if (person.name !== undefined)
+    line += `;CN=${paramValue(person.name, `${path}/name`)}`;
+  for (const [member, param] of [['partstat', 'PARTSTAT'], ['role', 'ROLE'], ['cutype', 'CUTYPE']]) {
+    if (person[member] !== undefined)
+      line += `;${param}=${paramValue(typeof person[member] === 'string' ? person[member].toUpperCase() : person[member], `${path}/${member}`)}`;
+  }
+  if (person.rsvp !== undefined) {
+    if (typeof person.rsvp !== 'boolean')
+      throw new IcalError('ICAL3003', 'rsvp is true or false', `${path}/rsvp`);
+    line += `;RSVP=${person.rsvp ? 'TRUE' : 'FALSE'}`;
+  }
+  for (const [member, param] of [['delegatedTo', 'DELEGATED-TO'], ['delegatedFrom', 'DELEGATED-FROM']]) {
+    if (person[member] === undefined)
+      continue;
+    if (!Array.isArray(person[member]) || person[member].length === 0)
+      throw new IcalError('ICAL3003', `${member} is a list of addresses`, `${path}/${member}`);
+    line += `;${param}=${person[member].map((/** @type {unknown} */ value, /** @type {number} */ i) => `"${paramValue(value, `${path}/${member}/${i}`).replace(/^"|"$/g, '')}"`).join(',')}`;
+  }
+  if (person.sentBy !== undefined)
+    line += `;SENT-BY="${paramValue(person.sentBy, `${path}/sentBy`).replace(/^"|"$/g, '')}"`;
+  return `${line}:${address}`;
+}
+
+/**
+ * A scheduling message (RFC 5546): its component's UID, DTSTAMP,
+ * RECURRENCE-ID, SEQUENCE and STATUS, its organizer and attendees, and
+ * its REQUEST-STATUS lines; an `event` (or a COUNTER's `suggested` event) is
+ * written as an event is, with the message's lines in each of its
+ * VEVENTs. The method's table is the writer's to check.
+ * @param {Record<string, any>} component
+ * @param {MapContext} context
+ * @param {string} path
+ * @returns {Rendered}
+ */
+function renderMessage(component, context, path) {
+  admitKeys(component, MESSAGE_KEYS, path, 'a scheduling message');
+  const kind = component.component ?? 'event';
+  if (!Object.hasOwn(MESSAGE_KINDS, kind))
+    throw new IcalError('ICAL3003', `component is 'event', 'todo', 'journal' or 'freebusy', not ${String(kind)}`, `${path}/component`);
+  const name = MESSAGE_KINDS[/** @type {keyof typeof MESSAGE_KINDS} */ (kind)];
+  if (component.event !== undefined && component.suggested !== undefined)
+    throw new IcalError('ICAL3003', 'a message carries an event or a suggested event, not both', `${path}/suggested`);
+  const member = component.event !== undefined ? 'event' : 'suggested';
+  const data = component[member];
+  /** @type {string[]} */
+  const own = [];
+  if (component.recurrenceId !== undefined) {
+    const id = writeTime(readTemporal(component.recurrenceId, 'start', `${path}/recurrenceId`), 'start', context, 'rfc5545', `${path}/recurrenceId`);
+    if (component.range !== undefined && component.range !== 'THISANDFUTURE')
+      throw new IcalError('ICAL3003', `range is 'THISANDFUTURE', not ${String(component.range)}`, `${path}/range`);
+    own.push(`RECURRENCE-ID${id.param}${component.range === undefined ? '' : ';RANGE=THISANDFUTURE'}:${id.text}`);
+  }
+  if (component.organizer !== undefined)
+    own.push(personLine('ORGANIZER', component.organizer, `${path}/organizer`));
+  if (component.attendees !== undefined && !Array.isArray(component.attendees))
+    throw new IcalError('ICAL3003', 'attendees is a list of calendar users', `${path}/attendees`);
+  for (const [i, person] of (component.attendees ?? []).entries())
+    own.push(personLine('ATTENDEE', person, `${path}/attendees/${i}`));
+  if (component.requestStatus !== undefined && !Array.isArray(component.requestStatus))
+    throw new IcalError('ICAL3003', 'requestStatus is a list of { code, description, data? }', `${path}/requestStatus`);
+  for (const [i, entry] of (component.requestStatus ?? []).entries()) {
+    const at = `${path}/requestStatus/${i}`;
+    if (!isRecord(entry) || typeof entry.code !== 'string' || !/^\d\.\d{1,3}(\.\d{1,3})?$/.test(entry.code))
+      throw new IcalError('ICAL3003', 'a request status is { code: \'2.0\', description, data? }', at);
+    own.push(`REQUEST-STATUS:${entry.code};${escapeText(entry.description ?? '', `${at}/description`)}${
+      entry.data === undefined ? '' : `;${escapeText(entry.data, `${at}/data`)}`}`);
+  }
+  for (const [member, name] of /** @type {const} */ ([['start', 'DTSTART'], ['end', 'DTEND']])) {
+    if (component[member] === undefined)
+      continue;
+    if (kind !== 'freebusy')
+      throw new IcalError('ICAL3002', `a message's ${member} is a VFREEBUSY's span; a${kind === 'event' ? 'n' : ''} ${kind}'s is its event's`, `${path}/${member}`);
+    own.unshift(`${name}:${formatUtc(readInstant(component[member], `${path}/${member}`))}`);
+  }
+  const status = component.status ?? (component.cancellation !== undefined ? 'cancelled' : undefined);
+  if (data === undefined) {
+    if (component.sequence !== undefined && (!Number.isSafeInteger(component.sequence) || component.sequence < 0))
+      throw new IcalError('ICAL3003', 'sequence is a whole number from 0', `${path}/sequence`);
+    if (status !== undefined && !Object.hasOwn(MESSAGE_STATUS, status))
+      throw new IcalError('ICAL3003', `status is one of ${Object.keys(MESSAGE_STATUS).join(', ')}, not ${String(status)}`, `${path}/status`);
+    return { lines: [`BEGIN:${name}`, uidLine(component.uid, `${path}/uid`), dtstamp(component, context, path), ...own,
+      ...(component.sequence !== undefined ? [`SEQUENCE:${component.sequence}`] : []),
+      ...(status !== undefined ? [`STATUS:${MESSAGE_STATUS[/** @type {keyof typeof MESSAGE_STATUS} */ (status)]}`] : []), `END:${name}`], components: 1, rdates: 0 };
+  }
+  if (name !== 'VEVENT' || !isRecord(data) || data.type !== 'event')
+    throw new IcalError('ICAL3003', `a message's ${member} is an event, of a VEVENT message`, `${path}/${member}`);
+  const rendered = renderEvent(data, context, `${path}/${member}`);
+  // the message's lines go into each VEVENT the event writes, before its END
+  let depth = 0;
+  const lines = rendered.lines.flatMap((line) => {
+    depth += line.startsWith('BEGIN:') ? 1 : line.startsWith('END:') ? -1 : 0;
+    return line === 'END:VEVENT' && depth === 0 ? [...own, line] : [line];
+  });
+  return { ...rendered, lines };
+}
+
+/**
  * Map one component of the model to its unfolded content lines.
  * @param {unknown} component
  * @param {MapContext} context
@@ -1083,9 +1319,13 @@ export function renderComponent(component, context, path) {
     return renderEvent(component, context, path);
   if (component.type === 'freebusy')
     return renderFreebusy(component, context, path);
+  if (component.type === 'availability')
+    return renderAvailability(component, context, path);
+  if (component.type === 'message')
+    return renderMessage(component, context, path);
   if (component.type === undefined)
-    throw new IcalError('ICAL3001', "a component has a type: 'event' or 'freebusy'", `${path}/type`);
-  throw new IcalError('ICAL3002', `the component type ${String(component.type)} is outside the documented subset ('event', 'freebusy')`, `${path}/type`);
+    throw new IcalError('ICAL3001', "a component has a type: 'event', 'freebusy', 'availability' or 'message'", `${path}/type`);
+  throw new IcalError('ICAL3002', `the component type ${String(component.type)} is outside the documented subset ('event', 'freebusy', 'availability', 'message')`, `${path}/type`);
 }
 
 //#endregion

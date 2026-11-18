@@ -303,10 +303,13 @@ describe('ical reader: series', () => {
     assert.deepStrictEqual([components.length, codes(report), report.unsupported[0].cause?.code], [0, ['ICAL1020'], 'JY0019']);
   });
 
-  it('withholds a zoned series of extra dates with a length, which needs the zone\'s offsets', () => {
-    const { report } = read(cal(vevent(['UID:s', 'DTSTART;TZID=Europe/Amsterdam:20260302T090000', 'DURATION:PT1H',
+  it('reads a zoned series of extra dates with a length, each date the end its zone gives it', () => {
+    const { components, report } = read(cal(vevent(['UID:s', 'DTSTART;TZID=Europe/Amsterdam:20260302T090000', 'DURATION:PT1H',
       'RDATE;TZID=Europe/Amsterdam:20260309T090000'])));
-    assert.deepStrictEqual(codes(report), ['ICAL1022']);
+    assert.deepStrictEqual(codes(report), []);
+    const ams = (/** @type {string} */ date, /** @type {string} */ time) => ({ kind: 'zoned', date, time, zone: 'Europe/Amsterdam' });
+    assert.deepStrictEqual(/** @type {any} */ (components[0]).series.rdates, [{ start: ams('2026-03-02', '09:00:00'), end: ams('2026-03-02', '10:00:00') },
+      { start: ams('2026-03-09', '09:00:00'), end: ams('2026-03-09', '10:00:00') }]);
   });
 });
 
@@ -351,8 +354,8 @@ describe('ical reader: the report of what is outside the subset', () => {
     'BEGIN:VTODO', 'UID:t', 'SUMMARY:Buy milk', 'END:VTODO',
     ...vevent(['UID:e', 'DTSTART:20260302T090000Z', 'X-FOO:bar', 'SUMMARY;LANGUAGE=en:Hello', 'ATTENDEE:mailto:a@example.com',
       'BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:-PT15M', 'END:VALARM']),
-    'BEGIN:VAVAILABILITY', 'UID:av', 'END:VAVAILABILITY', 'BEGIN:VJOURNAL', 'UID:j', 'END:VJOURNAL', 'BEGIN:X-CUSTOM', 'END:X-CUSTOM',
-  ], ['METHOD:REQUEST', 'X-WR-CALNAME:Team', 'CALSCALE:GREGORIAN']);
+    'BEGIN:VPOLL', 'UID:av', 'END:VPOLL', 'BEGIN:VJOURNAL', 'UID:j', 'END:VJOURNAL', 'BEGIN:X-CUSTOM', 'END:X-CUSTOM',
+  ], ['METHOD:X-PUSH', 'X-WR-CALNAME:Team', 'CALSCALE:GREGORIAN']);
 
   it('lists exactly VTODO, VALARM and X-FOO and the rest, with paths, lines and counts', () => {
     const { components, report, calendar } = read(text);
@@ -366,7 +369,7 @@ describe('ical reader: the report of what is outside the subset', () => {
       ['ICAL1011', 'X-FOO', '/VCALENDAR/VEVENT[0]/X-FOO', 14],
       ['ICAL1011', 'ATTENDEE', '/VCALENDAR/VEVENT[0]/ATTENDEE', 16],
       ['ICAL1012', 'SUMMARY;LANGUAGE', '/VCALENDAR/VEVENT[0]/SUMMARY;LANGUAGE', 15],
-      ['ICAL1013', 'VAVAILABILITY', '/VCALENDAR/VAVAILABILITY[0]', 22],
+      ['ICAL1013', 'VPOLL', '/VCALENDAR/VPOLL[0]', 22],
       ['ICAL1013', 'VJOURNAL', '/VCALENDAR/VJOURNAL[0]', 25],
       ['ICAL1013', 'X-CUSTOM', '/VCALENDAR/X-CUSTOM[0]', 28],
     ]);
@@ -401,7 +404,7 @@ describe('ical reader: the report of what is outside the subset', () => {
   });
 
   it('every reader code is in the code table', () => {
-    for (let i = 1; i <= 24; i++)
+    for (let i = 1; i <= 27; i++)
       assert.ok(Object.hasOwn(ICAL_CODES, `ICAL${1000 + i}`), String(i));
   });
 });
@@ -437,7 +440,9 @@ describe('ical reader: three entries, one engine', () => {
     const end = items.pop();
     assert.deepStrictEqual(items.map((item) => item.type === 'component' && item.component), whole.calendar.components);
     const { zones, ...rest } = /** @type {any} */ (end);
-    assert.deepStrictEqual(rest, { type: 'end', calendar: { prodId: '-//Test//EN', method: 'publish' }, report: whole.report });
+    // a METHOD:PUBLISH calendar's scheduling messages and table report come at the end too
+    assert.deepStrictEqual(rest, { type: 'end', calendar: { prodId: '-//Test//EN', method: 'publish' }, report: whole.report, scheduling: whole.scheduling });
+    assert.deepStrictEqual(/** @type {any} */ (whole).scheduling.messages.map((/** @type {any} */ m) => m.uid), ['s', 'a', 'fb']);
     assert.deepStrictEqual([zones.compiled, zones.undeclared], [whole.zones.compiled, whole.zones.undeclared]);
     assert.strictEqual(zones.provider.identity, provider.identity);
   });

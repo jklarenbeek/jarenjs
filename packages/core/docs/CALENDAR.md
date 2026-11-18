@@ -1191,8 +1191,8 @@ finite instant, is the runtime's own `TypeError`.
 
 ## Not here
 
-- **Availability.** VAVAILABILITY is not read or written; a layer is
-  the caller's own JSON. Availability is evaluated, never stored.
+- **Availability.** A layer is the caller's own JSON; `@jarenjs/josl/ical` reads and writes VAVAILABILITY and turns each into one
+  (`availabilityLayers`). Availability is evaluated, never stored.
 - **Storage.** No temporal value is stored by a database here; a caller
   stores the JSON forms above.
 - **Zone definitions.** A written definition holds RDATE onsets only;

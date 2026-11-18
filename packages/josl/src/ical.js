@@ -26,6 +26,7 @@
 import { CalendarError, vtimezoneFor } from '@jarenjs/core/calendar';
 import { resolveRuntime } from '@jarenjs/core/runtime';
 import { utf8ByteLength } from '@jarenjs/core/string';
+import { writtenEntries } from './ical-itip.js';
 import { horizonSpan, renderComponent } from './ical-map.js';
 import { renderVtimezone, ruledDefinition } from './ical-vtimezone.js';
 import { ICAL_CODES, ICAL_LIMIT_CODES, IcalError, escapeText, foldLine } from './ical-wire.js';
@@ -33,7 +34,8 @@ import { JoslLimitError, limitOption } from './limits.js';
 import { ICAL_STREAM_WRITE, ICAL_WRITE, admitOptions } from './options.js';
 
 const CALENDAR_KEYS = Object.freeze(['prodId', 'method', 'components']);
-const METHODS = Object.freeze({ publish: 'PUBLISH' });
+const METHODS = Object.freeze({ publish: 'PUBLISH', request: 'REQUEST', reply: 'REPLY', add: 'ADD', cancel: 'CANCEL', refresh: 'REFRESH',
+  counter: 'COUNTER', declinecounter: 'DECLINECOUNTER' });
 const TAIL = 'END:VCALENDAR\r\n';
 const LAST_INSTANT = 253402300799000;
 /** How much wider than the horizon a written VTIMEZONE reaches each way: two days. */
@@ -72,7 +74,7 @@ const MARGIN = 2 * 86400000;
 /**
  * The incremental writer's options: the calendar's head, a chunk sink,
  * and the options {@link stringifyIcal} takes.
- * @typedef {IcalWriterOptions & { prodId: string, method?: 'publish', onChunk?: (chunk: string) => void }} IcalStreamWriterOptions
+ * @typedef {IcalWriterOptions & { prodId: string, method?: import('./ical-read.js').IcalMethod, onChunk?: (chunk: string) => void }} IcalStreamWriterOptions
  */
 
 /**
@@ -88,7 +90,7 @@ function headOf(prodId, method, at) {
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', `PRODID:${escapeText(prodId, `${at}/prodId`)}`];
   if (method !== undefined) {
     if (typeof method !== 'string' || !Object.hasOwn(METHODS, method))
-      throw new IcalError('ICAL3002', `method is 'publish' or absent; ${String(method)} is outside the documented subset`, `${at}/method`);
+      throw new IcalError('ICAL3002', `method is one of RFC 5546's ${Object.keys(METHODS).join(', ')}, or absent; ${String(method)} is outside the documented subset`, `${at}/method`);
     lines.push(`METHOD:${METHODS[method]}`);
   }
   return lines.map(foldLine).join('');
@@ -141,6 +143,7 @@ export class IcalWriter {
       horizon: admitted.horizon ?? undefined,
       limits: admitted.limits ?? undefined,
       used: new Set(),
+      method: admitted.method ?? undefined,
       now: () => {
         if (now === undefined) {
           const at = runtime.now();
@@ -216,6 +219,14 @@ export class IcalWriter {
       const path = `/components/${this.#index}`;
       this.#context.used.clear();
       const rendered = renderComponent(component, this.#context, path);
+      // a scheduling message is written as RFC 5546 §3's table for its method has it (PUBLISH, whose
+      // events carry no ORGANIZER here, is written as before)
+      const { method } = this.#context;
+      if (method !== undefined && method !== 'publish') {
+        const [entry] = writtenEntries(rendered.lines, METHODS[/** @type {keyof typeof METHODS} */ (method)]);
+        if (entry !== undefined)
+          throw new IcalError('ICAL3021', `${entry.reason}; the component is no METHOD:${method.toUpperCase()} message`, path);
+      }
       const zones = [...this.#context.used].filter((zone) => !this.#zones.has(zone));
       const definitions = zones.map((zone) => this.#vtimezone(zone, path));
       if (this.#components + rendered.components > this.#limits.maxComponents)
@@ -287,7 +298,7 @@ export function createIcalWriter(options) {
 
 /**
  * Write a whole calendar: `{ prodId, method?, components }`.
- * @param {{ prodId: string, method?: 'publish', components: Record<string, unknown>[] }} calendar
+ * @param {{ prodId: string, method?: import('./ical-read.js').IcalMethod, components: Record<string, unknown>[] }} calendar
  * @param {IcalWriterOptions} [options]
  * @returns {string} The calendar, CRLF line endings
  * @throws {IcalError} for anything outside the documented model, with a pointer into it
@@ -319,3 +330,4 @@ export function stringifyIcal(calendar, options = undefined) {
 export { ICAL_CODES, ICAL_LIMIT_CODES, IcalError, JoslLimitError };
 export { parseIcal, createIcalReader, iterateIcal, IcalReader } from './ical-read.js';
 export { patchIcal } from './ical-lossless.js';
+export { availabilityLayers } from './ical-availability.js';

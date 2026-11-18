@@ -407,7 +407,7 @@ What each subpath carries:
 | `@jarenjs/josl/jsonx-stream` | `createJsonxStreamReader`, `parseJsonxStream` |
 | `@jarenjs/josl/csv` | `parseCsv`, `parseCsvDocument`, `stringifyCsv`, `sniffCsvDialect` |
 | `@jarenjs/josl/csv-stream` | `createCsvStreamReader`, `parseCsvStream`, `iterateCsvStream`, `createCsvStreamWriter` |
-| `@jarenjs/josl/ical` | `stringifyIcal`, `createIcalWriter`, `parseIcal`, `createIcalReader`, `iterateIcal`, `IcalError`, `ICAL_CODES` (an iCalendar writer and reader; see [docs/ICAL.md](docs/ICAL.md)) |
+| `@jarenjs/josl/ical` | `stringifyIcal`, `createIcalWriter`, `parseIcal`, `createIcalReader`, `iterateIcal`, `patchIcal`, `availabilityLayers`, `IcalError`, `ICAL_CODES` (an iCalendar writer and reader; see [docs/ICAL.md](docs/ICAL.md)) |
 | `@jarenjs/josl/values` | `LocalDate`, `LocalTime`, `LocalDateTime` |
 | `@jarenjs/josl/schemas/*` | schema artifacts (`jaren-josl-data.schema.json`, `jaren-josl-ical.schema.json`) |
 
@@ -636,6 +636,29 @@ const text = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Example//Rota//EN',
 const { tree } = parseIcal(text, { mode: 'lossless' });
 const edited = patchIcal(tree, [{ op: 'cancel', uid: 'standup', recurrenceId: '2026-03-09T09:00:00' }]);
 edited.split('\r\n').slice(9, 11); // ['X-COLOR:teal', 'EXDATE:20260309T090000']
+```
+
+Availability and scheduling are data too. A VAVAILABILITY (RFC 7953) is
+read and written as an `availability` component, and
+`availabilityLayers(calendar.components)` hands it to `evaluateAvailability`
+of `@jarenjs/core/calendar` as a bounded layer at its PRIORITY. A calendar
+with a METHOD (any of RFC 5546's eight) also answers `scheduling`: one
+message per component (organizer, attendees and their PARTSTAT, a
+CANCEL's cancellation, an ADD's event, a COUNTER's suggested event), and a report
+of each component against §3's table for its method. A REPLY or CANCEL
+is never read as an event of the calendar; the organizer's state machine
+and the mail transport are the host's.
+
+```js
+import { parseIcal } from '@jarenjs/josl/ical';
+
+const { calendar, scheduling } = parseIcal(['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Example//Rota//EN',
+  'METHOD:REPLY', 'BEGIN:VEVENT', 'UID:standup', 'DTSTAMP:20260301T000000Z',
+  'ORGANIZER:mailto:lead@example.com', 'ATTENDEE;PARTSTAT=DECLINED:mailto:sam@example.com',
+  'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n'));
+calendar.components.length; // 0
+scheduling.messages[0].attendees; // [{ address: 'mailto:sam@example.com', partstat: 'declined' }]
+scheduling.report; // [] (the REPLY has what RFC 5546 §3.2.3 requires)
 ```
 
 The model, the zone mode, the limits, the codes, the edits and the

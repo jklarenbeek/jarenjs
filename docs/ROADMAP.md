@@ -1129,6 +1129,10 @@ what each does is its own documentation's job
 
 ## @jarenjs/josl
 
+- [ ] **`@jarenjs/josl/ical` checks RFC 5546 §3's tables for presence only.** A table's comments on values (a CANCEL's
+  STATUS "MUST be CANCELLED", REQUEST-STATUS codes) are not checked, a METHOD written after the first component is not
+  applied to the components before it, and the writer checks each message against its table but not a calendar's counts
+  (ADD's one VEVENT).
 - [ ] **A CSV dialect with `quote: null` does not round-trip.** The writers
   read `quote: null` as the default `"` and the reader reads it as no quoting,
   so `parseCsv(stringifyCsv([['x,y']], { quote: null }), { quote: null })`
@@ -1144,30 +1148,20 @@ what each does is its own documentation's job
 
 ## @jarenjs/core
 
+- [ ] **An RFC 7953 BUSYTYPE has no availability layer.** A bounded available layer marks the time outside its spans
+  `busy-unavailable` only (availability.js: `busyType` is refused off `mode: 'busy'`; a gap is `busy-unavailable`), so
+  `@jarenjs/josl/ical` withholds a VAVAILABILITY with BUSYTYPE:BUSY or BUSY-TENTATIVE (`ICAL1025`). RFC 7953 §4 also
+  orders equal-priority busy types BUSY > BUSY-UNAVAILABLE > BUSY-TENTATIVE, where `BUSY_STRENGTH` shows
+  busy-unavailable first.
+- [ ] **An EXDATE of a range override's own slot orphans the range.** Excluding the occurrence a RANGE=THISANDFUTURE
+  override starts at drops the range's changes for every later occurrence, so `@jarenjs/josl/ical`'s `patchIcal` moves
+  the range to the next slot instead of writing the exclusion beside the kept range.
 - [ ] **An entity member has no temporal column kind.** A collection declares a member a calendar kind
   (`temporals`, MODEL-FORMAT §2), refused, keyed and compared identically on SQLite and PostgreSQL; an entity
   member holding a calendar value stays in the entity's document, unkeyed. A zoned member takes no unique index
   and is ordered by the engine, and a recurrence rule is stored as its JSON form (`…/rrule.schema.json`). A collection's
   temporal members are keyed through the seam `@jarenjs/db/temporals` (MODEL-FORMAT §2), whose hooks an entity kind
   would reuse.
-- [ ] **`@jarenjs/josl/ical` withholds a zoned DURATION that ends in the second pass of a repeated hour.**
-  `defineSeries` now holds it (`duration` on a moved override or an RDATE period), but the reader still reports it
-  `ICAL1022`, for an override and for a zoned RDATE period's length, and the writer reads a period's or override's
-  `end` only.
-- [ ] **`@jarenjs/josl/ical` reads no VAVAILABILITY or scheduling method.** Events, recurring series and free/busy spans are written by kind; under `zones: 'utc'` a
-  zoned time is written as the UTC instant `toUtc` answers, and a zoned recurring series as its
-  occurrences over a caller's horizon (refused without one, `ICAL3011`); under `zones: 'embed'` a zoned
-  time keeps its wall clock and TZID, each zone used is written as a VTIMEZONE over the horizon ending
-  in TZUNTIL (RDATE onsets, or with `onsets: 'rrule'` RRULE observances where the onsets follow a yearly
-  rule), and a zoned series under the RFC's policy keeps its RRULE. `parseIcal`,
-  `createIcalReader` and `iterateIcal` read the same subset back; a VTIMEZONE is compiled into a zone
-  provider (`compileVtimezone` in `@jarenjs/core/calendar`) and defines its TZID by default, and
-  everything else outside the subset is reported in `report.unsupported`, never interpreted.
-  `parseIcal(text, { mode: 'lossless' })` also keeps the syntax tree, and `patchIcal` moves, cancels or
-  excludes an occurrence, retitles, describes, relocates or removes an event, a VTODO or a VJOURNAL, and
-  describes, re-triggers or removes a VALARM, re-emitting every octet no edit reaches unchanged;
-  RANGE=THISANDFUTURE is expanded, and only a move, cancel or EXDATE of the range's own slot is refused
-  (`ICAL4005`). Not in it: VAVAILABILITY and the scheduling methods.
 - [ ] **String helpers that answer for a non-string.** `countCodePoints(5)` and
   `countCharCode(5, 48)` answer 0, `toCodePoints(5)` answers `[]`, and `fnv1a(5)` equals
   `fnv1a('')` (so `hashContent({})` is `hashContent('')`), each because a non-string's missing

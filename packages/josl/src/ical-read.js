@@ -37,9 +37,10 @@
 
 import { CalendarError, compileRecurrence, dateValue, defineSeries, floatingValue, isZone, parseTemporal, toUtc, utcValue, zonedValue }
   from '@jarenjs/core/calendar';
+import { ITIP_KINDS, ITIP_METHODS, calendarEntries, componentEntries } from './ical-itip.js';
 import { IcalMachine } from './ical-machine.js';
 import { IANA_FORM, ZONE_HORIZON, ZoneTable } from './ical-vtimezone.js';
-import { IcalError, daysOf, readDuration, wallOf } from './ical-wire.js';
+import { IcalError, daysOf, formatDuration, readDuration, wallOf } from './ical-wire.js';
 import { limitOption } from './limits.js';
 import { ICAL_ITERATE, ICAL_PARSE, ICAL_READ, admitOptions } from './options.js';
 import { abortedError, closeIterator } from './pull.js';
@@ -60,6 +61,10 @@ const EVENT_PROPERTIES = Object.freeze({
 const FREEBUSY_PROPERTIES = Object.freeze({
   UID: ['TEXT'], DTSTAMP: ['DATE-TIME'], DTSTART: ['DATE-TIME'], DTEND: ['DATE-TIME'], FREEBUSY: ['PERIOD'],
 });
+const AVAILABILITY_PROPERTIES = Object.freeze({
+  UID: ['TEXT'], DTSTAMP: ['DATE-TIME'], DTSTART: ['DATE-TIME'], DTEND: ['DATE-TIME'], DURATION: ['DURATION'], PRIORITY: ['INTEGER'],
+  BUSYTYPE: ['TEXT'], SUMMARY: ['TEXT'], DESCRIPTION: ['TEXT'], LOCATION: ['TEXT'],
+});
 const TIME_PARAMETERS = Object.freeze(['VALUE', 'TZID']);
 const PARAMETERS = Object.freeze({
   DTSTART: TIME_PARAMETERS, DTEND: TIME_PARAMETERS, RDATE: TIME_PARAMETERS, EXDATE: TIME_PARAMETERS,
@@ -67,9 +72,9 @@ const PARAMETERS = Object.freeze({
 });
 /** Properties a component holds at most once. */
 const ONCE = Object.freeze(['UID', 'DTSTAMP', 'DTSTART', 'DTEND', 'DURATION', 'SUMMARY', 'DESCRIPTION', 'LOCATION', 'STATUS',
-  'SEQUENCE', 'RRULE', 'RECURRENCE-ID']);
+  'SEQUENCE', 'RRULE', 'RECURRENCE-ID', 'PRIORITY', 'BUSYTYPE']);
 /** The report entries that withhold their component. */
-const WITHHOLDING = Object.freeze(['ICAL1017', 'ICAL1018', 'ICAL1019', 'ICAL1020', 'ICAL1021', 'ICAL1022']);
+const WITHHOLDING = Object.freeze(['ICAL1017', 'ICAL1018', 'ICAL1019', 'ICAL1020', 'ICAL1021', 'ICAL1022', 'ICAL1025']);
 
 /**
  * One entry of the report.
@@ -110,6 +115,8 @@ const WITHHOLDING = Object.freeze(['ICAL1017', 'ICAL1018', 'ICAL1019', 'ICAL1020
  * @property {Partial<typeof import('@jarenjs/core/calendar').VTIMEZONE_LIMITS>} [zoneLimits] - the
  *   compilation's limits (the calendar layer's defaults when absent)
  * @property {boolean} [strict] - refuse at the first report entry, with its code
+ * @property {boolean} [strictScheduling] - refuse at the first scheduling entry (a calendar with a METHOD whose
+ *   component breaks RFC 5546 §3's table for it), with its code
  * @property {number} [maxOctets] - octets of input
  * @property {number} [maxComponents] - components, every BEGIN inside the calendar counted
  * @property {number} [maxLineOctets] - octets of one unfolded content line
@@ -117,6 +124,27 @@ const WITHHOLDING = Object.freeze(['ICAL1017', 'ICAL1018', 'ICAL1019', 'ICAL1020
  * @property {number} [maxDepth] - nesting of components, the calendar counted as 1
  * @property {number} [maxProperties] - properties of one component
  * @property {number} [maxReported] - report entries listed; past it they are counted only
+ */
+
+/**
+ * A calendar's METHOD (RFC 5546), as the model spells it.
+ * @typedef {'publish' | 'request' | 'reply' | 'add' | 'cancel' | 'refresh' | 'counter' | 'declinecounter'} IcalMethod
+ */
+
+/**
+ * What a read of a calendar with a METHOD answers beside its model: one
+ * message per VEVENT, VTODO, VJOURNAL or VFREEBUSY, and the components'
+ * breaches of RFC 5546 §3's table for the method. PUBLISH and REQUEST
+ * components (and PUBLISH and REPLY VFREEBUSYs) are calendar data and
+ * are also read into the model; every other method's are messages only.
+ * @typedef {Object} IcalScheduling
+ * @property {IcalMethod} method
+ * @property {Record<string, any>[]} messages - `{ component, uid?, dtstamp?, sequence?, recurrenceId?, range?,
+ *   organizer?, attendees, requestStatus?, status?, start?, end?, cancellation?, event?, suggested? }`, in the order read
+ *   (`start` and `end`, epoch milliseconds, of a VFREEBUSY only)
+ * @property {import('./ical-itip.js').SchedulingEntry[]} report - `ICAL1026` (a property or subcomponent the
+ *   table requires is missing) and `ICAL1027` (one it excludes, or takes fewer times, is present; or a
+ *   component the method does not take), in the order read
  */
 
 /**
@@ -146,7 +174,7 @@ const WITHHOLDING = Object.freeze(['ICAL1017', 'ICAL1018', 'ICAL1019', 'ICAL1020
  * @property {'text' | 'octets'} form - what was read: a string, re-emitted as one, or octets
  * @property {Uint8Array} source - the input's octets (a string's UTF-8), a copy
  * @property {import('./ical-machine.js').IcalNode} root - the VCALENDAR component
- * @property {{ prodId: string, method?: 'publish', components: Record<string, any>[] }} calendar - the model read
+ * @property {{ prodId: string, method?: IcalMethod, components: Record<string, any>[] }} calendar - the model read
  * @property {IcalZones} zones - the zones of the read
  */
 
@@ -457,33 +485,45 @@ function durationOf(prop, start, context) {
 }
 
 /**
- * The end a length gives a start, where it is exact without a zone:
- * days for a date, wall or UTC time otherwise. A zoned start with a
- * length is not placed here.
+ * The end a length gives a start of a kind without a zone: days for a
+ * date, wall or UTC time otherwise.
  * @param {any} start
  * @param {{ days: number, ms: number }} length
  * @param {{ path: string, line: number, name: string }} at
  * @returns {any}
  */
 function endAfter(start, length, at) {
-  if (start.kind === 'zoned')
-    withhold('ICAL1022', `${at.name} gives a zoned time a length that only the zone's offsets can place, which this release does not read`, at);
   return viaCalendar(() => valueAt(start.kind, placeOf(start) + length.days * DAY + length.ms), 'ICAL1018', at.name, at);
 }
 
 /**
- * The end a length gives a zoned start, as a wall clock of its zone (RFC
- * 5545 §3.3.6): the days on the wall clock, then the time exactly, read
- * through the file's zones under the RFC's policy. An end whose wall
- * clock the zone reads as another instant (the second pass of a repeated
- * hour) is withheld: a zoned end names the first.
+ * The length a zoned start is given, as RFC 5545 §3.3.6 reads it: the
+ * days on the wall clock, then the time exactly, through the file's zones
+ * under the RFC's policy. It is the end it gives, a wall clock of the
+ * zone, where that wall clock names it; an end in the second pass of a
+ * repeated hour, which a zoned end does not name, is the duration itself,
+ * which the calendar layer reads exactly.
  * @param {any} start
  * @param {{ days: number, ms: number }} length
  * @param {ReadContext} context
  * @param {{ path: string, line: number, name: string }} at
- * @returns {any}
+ * @returns {{ end: any } | { duration: string }}
  */
-function zonedEndAfter(start, length, context, at) {
+function zonedLength(start, length, context, at) {
+  const { value, named } = zonedEnd(start, length, context, at);
+  return named ? { end: value } : { duration: formatDuration(length) };
+}
+
+/**
+ * The end a length gives a zoned start (see {@link zonedLength}): its
+ * wall clock, its instant, and whether that wall clock names the instant.
+ * @param {any} start
+ * @param {{ days: number, ms: number }} length
+ * @param {ReadContext} context
+ * @param {{ path: string, line: number, name: string }} at
+ * @returns {{ value: any, instant: number, named: boolean }}
+ */
+function zonedEnd(start, length, context, at) {
   const { provider } = context.zoneTable;
   const { zone } = start;
   const dayWall = valueAt('floating', placeOf(start) + length.days * DAY);
@@ -502,16 +542,30 @@ function zonedEndAfter(start, length, context, at) {
   const two = (/** @type {number} */ n) => String(n).padStart(2, '0');
   const value = { kind: 'zoned', date: `${String(parts.year).padStart(4, '0')}-${two(parts.month)}-${two(parts.day)}`,
     time: `${two(parts.hours)}:${two(parts.minutes)}:${two(Math.floor(parts.seconds))}`, zone };
-  if (viaCalendar(() => toUtc(value, { provider, policy: 'rfc5545' }), 'ICAL1018', at.name, at).instant !== instant)
-    withhold('ICAL1022', `${at.name} ends it at ${new Date(instant).toISOString()}, the second pass of a repeated wall clock in ${zone}, which a zoned end does not name`, at);
-  return value;
+  return { value, instant, named: viaCalendar(() => toUtc(value, { provider, policy: 'rfc5545' }), 'ICAL1018', at.name, at).instant === instant };
+}
+
+/**
+ * The exact time between two zoned values of one zone, through the
+ * file's zones under the RFC's policy.
+ * @param {any} start
+ * @param {any} end
+ * @param {ReadContext} context
+ * @param {{ path: string, line: number, name: string }} at
+ * @returns {number}
+ */
+function exactBetween(start, end, context, at) {
+  const { provider } = context.zoneTable;
+  const instant = (/** @type {any} */ value) => viaCalendar(() => toUtc(value, { provider, policy: 'rfc5545' }), 'ICAL1018', at.name, at).instant;
+  return instant(end) - instant(start);
 }
 
 /**
  * The values of an RDATE or EXDATE: dates, date-times or periods.
  * @param {import('./ical-machine.js').IcalProperty} prop
  * @param {ReadContext} context
- * @returns {any[]} values, and `{ start, end }` periods
+ * @returns {any[]} values, and `{ start, end }` periods (`{ start, duration }` for a zoned
+ *   start/duration whose end a zoned wall clock does not name)
  */
 function listOf(prop, context) {
   const { type, tzid } = timeParams(prop, context);
@@ -523,8 +577,11 @@ function listOf(prop, context) {
       withhold('ICAL1018', `a PERIOD of ${prop.name} is start/end or start/duration, not '${text}'`, prop);
     const start = timeOf(text.slice(0, slash), 'DATE-TIME', tzid, prop, context);
     const rest = text.slice(slash + 1);
-    const end = /^[+]?P/.test(rest) ? endAfter(start, durationOf({ ...prop, value: rest, params: [] }, start, context), prop)
-      : timeOf(rest, 'DATE-TIME', tzid, prop, context);
+    if (/^[+]?P/.test(rest)) {
+      const length = durationOf({ ...prop, value: rest, params: [] }, start, context);
+      return start.kind === 'zoned' ? { start, ...zonedLength(start, length, context, prop) } : { start, end: endAfter(start, length, prop) };
+    }
+    const end = timeOf(rest, 'DATE-TIME', tzid, prop, context);
     if (end.kind !== start.kind || placeOf(end) < placeOf(start))
       withhold('ICAL1018', `a PERIOD of ${prop.name} ends at or after its start, in its kind`, prop);
     return { start, end };
@@ -567,10 +624,13 @@ function instantText(text, prop, context) {
  * @param {import('./ical-machine.js').IcalNode} node
  * @param {Readonly<Record<string, readonly string[]>>} known
  * @param {ReadContext} context
+ * @param {string} [read] - the subcomponent its caller reads itself
  * @returns {Map<string, import('./ical-machine.js').IcalProperty[]>}
  */
-function propertiesOf(node, known, context) {
+function propertiesOf(node, known, context, read = undefined) {
   for (const child of node.children) {
+    if (child.name === read)
+      continue;
     context.report.add('ICAL1013', child.name, child.path, child.line,
       `${child.name} inside ${node.name} is outside the subset; it is left out with everything inside it`);
   }
@@ -697,9 +757,10 @@ function spanOf(props, node, context) {
  * override of one.
  * @param {import('./ical-machine.js').IcalNode} node
  * @param {ReadContext} context
+ * @param {boolean} [asMaster] - read a single event as the master of a series of itself
  * @returns {{ type: 'single', component: Record<string, any> } | { type: 'master', master: Master } | { type: 'override', override: Override }}
  */
-function readEvent(node, context) {
+function readEvent(node, context, asMaster = false) {
   const props = propertiesOf(node, EVENT_PROPERTIES, context);
   const uid = uidOf(props, node, context);
   const stampProp = one(props, 'DTSTAMP');
@@ -725,7 +786,7 @@ function readEvent(node, context) {
       context.zoneTable.use(span.start.zone, wallOf(span.start.date, span.start.time, rrule.path), true);
     return { type: 'master', master: { uid, dtstamp, span, text, rrule: rrule.value, rdates, exdates, node } };
   }
-  if (rdates.length !== 0)
+  if (rdates.length !== 0 || asMaster)
     return { type: 'master', master: { uid, dtstamp, span, text, rrule: undefined, rdates, exdates, node } };
   if (exdates.length !== 0)
     withhold('ICAL1022', 'EXDATE on an event with no RRULE or RDATE removes its only occurrence, which this release does not read', props.get('EXDATE')[0]);
@@ -768,6 +829,23 @@ export function slotId(value) {
 }
 
 /**
+ * The length a series gives one of its slots: an RDATE period's own at
+ * that slot, or else the series'.
+ * @param {Master} master
+ * @param {string} id
+ * @param {{ days: number, ms: number }} none - the length of a slot the series gives none
+ * @returns {{ days: number, ms: number }}
+ */
+function slotLength(master, id, none) {
+  const period = master.rdates.find((entry) => entry.kind === undefined && slotId(entry.start) === id);
+  if (period === undefined)
+    return master.span.length ?? none;
+  if (period.end === undefined)
+    return readDuration(period.duration, '');
+  return { days: 0, ms: placeOf(period.end) - placeOf(period.start) };
+}
+
+/**
  * A series' override, from its VEVENT.
  * @param {Override} override
  * @param {Master} master
@@ -802,28 +880,37 @@ function overrideOf(override, master, context, ranges = []) {
   const out = { recurrenceId: slotId(recurrenceId), status: 'moved', start: span.start };
   // an override with no end lasts what an event with no end lasts (RFC
   // 5545 §3.6.1: a day for a date, nothing for a time); the model's
-  // override without one keeps its slot's length, so the end is spelled
-  // out exactly where the two differ
-  if (span.end !== undefined)
+  // override without one keeps its slot's length (an RDATE period's own,
+  // or else the series'), so the end is spelled out exactly where the two
+  // differ. A range carries its length to every later slot only where it
+  // changes its own slot's (§3.8.4.4: "if the duration of the given
+  // recurrence instance is modified"), so a range of its own slot's
+  // length has no end, and each later slot keeps its own
+  const none = { days: start.kind === 'date' ? 1 : 0, ms: 0 };
+  const same = (/** @type {{ days: number, ms: number }} */ a, /** @type {{ days: number, ms: number }} */ b) => a.days === b.days && a.ms === b.ms;
+  const id = slotId(recurrenceId);
+  if (span.end !== undefined && (override.range === undefined || span.length === undefined || !same(span.length, slotLength(master, id, none))))
     out.end = span.end;
-  else {
-    const none = { days: start.kind === 'date' ? 1 : 0, ms: 0 };
+  else if (span.end === undefined) {
     const own = span.length ?? none;
     // a series whose DTEND lies in another zone has no slot length here:
     // the calendar layer refuses its rule, and a series of extra dates is withheld
     // and one after an override over this and future occurrences lasts
-    // what that range gives: its own length where it is not the series'
-    const id = slotId(recurrenceId);
+    // what that range gives: its own length where it changes its slot's
     const over = override.range === undefined
       ? ranges.filter((range) => slotId(range.recurrenceId) <= id)
         .reduce((/** @type {Override | undefined} */ a, b) => (a === undefined || slotId(b.recurrenceId) > slotId(a.recurrenceId) ? b : a), undefined)
       : undefined;
-    const slot = over === undefined || over.text.status === 'cancelled' || (over.span.end !== undefined && over.span.length === undefined)
-      ? master.span.length ?? none : over.span.length ?? none;
-    if (own.days !== slot.days || own.ms !== slot.ms) {
+    const overLength = over === undefined || over.text.status === 'cancelled' || (over.span.end !== undefined && over.span.length === undefined)
+      ? undefined : over.span.length ?? none;
+    const slot = overLength !== undefined && !same(overLength, slotLength(master, slotId(/** @type {Override} */ (over).recurrenceId), none))
+      ? overLength : slotLength(master, id, none);
+    if (!same(own, slot)) {
       const at = { path: node.path, line: node.line, name: 'the override\'s length' };
-      out.end = own.days === 0 && own.ms === 0 ? span.start
-        : span.start.kind === 'zoned' ? zonedEndAfter(span.start, own, context, at) : endAfter(span.start, own, at);
+      if (own.days === 0 && own.ms === 0)
+        out.end = span.start;
+      else
+        Object.assign(out, span.start.kind === 'zoned' ? zonedLength(span.start, own, context, at) : { end: endAfter(span.start, own, at) });
     }
   }
   if (override.range !== undefined)
@@ -861,8 +948,14 @@ function seriesOf(master, overrides, context) {
         return value;
       if (end !== undefined && sameValue(value, start))
         return { start: value, end };
-      return { start: value, end: endAfter(value, length, { path: at.path, line: at.line, name: 'the length of an RDATE' }) };
+      const where = { path: at.path, line: at.line, name: 'the length of an RDATE' };
+      if (value.kind !== 'zoned')
+        return { start: value, end: endAfter(value, exact ?? length, where) };
+      return { start: value, ...zonedLength(value, exact ?? length, context, where) };
     };
+    // a zoned DTEND gives every RDATE the exact time between it and DTSTART (RFC 5545 §3.8.5.3)
+    const exact = start.kind === 'zoned' && end !== undefined && length !== undefined
+      ? { days: 0, ms: exactBetween(start, end, context, { path: at.path, line: at.line, name: 'DTEND' }) } : undefined;
     if (end !== undefined && length === undefined)
       withhold('ICAL1022', 'a series of extra dates whose DTEND lies in another zone than DTSTART', at);
     rdates = [start, ...rdates.filter((entry) => entry.kind === undefined || !sameValue(entry, start))].map(slot);
@@ -926,6 +1019,243 @@ function readFreebusy(node, context) {
   return component;
 }
 
+/**
+ * Read one VAVAILABILITY (RFC 7953): its period, PRIORITY and BUSYTYPE,
+ * and each AVAILABLE as a series (a recurring one with its RDATEs,
+ * EXDATEs and RECURRENCE-ID overrides, which are AVAILABLEs of its UID).
+ * Its times are UTC or zoned DATE-TIMEs (§3.1). What the availability
+ * layers cannot hold is withheld whole (`ICAL1025`): a BUSYTYPE other than
+ * BUSY-UNAVAILABLE, and AVAILABLE times of more than one kind.
+ * @param {import('./ical-machine.js').IcalNode} node
+ * @param {ReadContext} context
+ * @returns {Record<string, any>}
+ */
+function readAvailability(node, context) {
+  const props = propertiesOf(node, AVAILABILITY_PROPERTIES, context, 'AVAILABLE');
+  /** @type {Record<string, any>} */
+  const component = { type: 'availability', uid: uidOf(props, node, context) };
+  const stamp = one(props, 'DTSTAMP');
+  if (stamp !== undefined)
+    component.dtstamp = instantOf(stamp, context);
+  const timed = (/** @type {any} */ value, /** @type {any} */ prop) => {
+    if (value.kind !== 'utc' && value.kind !== 'zoned')
+      withhold('ICAL1018', `the times of a VAVAILABILITY and its AVAILABLE components are DATE-TIMEs in UTC or with a TZID (RFC 7953 §3.1), not ${value.kind}`, prop);
+    return value;
+  };
+  const startProp = one(props, 'DTSTART');
+  const endProp = one(props, 'DTEND');
+  const durationProp = one(props, 'DURATION');
+  if (endProp !== undefined && durationProp !== undefined)
+    withhold('ICAL1017', 'a VAVAILABILITY takes DTEND or DURATION, not both', durationProp);
+  if (durationProp !== undefined && startProp === undefined)
+    withhold('ICAL1017', 'a VAVAILABILITY with a DURATION has a DTSTART', durationProp);
+  const instant = (/** @type {any} */ value, /** @type {any} */ prop) => (value.kind === 'utc' ? Date.parse(value.instant)
+    : viaCalendar(() => toUtc(value, { provider: context.zoneTable.provider, policy: 'rfc5545' }), 'ICAL1018', prop.name, prop).instant);
+  if (startProp !== undefined)
+    component.start = timed(singleTime(startProp, context), startProp);
+  if (endProp !== undefined)
+    component.end = timed(singleTime(endProp, context), endProp);
+  else if (durationProp !== undefined) {
+    const length = durationOf(durationProp, component.start, context);
+    const at = { path: durationProp.path, line: durationProp.line, name: 'DURATION' };
+    if (component.start.kind === 'utc')
+      component.end = endAfter(component.start, length, at);
+    else {
+      // a zoned end that names its instant, or else that instant in UTC
+      const end = zonedEnd(component.start, length, context, at);
+      component.end = end.named ? end.value : valueAt('utc', end.instant);
+    }
+  }
+  if (component.start !== undefined && component.end !== undefined && instant(component.end, endProp ?? durationProp) <= instant(component.start, startProp))
+    withhold('ICAL1018', 'the end of a VAVAILABILITY is after its start', endProp ?? durationProp);
+  const priority = one(props, 'PRIORITY');
+  if (priority !== undefined) {
+    paramsOf(priority, ['INTEGER'], context);
+    if (!/^\+?[0-9]$/.test(priority.value))
+      withhold('ICAL1018', `PRIORITY is a whole number from 0 to 9, not '${priority.value}'`, priority);
+    component.priority = Number(priority.value);
+  }
+  const busy = one(props, 'BUSYTYPE');
+  if (busy !== undefined) {
+    paramsOf(busy, ['TEXT'], context);
+    const value = textOf(busy).toUpperCase();
+    if (value !== 'BUSY-UNAVAILABLE') {
+      withhold('ICAL1025', `BUSYTYPE:${value} marks the time outside its AVAILABLE components ${value.toLowerCase()}, and an availability layer `
+        + 'marks it busy-unavailable', busy);
+    }
+    component.busyType = 'busy-unavailable';
+  }
+  Object.assign(component, eventText(props, context));
+  /** @type {Map<string, Master>} */
+  const masters = new Map();
+  /** @type {Map<string, Override[]>} */
+  const overrides = new Map();
+  for (const child of node.children.filter((other) => other.name === 'AVAILABLE')) {
+    const read = readEvent(child, context, true);
+    if (read.type === 'override') {
+      timed(read.override.span.start, child);
+      overrides.set(read.override.uid, [...(overrides.get(read.override.uid) ?? []), read.override]);
+    }
+    else if (read.type === 'master') {
+      if (masters.has(read.master.uid))
+        withhold('ICAL1021', `a second AVAILABLE with the UID '${read.master.uid}'`, child);
+      timed(read.master.span.start, child);
+      masters.set(read.master.uid, read.master);
+    }
+  }
+  for (const [uid, list] of overrides) {
+    if (!masters.has(uid))
+      withhold('ICAL1021', `the AVAILABLE override of ${slotId(list[0].recurrenceId)} names the UID '${uid}', and no AVAILABLE has it`, list[0].node);
+  }
+  component.available = [...masters.values()].map((master) => {
+    const { type: _type, ...available } = seriesOf(master, overrides.get(master.uid) ?? [], context);
+    return available;
+  });
+  const kinds = new Set([...masters.values()].map((master) => master.span.start.kind));
+  if (kinds.size > 1)
+    withhold('ICAL1025', 'its AVAILABLE components are both UTC and zoned, and one availability layer holds series of one kind', node);
+  return component;
+}
+
+/** What a scheduling message reads of its component (RFC 5546 §3). */
+const MESSAGE_PROPERTIES = Object.freeze(['UID', 'DTSTAMP', 'SEQUENCE', 'RECURRENCE-ID', 'ORGANIZER', 'ATTENDEE', 'REQUEST-STATUS', 'STATUS']);
+/** What a VFREEBUSY message reads besides: the span a free/busy request asks about, or a reply answers for. */
+const FREEBUSY_MESSAGE_PROPERTIES = Object.freeze([...MESSAGE_PROPERTIES, 'DTSTART', 'DTEND']);
+/** The methods whose VEVENTs (and VTODOs and VJOURNALs) are calendar data, read into the model as without a method. */
+const DATA_METHODS = Object.freeze(['publish', 'request']);
+/** The methods whose VFREEBUSYs are free/busy data. */
+const FREEBUSY_DATA_METHODS = Object.freeze(['publish', 'reply']);
+
+/** The parameters of an ORGANIZER or ATTENDEE a message reads. */
+const PERSON_PARAMETERS = Object.freeze(['CN', 'PARTSTAT', 'ROLE', 'CUTYPE', 'RSVP', 'DELEGATED-TO', 'DELEGATED-FROM', 'SENT-BY']);
+
+/**
+ * A calendar user of an ORGANIZER or ATTENDEE: its address (the
+ * cal-address as written) and the parameters scheduling reads; any other
+ * parameter is reported where the message is all the read takes of its
+ * component (a PUBLISH or REQUEST event reports the whole line, left out
+ * of the event).
+ * @param {import('./ical-machine.js').IcalProperty} prop
+ * @param {ReadContext} context
+ * @param {boolean} alone
+ * @returns {Record<string, any>}
+ */
+function personOf(prop, context, alone) {
+  for (const param of alone ? prop.params.filter((other) => !PERSON_PARAMETERS.includes(other.name)) : []) {
+    context.report.add('ICAL1012', `${prop.name};${param.name}`, `${prop.path};${param.name}`, prop.line,
+      `the parameter ${param.name} of ${prop.name} is outside what a message reads; ${prop.name} is read without it`);
+  }
+  /** @type {Record<string, any>} */
+  const person = { address: prop.value };
+  const param = (/** @type {string} */ name) => prop.params.find((entry) => entry.name === name)?.values;
+  const name = param('CN')?.[0];
+  if (name !== undefined)
+    person.name = name;
+  for (const [key, member] of [['PARTSTAT', 'partstat'], ['ROLE', 'role'], ['CUTYPE', 'cutype']]) {
+    const value = param(key)?.[0];
+    if (value !== undefined)
+      person[member] = value.toLowerCase();
+  }
+  const rsvp = param('RSVP')?.[0]?.toUpperCase();
+  if (rsvp === 'TRUE' || rsvp === 'FALSE')
+    person.rsvp = rsvp === 'TRUE';
+  for (const [key, member] of [['DELEGATED-TO', 'delegatedTo'], ['DELEGATED-FROM', 'delegatedFrom'], ['SENT-BY', 'sentBy']]) {
+    const values = param(key);
+    if (values !== undefined)
+      person[member] = key === 'SENT-BY' ? values[0] : [...values];
+  }
+  return person;
+}
+
+/**
+ * The scheduling message of one component of a calendar with a METHOD:
+ * its UID, DTSTAMP, SEQUENCE and RECURRENCE-ID, its organizer and
+ * attendees (each attendee's PARTSTAT is a REPLY's answer), its
+ * REQUEST-STATUS, and the method's own data - a CANCEL's cancellation, in
+ * the series model's terms, and the event an ADD adds or a COUNTER
+ * suggests. Under a method whose components are not calendar data, the
+ * rest of the component is reported, as outside the subset.
+ * @param {import('./ical-machine.js').IcalNode} node
+ * @param {string} method
+ * @param {ReadContext} context
+ * @param {boolean} alone - the message is all the read takes of the component
+ * @returns {Record<string, any>}
+ */
+function messageOf(node, method, context, alone) {
+  /** @type {Record<string, any>} */
+  const message = { component: /** @type {any} */ (ITIP_KINDS)[node.name] };
+  const props = (/** @type {string} */ name) => node.props.filter((prop) => prop.name === name);
+  // an ADD's or COUNTER's VEVENT is also read as the event it adds or suggests, which reports what that leaves out
+  const evented = (method === 'add' || method === 'counter') && node.name === 'VEVENT';
+  if (alone && !evented) {
+    for (const prop of node.props.filter((other) => !(node.name === 'VFREEBUSY' ? FREEBUSY_MESSAGE_PROPERTIES : MESSAGE_PROPERTIES).includes(other.name)))
+      context.report.add('ICAL1011', prop.name, prop.path, prop.line, `${prop.name} in a METHOD:${method.toUpperCase()} ${node.name} is outside what its message reads; it is left out`);
+    for (const child of node.children)
+      context.report.add('ICAL1013', child.name, child.path, child.line, `${child.name} inside a METHOD:${method.toUpperCase()} ${node.name} is left out with everything inside it`);
+  }
+  const [uid] = props('UID');
+  if (uid !== undefined)
+    message.uid = textOf(uid);
+  const [stamp] = props('DTSTAMP');
+  if (stamp !== undefined)
+    message.dtstamp = instantText(stamp.value, stamp, context);
+  const [sequence] = props('SEQUENCE');
+  if (sequence !== undefined) {
+    if (!/^\+?\d{1,15}$/.test(sequence.value))
+      withhold('ICAL1018', `SEQUENCE is a whole number from 0, not '${sequence.value}'`, sequence);
+    message.sequence = Number(sequence.value);
+  }
+  const [id] = props('RECURRENCE-ID');
+  if (id !== undefined) {
+    const { type, tzid } = timeParams(id, context);
+    message.recurrenceId = timeOf(id.value, type, tzid, id, context);
+    const range = id.params.find((param) => param.name === 'RANGE')?.values[0].toUpperCase();
+    if (range === 'THISANDFUTURE')
+      message.range = range;
+  }
+  if (node.name === 'VFREEBUSY') {
+    for (const [name, member] of [['DTSTART', 'start'], ['DTEND', 'end']]) {
+      const [prop] = props(name);
+      if (prop !== undefined)
+        message[member] = instantOf(prop, context);
+    }
+  }
+  const [organizer] = props('ORGANIZER');
+  if (organizer !== undefined)
+    message.organizer = personOf(organizer, context, alone);
+  message.attendees = props('ATTENDEE').map((prop) => personOf(prop, context, alone));
+  const statuses = props('REQUEST-STATUS').map((prop) => {
+    const [code, description, ...data] = prop.value.split(/(?<!\\);/).map((part) => textOf({ ...prop, value: part }));
+    return { code, description: description ?? '', ...(data.length !== 0 ? { data: data.join(';') } : {}) };
+  });
+  if (statuses.length !== 0)
+    message.requestStatus = statuses;
+  const [status] = props('STATUS');
+  if (status !== undefined)
+    message.status = status.value.toLowerCase();
+  if (method === 'cancel')
+    message.cancellation = message.recurrenceId === undefined ? { status: 'cancelled' }
+      : { recurrenceId: slotId(message.recurrenceId), status: 'cancelled', ...(message.range !== undefined ? { range: message.range } : {}) };
+  if (evented) {
+    // the message's own people and status lines are read above, not left out of the event
+    const read = readEvent({ ...node, props: node.props.filter((prop) => !['ORGANIZER', 'ATTENDEE', 'REQUEST-STATUS'].includes(prop.name)) }, context);
+    /** @type {Record<string, any>} */
+    let event;
+    if (read.type === 'single')
+      event = read.component;
+    else if (read.type === 'master')
+      event = seriesOf(read.master, [], context);
+    else {
+      const { span, text } = read.override;
+      event = { type: 'event', uid: read.override.uid, ...(read.override.dtstamp !== undefined ? { dtstamp: read.override.dtstamp } : {}),
+        start: span.start, ...(span.end !== undefined ? { end: span.end } : {}),
+        ...(span.duration !== undefined ? { duration: span.duration } : {}), ...(span.start.kind === 'zoned' ? { policy: 'rfc5545' } : {}), ...text };
+    }
+    message[method === 'add' ? 'event' : 'suggested'] = event;
+  }
+  return message;
+}
+
 //#endregion
 
 //#region engine
@@ -958,6 +1288,13 @@ export class IcalReader {
   #overrides = new Map();
   /** @type {{ version: number, prodId: string | undefined, method: string | undefined, methods: number }} */
   #head = { version: 0, prodId: undefined, method: undefined, methods: 0 };
+  /** @type {Record<string, any>[]} */
+  #messages = [];
+  /** @type {import('./ical-itip.js').SchedulingEntry[]} */
+  #scheduling = [];
+  /** @type {Map<string, number>} */
+  #kinds = new Map();
+  #strictScheduling = false;
 
   /**
    * @param {IcalReaderOptions} [options]
@@ -967,6 +1304,7 @@ export class IcalReader {
   constructor(options = undefined, owner = 'createIcalReader', table = ICAL_READ) {
     const admitted = admitOptions(options, table, owner);
     this.#report = new Report(admitted.strict === true, limitOption(admitted, 'maxReported'));
+    this.#strictScheduling = admitted.strictScheduling === true;
     const provider = admitted.provider ?? null;
     const zoneTable = new ZoneTable(admitted.vtimezone ?? 'embedded', admitted.zoneHorizon ?? ZONE_HORIZON, admitted.zoneLimits ?? undefined, provider);
     this.#context = { provider, report: this.#report, zones: new Map(), zoneTable };
@@ -1011,9 +1349,9 @@ export class IcalReader {
 
   /**
    * End the input.
-   * @returns {{ calendar: { prodId: string, method?: 'publish', components: Record<string, any>[] }, report: IcalReport,
-   *   zones: IcalZones }} the calendar's head and the components still held (every series), the report of the
-   *   whole read, and its zones
+   * @returns {{ calendar: { prodId: string, method?: IcalMethod, components: Record<string, any>[] }, report: IcalReport,
+   *   zones: IcalZones, scheduling?: IcalScheduling }} the calendar's head and the components still held (every
+   *   series), the report of the whole read, its zones, and with a METHOD its scheduling messages and report
    * @throws {IcalError} for an unclosed component, a calendar that is not iCalendar 2.0, and under `strict` for any report entry
    */
   end() {
@@ -1041,11 +1379,26 @@ export class IcalReader {
     this.#masters.clear();
     this.#overrides.clear();
     this.#context.zoneTable.compare(this.#report);
+    if (method !== undefined) {
+      const calendar = /** @type {import('./ical-machine.js').IcalNode} */ (this.#machine.calendar);
+      this.#schedule(calendarEntries(this.#kinds, method.toUpperCase(), calendar));
+    }
     return {
-      calendar: { prodId, ...(method !== undefined ? { method: /** @type {'publish'} */ (method) } : {}), components: this.#ready.splice(0, this.#ready.length) },
+      calendar: { prodId, ...(method !== undefined ? { method: /** @type {IcalMethod} */ (method) } : {}), components: this.#ready.splice(0, this.#ready.length) },
       report: this.#report.json(),
       zones: this.#context.zoneTable.summary(),
+      ...(method !== undefined ? { scheduling: { method: /** @type {IcalMethod} */ (method), messages: this.#messages.splice(0), report: [...this.#scheduling] } } : {}),
     };
+  }
+
+  /**
+   * Add scheduling entries, or refuse at the first under `strictScheduling`.
+   * @param {import('./ical-itip.js').SchedulingEntry[]} entries
+   */
+  #schedule(entries) {
+    if (this.#strictScheduling && entries.length !== 0)
+      throw new IcalError(entries[0].code, entries[0].reason, entries[0].path, undefined, entries[0].line);
+    this.#scheduling.push(...entries);
   }
 
   /**
@@ -1096,11 +1449,12 @@ export class IcalReader {
       if (prop.value.toUpperCase() !== 'GREGORIAN')
         fail(`the calendar's scale is GREGORIAN, not ${prop.value}`);
     }
-    else if (prop.name === 'METHOD' && prop.value.toUpperCase() === 'PUBLISH' && head.methods++ === 0)
-      head.method = 'publish';
+    else if (prop.name === 'METHOD' && ITIP_METHODS.includes(prop.value.toLowerCase()) && head.methods++ === 0)
+      head.method = prop.value.toLowerCase();
     else {
       this.#report.add('ICAL1011', prop.name, prop.path, prop.line, prop.name === 'METHOD'
-        ? `METHOD ${prop.value} is outside the subset (PUBLISH, once); it is left out` : `${prop.name} in VCALENDAR is outside the subset; it is left out`);
+        ? `METHOD ${prop.value} is outside the subset (one of RFC 5546's eight methods, once); it is left out`
+        : `${prop.name} in VCALENDAR is outside the subset; it is left out`);
     }
   }
 
@@ -1109,6 +1463,25 @@ export class IcalReader {
    * @param {import('./ical-machine.js').IcalNode} node
    */
   #component(node) {
+    const { method } = this.#head;
+    const kind = Object.hasOwn(ITIP_KINDS, node.name);
+    if (method !== undefined && (kind || node.name === 'VTIMEZONE')) {
+      this.#kinds.set(node.name, (this.#kinds.get(node.name) ?? 0) + 1);
+      if (kind)
+        this.#schedule(componentEntries(node, method.toUpperCase()));
+    }
+    // under a method whose components are messages, not calendar data, the message is all that is read
+    const data = method === undefined || (node.name === 'VFREEBUSY' ? FREEBUSY_DATA_METHODS : DATA_METHODS).includes(method);
+    if (method !== undefined && kind) {
+      try {
+        this.#messages.push(messageOf(node, method, this.#context, !data));
+      }
+      catch (error) {
+        this.#withheld(error);
+      }
+      if (!data)
+        return;
+    }
     try {
       if (node.name === 'VEVENT') {
         const read = readEvent(node, this.#context);
@@ -1128,6 +1501,8 @@ export class IcalReader {
       }
       else if (node.name === 'VFREEBUSY')
         this.#ready.push(readFreebusy(node, this.#context));
+      else if (node.name === 'VAVAILABILITY')
+        this.#ready.push(readAvailability(node, this.#context));
       else if (node.name === 'VTIMEZONE')
         this.#context.zoneTable.define(node, this.#report);
       else {
@@ -1155,10 +1530,10 @@ export class IcalReader {
  * the same in both modes.
  * @param {string | Uint8Array} text - the calendar, as text or UTF-8 octets
  * @param {IcalReaderOptions} [options]
- * @returns {{ calendar: { prodId: string, method?: 'publish', components: Record<string, any>[] }, report: IcalReport,
- *   zones: IcalZones, tree?: IcalTree }} single events and free/busy components in the order read, then every
- *   series in the order it began; `zones.provider` is what their zoned values resolve through; `tree`
- *   under `mode: 'lossless'` only
+ * @returns {{ calendar: { prodId: string, method?: IcalMethod, components: Record<string, any>[] }, report: IcalReport,
+ *   zones: IcalZones, scheduling?: IcalScheduling, tree?: IcalTree }} single events and free/busy components in
+ *   the order read, then every series in the order it began; `zones.provider` is what their zoned values
+ *   resolve through; `scheduling` with a METHOD only; `tree` under `mode: 'lossless'` only
  * @throws {IcalError} for text the reader cannot follow (`ICAL1001`-`ICAL1009`), and under `strict` for any report entry
  * @throws {import('./limits.js').JoslLimitError} for a limit the input crosses
  * @throws {TypeError} for an unknown or mistyped option
@@ -1171,18 +1546,18 @@ export class IcalReader {
 export function parseIcal(text, options = undefined) {
   const reader = new IcalReader(options, 'parseIcal', ICAL_PARSE);
   const first = reader.feed(text);
-  const { calendar, report, zones } = reader.end();
+  const { calendar, report, zones, scheduling } = reader.end();
   calendar.components = [...first, ...calendar.components];
   const root = rootOf(reader);
   if (/** @type {any} */ (options)?.mode !== 'lossless' || root === null)
-    return { calendar, report, zones };
+    return { calendar, report, zones, ...(scheduling !== undefined ? { scheduling } : {}) };
   // the octets the machine read: a string has no lone surrogate here, so its UTF-8 is exact
   const source = typeof text === 'string' ? new TextEncoder().encode(text) : text.slice();
   /** @type {IcalTree} */
   const tree = Object.freeze({ form: typeof text === 'string' ? 'text' : 'octets', source, root, calendar, zones });
   const { mode: _mode, ...read } = /** @type {IcalReaderOptions} */ (options);
   TREES.set(tree, read);
-  return { calendar, report, zones, tree };
+  return { calendar, report, zones, ...(scheduling !== undefined ? { scheduling } : {}), tree };
 }
 
 /**
@@ -1213,7 +1588,7 @@ export function createIcalReader(options = undefined) {
  * @param {AsyncIterable<string | Uint8Array> | Iterable<string | Uint8Array>} chunks
  * @param {IcalReaderOptions & { signal?: AbortSignal | null }} [options]
  * @returns {AsyncGenerator<{ type: 'component', component: Record<string, any> }
- *   | { type: 'end', calendar: { prodId: string, method?: 'publish' }, report: IcalReport, zones: IcalZones }>}
+ *   | { type: 'end', calendar: { prodId: string, method?: IcalMethod }, report: IcalReport, zones: IcalZones, scheduling?: IcalScheduling }>}
  * @example
  * for await (const item of iterateIcal(response.body))
  *   if (item.type === 'component') await save(item.component);
@@ -1240,10 +1615,10 @@ export async function* iterateIcal(chunks, options = undefined) {
     if (!finished)
       await closeIterator(iterator);
   }
-  const { calendar: { components, ...head }, report, zones } = reader.end();
+  const { calendar: { components, ...head }, report, zones, scheduling } = reader.end();
   for (const component of components)
     yield { type: /** @type {const} */ ('component'), component };
-  yield { type: /** @type {const} */ ('end'), calendar: head, report, zones };
+  yield { type: /** @type {const} */ ('end'), calendar: head, report, zones, ...(scheduling !== undefined ? { scheduling } : {}) };
 }
 
 //#endregion

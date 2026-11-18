@@ -115,11 +115,16 @@ describe('ical reader: a zoned override with its own DURATION', () => {
       '2026-03-30T23:00:00 2026-03-30T20:00 2026-03-31T20:30', '2026-03-31T23:00:00 2026-03-31T21:00 2026-03-31T22:00']);
   });
 
-  it('is withheld only where it ends in the second pass of a repeated hour (ICAL1022)', () => {
+  it('ending in the second pass of a repeated hour, which a zoned end does not name, is read as its duration', () => {
     const { calendar, report } = parseIcal(cal([...head.map((line) => line.replace('20260328T230000', '20261024T020000')),
-      ...override('20261025T020000', '20261025T013000', 'PT2H')]), { provider });
-    assert.deepStrictEqual([calendar.components.length, report.unsupported.map((e) => e.code)], [0, ['ICAL1022']]);
-    assert.match(report.unsupported[0].reason, /second pass/);
+      ...override('20261025T020000', '20261025T013000', 'PT2H')]), { provider, strict: true });
+    assert.deepStrictEqual(report.unsupported, []);
+    const series = /** @type {any} */ (calendar.components[0]).series;
+    assert.deepStrictEqual(series.overrides.map((/** @type {any} */ o) => [o.end, o.duration]), [[undefined, 'PT2H']]);
+    // 01:30 CEST is 23:30Z; two hours on is 01:30Z, 02:30 CET, the second pass
+    const moved = expandSeries(series, { horizon: [Date.UTC(2026, 9, 24), Date.UTC(2026, 9, 28)], provider }).occurrences[1];
+    assert.deepStrictEqual([moved.recurrenceId, moved.instants?.start, moved.instants?.end],
+      ['2026-10-25T02:00:00', Date.parse('2026-10-24T23:30:00Z'), Date.parse('2026-10-25T01:30:00Z')]);
   });
 });
 
