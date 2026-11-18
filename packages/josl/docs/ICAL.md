@@ -155,8 +155,24 @@ widening lets a time at either edge of the horizon read back:
 - `TZUNTIL` (RFC 7808) is at the widened end, so a reader never
   stretches the definition past what the provider said.
 
-No RRULE is inferred for a zone. A VTIMEZONE counts toward `maxOctets`
-but not toward `maxComponents` or `maxRdates`.
+By default every onset is an RDATE. With `onsets: 'rrule'`, a run of
+three or more onsets of one observance in consecutive years, on the same
+weekday of the same month at the same time - the nth (`BYDAY=2SU`) or the
+last (`BYDAY=-1SU`) - is written as one observance with DTSTART its first
+onset and `RRULE:FREQ=YEARLY;BYMONTH;BYDAY` (RFC 5545 §3.6.5), with a UTC
+UNTIL at its last onset where the rule would go on inside the definition
+(New York's 2007 change: the old rules end, the new ones start). Onsets no
+such run covers (a historic change, Apia's skipped day, the Sydney 2000
+change) stay RDATEs. The writer compiles the rewritten definition and
+keeps the RDATE form if its transitions differ in any way. Each
+observance's runs are written as rules only in the choice that is
+shortest, so the RRULE form is never longer than the RDATE form: over
+decades of a yearly rule it is much shorter, and over a few years, or for
+a zone with no change (UTC), it is the RDATE form itself. The tests read each written
+VTIMEZONE back with no provider and compare its offsets with the
+writer's provider at every change of New York, Amsterdam, Lord Howe, Apia
+and UTC from 2000 to 2040. A VTIMEZONE counts toward `maxOctets` but not
+toward `maxComponents` or `maxRdates`.
 
 ```js
 import { compileRecurrence, defineSeries, utcValue, zonedValue } from '@jarenjs/core/calendar';
@@ -235,14 +251,29 @@ What is refused rather than written wrong:
   which a UTC calendar cannot tell apart;
 - an override whose slot the series never makes (`ICAL3015`), which a
   reader would take for an event of its own;
-- an override over this and future occurrences (`ICAL3016`);
+- an override over this and future occurrences in a series with an RDATE
+  period (`ICAL3016`): RECURRENCE-ID;RANGE gives every later slot the
+  range's length or the series', never the period's own;
 - a period of dates as an extra date, or a slot of dates whose length
   differs from the first's (`ICAL3017`): an RDATE period runs between
   date-times.
 
-The recurrence rules the calendar layer enumerates are DAILY, WEEKLY,
-MONTHLY and YEARLY; a series of a sub-daily frequency is refused there
-(`ICAL3005`, its `JY0020` the cause).
+Every frequency from SECONDLY to YEARLY is written with its rule; a
+sub-daily frequency on a date start is refused by the calendar layer
+(`ICAL3005`, its `JY0018` the cause).
+
+An override over this and future occurrences (`range: 'THISANDFUTURE'`)
+of a series written with its rule is its slot's VEVENT with
+`RECURRENCE-ID;RANGE=THISANDFUTURE` (a cancelled one with
+STATUS:CANCELLED); a one-slot override after it with no end of its own
+gets the DURATION the range gives. A series written by its occurrences
+writes them as the calendar layer expands the ranges.
+
+Under `zones: 'embed'` an RDATE or EXDATE of a zoned series that is utc
+or in another zone is written as itself: `EXDATE:20260309T080000Z`,
+`RDATE;TZID=America/New_York:20260304T090000` (with that zone's
+VTIMEZONE); a period whose ends are in two zones is written as two UTC
+instants.
 
 ## Free/busy
 
@@ -417,20 +448,31 @@ provider does not know, is withheld.
 
 A VEVENT with an RRULE or an RDATE is a recurring event; its `series` is
 a value `defineSeries` returned. The rule is compiled by
-`compileRecurrence`, so DAILY, WEEKLY, MONTHLY and YEARLY are read, and a
-sub-daily rule withholds its event with the calendar layer's `JY0020` as
-the cause. RDATE (DATE, DATE-TIME, PERIOD) and EXDATE are read as extra
-and excluded dates; an RDATE of DTSTART says nothing DTSTART does not,
+`compileRecurrence`, so every frequency from SECONDLY to YEARLY is read.
+RDATE (DATE, DATE-TIME, PERIOD) and EXDATE are read as extra and excluded
+dates, each with its own TZID (or UTC), which may differ from DTSTART's; an RDATE of DTSTART says nothing DTSTART does not,
 and is left out. Without a rule, DTSTART and every RDATE are the
 occurrences, each as long as the event. A VEVENT with the series' UID and
 a RECURRENCE-ID is an override: STATUS:CANCELLED makes it a cancelled
 slot, any other a moved one. An override with no DTEND or DURATION lasts
 what such an event lasts (nothing for a time, a day for a date), so its
-end is written out where that differs from the slot's length. An
-override's SUMMARY, DESCRIPTION, LOCATION, STATUS, SEQUENCE or DTSTAMP
+end is written out where that differs from the slot's length (under an
+override over this and future occurrences, the length that range gives).
+A zoned override's own DURATION ends it at its start plus the days on the
+wall clock and the time exactly (RFC 5545 §3.3.6), read through the file's
+zones; one that ends in the second pass of a repeated hour is withheld
+(`ICAL1022`), since a zoned end names the first. An override's SUMMARY, DESCRIPTION, LOCATION, STATUS, SEQUENCE or DTSTAMP
 that differs from its series' is reported (`ICAL1016`); the series' value
-is kept. RANGE=THISANDFUTURE is kept as data and reported (`ICAL1015`);
-expanding it is refused (`JY0021`).
+is kept. RANGE=THISANDFUTURE is read into the series, which the
+calendar layer expands: the override's slot and every later one move by
+its distance and take its length.
+
+The read's `zones.provider` lists the compiled definitions' changes of
+offset (`offsetChanges`), so a SECONDLY or MINUTELY zoned series asks it
+once per wall-clock hour before its horizon rather than once per time;
+for a TZID it routes to the caller's provider, which lists none, it
+answers one entry at the span's start, and the walk resolves time by
+time.
 
 ### The report
 
@@ -453,8 +495,9 @@ counted, not listed (`report.omitted`).
   TZID (`ICAL1019`), a refusal of the calendar layer (`ICAL1020`), an
   override no series claims or a second series of one UID (`ICAL1021`),
   and what would change when the event occurs that this release does not
-  read (`ICAL1022`: EXRULE, EXDATE with no rule, a zoned length placed
-  only by the zone's offsets).
+  read (`ICAL1022`: EXRULE, EXDATE with no rule, a zoned RDATE length, a
+  zoned override's DURATION that ends in the second pass of a repeated
+  hour).
 
 `strict: true` refuses at the first entry, with the entry's code. Text the
 reader cannot follow is refused in either mode (`ICAL1001`-`ICAL1009`).
@@ -528,6 +571,9 @@ it (`2026-03-02`, `2026-03-02T09:00:00`, `2026-03-02T08:00:00Z`).
 | `{ op: 'cancel', uid, recurrenceId? }` | STATUS:CANCELLED on the event, or on the occurrence's own VEVENT; an occurrence with none gets an EXDATE |
 | `{ op: 'exdate', uid, recurrenceId }` | an EXDATE on the series |
 | `{ op: 'remove', uid, recurrenceId? }` | the event's lines (every VEVENT of its UID), or the occurrence's own VEVENT's, which returns the occurrence to its series' form |
+| `{ ..., component: 'todo' \| 'journal' }` | `retitle`, `describe`, `relocate` (VTODO only) and `remove` of the VTODO or VJOURNAL of that UID (and RECURRENCE-ID), as written: the model does not read them |
+| `{ ..., alarm: n }` | the nth VALARM (from 0, in file order) of the event, occurrence or VTODO: `describe` (a string: DISPLAY and EMAIL alarms need one) and `remove` |
+| `{ op: 'trigger', uid, recurrenceId?, component?, alarm, trigger }` | the VALARM's TRIGGER value, a duration such as `-PT15M`, its parameters (RELATED=END) kept; an absolute TRIGGER is refused (`ICAL4013`) |
 
 Every octet no edit reaches is the input's own. An edit writes whole
 content lines and only its own:
@@ -554,10 +600,12 @@ edit is planned before anything is emitted, so a refusal returns nothing:
   an event the read did not withhold, and an occurrence's own VEVENT one
   the read took into its series (`ICAL4006` otherwise);
 - a move's times are of the series' kind and zone, in whole seconds;
-- RANGE=THISANDFUTURE overrides stay as written and are never expanded:
-  an edit of their slot or a later one is refused (`ICAL4005`), while the
-  event's text, the override's own text and its removal are edits like
-  any other;
+- a RANGE=THISANDFUTURE override is read into its series and expanded:
+  a later occurrence is edited as any other (one moved with no end of its
+  own ends by the range's length, not the series' DURATION a copy would
+  carry), while a move, cancel or EXDATE of the range's own slot would
+  change every later occurrence and is refused (`ICAL4005`); its text and
+  its removal are edits like any other;
 - a text with an alternate representation (ALTREP), a property held more
   than once, and an EXDATE over an occurrence's own VEVENT would lose or
   contradict content (`ICAL4007`);
@@ -567,8 +615,8 @@ edit is planned before anything is emitted, so a refusal returns nothing:
 - the output is read once more under the options the tree was read with,
   and an edit after which that read would withhold an event it held
   before is refused (`ICAL4012`): a zoned occurrence moved with a
-  `duration`, which the canonical read does not place, is moved with an
-  `end` instead.
+  `duration` that ends in the second pass of a repeated hour, which the
+  canonical read withholds, is moved with an `end` instead.
 
 ## Codes
 
@@ -599,14 +647,14 @@ refuses carries the writer's code for it (`ICAL3004`, `ICAL3006`,
 | `ICAL1012` | reported: a parameter outside the subset, its property read without it |
 | `ICAL1013` | reported: a component outside the subset, left out with everything inside it |
 | `ICAL1014` | reported: a VTIMEZONE that cannot be compiled, a second one of a TZID, or one a limit stopped |
-| `ICAL1015` | reported: an override over this and future occurrences, kept as data |
+| `ICAL1015` | Retired, no longer raised: an override over this and future occurrences is read into its series and expanded |
 | `ICAL1016` | reported: an override's property differs from its series', whose value is kept |
 | `ICAL1017` | withheld: a component lacks a property it requires, repeats one, or holds two that exclude each other |
 | `ICAL1018` | withheld: a value is not of the form or kind its property takes here |
 | `ICAL1019` | withheld: a TZID that names no IANA zone the provider knows, or no provider |
 | `ICAL1020` | withheld: the calendar layer refused a value, rule or series (cause attached) |
 | `ICAL1021` | withheld: an override with no series of its UID, or a second series of one UID |
-| `ICAL1022` | withheld: what changes when the event occurs and this release does not read (EXRULE, EXDATE with no rule, a zoned length) |
+| `ICAL1022` | withheld: what changes when the event occurs and this release does not read (EXRULE, EXDATE with no rule, a zoned RDATE length, a zoned override's DURATION ending in a repeated hour's second pass) |
 | `ICAL1023` | reported: a VTIMEZONE of an IANA name and the provider give other offsets over the span the file uses it |
 | `ICAL1024` | reported: a value lies outside what the VTIMEZONE of its TZID covers |
 | `ICAL3001` | the calendar or a component is not an object of the documented model, or lacks a member it requires |
@@ -624,7 +672,7 @@ refuses carries the writer's code for it (`ICAL3004`, `ICAL3006`,
 | `ICAL3013` | a series makes no occurrence to write |
 | `ICAL3014` | two slots of a zoned series resolve to one UTC instant |
 | `ICAL3015` | an override names a slot the series never makes |
-| `ICAL3016` | an override over this and future occurrences is not written in this mode |
+| `ICAL3016` | an override over this and future occurrences of a series with an RDATE period, whose own length the range would override |
 | `ICAL3017` | a value iCalendar cannot spell here |
 | `ICAL3018` | the writer has ended or refused, and takes no more components |
 | `ICAL3019` | `zones: 'embed'` and no horizon for a zone's VTIMEZONE |
@@ -633,7 +681,7 @@ refuses carries the writer's code for it (`ICAL3004`, `ICAL3006`,
 | `ICAL4002` | no VEVENT holds the UID, or the occurrence, an edit names |
 | `ICAL4003` | more than one VEVENT could be the one an edit names |
 | `ICAL4004` | the event is not recurring, its series makes no such occurrence, or a moved occurrence is excluded or cancelled |
-| `ICAL4005` | the occurrence lies at or after an override over this and future occurrences, which is kept and never expanded |
+| `ICAL4005` | the occurrence is the slot of an override over this and future occurrences; moving, cancelling or excluding it would change every later one |
 | `ICAL4006` | the read withheld the event, or the occurrence's own VEVENT, so the occurrence cannot be checked |
 | `ICAL4007` | the edit would lose content: a property held more than once, a text with an alternate representation, an occurrence with its own VEVENT |
 | `ICAL4008` | a moved occurrence's start or end is not of its series' kind and zone |
@@ -641,6 +689,7 @@ refuses carries the writer's code for it (`ICAL3004`, `ICAL3006`,
 | `ICAL4010` | two edits reach one property or occurrence, or an event another edit removes |
 | `ICAL4011` | the tree is not one `parseIcal` returned under `mode: 'lossless'` |
 | `ICAL4012` | the edited calendar would not read back with every event an edit reached and kept |
+| `ICAL4013` | a VALARM's TRIGGER is an absolute time, which a duration does not replace |
 
 ## Capability matrix
 
@@ -657,24 +706,24 @@ a calendar holding only that name is read and its code asserted. Under
 | `VEVENT` | supported | supported | preserved; the component `patchIcal` edits |
 | `VFREEBUSY` | supported | supported | preserved |
 | `VTIMEZONE`, `STANDARD`, `DAYLIGHT` | `zones: 'embed'` | compiled; one that cannot be is reported (`ICAL1014`) | preserved |
-| `VTODO`, `VJOURNAL`, `VAVAILABILITY`, `AVAILABLE`, X- and IANA components | refused (`ICAL3002`) | reported (`ICAL1013`) | preserved |
-| `VALARM` | refused (`ICAL3002`) | reported (`ICAL1013`) | preserved; copied into a new override |
+| `VTODO`, `VJOURNAL`, `VAVAILABILITY`, `AVAILABLE`, X- and IANA components | refused (`ICAL3002`) | reported (`ICAL1013`) | preserved; a VTODO or VJOURNAL retitled, described, relocated (VTODO) or removed by `component` |
+| `VALARM` | refused (`ICAL3002`) | reported (`ICAL1013`) | preserved; copied into a new override; described, re-triggered or removed by `alarm` |
 | `VERSION`, `PRODID` | supported | supported, VERSION 2.0 (any other refused, `ICAL1008`) | preserved |
 | `CALSCALE` | not written | GREGORIAN; any other refused (`ICAL1008`) | preserved |
 | `METHOD` | `PUBLISH` only | `PUBLISH`; any other reported (`ICAL1011`) | preserved |
 | `UID`, `DTSTAMP` | supported | supported | preserved; a new override's DTSTAMP from the edit |
-| `DTSTART`, `DTEND`, `DURATION` | supported | supported; a zoned override's DURATION that differs from its slot's withheld (`ICAL1022`) | preserved; written by `move` |
+| `DTSTART`, `DTEND`, `DURATION` | supported | supported; a zoned override's DURATION that ends in a repeated hour's second pass withheld (`ICAL1022`) | preserved; written by `move` |
 | `SUMMARY`, `DESCRIPTION`, `LOCATION` | supported | supported | preserved; set or removed by `retitle`, `describe`, `relocate` |
 | `STATUS` | supported | supported | preserved; written by `cancel` |
 | `SEQUENCE` | supported | supported | preserved |
-| `RRULE` | DAILY, WEEKLY, MONTHLY and YEARLY, for date, floating and utc series, and zoned ones under `zones: 'embed'` | DAILY, WEEKLY, MONTHLY and YEARLY, every kind; sub-daily withheld (`ICAL1020`, `JY0020`) | preserved |
-| `RDATE` | supported (DATE, DATE-TIME, PERIOD) | supported | preserved |
-| `EXDATE` | supported | supported; with no rule or RDATE withheld (`ICAL1022`) | preserved; added by `exdate` and `cancel` |
-| `RECURRENCE-ID` | supported (no RANGE) | supported | preserved; written in a new override |
+| `RRULE` | SECONDLY to YEARLY, for date (DAILY to YEARLY), floating and utc series, and zoned ones under `zones: 'embed'`; a VTIMEZONE's yearly onsets under `onsets: 'rrule'` | SECONDLY to YEARLY, every kind | preserved |
+| `RDATE` | supported (DATE, DATE-TIME, PERIOD); utc or in another zone, written as itself under `zones: 'embed'` | supported, each with its own TZID | preserved |
+| `EXDATE` | supported; utc or in another zone, written as itself under `zones: 'embed'` | supported, each with its own TZID; with no rule or RDATE withheld (`ICAL1022`) | preserved; added by `exdate` and `cancel` |
+| `RECURRENCE-ID` | supported | supported | preserved; written in a new override |
 | `EXRULE` | not written | withheld (`ICAL1022`) | preserved |
 | `FREEBUSY` | supported, with FBTYPE | supported | preserved |
 | `ATTACH`, `CATEGORIES`, `CLASS`, `COMMENT`, `GEO`, `PERCENT-COMPLETE`, `PRIORITY`, `RESOURCES`, `COMPLETED`, `DUE`, `TRANSP`, `ATTENDEE`, `CONTACT`, `ORGANIZER`, `RELATED-TO`, `URL`, `CREATED`, `LAST-MODIFIED`, `REQUEST-STATUS` | not written | reported (`ICAL1011`) | preserved |
-| `ACTION`, `REPEAT`, `TRIGGER` | not written | reported with their VALARM (`ICAL1013`) | preserved |
+| `ACTION`, `REPEAT`, `TRIGGER` | not written | reported with their VALARM (`ICAL1013`) | preserved; a relative TRIGGER's value set by `trigger` |
 | `TZID` (property), `TZOFFSETFROM`, `TZOFFSETTO`, `TZNAME` | `zones: 'embed'` | compiled | preserved |
 | `TZURL` | not written | read past, informational | preserved |
 | `TZUNTIL` (RFC 7808) | `zones: 'embed'` | compiled: the definition's end | preserved |
@@ -684,7 +733,7 @@ a calendar holding only that name is read and its code asserted. Under
 | `CONFERENCE` (RFC 7986) | not written | reported (`ICAL1011`) | preserved |
 | X- and IANA properties | refused (`ICAL3002`) | reported (`ICAL1011`) | preserved |
 | `VALUE`, `TZID` (parameter) | supported | supported | preserved; spelled for every new time |
-| `RANGE` | not written | THISANDFUTURE kept as data and reported (`ICAL1015`); any other withheld (`ICAL1018`) | preserved; edits at or after it refused (`ICAL4005`) |
+| `RANGE` | THISANDFUTURE, on a series written with its rule (`ICAL3016` with an RDATE period); expanded otherwise | THISANDFUTURE read into the series and expanded; any other withheld (`ICAL1018`) | preserved; a later occurrence edited as any other, a move, cancel or EXDATE of its own slot refused (`ICAL4005`) |
 | `FBTYPE` | supported | supported | preserved |
 | `ALTREP` | not written | reported (`ICAL1012`) | preserved; a text edit of its property refused (`ICAL4007`) |
 | `LANGUAGE`, `CN`, `CUTYPE`, `DELEGATED-FROM`, `DELEGATED-TO`, `DIR`, `ENCODING`, `FMTTYPE`, `MEMBER`, `PARTSTAT`, `RELATED`, `RELTYPE`, `ROLE`, `RSVP`, `SENT-BY`, `DISPLAY`, `EMAIL`, `FEATURE`, `LABEL`, X- and IANA parameters | not written | reported on a property of the subset (`ICAL1012`) | preserved; a replaced line keeps its parameters |

@@ -28,7 +28,7 @@ import { CodedError } from '@jarenjs/core/errors';
  *   | 'ICAL3007' | 'ICAL3008' | 'ICAL3009' | 'ICAL3010' | 'ICAL3011' | 'ICAL3012' | 'ICAL3013'
  *   | 'ICAL3014' | 'ICAL3015' | 'ICAL3016' | 'ICAL3017' | 'ICAL3018' | 'ICAL3019' | 'ICAL3020'
  *   | 'ICAL4001' | 'ICAL4002' | 'ICAL4003' | 'ICAL4004' | 'ICAL4005' | 'ICAL4006' | 'ICAL4007'
- *   | 'ICAL4008' | 'ICAL4009' | 'ICAL4010' | 'ICAL4011' | 'ICAL4012', string>>}
+ *   | 'ICAL4008' | 'ICAL4009' | 'ICAL4010' | 'ICAL4011' | 'ICAL4012' | 'ICAL4013', string>>}
  */
 export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
   ICAL1001: 'the input is not UTF-8, or a string holds a lone surrogate',
@@ -45,7 +45,7 @@ export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
   ICAL1012: 'a parameter outside the subset; its property is read without it',
   ICAL1013: 'a component outside the subset; it is left out of the model with everything inside it',
   ICAL1014: 'a VTIMEZONE that cannot be compiled, a second one of a TZID, or one a limit stopped; a TZID it would define resolves as one no VTIMEZONE defines',
-  ICAL1015: 'an override over this and future occurrences; it is kept as data and its expansion refused',
+  ICAL1015: 'Retired, no longer raised: an override over this and future occurrences is read into its series and expanded',
   ICAL1016: 'an override\'s property differs from its series\'; the series\' value is kept',
   ICAL1017: 'a component lacks a property it requires, repeats one, or holds two that exclude each other; it is withheld',
   ICAL1018: 'a value is not of the form or kind its property takes here; its component is withheld',
@@ -70,7 +70,7 @@ export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
   ICAL3013: 'a series makes no occurrence to write',
   ICAL3014: 'two slots of a zoned series resolve to one UTC instant, which a UTC calendar cannot tell apart',
   ICAL3015: 'an override names a slot the series never makes',
-  ICAL3016: 'an override over this and future occurrences is not written in this mode',
+  ICAL3016: 'an override over this and future occurrences of a series with an RDATE period, whose own length the range would override',
   ICAL3017: 'a value iCalendar cannot spell here: a period of dates as an extra date, or a free/busy span that is not an instant',
   ICAL3018: 'the writer has ended or refused, and takes no more components',
   ICAL3019: "zones: 'embed' and no horizon for the VTIMEZONE of a zone",
@@ -79,7 +79,7 @@ export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
   ICAL4002: 'no VEVENT holds the UID, or the occurrence, an edit names',
   ICAL4003: 'more than one VEVENT could be the one an edit names',
   ICAL4004: 'the event is not recurring, or its series makes no such occurrence, or the occurrence is excluded or cancelled',
-  ICAL4005: 'the occurrence lies at or after an override over this and future occurrences, which is kept and never expanded',
+  ICAL4005: 'the occurrence is the slot of an override over this and future occurrences; moving, cancelling or excluding it would change every later one',
   ICAL4006: "the read withheld the event, or the occurrence's own VEVENT, so the occurrence cannot be checked",
   ICAL4007: 'the edit would lose content: a property held more than once, a text with an alternate representation, or an occurrence with its own VEVENT',
   ICAL4008: "a moved occurrence's start or end is not of its series' kind and zone",
@@ -87,6 +87,7 @@ export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
   ICAL4010: 'two edits reach one property or occurrence, or an event another edit removes',
   ICAL4011: "the tree is not one parseIcal returned under mode: 'lossless'",
   ICAL4012: 'the edited calendar would not read back with every event an edit reached and kept',
+  ICAL4013: "a VALARM's TRIGGER is an absolute time, which a duration does not replace",
 });
 
 /**

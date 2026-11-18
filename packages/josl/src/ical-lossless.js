@@ -21,8 +21,11 @@
 // must be one the series makes (asked of the calendar layer, never
 // guessed), and an edit whose result the tree cannot hold without losing
 // or contradicting content is refused with a code, before anything is
-// emitted. RANGE=THISANDFUTURE overrides are kept as written and never
-// expanded: an edit of their slot, or of a later one, is refused.
+// emitted. A RANGE=THISANDFUTURE override is read into its series,
+// which the calendar layer expands: a later occurrence is edited as any
+// other (one moved without an end lasts what the range gives), and an
+// edit of the range's own slot, which would move every later one, is
+// refused.
 // Every edit reads the input as it was read: two edits that reach one
 // line, one occurrence, or an event another removes are refused; read
 // the output again to edit further. The output is read once more, under
@@ -47,14 +50,23 @@ const TEXT_EDITS = /** @type {const} */ ({ retitle: ['SUMMARY', 'summary'], desc
   relocate: ['LOCATION', 'location'] });
 /** The members each edit takes, `op` and `uid` with them. */
 const MEMBERS = Object.freeze({
-  retitle: ['recurrenceId', 'summary'],
-  describe: ['recurrenceId', 'description'],
-  relocate: ['recurrenceId', 'location'],
+  retitle: ['recurrenceId', 'component', 'summary'],
+  describe: ['recurrenceId', 'component', 'alarm', 'description'],
+  relocate: ['recurrenceId', 'component', 'location'],
   move: ['recurrenceId', 'start', 'end', 'duration', 'dtstamp'],
   cancel: ['recurrenceId'],
   exdate: ['recurrenceId'],
-  remove: ['recurrenceId'],
+  remove: ['recurrenceId', 'component', 'alarm'],
+  trigger: ['recurrenceId', 'component', 'alarm', 'trigger'],
 });
+/** The components an edit names by `component`, and the edits each takes (RFC 5545 §3.6.1-§3.6.3). */
+const COMPONENTS = Object.freeze({
+  event: { name: 'VEVENT', ops: Object.keys(MEMBERS).filter((op) => op !== 'trigger'), alarms: true },
+  todo: { name: 'VTODO', ops: ['retitle', 'describe', 'relocate', 'remove'], alarms: true },
+  journal: { name: 'VJOURNAL', ops: ['retitle', 'describe', 'remove'], alarms: false },
+});
+/** The edits of one VALARM. */
+const ALARM_OPS = Object.freeze(['describe', 'trigger', 'remove']);
 /** What a new override does not copy from its series' VEVENT. */
 const SERIES_ONLY = Object.freeze(['RRULE', 'RDATE', 'EXDATE', 'EXRULE']);
 
@@ -77,13 +89,21 @@ const encoder = new TextEncoder();
  * - `exdate`: exclude an occurrence by an EXDATE on its series;
  * - `remove`: remove the event (every VEVENT of its UID), or only the
  *   occurrence's own VEVENT, which returns it to its series' form.
- * @typedef {{ op: 'retitle', uid: string, recurrenceId?: string, summary: string | null }
- *   | { op: 'describe', uid: string, recurrenceId?: string, description: string | null }
- *   | { op: 'relocate', uid: string, recurrenceId?: string, location: string | null }
+ *
+ * `component: 'todo'` or `'journal'` names a VTODO or VJOURNAL by its UID
+ * (and RECURRENCE-ID) instead, which the model does not read: `retitle`,
+ * `describe`, `relocate` (VTODO only) and `remove` edit it as written.
+ * `alarm: n` names the nth VALARM (from 0, in file order) of the event,
+ * occurrence or VTODO: `describe` (a string), `trigger` (a duration that
+ * replaces a relative TRIGGER's value, its parameters kept) and `remove`.
+ * @typedef {{ op: 'retitle', uid: string, recurrenceId?: string, component?: 'event' | 'todo' | 'journal', summary: string | null }
+ *   | { op: 'describe', uid: string, recurrenceId?: string, component?: 'event' | 'todo' | 'journal', alarm?: number, description: string | null }
+ *   | { op: 'relocate', uid: string, recurrenceId?: string, component?: 'event' | 'todo', location: string | null }
  *   | { op: 'move', uid: string, recurrenceId: string, start: unknown, end?: unknown, duration?: string, dtstamp?: unknown }
  *   | { op: 'cancel', uid: string, recurrenceId?: string }
  *   | { op: 'exdate', uid: string, recurrenceId: string }
- *   | { op: 'remove', uid: string, recurrenceId?: string }} IcalEdit
+ *   | { op: 'remove', uid: string, recurrenceId?: string, component?: 'event' | 'todo' | 'journal', alarm?: number }
+ *   | { op: 'trigger', uid: string, recurrenceId?: string, component?: 'event' | 'todo', alarm: number, trigger: string }} IcalEdit
  */
 
 /**
@@ -241,6 +261,8 @@ class Plan {
   claims = new Map();
   /** @type {Map<string, Group>} */
   groups = new Map();
+  /** VTODOs and VJOURNALs by `NAME\u0000uid` @type {Map<string, Group>} */
+  others = new Map();
   /** @type {Map<string, Record<string, any>>} */
   model = new Map();
   #order = 0;
@@ -251,7 +273,7 @@ class Plan {
     this.source = tree.source;
     this.options = TREES.get(tree);
     for (const node of tree.root.children) {
-      if (node.name !== 'VEVENT')
+      if (node.name !== 'VEVENT' && node.name !== 'VTODO' && node.name !== 'VJOURNAL')
         continue;
       const uids = named(node, 'UID');
       if (uids.length !== 1)
@@ -263,10 +285,12 @@ class Plan {
       catch {
         uid = uids[0].value;
       }
-      let group = this.groups.get(uid);
+      const groups = node.name === 'VEVENT' ? this.groups : this.others;
+      const key = node.name === 'VEVENT' ? uid : `${node.name}\u0000${uid}`;
+      let group = groups.get(key);
       if (group === undefined) {
         group = { masters: [], overrides: new Map(), last: 0 };
-        this.groups.set(uid, group);
+        groups.set(key, group);
       }
       group.last = Math.max(group.last, /** @type {number} */ (node.to));
       const ids = named(node, 'RECURRENCE-ID');
@@ -345,21 +369,22 @@ class Plan {
 }
 
 /**
- * The VEVENT an edit names: the event (no recurrenceId) or the
- * occurrence's own; `null` for an occurrence with none.
+ * The VEVENT (or VTODO, VJOURNAL) an edit names: the event (no
+ * recurrenceId) or the occurrence's own; `null` for an occurrence with none.
  * @param {Plan} plan
  * @param {Group} group
  * @param {string} uid
  * @param {string | undefined} id
  * @param {string} at
+ * @param {string} [name] - the component's name, for a refusal
  * @returns {Node | null}
  */
-function nodeOf(plan, group, uid, id, at) {
+function nodeOf(plan, group, uid, id, at, name = 'VEVENT') {
   const list = id === undefined ? group.masters : group.overrides.get(id) ?? [];
   if (list.length > 1)
-    refuse('ICAL4003', `${list.length} VEVENTs hold the UID '${uid}'${id === undefined ? ' and no RECURRENCE-ID' : ` and the RECURRENCE-ID ${id}`}`, at);
+    refuse('ICAL4003', `${list.length} ${name}s hold the UID '${uid}'${id === undefined ? ' and no RECURRENCE-ID' : ` and the RECURRENCE-ID ${id}`}`, at);
   if (list.length === 0 && id === undefined)
-    refuse('ICAL4002', `no VEVENT holds the UID '${uid}' without a RECURRENCE-ID`, at);
+    refuse('ICAL4002', `no ${name} holds the UID '${uid}' without a RECURRENCE-ID`, at);
   return list[0] ?? null;
 }
 
@@ -371,15 +396,16 @@ function nodeOf(plan, group, uid, id, at) {
  * @returns {Group}
  */
 function groupOf(plan, edit, at) {
-  const group = plan.groups.get(edit.uid);
+  const { name } = COMPONENTS[/** @type {keyof COMPONENTS} */ (edit.component ?? 'event')];
+  const group = name === 'VEVENT' ? plan.groups.get(edit.uid) : plan.others.get(`${name}\u0000${edit.uid}`);
   if (group === undefined)
-    refuse('ICAL4002', `no VEVENT holds the UID '${edit.uid}'`, `${at}/uid`);
+    refuse('ICAL4002', `no ${name} holds the UID '${edit.uid}'`, `${at}/uid`);
   return group;
 }
 
 /**
  * The series an occurrence edit reaches, checked: read by the canonical
- * read, of one series VEVENT, and not under a THISANDFUTURE override.
+ * read, of one series VEVENT, and not the slot of a THISANDFUTURE override.
  * @param {Plan} plan
  * @param {Group} group
  * @param {Record<string, any>} edit
@@ -395,11 +421,12 @@ function seriesOf(plan, group, edit, at) {
   if (component.series === undefined)
     refuse('ICAL4004', `the event '${uid}' is not recurring; it has no occurrence ${id}`, `${at}/recurrenceId`);
   const { series } = component;
-  for (const override of series.overrides) {
-    if (override.range !== undefined && override.recurrenceId <= id) {
-      refuse('ICAL4005', `the override of ${override.recurrenceId} ranges over this and future occurrences; it is kept as written and ${id} is not edited under it`,
-        `${at}/recurrenceId`);
-    }
+  // the slot of an override over this and future occurrences is that
+  // override's own VEVENT, and moving, cancelling or excluding it would
+  // change every later occurrence too; a later slot is edited as any other
+  if (series.overrides.some((/** @type {any} */ override) => override.range !== undefined && override.recurrenceId === id)) {
+    refuse('ICAL4005', `the occurrence ${id} is the slot of an override over this and future occurrences; editing it would change every later one`,
+      `${at}/recurrenceId`);
   }
   const starts = named(master, 'DTSTART');
   return { series, master, shape: shapeOf(starts[0]) };
@@ -452,8 +479,40 @@ function makes(plan, series, shape, id, at) {
  * @param {string} id
  * @returns {boolean}
  */
-const gone = (series, id) => series.exdates.some((/** @type {any} */ value) => slotId(value) === id)
-  || series.overrides.some((/** @type {any} */ override) => override.recurrenceId === id && override.status === 'cancelled');
+const gone = (series, id) => series.exdates.some((/** @type {any} */ value) => names(series, value, id))
+  || series.overrides.some((/** @type {any} */ override) => override.recurrenceId === id && override.status === 'cancelled')
+  || rangeOver(series, id)?.status === 'cancelled';
+
+/**
+ * The override over this and future occurrences in force at a slot: the
+ * latest at or before it, in whatever order the overrides are listed.
+ * @param {any} series
+ * @param {string} id
+ * @returns {any}
+ */
+function rangeOver(series, id) {
+  let over;
+  for (const override of series.overrides) {
+    if (override.range !== undefined && override.recurrenceId <= id && (over === undefined || override.recurrenceId > over.recurrenceId))
+      over = override;
+  }
+  return over;
+}
+
+/**
+ * Whether an EXDATE is spelled as a slot's recurrenceId: one of the
+ * series' own kind and zone. A utc EXDATE of a zoned series, or one in
+ * another zone, removes the slots at its instant, which its spelling
+ * does not name; it is never taken for the slot its wall clock spells.
+ * @param {any} series
+ * @param {any} value
+ * @param {string} id
+ * @returns {boolean}
+ */
+function names(series, value, id) {
+  const own = series.base?.dtstart ?? series.rdates[0]?.start ?? series.rdates[0];
+  return value.kind === own?.kind && value.zone === own?.zone && slotId(value) === id;
+}
 
 /**
  * A time of the series' kind, spelled: the value admitted by the
@@ -578,6 +637,28 @@ function lengthOf(edit, shape, wall, at) {
 }
 
 /**
+ * The end an occurrence moved without one takes under the override over
+ * this and future occurrences in force at its slot, where that range
+ * gives a length of its own (its end less its start, on the wall clock,
+ * as the calendar layer applies it): a new VEVENT copied from the series
+ * would otherwise carry the series' length.
+ * @param {any} series
+ * @param {Shape} shape
+ * @param {string} id
+ * @param {number} wall - the new start
+ * @returns {{ name: 'DTEND', value: string, line: string } | undefined}
+ */
+function rangedEnd(series, shape, id, wall) {
+  const over = rangeOver(series, id);
+  if (over === undefined || over.status === 'cancelled' || over.end === undefined)
+    return undefined;
+  const place = (/** @type {any} */ value) => timeOf(value, shape, '').wall;
+  const end = wall + place(over.end) - place(over.start);
+  const text = shape.kind === 'date' ? formatDate(end / 86400000) : shape.kind === 'utc' ? formatUtc(end) : formatFloating(end);
+  return { name: 'DTEND', value: text, line: `DTEND${timeParams(shape)}:${text}` };
+}
+
+/**
  * Move an occurrence: edit its own VEVENT, or add one after the last
  * VEVENT of its UID, copied from the series' VEVENT line by line. A time
  * property keeps its name and parameters as written (a series and its
@@ -594,24 +675,24 @@ function move(plan, group, edit, at) {
   const id = edit.recurrenceId;
   const own = ownOf(plan, group, series, edit, at);
   const start = timeOf(edit.start, shape, `${at}/start`);
-  const length = lengthOf(edit, shape, start.wall, at);
+  const given = lengthOf(edit, shape, start.wall, at);
   const stamp = edit.dtstamp === undefined ? undefined : formatUtc(stampOf(edit.dtstamp, `${at}/dtstamp`));
   if (own !== null) {
     if (named(own, 'STATUS').some((prop) => prop.value.toUpperCase() === 'CANCELLED'))
       refuse('ICAL4004', `the occurrence ${id} is cancelled; it is not moved`, `${at}/recurrenceId`);
-    if (length === undefined && named(own, 'DTEND').length !== 0)
+    if (given === undefined && named(own, 'DTEND').length !== 0)
       refuse('ICAL4009', `the occurrence ${id} ends at its DTEND; give the move an end or a duration`, at);
     const dtstart = named(own, 'DTSTART')[0];
     replaceValue(plan, dtstart, start.text);
-    if (length !== undefined) {
-      const same = named(own, length.name)[0];
-      const other = named(own, length.name === 'DTEND' ? 'DURATION' : 'DTEND')[0];
+    if (given !== undefined) {
+      const same = named(own, given.name)[0];
+      const other = named(own, given.name === 'DTEND' ? 'DURATION' : 'DTEND')[0];
       if (same !== undefined)
-        replaceValue(plan, same, length.value);
+        replaceValue(plan, same, given.value);
       else if (other !== undefined)
-        plan.change(/** @type {number} */ (other.from), /** @type {number} */ (other.to), lineOf(length.line, endingOf(source, /** @type {any} */ (other)) || '\r\n'));
+        plan.change(/** @type {number} */ (other.from), /** @type {number} */ (other.to), lineOf(given.line, endingOf(source, /** @type {any} */ (other)) || '\r\n'));
       else
-        insertProperty(plan, own, length.line, dtstart);
+        insertProperty(plan, own, given.line, dtstart);
     }
     if (stamp !== undefined)
       setValue(plan, own, 'DTSTAMP', stamp, at);
@@ -619,6 +700,7 @@ function move(plan, group, edit, at) {
   }
   if (gone(series, id) || !makes(plan, series, shape, id, at))
     refuse('ICAL4004', `the series '${edit.uid}' makes no occurrence ${id}${gone(series, id) ? ' that is not excluded or cancelled' : ''}`, `${at}/recurrenceId`);
+  const length = given ?? rangedEnd(series, shape, id, start.wall);
   if (length === undefined && named(master, 'DTEND').length !== 0)
     refuse('ICAL4009', `the series ends each occurrence at its DTEND; give the move an end or a duration`, at);
   const ending = endingOf(source, /** @type {any} */ (shape.prop)) || '\r\n';
@@ -776,7 +858,7 @@ function exdate(plan, group, edit, at) {
   const { series, master, shape } = seriesOf(plan, group, edit, at);
   if (nodeOf(plan, group, edit.uid, id, at) !== null)
     refuse('ICAL4007', `the occurrence ${id} has its own VEVENT, which an EXDATE would leave behind; cancel or remove it`, `${at}/recurrenceId`);
-  if (series.exdates.some((/** @type {any} */ value) => slotId(value) === id))
+  if (series.exdates.some((/** @type {any} */ value) => names(series, value, id)) || rangeOver(series, id)?.status === 'cancelled')
     return;
   if (!makes(plan, series, shape, id, at))
     refuse('ICAL4004', `the series '${edit.uid}' makes no occurrence ${id}`, `${at}/recurrenceId`);
@@ -792,15 +874,51 @@ function exdate(plan, group, edit, at) {
  */
 function remove(plan, group, edit, at) {
   const id = edit.recurrenceId;
+  const { name } = COMPONENTS[/** @type {keyof COMPONENTS} */ (edit.component ?? 'event')];
   if (id !== undefined) {
-    const own = nodeOf(plan, group, edit.uid, id, at);
+    const own = nodeOf(plan, group, edit.uid, id, at, name);
     if (own === null)
-      refuse('ICAL4002', `no VEVENT holds the occurrence ${id} of '${edit.uid}'`, `${at}/recurrenceId`);
+      refuse('ICAL4002', `no ${name} holds the occurrence ${id} of '${edit.uid}'`, `${at}/recurrenceId`);
     plan.change(/** @type {number} */ (own.from), /** @type {number} */ (own.to), '');
     return;
   }
   for (const node of [...group.masters, ...[...group.overrides.values()].flat()])
     plan.change(/** @type {number} */ (node.from), /** @type {number} */ (node.to), '');
+}
+
+/**
+ * Edit one VALARM of the event, occurrence or VTODO an edit names: its
+ * DESCRIPTION, its TRIGGER's value (a relative one, parameters kept), or
+ * the whole alarm.
+ * @param {Plan} plan
+ * @param {Group} group
+ * @param {Record<string, any>} edit
+ * @param {string} at
+ */
+function alarm(plan, group, edit, at) {
+  const { name } = COMPONENTS[/** @type {keyof COMPONENTS} */ (edit.component ?? 'event')];
+  const owner = nodeOf(plan, group, edit.uid, edit.recurrenceId, at, name);
+  if (owner === null)
+    refuse('ICAL4002', `no ${name} holds the occurrence ${edit.recurrenceId} of '${edit.uid}'`, `${at}/recurrenceId`);
+  const node = owner.children.filter((child) => child.name === 'VALARM')[edit.alarm];
+  if (node === undefined)
+    refuse('ICAL4002', `the ${name} of '${edit.uid}' holds no VALARM ${edit.alarm} (they count from 0)`, `${at}/alarm`);
+  if (edit.op === 'remove') {
+    plan.change(/** @type {number} */ (node.from), /** @type {number} */ (node.to), '');
+    return;
+  }
+  if (edit.op === 'describe') {
+    setText(plan, node, 'DESCRIPTION', edit.description, `${at}/description`);
+    return;
+  }
+  const triggers = named(node, 'TRIGGER');
+  if (triggers.length !== 1)
+    refuse('ICAL4007', `the VALARM holds TRIGGER ${triggers.length} times; which one to change is not known`, at);
+  // an absolute TRIGGER says VALUE=DATE-TIME; some exporters write the UTC time without it
+  const value = paramOf(triggers[0], 'VALUE');
+  if ((value !== undefined && value !== 'DURATION') || COMPACT_FORM.test(triggers[0].value))
+    refuse('ICAL4013', `the TRIGGER is an absolute time (${triggers[0].value}); a duration does not replace it`, `${at}/trigger`);
+  replaceValue(plan, triggers[0], edit.trigger);
 }
 
 /**
@@ -835,6 +953,29 @@ function admitEdit(edit, at) {
     if (value !== null && typeof value !== 'string')
       refuse('ICAL4001', `${member} is a string, or null to remove it`, `${at}/${member}`);
   }
+  const { component = 'event', alarm: index } = /** @type {Record<string, any>} */ (edit);
+  if (typeof component !== 'string' || !Object.hasOwn(COMPONENTS, component))
+    refuse('ICAL4001', `component is one of ${Object.keys(COMPONENTS).join(', ')}, not ${typeof component === 'string' ? `'${component}'` : typeof component}`, `${at}/component`);
+  const kind = COMPONENTS[/** @type {keyof COMPONENTS} */ (component)];
+  if (index === undefined) {
+    if (!kind.ops.includes(op))
+      refuse('ICAL4001', op === 'trigger' ? 'a trigger edit names its VALARM (alarm)' : `a ${kind.name} takes ${kind.ops.join(', ')}, not ${op}`, `${at}/op`);
+    return /** @type {Record<string, any>} */ (edit);
+  }
+  if (!Number.isSafeInteger(index) || index < 0)
+    refuse('ICAL4001', 'alarm is the index of a VALARM, from 0', `${at}/alarm`);
+  if (!kind.alarms)
+    refuse('ICAL4001', `a ${kind.name} holds no VALARM`, `${at}/alarm`);
+  if (!ALARM_OPS.includes(op))
+    refuse('ICAL4001', `an alarm takes ${ALARM_OPS.join(', ')}, not ${op}`, `${at}/op`);
+  if (op === 'describe' && typeof (/** @type {Record<string, any>} */ (edit)).description !== 'string')
+    refuse('ICAL4001', 'an alarm\'s description is a string: DISPLAY and EMAIL alarms require one', `${at}/description`);
+  if (op === 'trigger') {
+    const trigger = /** @type {Record<string, any>} */ (edit).trigger;
+    if (typeof trigger !== 'string')
+      refuse('ICAL4001', 'trigger is an RFC 5545 duration such as -PT15M', `${at}/trigger`);
+    readDuration(/^[+-]P/.test(trigger) ? trigger.slice(1) : trigger, `${at}/trigger`);
+  }
   return /** @type {Record<string, any>} */ (edit);
 }
 
@@ -846,9 +987,17 @@ function admitEdit(edit, at) {
  * @returns {{ key: string, whole: boolean }[]}
  */
 function claimsOf(edit) {
-  const event = `${edit.uid}\u0000`;
+  const kind = edit.component === undefined || edit.component === 'event' ? '' : `${COMPONENTS[/** @type {keyof COMPONENTS} */ (edit.component)].name} `;
+  const event = `${kind}${edit.uid}\u0000`;
   const id = edit.recurrenceId;
   const component = `${event}${id === undefined ? 'event' : `occurrence ${id}`}`;
+  if (edit.alarm !== undefined) {
+    const alarm = `${component} alarm ${edit.alarm}`;
+    const shared = [{ key: event, whole: false }, { key: component, whole: false }];
+    if (edit.op === 'remove')
+      return [...shared, { key: alarm, whole: true }];
+    return [...shared, { key: alarm, whole: false }, { key: `${alarm}\u0000${edit.op === 'trigger' ? 'TRIGGER' : 'DESCRIPTION'}`, whole: true }];
+  }
   if (edit.op === 'remove')
     return id === undefined ? [{ key: event, whole: true }] : [{ key: event, whole: false }, { key: component, whole: true }];
   const claims = [{ key: event, whole: false }, { key: component, whole: false }];
@@ -872,7 +1021,7 @@ function claimsOf(edit) {
  * @param {import('./ical-read.js').IcalTree} tree - `parseIcal(text, { mode: 'lossless' }).tree`
  * @param {readonly IcalEdit[]} [edits]
  * @returns {string | Uint8Array} the calendar: a string when a string was read, octets when octets were
- * @throws {IcalError} `ICAL4001`-`ICAL4011` for an edit refused; `ICAL3004` for text iCalendar cannot carry,
+ * @throws {IcalError} `ICAL4001`-`ICAL4011` and `ICAL4013` for an edit refused; `ICAL3004` for text iCalendar cannot carry,
  *   `ICAL3006` for a fraction of a second, `ICAL3007` for an end not after its start or given with a duration
  * @example
  * const { tree } = parseIcal(text, { mode: 'lossless' });
@@ -892,11 +1041,16 @@ export function patchIcal(tree, edits = []) {
     const edit = admitEdit(raw, at);
     plan.claim(edit, i);
     const group = groupOf(plan, edit, at);
-    if (Object.hasOwn(TEXT_EDITS, edit.op)) {
+    const component = COMPONENTS[/** @type {keyof COMPONENTS} */ (edit.component ?? 'event')].name;
+    if (edit.alarm !== undefined)
+      alarm(plan, group, edit, at);
+    else if (Object.hasOwn(TEXT_EDITS, edit.op)) {
       const [name, member] = /** @type {any} */ (TEXT_EDITS)[edit.op];
-      const node = nodeOf(plan, group, edit.uid, edit.recurrenceId, at);
-      if (node === null)
-        refuse('ICAL4002', `no VEVENT holds the occurrence ${edit.recurrenceId} of '${edit.uid}'; move it first`, `${at}/recurrenceId`);
+      const node = nodeOf(plan, group, edit.uid, edit.recurrenceId, at, component);
+      if (node === null) {
+        refuse('ICAL4002', `no ${component} holds the occurrence ${edit.recurrenceId} of '${edit.uid}'${component === 'VEVENT' ? '; move it first' : ''}`,
+          `${at}/recurrenceId`);
+      }
       setText(plan, node, name, edit[member], `${at}/${member}`);
     }
     else if (edit.op === 'move')
@@ -933,7 +1087,8 @@ function verify(plan, out, edits) {
   }
   const held = new Set(read.calendar.components.map((component) => component.series?.uid ?? component.uid));
   for (const [i, edit] of edits.entries()) {
-    if (edit.op === 'remove' && edit.recurrenceId === undefined)
+    // the model holds no VTODO or VJOURNAL; a removed event is gone on purpose
+    if ((edit.component !== undefined && edit.component !== 'event') || (edit.op === 'remove' && edit.recurrenceId === undefined && edit.alarm === undefined))
       continue;
     if (plan.model.has(edit.uid) && !held.has(edit.uid)) {
       const entry = read.report.unsupported.find((item) => item.withheld === true);

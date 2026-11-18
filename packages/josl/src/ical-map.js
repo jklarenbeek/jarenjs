@@ -51,6 +51,7 @@ const POLICIES = Object.freeze(['rfc5545', 'later', 'reject']);
  * What a component's mapping reads from the writer.
  * @typedef {Object} MapContext
  * @property {'utc' | 'embed' | undefined} zones
+ * @property {'rdate' | 'rrule'} [onsets] - how a VTIMEZONE writes its onsets
  * @property {any} provider - the zone provider, or null
  * @property {[unknown, unknown] | undefined} horizon - bounds the expansion of zoned recurring series,
  *   and under `zones: 'embed'` the span each VTIMEZONE covers
@@ -442,10 +443,6 @@ function placeOf(value) {
 function renderSeries(component, context, path) {
   admitKeys(component, SERIES_EVENT_KEYS, path, 'a recurring event (its uid, times and sequence are the series\')');
   const series = seriesOf(component.series, `${path}/series`);
-  for (const [i, override] of series.overrides.entries()) {
-    if (override.range !== undefined)
-      throw new IcalError('ICAL3016', `the override of ${override.recurrenceId} ranges over this and future occurrences`, `${path}/series/overrides/${i}/range`);
-  }
   const kind = seriesKind(series);
   const zoned = { zone: undefined, policy: series.base?.policy ?? 'rfc5545', provider: null };
   if (kind === 'zoned') {
@@ -471,6 +468,11 @@ function renderSeries(component, context, path) {
  * @property {any} base - the series' own compiled rule, whose UNTIL is UTC
  * @property {(value: Written) => Written} written - a twin's wall clock with the zone's TZID, checked against the horizon
  * @property {(start: any, path: string) => any} until - the UTC UNTIL of a twin's last start
+ * @property {readonly any[]} rdates - the series' own RDATEs, in the twin's order
+ * @property {readonly any[]} exdates - the series' own EXDATEs, in the twin's order
+ * @property {(value: any, always?: boolean) => Written | undefined} own - a utc value or one of another zone spelled
+ *   as itself (its zone's VTIMEZONE written too); undefined for a value in the series' zone, which the twin spells,
+ *   unless `always`
  */
 
 /**
@@ -494,6 +496,16 @@ function renderZonedRule(series, head, shared, context, path) {
   const twin = floatingTwin(series, zone, provider, path);
   return renderRule(twin, 'floating', head, shared, context, path, {
     base: series.base,
+    rdates: series.rdates,
+    exdates: series.exdates,
+    own: (value, always = false) => {
+      if (value.kind === 'zoned' && value.zone === zone && !always)
+        return undefined;
+      if (value.kind === 'utc')
+        return written('instant', instantOf(value.instant, `${path}/series`));
+      const instant = viaCalendar(() => toUtc(value, { provider, policy: 'rfc5545' }), `${path}/series`).instant;
+      return zonedWritten(value.zone, wallOf(value.date, value.time, `${path}/series`), instant, context, `${path}/series`);
+    },
     written: (value) => {
       // the twin places its values by wall clock, and keeps doing so
       const iso = new Date(value.at).toISOString();
@@ -513,18 +525,27 @@ function renderZonedRule(series, head, shared, context, path) {
  * @returns {any}
  */
 function floatingTwin(series, zone, provider, path) {
-  // the calendar layer holds every value of a zoned series in its zone
-  /** @param {any} value */
-  const wall = (value) => (value === undefined ? undefined : { kind: 'floating', date: value.date, time: value.time });
+  // every value of a zoned series is in its zone but an RDATE or EXDATE,
+  // which may be utc or in another zone: the twin holds such a value as
+  // the series' wall clock at its instant, which is the slot it names
+  /** @param {any} value @param {string} [where] */
+  const wall = (value, where = `${path}/series`) => {
+    if (value === undefined)
+      return undefined;
+    if (value.kind === 'zoned' && value.zone === zone)
+      return { kind: 'floating', date: value.date, time: value.time };
+    const instant = value.kind === 'utc' ? Date.parse(value.instant)
+      : viaCalendar(() => toUtc(value, { provider, policy: 'rfc5545' }), where).instant;
+    const parts = viaCalendar(() => provider.toParts(instant, zone), where);
+    const two = (/** @type {number} */ n) => String(n).padStart(2, '0');
+    return { kind: 'floating', date: `${String(parts.year).padStart(4, '0')}-${two(parts.month)}-${two(parts.day)}`,
+      time: `${two(parts.hours)}:${two(parts.minutes)}:${two(Math.floor(parts.seconds))}` };
+  };
   const { base } = series;
   /** @type {Record<string, any>} */
   const rrule = { ...base.rrule };
-  if (rrule.UNTIL !== undefined) {
-    const parts = viaCalendar(() => provider.toParts(Date.parse(rrule.UNTIL.instant), zone), `${path}/series/base/rrule`);
-    const two = (/** @type {number} */ n) => String(n).padStart(2, '0');
-    rrule.UNTIL = { kind: 'floating', date: `${String(parts.year).padStart(4, '0')}-${two(parts.month)}-${two(parts.day)}`,
-      time: `${two(parts.hours)}:${two(parts.minutes)}:${two(Math.floor(parts.seconds))}` };
-  }
+  if (rrule.UNTIL !== undefined)
+    rrule.UNTIL = wall(rrule.UNTIL, `${path}/series/base/rrule`);
   /** @type {Record<string, any>} */
   const twinBase = { dtstart: wall(base.dtstart), rrule };
   if (base.duration !== undefined)
@@ -670,16 +691,30 @@ function renderExpanded(series, kind, zoned, head, shared, context, path) {
 }
 
 /**
+ * The length from a start to an end of a series' kind: days for dates,
+ * wall-clock or UTC time otherwise.
+ * @param {any} start
+ * @param {any} end
+ * @param {'date' | 'floating' | 'utc'} kind
+ * @returns {{ days: number, ms: number }}
+ */
+function lengthBetween(start, end, kind) {
+  const span = placeOf(end) - placeOf(start);
+  return kind === 'date' ? { days: span / DAY, ms: 0 } : { days: 0, ms: span };
+}
+
+/**
  * The VEVENT of a moved slot.
  * @param {string[]} head - UID and DTSTAMP
  * @param {string[]} shared
  * @param {Written} slot
  * @param {Written} start
  * @param {string | undefined} endLine
+ * @param {string} [range] - `;RANGE=THISANDFUTURE` for an override over this and future occurrences
  * @returns {string[]}
  */
-function movedEvent(head, shared, slot, start, endLine) {
-  return ['BEGIN:VEVENT', ...head, `RECURRENCE-ID${slot.param}:${slot.text}`, `DTSTART${start.param}:${start.text}`,
+function movedEvent(head, shared, slot, start, endLine, range = '') {
+  return ['BEGIN:VEVENT', ...head, `RECURRENCE-ID${slot.param}${range}:${slot.text}`, `DTSTART${start.param}:${start.text}`,
     ...(endLine === undefined ? [] : [endLine]), ...shared, 'END:VEVENT'];
 }
 
@@ -732,14 +767,16 @@ function renderRule(series, kind, head, shared, context, path, embed = null) {
     if (seen.has(id))
       continue;
     seen.add(id);
+    const own = embed?.own(period ? embed.rdates[i].start : embed.rdates[i]);
     if (!period) {
-      lines.push(`RDATE${from.param}:${from.text}`);
+      lines.push(`RDATE${(own ?? from).param}:${(own ?? from).text}`);
       rdates++;
       continue;
     }
     if (kind === 'date')
       throw new IcalError('ICAL3017', 'a period of dates is no RDATE; an RDATE period runs between two date-times', `${path}/series/rdates/${i}`);
     const to = tz(written(form, placeOf(entry.end)));
+    const ownEnd = embed?.own(embed.rdates[i].end);
     periods.set(id, { days: 0, ms: to.at - from.at });
     // a period on a slot the rule makes too would be a duplicate instance
     // whose length a reader may take from either: it is written as that
@@ -747,23 +784,43 @@ function renderRule(series, kind, head, shared, context, path, embed = null) {
     if (ruleMakes(base, kind, from.at, context, path))
       onRule.set(id, { from, to });
     else {
-      lines.push(`RDATE;VALUE=PERIOD${from.param}:${from.text}/${to.text}`);
+      // a period outside the series' zone keeps its own when both ends share it, and is two UTC instants otherwise
+      const [a, b] = own === undefined && ownEnd === undefined ? [from, to]
+        : own !== undefined && ownEnd !== undefined && own.param === ownEnd.param ? [own, ownEnd]
+          : [embed?.own(embed.rdates[i].start, true), embed?.own(embed.rdates[i].end, true)]
+            .map((value) => written('instant', /** @type {Written} */ (value).at));
+      lines.push(`RDATE;VALUE=PERIOD${a.param}:${a.text}/${b.text}`);
       rdates++;
     }
   }
   const excluded = new Set();
-  for (const entry of series.exdates) {
+  for (const [i, entry] of series.exdates.entries()) {
     const value = tz(written(form, placeOf(entry)));
     excluded.add(slotIdOf(value.at, kind));
-    lines.push(`EXDATE${value.param}:${value.text}`);
+    const own = embed?.own(embed.exdates[i]) ?? value;
+    lines.push(`EXDATE${own.param}:${own.text}`);
   }
   const moved = [];
   const overridden = new Set();
+  // an override over this and future occurrences is its slot's VEVENT
+  // with RANGE=THISANDFUTURE (a cancelled one with STATUS:CANCELLED); an
+  // override after it without an end lasts what the range gives
+  const ranges = series.overrides.filter((/** @type {any} */ override) => override.range !== undefined);
+  if (ranges.length !== 0 && periods.size !== 0) {
+    throw new IcalError('ICAL3016', `the override of ${ranges[0].recurrenceId} ranges over this and future occurrences of a series with an RDATE period, `
+      + 'whose own length a RECURRENCE-ID;RANGE cannot keep apart from the range\'s', `${path}/series/overrides/${series.overrides.indexOf(ranges[0])}/range`);
+  }
   for (const override of series.overrides) {
     overridden.add(override.recurrenceId);
     const slot = tz(slotOf(override.recurrenceId, kind, { policy: base.policy, provider: null }, `${path}/series/overrides`));
+    const range = override.range === undefined ? '' : ';RANGE=THISANDFUTURE';
     if (override.status === 'cancelled') {
-      lines.push(`EXDATE${slot.param}:${slot.text}`);
+      if (range === '')
+        lines.push(`EXDATE${slot.param}:${slot.text}`);
+      else {
+        moved.push(movedEvent(head, [...shared.filter((line) => !line.startsWith('STATUS:')), 'STATUS:CANCELLED'], slot, slot,
+          undefined, range));
+      }
       continue;
     }
     const start = tz(written(form, placeOf(override.start)));
@@ -773,11 +830,14 @@ function renderRule(series, kind, head, shared, context, path, embed = null) {
       endLine = `DTEND${end.param}:${end.text}`;
     }
     else {
-      const own = periods.get(override.recurrenceId) ?? length;
+      // the range in force is the latest at or before the slot, in whatever order the overrides are listed
+      const over = range === '' ? ranges.filter((/** @type {any} */ other) => other.recurrenceId <= override.recurrenceId)
+        .reduce((/** @type {any} */ a, /** @type {any} */ b) => (a === undefined || b.recurrenceId > a.recurrenceId ? b : a), undefined) : undefined;
+      const own = over?.end !== undefined ? lengthBetween(over.start, over.end, kind) : periods.get(override.recurrenceId) ?? length;
       if (own !== undefined)
         endLine = `DURATION:${formatDuration(own)}`;
     }
-    moved.push(movedEvent(head, shared, slot, start, endLine));
+    moved.push(movedEvent(head, shared, slot, start, endLine, range));
   }
   for (const [id, { from, to }] of onRule) {
     if (!overridden.has(id) && !excluded.has(id))

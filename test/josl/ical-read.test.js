@@ -238,22 +238,23 @@ describe('ical reader: series', () => {
     assert.deepStrictEqual(starts(components[1].series), ['2026-02-28T', '2027-02-28T']);
   });
 
-  it('withholds a sub-daily rule by name, the calendar layer\'s JY0020 the cause', () => {
+  it('reads a sub-daily rule and expands it', () => {
     const text = cal(vevent(['UID:h', 'DTSTART:20260302T090000Z', 'RRULE:FREQ=HOURLY;COUNT=3']));
     const { components, report } = read(text);
-    assert.deepStrictEqual([components.length, codes(report), report.unsupported[0].cause?.code], [0, ['ICAL1020'], 'JY0020']);
-    assert.match(report.unsupported[0].reason, /FREQ=HOURLY/);
-    refusesStrict(text, 'ICAL1020');
+    assert.deepStrictEqual(report.unsupported, []);
+    assert.deepStrictEqual(starts(components[0].series), ['2026-03-02T09:00:00Z', '2026-03-02T10:00:00Z', '2026-03-02T11:00:00Z'].map(Date.parse));
+    parseIcal(text, { provider, strict: true });
   });
 
-  it('keeps a RANGE=THISANDFUTURE override as data and reports it; its expansion is refused', () => {
+  it('reads a RANGE=THISANDFUTURE override into its series, which moves that slot and every later one', () => {
     const text = cal([...vevent(['UID:s', 'DTSTART:20260302T090000', 'RRULE:FREQ=DAILY;COUNT=5']),
       ...vevent(['UID:s', 'RECURRENCE-ID;RANGE=THISANDFUTURE:20260304T090000', 'DTSTART:20260304T100000'])]);
     const { components, report } = read(text);
-    assert.deepStrictEqual(report.unsupported.map((e) => [e.code, e.name, e.path]), [['ICAL1015', 'RECURRENCE-ID;RANGE', '/VCALENDAR/VEVENT[1]/RECURRENCE-ID;RANGE']]);
+    assert.deepStrictEqual(report.unsupported, []);
     assert.strictEqual(components[0].series.overrides[0].range, 'THISANDFUTURE');
-    assert.throws(() => expand(components[0].series), (/** @type {any} */ error) => error.code === 'JY0021');
-    refusesStrict(text, 'ICAL1015');
+    assert.deepStrictEqual(starts(components[0].series),
+      ['2026-03-02T09:00:00', '2026-03-03T09:00:00', '2026-03-04T10:00:00', '2026-03-05T10:00:00', '2026-03-06T10:00:00']);
+    parseIcal(text, { provider, strict: true });
   });
 
   it('withholds an override no series claims, and a second series of one UID', () => {

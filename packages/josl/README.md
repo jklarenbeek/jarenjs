@@ -594,8 +594,9 @@ text.split('\r\n')[6]; // 'DTSTART;VALUE=DATE:20261225'
   TZID; its disagreement with the injected provider is reported. Any
   other TZID resolves only when it names an IANA zone the provider knows,
   and `zones.provider` resolves them all.
-- A rule goes through the calendar layer (all four frequencies; a
-  sub-daily one is refused by name).
+- A rule goes through the calendar layer (every frequency from SECONDLY
+  to YEARLY), and an override over this and future occurrences
+  (RANGE=THISANDFUTURE) is expanded with it.
 - Everything outside the subset (VTODO, VALARM, X- properties) is listed
   in `report.unsupported` with its path and line, never silently
   interpreted. `createIcalReader` and `iterateIcal` read the same way from
@@ -618,11 +619,12 @@ Foreign iCalendar can also be edited without losing what lies outside
 the subset. `parseIcal(text, { mode: 'lossless' })` returns, beside the
 same model, the syntax tree over the input's octets, and
 `patchIcal(tree, edits)` moves, cancels or excludes an occurrence, or
-retitles, describes, relocates or removes an event. Every octet no edit
-reaches comes back as it was: folds, line ends, X- properties, VALARMs,
-the order of everything. RANGE=THISANDFUTURE overrides are kept as
-written and never expanded, and an edit the tree cannot hold without
-losing content is refused by code.
+retitles, describes, relocates or removes an event, a VTODO or a
+VJOURNAL, or describes, re-triggers or removes a VALARM. Every octet no
+edit reaches comes back as it was: folds, line ends, X- properties,
+VALARMs, the order of everything. An occurrence after a
+RANGE=THISANDFUTURE override is edited as any other, and an edit the tree
+cannot hold without losing content is refused by code.
 
 ```js
 import { parseIcal, patchIcal } from '@jarenjs/josl/ical';

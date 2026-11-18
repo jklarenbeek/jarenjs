@@ -27,7 +27,7 @@ import { CalendarError, vtimezoneFor } from '@jarenjs/core/calendar';
 import { resolveRuntime } from '@jarenjs/core/runtime';
 import { utf8ByteLength } from '@jarenjs/core/string';
 import { horizonSpan, renderComponent } from './ical-map.js';
-import { renderVtimezone } from './ical-vtimezone.js';
+import { renderVtimezone, ruledDefinition } from './ical-vtimezone.js';
 import { ICAL_CODES, ICAL_LIMIT_CODES, IcalError, escapeText, foldLine } from './ical-wire.js';
 import { JoslLimitError, limitOption } from './limits.js';
 import { ICAL_STREAM_WRITE, ICAL_WRITE, admitOptions } from './options.js';
@@ -48,6 +48,11 @@ const MARGIN = 2 * 86400000;
  *   that zone's VTIMEZONE over `horizon` (RDATE onsets, TZUNTIL at its
  *   end), so a zoned recurring series keeps its RRULE. Required as soon
  *   as a zoned value is written.
+ * @property {'rdate' | 'rrule'} [onsets] - under `zones: 'embed'`, how a
+ *   VTIMEZONE writes its onsets: `'rdate'` (the default) every one as an
+ *   RDATE; `'rrule'` each run of three or more yearly onsets on the nth or
+ *   last weekday of a month as an RRULE observance (RFC 5545 §3.6.5)
+ *   where that is shorter, the rest as RDATEs
  * @property {import('@jarenjs/core/series').ZoneProvider | null} [provider] - the zone
  *   provider zoned values resolve through; defaults to `runtime.zoneProvider`
  * @property {Partial<import('@jarenjs/core/runtime').Runtime>} [runtime] - its
@@ -131,6 +136,7 @@ export class IcalWriter {
     let now;
     this.#context = {
       zones: admitted.zones ?? undefined,
+      onsets: admitted.onsets ?? 'rdate',
       provider: admitted.provider ?? runtime.zoneProvider ?? null,
       horizon: admitted.horizon ?? undefined,
       limits: admitted.limits ?? undefined,
@@ -180,7 +186,8 @@ export class IcalWriter {
     const { provider } = this.#context;
     const [low, high] = horizonSpan(this.#context);
     try {
-      return renderVtimezone(vtimezoneFor(zone, { provider, horizon: [low - MARGIN, high + MARGIN] }));
+      const definition = vtimezoneFor(zone, { provider, horizon: [low - MARGIN, high + MARGIN] });
+      return renderVtimezone(this.#context.onsets === 'rrule' ? ruledDefinition(definition, [low - MARGIN, high + MARGIN]) : definition);
     }
     catch (error) {
       if (error instanceof CalendarError)

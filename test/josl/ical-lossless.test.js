@@ -467,35 +467,57 @@ describe('each edit changes only the lines it owns', () => {
   });
 });
 
-describe('RANGE=THISANDFUTURE is kept and never expanded', () => {
+describe('RANGE=THISANDFUTURE is read into its series and edited around', () => {
   const text = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:p', 'BEGIN:VEVENT', 'UID:r', 'DTSTAMP:20260101T000000Z',
-    'DTSTART:20260302T090000', 'DURATION:PT1H', 'RRULE:FREQ=WEEKLY;COUNT=10', 'SUMMARY:Ronde', 'END:VEVENT',
+    'DTSTART:20260302T090000', 'DURATION:PT1H', 'RRULE:FREQ=WEEKLY;COUNT=6', 'SUMMARY:Ronde', 'END:VEVENT',
     'BEGIN:VEVENT', 'UID:r', 'DTSTAMP:20260101T000000Z', 'RECURRENCE-ID;RANGE=THISANDFUTURE:20260323T090000',
-    'DTSTART:20260323T100000', 'DURATION:PT1H', 'SUMMARY:Ronde', 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n');
+    'DTSTART:20260323T100000', 'DURATION:PT30M', 'SUMMARY:Ronde', 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n');
   const { tree } = /** @type {any} */ (parseIcal(text, LOSSLESS));
+  const horizon = [{ kind: 'floating', date: '2026-03-01', time: '00:00' }, { kind: 'floating', date: '2026-06-01', time: '00:00' }];
+  /** `id start-end` of each occurrence the text's series makes. @param {string} out */
+  const rows = (out) => expandSeries(/** @type {any} */ (parseIcal(out).calendar.components[0]).series, { horizon: /** @type {any} */ (horizon) })
+    .occurrences.map((o) => `${o.recurrenceId.slice(5, 10)} ${/** @type {any} */ (o.start).date.slice(5)} ${/** @type {any} */ (o.start).time.slice(0, 5)}-${/** @type {any} */ (o.end).time.slice(0, 5)}`);
+  const before = ['03-02 03-02 09:00-10:00', '03-09 03-09 09:00-10:00', '03-16 03-16 09:00-10:00', '03-23 03-23 10:00-10:30',
+    '03-30 03-30 10:00-10:30', '04-06 04-06 10:00-10:30'];
 
-  it('re-emits the override as written, and edits the series around it', () => {
+  it('re-emits the override as written; the series it reads expands it', () => {
     assert.strictEqual(patchIcal(tree), text);
+    assert.deepStrictEqual(rows(text), before);
     const out = /** @type {string} */ (patchIcal(tree, [{ op: 'retitle', uid: 'r', summary: 'Ronde 2' },
       { op: 'cancel', uid: 'r', recurrenceId: '2026-03-09T09:00:00' }]));
     assert.ok(out.includes('RECURRENCE-ID;RANGE=THISANDFUTURE:20260323T090000\r\n'));
     assert.deepStrictEqual(lineDiff(text, out), { removed: ['SUMMARY:Ronde\r\n'], added: ['SUMMARY:Ronde 2\r\n', 'EXDATE:20260309T090000\r\n'] });
-    const series = parseIcal(out).calendar.components[0].series;
-    assert.strictEqual(series.overrides[0].range, 'THISANDFUTURE');
-    assert.throws(() => expandSeries(series, { horizon: [{ kind: 'date', date: '2026-03-01' }, { kind: 'date', date: '2026-06-01' }] }), { code: 'JY0021' });
+    assert.deepStrictEqual(rows(out), before.filter((row) => !row.startsWith('03-09')));
   });
 
-  it('refuses an edit of its slot or a later one (ICAL4005)', () => {
-    for (const id of ['2026-03-23T09:00:00', '2026-03-30T09:00:00']) {
-      assert.throws(() => patchIcal(tree, [{ op: 'cancel', uid: 'r', recurrenceId: id }]), { code: 'ICAL4005', docPath: '/edits/0/recurrenceId' });
-      assert.throws(() => patchIcal(tree, [{ op: 'exdate', uid: 'r', recurrenceId: id }]), { code: 'ICAL4005' });
-      assert.throws(() => patchIcal(tree, [{ op: 'move', uid: 'r', recurrenceId: id, start: { kind: 'floating', date: '2026-04-01', time: '09:00' } }]),
-        { code: 'ICAL4005' });
+  it('edits a later occurrence as any other: cancelled, excluded, or moved with the range\'s length', () => {
+    const later = '2026-03-30T09:00:00';
+    for (const op of /** @type {const} */ (['cancel', 'exdate'])) {
+      const out = /** @type {string} */ (patchIcal(tree, [{ op, uid: 'r', recurrenceId: later }]));
+      assert.deepStrictEqual(lineDiff(text, out), { removed: [], added: ['EXDATE:20260330T090000\r\n'] }, op);
+      assert.deepStrictEqual(rows(out), before.filter((row) => !row.startsWith('03-30')), op);
     }
-    // its own text, or its removal, expands nothing
-    assert.ok(/** @type {string} */ (patchIcal(tree, [{ op: 'retitle', uid: 'r', recurrenceId: '2026-03-23T09:00:00', summary: 'Later' }]))
+    // a new VEVENT copied from the series would carry its DURATION:PT1H; it ends by the range's 30 minutes instead
+    const moved = /** @type {string} */ (patchIcal(tree, [{ op: 'move', uid: 'r', recurrenceId: later, start: { kind: 'floating', date: '2026-04-01', time: '08:00' } }]));
+    assert.ok(moved.includes('RECURRENCE-ID:20260330T090000\r\nDTSTART:20260401T080000\r\nDTEND:20260401T083000\r\n'));
+    assert.deepStrictEqual(rows(moved), before.map((row) => (row.startsWith('03-30') ? '03-30 04-01 08:00-08:30' : row)));
+    // given a duration, it keeps that
+    const given = /** @type {string} */ (patchIcal(tree, [{ op: 'move', uid: 'r', recurrenceId: later, start: { kind: 'floating', date: '2026-04-01', time: '08:00' }, duration: 'PT1H' }]));
+    assert.deepStrictEqual(rows(given), before.map((row) => (row.startsWith('03-30') ? '03-30 04-01 08:00-09:00' : row)));
+  });
+
+  it('refuses a move, cancel or exclusion of the range\'s own slot, which would change every later one (ICAL4005)', () => {
+    const id = '2026-03-23T09:00:00';
+    assert.throws(() => patchIcal(tree, [{ op: 'cancel', uid: 'r', recurrenceId: id }]), { code: 'ICAL4005', docPath: '/edits/0/recurrenceId' });
+    assert.throws(() => patchIcal(tree, [{ op: 'exdate', uid: 'r', recurrenceId: id }]), { code: 'ICAL4005' });
+    assert.throws(() => patchIcal(tree, [{ op: 'move', uid: 'r', recurrenceId: id, start: { kind: 'floating', date: '2026-04-01', time: '09:00' } }]),
+      { code: 'ICAL4005' });
+    // its own text, or its removal, is edited as written
+    assert.ok(/** @type {string} */ (patchIcal(tree, [{ op: 'retitle', uid: 'r', recurrenceId: id, summary: 'Later' }]))
       .includes('RANGE=THISANDFUTURE'));
-    assert.ok(!(/** @type {string} */ (patchIcal(tree, [{ op: 'remove', uid: 'r', recurrenceId: '2026-03-23T09:00:00' }]))).includes('RANGE'));
+    const removed = /** @type {string} */ (patchIcal(tree, [{ op: 'remove', uid: 'r', recurrenceId: id }]));
+    assert.ok(!removed.includes('RANGE'));
+    assert.deepStrictEqual(rows(removed).slice(3), ['03-23 03-23 09:00-10:00', '03-30 03-30 09:00-10:00', '04-06 04-06 09:00-10:00']);
   });
 });
 
@@ -605,9 +627,11 @@ describe('an edit the tree cannot hold is refused with its code', () => {
   });
 
   it('ICAL4012: an edit after which the read would withhold the event', () => {
-    // a zoned override's own DURATION only the zone's offsets can place: the canonical read does not read it
-    refuses([{ op: 'move', uid: S, recurrenceId: '2026-03-30T09:00:00', start: zoned('2026-03-31', '10:00'), duration: 'PT30M' }], 'ICAL4012', '/edits/0');
-    // with an end it reads
+    // a zoned override's own DURATION that ends in the second pass of a repeated hour: a zoned end names the first,
+    // so the canonical read withholds it
+    refuses([{ op: 'move', uid: S, recurrenceId: '2026-03-30T09:00:00', start: zoned('2026-10-25', '01:30'), duration: 'PT2H' }], 'ICAL4012', '/edits/0');
+    // one that ends anywhere else reads, as does an end
+    assert.ok(patchIcal(tree, [{ op: 'move', uid: S, recurrenceId: '2026-03-30T09:00:00', start: zoned('2026-03-31', '10:00'), duration: 'PT30M' }]));
     assert.ok(patchIcal(tree, [{ op: 'move', uid: S, recurrenceId: '2026-03-30T09:00:00', start: zoned('2026-03-31', '10:00'), end: zoned('2026-03-31', '10:30') }]));
   });
 });

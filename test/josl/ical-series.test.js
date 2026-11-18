@@ -15,7 +15,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
-import { stringifyIcal, IcalError } from '@jarenjs/josl/ical';
+import { parseIcal, stringifyIcal, IcalError } from '@jarenjs/josl/ical';
 import { defineSeries, compileRecurrence, expandSeries, weeklyPattern, toUtc, formatRRule } from '@jarenjs/core/calendar';
 import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
 import { oracleStarts } from '../core/calendar/rrule-oracle.js';
@@ -525,10 +525,12 @@ describe('ical series: refused where a calendar would be wrong', () => {
       overrides: [{ ...off, start: zoned('2026-03-03', '10:00') }] }], { zones: 'utc', provider, horizon: YEAR_2026 }), 'ICAL3015');
   });
 
-  it('an override over this and future occurrences', () => {
-    refuses(() => write([{ uid: 's', base: { dtstart: floating('2026-03-02', '09:00'), rrule: 'FREQ=DAILY;COUNT=3' },
-      overrides: [{ recurrenceId: '2026-03-03T09:00:00', status: 'moved', start: floating('2026-03-03', '10:00'), range: 'THISANDFUTURE' }] }]),
-    'ICAL3016', '/components/0/series/overrides/0/range');
+  it('an override over this and future occurrences of a series with an RDATE period', () => {
+    refuses(() => write([{ uid: 's', base: { dtstart: floating('2026-03-02', '09:00'), duration: 'PT1H', rrule: 'FREQ=DAILY;COUNT=3' },
+      rdates: [{ start: floating('2026-03-10', '09:00'), end: floating('2026-03-10', '09:15') }],
+      overrides: [{ recurrenceId: '2026-03-02T09:00:00', status: 'cancelled' },
+        { recurrenceId: '2026-03-03T09:00:00', status: 'moved', start: floating('2026-03-03', '10:00'), range: 'THISANDFUTURE' }] }]),
+    'ICAL3016', '/components/0/series/overrides/1/range');
   });
 
   it('a period of dates, which no RDATE spells', () => {
@@ -537,10 +539,21 @@ describe('ical series: refused where a calendar would be wrong', () => {
     refuses(() => write([{ uid: 's', rdates: [date('2026-03-02'), { start: date('2026-03-10'), end: date('2026-03-12') }] }]), 'ICAL3017');
   });
 
+  it('a sub-daily series it once refused is written with its rule and reads back to the same occurrences', () => {
+    const series = { uid: 's', base: { dtstart: floating('2026-03-02', '09:00'), rrule: 'FREQ=HOURLY;COUNT=3' } };
+    const { text } = write([series]);
+    assert.match(text, /\r\nRRULE:FREQ=HOURLY;COUNT=3\r\n/);
+    const read = /** @type {any} */ (parseIcal(text, { provider, strict: true }).calendar.components[0]).series;
+    const horizon = /** @type {any} */ ([floating('2026-03-01', '00:00'), floating('2026-03-03', '00:00')]);
+    const ids = (/** @type {any} */ s) => expandSeries(s, { horizon }).occurrences.map((o) => o.recurrenceId);
+    assert.deepStrictEqual(ids(read), ['2026-03-02T09:00:00', '2026-03-02T10:00:00', '2026-03-02T11:00:00']);
+    assert.deepStrictEqual(ids(read), ids(defineSeries({ ...series, base: compileRecurrence(/** @type {any} */ (series.base)) })));
+  });
+
   it('what the calendar layer refuses of a series, with its error as the cause', () => {
-    const hourly = refuses(() => write([{ uid: 's', base: { dtstart: floating('2026-03-02', '09:00'), rrule: 'FREQ=HOURLY;COUNT=3' } }]),
+    const hourly = refuses(() => write([{ uid: 's', base: { dtstart: date('2026-03-02'), rrule: 'FREQ=HOURLY;COUNT=3' } }]),
       'ICAL3005', '/components/0/series');
-    assert.strictEqual(hourly.cause.code, 'JY0020');
+    assert.strictEqual(hourly.cause.code, 'JY0018');
     refuses(() => write([{ uid: 's' }]), 'ICAL3005');
     const backwards = refuses(() => write([{ uid: 's', base: { dtstart: zoned('2026-03-02', '09:00'), rrule: 'FREQ=DAILY' } }],
       { zones: 'utc', provider, horizon: [1, 0] }), 'ICAL3005', '/components/0/series');

@@ -192,12 +192,20 @@ describe('ical reader: RFC 5545 §3.8.5.3, every example read from its own lines
       const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//RFC 5545//Examples//EN', 'BEGIN:VEVENT', 'UID:rfc', 'DTSTAMP:19970901T000000Z', row.dtstart,
         `RRULE:${row.rrule}`, ...(row.exdate ? [row.exdate] : []), 'END:VEVENT', 'END:VCALENDAR', ''];
       const { calendar, report } = parseIcal(lines.join('\r\n'), { provider });
+      assert.deepStrictEqual(report.unsupported, []);
       if (row.expected === undefined) {
-        assert.deepStrictEqual(report.unsupported.map((e) => [e.code, e.cause?.code]), [['ICAL1020', 'JY0020']]);
-        assert.match(report.unsupported[0].reason, new RegExp(`FREQ=${row.rrule.match(/FREQ=(\w+)/)[1]}`));
+        // sub-daily: the fixture lists no instants (the calendar layer's own tests pin them); the read series makes
+        // what the rule compiled directly makes, over a day from its start
+        const [, zone, wall] = /** @type {RegExpExecArray} */ (/^DTSTART;TZID=([^:]+):(\d{8}T\d{6})$/.exec(row.dtstart));
+        const dtstart = { kind: 'zoned', date: `${wall.slice(0, 4)}-${wall.slice(4, 6)}-${wall.slice(6, 8)}`, time: `${wall.slice(9, 11)}:${wall.slice(11, 13)}:${wall.slice(13)}`, zone };
+        const from = Date.parse(`${dtstart.date}T00:00:00Z`);
+        const day = [from, from + 2 * 86400000];
+        const direct = expandSeries(defineSeries({ uid: 'rfc', base: compileRecurrence(/** @type {any} */ ({ dtstart, rrule: row.rrule })) }), { horizon: day, provider });
+        const read = expandSeries(calendar.components[0].series, { horizon: day, provider });
+        assert.ok(direct.occurrences.length >= 2);
+        assert.deepStrictEqual(read.occurrences.map((o) => o.instants?.start), direct.occurrences.map((o) => o.instants?.start));
         return;
       }
-      assert.deepStrictEqual(report.unsupported, []);
       const horizon = row.horizon.map((/** @type {string} */ t) => Date.parse(t));
       const expansion = expandSeries(calendar.components[0].series, { horizon, provider });
       assert.deepStrictEqual(expansion.occurrences.map((o) => o.instants?.start), row.expected.map((/** @type {string} */ t) => Date.parse(t)));

@@ -1150,25 +1150,29 @@ what each does is its own documentation's job
   (`temporals`, MODEL-FORMAT §2), refused, keyed and compared identically on SQLite and PostgreSQL; an entity
   member holding a calendar value stays in the entity's document, unkeyed. A zoned member takes no unique index
   and is ordered by the engine, and a recurrence rule is stored as its JSON form (`…/rrule.schema.json`).
+- [ ] **A zoned SECONDLY or MINUTELY walk stops skipping before the horizon at the first wall-clock hour holding a
+  change.** Every later time before the horizon is then resolved one by one, so a long walk to a far horizon costs a
+  provider call per time after the first change it meets (cost only; the answers are exact).
+- [ ] **A series override has an end but no exact duration.** A zoned override whose DURATION ends in the second pass
+  of a repeated hour cannot be held, so `@jarenjs/josl/ical` withholds it (`ICAL1022`), as it does a zoned RDATE
+  period's length.
 - [ ] **A zoned SECONDLY expansion through the Intl provider asks it about every time of the day before its horizon.**
   ICU exposes no list of offset changes, so `createIntlZoneProvider` carries no `offsetChanges`, and up to 86400
   provider calls precede the first occurrence (a compiled VTIMEZONE lists its changes and needs none of them).
-- [ ] **`@jarenjs/josl/ical` writes no VTIMEZONE by RRULE and reads no VAVAILABILITY or scheduling
-  method.** Events, recurring series and free/busy spans are written by kind; under `zones: 'utc'` a
+- [ ] **`@jarenjs/josl/ical` reads no VAVAILABILITY or scheduling method.** Events, recurring series and free/busy spans are written by kind; under `zones: 'utc'` a
   zoned time is written as the UTC instant `toUtc` answers, and a zoned recurring series as its
   occurrences over a caller's horizon (refused without one, `ICAL3011`); under `zones: 'embed'` a zoned
-  time keeps its wall clock and TZID, each zone used is written as a VTIMEZONE of RDATE onsets over the
-  horizon ending in TZUNTIL, and a zoned series under the RFC's policy keeps its RRULE. `parseIcal`,
+  time keeps its wall clock and TZID, each zone used is written as a VTIMEZONE over the horizon ending
+  in TZUNTIL (RDATE onsets, or with `onsets: 'rrule'` RRULE observances where the onsets follow a yearly
+  rule), and a zoned series under the RFC's policy keeps its RRULE. `parseIcal`,
   `createIcalReader` and `iterateIcal` read the same subset back; a VTIMEZONE is compiled into a zone
   provider (`compileVtimezone` in `@jarenjs/core/calendar`) and defines its TZID by default, and
   everything else outside the subset is reported in `report.unsupported`, never interpreted.
   `parseIcal(text, { mode: 'lossless' })` also keeps the syntax tree, and `patchIcal` moves, cancels or
-  excludes an occurrence and retitles, describes, relocates or removes an event, re-emitting every octet
-  no edit reaches unchanged; RANGE=THISANDFUTURE is kept as written and an edit at or after it is
-  refused (`ICAL4005`). Not in it: a VTIMEZONE written by RRULE, VAVAILABILITY, the scheduling methods,
-  RANGE=THISANDFUTURE expansion, a zoned override whose own DURATION differs from its slot's (withheld,
-  `ICAL1022`, so `patchIcal` refuses to write one, `ICAL4012`), and edits inside VTODO, VJOURNAL or VALARM
-  (kept as written).
+  excludes an occurrence, retitles, describes, relocates or removes an event, a VTODO or a VJOURNAL, and
+  describes, re-triggers or removes a VALARM, re-emitting every octet no edit reaches unchanged;
+  RANGE=THISANDFUTURE is expanded, and only a move, cancel or EXDATE of the range's own slot is refused
+  (`ICAL4005`). Not in it: VAVAILABILITY and the scheduling methods.
 - [ ] **String helpers that answer for a non-string.** `countCodePoints(5)` and
   `countCharCode(5, 48)` answer 0, `toCodePoints(5)` answers `[]`, and `fnv1a(5)` equals
   `fnv1a('')` (so `hashContent({})` is `hashContent('')`), each because a non-string's missing

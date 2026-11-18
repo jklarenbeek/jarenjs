@@ -19,7 +19,8 @@
 //   refused when resolved otherwise; either way it is reported (`ICAL1024`).
 // - Writing: a zone used under `zones: 'embed'` becomes a VTIMEZONE of
 //   RDATE onsets over the writer's horizon and two days either side,
-//   ending in TZUNTIL.
+//   ending in TZUNTIL; under `onsets: 'rrule'` each run of yearly onsets
+//   on the nth or last weekday of a month is one RRULE observance.
 
 import { CalendarError, compileVtimezone, isZone } from '@jarenjs/core/calendar';
 import { hashContent } from '@jarenjs/core/string';
@@ -201,12 +202,169 @@ export function renderVtimezone(definition) {
     const name = observance.type === 'daylight' ? 'DAYLIGHT' : 'STANDARD';
     lines.push(`BEGIN:${name}`, `DTSTART:${time(observance.start)}`, `TZOFFSETFROM:${observance.offsetFrom.replace(/:/g, '')}`,
       `TZOFFSETTO:${observance.offsetTo.replace(/:/g, '')}`);
+    if (observance.rrule !== undefined)
+      lines.push(`RRULE:${observance.rrule}`);
     if (observance.rdates !== undefined && observance.rdates.length > 0)
       lines.push(`RDATE:${observance.rdates.map(time).join(',')}`);
     lines.push(`END:${name}`);
   }
   lines.push('END:VTIMEZONE');
   return lines;
+}
+
+/** The fewest yearly onsets an RRULE observance stands for; fewer stay RDATEs, which are shorter. */
+const RULED_RUN = 3;
+const WEEKDAYS = Object.freeze(['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']);
+
+/**
+ * Milliseconds east of UTC an offset text (`+01:00`, `-03:30:15`) names.
+ * @param {string} text
+ * @returns {number}
+ */
+function offsetMs(text) {
+  const [h, m, sec = '0'] = text.slice(1).split(':');
+  return (text[0] === '-' ? -1 : 1) * ((Number(h) * 60 + Number(m)) * 60 + Number(sec)) * 1000;
+}
+
+/**
+ * The yearly rule an onset fits: its month, weekday and time, and the
+ * ordinals of that weekday in the month it is (the nth, and -1 when it is
+ * the last).
+ * @param {string} wall - `YYYY-MM-DDTHH:MM:SS`
+ */
+function onsetShape(wall) {
+  const year = Number(wall.slice(0, 4));
+  const month = Number(wall.slice(5, 7));
+  const day = Number(wall.slice(8, 10));
+  const ordinals = [Math.ceil(day / 7), ...(day + 7 > monthLength(year, month) ? [-1] : [])];
+  return { year, month, weekday: dayOf(year, month, day).getUTCDay(), time: wall.slice(11), ordinals };
+}
+
+/**
+ * A civil date as a Date at its midnight UTC, any year from 0.
+ * @param {number} year
+ * @param {number} month
+ * @param {number} day
+ */
+function dayOf(year, month, day) {
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  return date;
+}
+
+/** @param {number} year @param {number} month */
+const monthLength = (year, month) => dayOf(year, month + 1, 0).getUTCDate();
+
+/**
+ * The onset of a yearly rule in a year, as a wall clock: the nth (or the
+ * last) weekday of the month at a time.
+ * @param {number} year
+ * @param {number} month
+ * @param {number} weekday
+ * @param {number} ordinal
+ * @param {string} time
+ * @returns {string | undefined} undefined when the month has no such day
+ */
+function ruleOnset(year, month, weekday, ordinal, time) {
+  const length = monthLength(year, month);
+  const first = dayOf(year, month, 1).getUTCDay();
+  const firstDay = 1 + ((weekday - first + 7) % 7);
+  const day = ordinal === -1 ? firstDay + 7 * Math.floor((length - firstDay) / 7) : firstDay + 7 * (ordinal - 1);
+  if (day > length)
+    return undefined;
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${time}`;
+}
+
+/**
+ * A zone definition of RDATE onsets rewritten with RRULE observances
+ * (RFC 5545 §3.6.5): each run of three or more onsets of one observance
+ * in consecutive years on the same weekday of the same month at the same
+ * time - the nth (`BYDAY=2SU`) or the last (`BYDAY=-1SU`) - becomes one
+ * observance, DTSTART its first onset and FREQ=YEARLY;BYMONTH;BYDAY, with
+ * UNTIL (UTC) at its last onset where the rule would go on inside the
+ * definition, where that observance is shorter than the run's RDATEs; the
+ * onsets no run covers stay RDATEs. The rewrite is compiled and its
+ * transitions compared with the original's over the horizon; any
+ * difference, or a rewrite no shorter than the original, keeps the original.
+ * @param {import('@jarenjs/core/calendar').VtimezoneDefinition} definition - as `vtimezoneFor` writes it
+ * @param {[number, number]} horizon - the span it was written over
+ * @returns {import('@jarenjs/core/calendar').VtimezoneDefinition}
+ */
+export function ruledDefinition(definition, horizon) {
+  const end = definition.until === undefined ? Infinity : Date.parse(definition.until);
+  /** @type {any[]} */
+  const observances = [];
+  let ruled = false;
+  for (const observance of definition.observances) {
+    const onsets = [observance.start, ...(observance.rdates ?? [])];
+    const { type, offsetFrom, offsetTo } = observance;
+    const from = offsetMs(offsetFrom);
+    /** @type {{ i: number, j: number, rule: string }[]} */
+    const runs = [];
+    let i = 0;
+    while (i < onsets.length) {
+      const first = onsetShape(onsets[i]);
+      let ordinals = first.ordinals;
+      let j = i + 1;
+      while (j < onsets.length) {
+        const next = onsetShape(onsets[j]);
+        const common = ordinals.filter((n) => next.ordinals.includes(n));
+        if (next.year !== first.year + (j - i) || next.month !== first.month || next.weekday !== first.weekday || next.time !== first.time
+          || common.length === 0)
+          break;
+        ordinals = common;
+        j++;
+      }
+      if (j - i < RULED_RUN || offsetFrom === offsetTo) {
+        i++;
+        continue;
+      }
+      const ordinal = ordinals.includes(-1) ? -1 : ordinals[0];
+      let rule = `FREQ=YEARLY;BYMONTH=${first.month};BYDAY=${ordinal}${WEEKDAYS[first.weekday]}`;
+      const after = ruleOnset(first.year + (j - i), first.month, first.weekday, ordinal, first.time);
+      if (after === undefined || Date.parse(`${after}Z`) - from < end) {
+        const until = new Date(Date.parse(`${onsets[j - 1]}Z`) - from).toISOString();
+        rule += `;UNTIL=${until.slice(0, 19).replace(/[-:]/g, '')}Z`;
+      }
+      runs.push({ i, j, rule });
+      i = j;
+    }
+    // which runs to write as rules: the choice whose observances are shortest (a run
+    // costs a whole observance, its onsets as RDATEs 16 octets each)
+    /** @param {number} mask */
+    const chosen = (mask) => {
+      const own = runs.filter((_, k) => (mask & (1 << k)) !== 0);
+      const rest = onsets.filter((_, at) => !own.some((run) => at >= run.i && at < run.j));
+      return [...own.map((run) => ({ type, start: onsets[run.i], offsetFrom, offsetTo, rrule: run.rule })),
+        ...(rest.length === 0 ? [] : [{ type, start: rest[0], offsetFrom, offsetTo, ...(observance.rdates === undefined ? {} : { rdates: rest.slice(1) }) }])];
+    };
+    const size = (/** @type {any[]} */ list) => renderVtimezone({ tzid: '', observances: list }).join('\r\n').length;
+    let best = chosen(0);
+    // runs of one observance are few (one per rule the zone has had): every choice is tried up to 2^10
+    for (let mask = 1; mask < 2 ** Math.min(runs.length, 10); mask++) {
+      const candidate = chosen(mask);
+      if (size(candidate) < size(best))
+        best = candidate;
+    }
+    ruled ||= best.some((entry) => entry.rrule !== undefined);
+    observances.push(...best);
+  }
+  if (!ruled)
+    return definition;
+  const rewritten = { ...definition, observances };
+  const transitions = (/** @type {any} */ value) => {
+    try {
+      return JSON.stringify(compileVtimezone(value, { horizon }).transitions);
+    }
+    catch (error) {
+      if (error instanceof CalendarError)
+        return undefined;
+      throw error;
+    }
+  };
+  const want = transitions(definition);
+  const length = (/** @type {any} */ value) => renderVtimezone(value).join('\r\n').length;
+  return want !== undefined && transitions(rewritten) === want && length(rewritten) < length(definition) ? rewritten : definition;
 }
 
 /**
@@ -292,6 +450,15 @@ export class ZoneTable {
         if (typeof p.candidates !== 'function')
           throw new TypeError('the zone provider has no candidates(parts, zone)');
         return p.candidates(parts, zone);
+      }),
+      // a compiled definition lists its changes, so a sub-daily zoned walk
+      // asks it per wall-clock hour; a provider that lists none (Intl) is
+      // answered for with one entry at `from`, which the walk reads as "may
+      // change here" and so resolves time by time, as without the member
+      offsetChanges: (/** @type {number} */ from, /** @type {number} */ to, /** @type {string} */ zone) => route(zone, (p) => {
+        if (typeof p.offsetChanges === 'function')
+          return p.offsetChanges(from, to, zone);
+        return [{ at: from, before: p.toParts(from, zone).offset, after: p.toParts(to, zone).offset }];
       }),
       get identity() {
         return identityOf();

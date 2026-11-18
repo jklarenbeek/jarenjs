@@ -154,6 +154,7 @@ export const ICAL_STREAM_WRITE = /* @__PURE__ */ icalTable(true);
 function icalTable(stream) {
   return table({
     zones: oneOf('utc', 'embed'),
+    onsets: oneOf('rdate', 'rrule'),
     provider: rule((v) => v === null || typeof v === 'object', 'a zone provider'),
     runtime: READ_DOWNSTREAM,
     horizon: rule((v) => v === null || (Array.isArray(v) && v.length === 2), 'a [start, end) pair'),

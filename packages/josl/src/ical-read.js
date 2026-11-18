@@ -18,7 +18,9 @@
 //   WITHHELD whole and listed (`ICAL1017`-`ICAL1022`): a missing or
 //   repeated property, a malformed value, a TZID that names no IANA zone
 //   the provider knows, a rule or series the calendar layer refuses (its
-//   CalendarError the cause; a sub-daily rule is its `JY0020`), EXRULE.
+//   CalendarError the cause), EXRULE. An override over this and future
+//   occurrences (RANGE=THISANDFUTURE) is read into its series, which the
+//   calendar layer expands.
 // - `strict: true` turns the first entry into a refusal with its code.
 // - Syntax, structure and limits stop the read in either mode
 //   (`ICAL1001`-`ICAL1009`, `ICAL2xxx`), from the content-line machine.
@@ -33,7 +35,7 @@
 // The reader takes no clock and invents nothing: a component without a
 // DTSTAMP has none in the model.
 
-import { CalendarError, compileRecurrence, dateValue, defineSeries, floatingValue, isZone, parseTemporal, utcValue, zonedValue }
+import { CalendarError, compileRecurrence, dateValue, defineSeries, floatingValue, isZone, parseTemporal, toUtc, utcValue, zonedValue }
   from '@jarenjs/core/calendar';
 import { IcalMachine } from './ical-machine.js';
 import { IANA_FORM, ZONE_HORIZON, ZoneTable } from './ical-vtimezone.js';
@@ -470,6 +472,42 @@ function endAfter(start, length, at) {
 }
 
 /**
+ * The end a length gives a zoned start, as a wall clock of its zone (RFC
+ * 5545 §3.3.6): the days on the wall clock, then the time exactly, read
+ * through the file's zones under the RFC's policy. An end whose wall
+ * clock the zone reads as another instant (the second pass of a repeated
+ * hour) is withheld: a zoned end names the first.
+ * @param {any} start
+ * @param {{ days: number, ms: number }} length
+ * @param {ReadContext} context
+ * @param {{ path: string, line: number, name: string }} at
+ * @returns {any}
+ */
+function zonedEndAfter(start, length, context, at) {
+  const { provider } = context.zoneTable;
+  const { zone } = start;
+  const dayWall = valueAt('floating', placeOf(start) + length.days * DAY);
+  const instant = viaCalendar(() => toUtc({ ...dayWall, kind: 'zoned', zone }, { provider, policy: 'rfc5545' }), 'ICAL1018', at.name, at).instant
+    + length.ms;
+  const parts = viaCalendar(() => {
+    try {
+      return provider.toParts(instant, zone);
+    }
+    catch (error) {
+      if (error instanceof CalendarError)
+        throw error;
+      throw new CalendarError('JY0004', `the zone provider's toParts(instant, '${zone}') threw`, '/provider', error);
+    }
+  }, 'ICAL1018', at.name, at);
+  const two = (/** @type {number} */ n) => String(n).padStart(2, '0');
+  const value = { kind: 'zoned', date: `${String(parts.year).padStart(4, '0')}-${two(parts.month)}-${two(parts.day)}`,
+    time: `${two(parts.hours)}:${two(parts.minutes)}:${two(Math.floor(parts.seconds))}`, zone };
+  if (viaCalendar(() => toUtc(value, { provider, policy: 'rfc5545' }), 'ICAL1018', at.name, at).instant !== instant)
+    withhold('ICAL1022', `${at.name} ends it at ${new Date(instant).toISOString()}, the second pass of a repeated wall clock in ${zone}, which a zoned end does not name`, at);
+  return value;
+}
+
+/**
  * The values of an RDATE or EXDATE: dates, date-times or periods.
  * @param {import('./ical-machine.js').IcalProperty} prop
  * @param {ReadContext} context
@@ -679,10 +717,6 @@ function readEvent(node, context) {
     const range = idProp.params.find((param) => param.name === 'RANGE')?.values[0].toUpperCase();
     if (range !== undefined && range !== 'THISANDFUTURE')
       withhold('ICAL1018', `RANGE is THISANDFUTURE, not ${range}`, idProp);
-    if (range !== undefined) {
-      context.report.add('ICAL1015', 'RECURRENCE-ID;RANGE', `${idProp.path};RANGE`, idProp.line,
-        'the override ranges over this and future occurrences; it is kept as data and its expansion is refused (JY0021)');
-    }
     return { type: 'override', override: { uid, dtstamp, recurrenceId, range, span, text, node, idProp } };
   }
   if (rrule !== undefined) {
@@ -738,9 +772,10 @@ export function slotId(value) {
  * @param {Override} override
  * @param {Master} master
  * @param {ReadContext} context
+ * @param {Override[]} [ranges] - the series' overrides over this and future occurrences
  * @returns {Record<string, any>}
  */
-function overrideOf(override, master, context) {
+function overrideOf(override, master, context, ranges = []) {
   const { start } = master.span;
   const { recurrenceId, span, idProp, node } = override;
   const kindOf = (/** @type {any} */ value) => `${value.kind}${value.zone === undefined ? '' : ` in ${value.zone}`}`;
@@ -776,10 +811,19 @@ function overrideOf(override, master, context) {
     const own = span.length ?? none;
     // a series whose DTEND lies in another zone has no slot length here:
     // the calendar layer refuses its rule, and a series of extra dates is withheld
-    const slot = master.span.length ?? none;
+    // and one after an override over this and future occurrences lasts
+    // what that range gives: its own length where it is not the series'
+    const id = slotId(recurrenceId);
+    const over = override.range === undefined
+      ? ranges.filter((range) => slotId(range.recurrenceId) <= id)
+        .reduce((/** @type {Override | undefined} */ a, b) => (a === undefined || slotId(b.recurrenceId) > slotId(a.recurrenceId) ? b : a), undefined)
+      : undefined;
+    const slot = over === undefined || over.text.status === 'cancelled' || (over.span.end !== undefined && over.span.length === undefined)
+      ? master.span.length ?? none : over.span.length ?? none;
     if (own.days !== slot.days || own.ms !== slot.ms) {
+      const at = { path: node.path, line: node.line, name: 'the override\'s length' };
       out.end = own.days === 0 && own.ms === 0 ? span.start
-        : endAfter(span.start, own, { path: node.path, line: node.line, name: 'the override\'s length' });
+        : span.start.kind === 'zoned' ? zonedEndAfter(span.start, own, context, at) : endAfter(span.start, own, at);
     }
   }
   if (override.range !== undefined)
@@ -824,7 +868,7 @@ function seriesOf(master, overrides, context) {
     rdates = [start, ...rdates.filter((entry) => entry.kind === undefined || !sameValue(entry, start))].map(slot);
   }
   const definition = { uid: master.uid, ...(master.text.sequence !== undefined ? { sequence: master.text.sequence } : {}), base,
-    rdates, exdates: master.exdates, overrides: overrides.map((override) => overrideOf(override, master, context)) };
+    rdates, exdates: master.exdates, overrides: overrides.map((override) => overrideOf(override, master, context, overrides.filter((other) => other.range !== undefined))) };
   const series = viaCalendar(() => defineSeries(/** @type {any} */ (definition)), 'ICAL1020', 'the series', at);
   /** @type {Record<string, any>} */
   const component = { type: 'event', series };

@@ -317,7 +317,7 @@ describe('ical: options', () => {
     assert.throws(() => stringifyIcal({ prodId: 'p', components: [] }, /** @type {any} */ ({ provider: 'intl' })),
       { name: 'TypeError', message: 'options.provider must be a zone provider' });
     assert.throws(() => stringifyIcal({ prodId: 'p', components: [] }, /** @type {any} */ ({ onChunk: () => {} })),
-      { name: 'TypeError', message: "stringifyIcal: unknown option 'onChunk'; the options are zones, provider, runtime, horizon, limits, maxOctets, maxComponents, maxRdates" });
+      { name: 'TypeError', message: "stringifyIcal: unknown option 'onChunk'; the options are zones, onsets, provider, runtime, horizon, limits, maxOctets, maxComponents, maxRdates" });
     for (const limit of ['maxOctets', 'maxComponents', 'maxRdates'])
       assert.throws(() => stringifyIcal({ prodId: 'p', components: [] }, { [limit]: 0 }), { name: 'TypeError', message: `options.${limit} must be a positive integer or Infinity` });
     assert.throws(() => createIcalWriter(/** @type {any} */ ({ prodId: 'p', onchunk: () => {} })), { name: 'TypeError', message: "createIcalWriter: unknown option 'onchunk' — did you mean 'onChunk'?" });
