@@ -212,7 +212,18 @@ series' own set, not the shape the RFC leaves open:
   RFC 5545 leaves that set undefined. DTSTART is also written as an RDATE,
   which every reader keeps, and a COUNT is written as the UNTIL of the last
   occurrence it makes, so a reader that counts from the rule alone ends in
-  the same place.
+  the same place. Whether the rule makes its start is asked of the rule
+  started whole periods earlier on what DTSTART gives it: its weekday
+  (DAILY, WEEKLY), its day of the month and month (MONTHLY, YEARLY, stepped
+  back by month index past any month without that day, a 31st or 29
+  February), or with BYWEEKNO its weekday and week-year (400 years or a
+  multiple earlier, where the calendar repeats). So a start the rule makes
+  is written once, with its rule as given, COUNT and all. A BYWEEKNO rule
+  whose INTERVAL and 400 have a least common multiple past the calendar's
+  10000 years (every 27 years), or any rule whose INTERVAL nears 10000
+  years, is asked one INTERVAL of days earlier instead, and may be written
+  in this longer form although its rule makes its start; it reads back to
+  the same set.
 
 What is refused rather than written wrong:
 

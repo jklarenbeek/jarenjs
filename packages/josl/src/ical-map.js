@@ -841,6 +841,70 @@ function ruleMakes(compiled, kind, at, context, path) {
 }
 
 /**
+ * The place a whole number of months before another, on its day of the
+ * month and time of day: the fewest multiples of `months` back whose month
+ * has that day (a 31st, 29 February); -Infinity once that passes the
+ * earliest time a Date holds.
+ * @param {number} at
+ * @param {number} months
+ * @returns {number}
+ */
+function monthsBefore(at, months) {
+  const from = new Date(at);
+  const day = from.getUTCDate();
+  // 400 years on the calendar repeats, so a month with the day is met by then
+  for (let back = months; ; back += months) {
+    const to = new Date(at);
+    to.setUTCFullYear(from.getUTCFullYear(), from.getUTCMonth() - back, day);
+    if (Number.isNaN(to.getTime()))
+      return -Infinity;
+    if (to.getUTCDate() === day)
+      return to.getTime();
+  }
+}
+
+/**
+ * The greatest common divisor of two whole numbers.
+ * @param {number} a
+ * @param {number} b
+ * @returns {number}
+ */
+const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
+
+/**
+ * Where to start the open rule, and the place to ask it about, so that it
+ * makes that place exactly when the rule started at `at` makes `at`
+ * itself: started a whole number of its periods earlier, on what DTSTART
+ * supplies a rule that names no day - its weekday (DAILY, WEEKLY), its day
+ * of the month and month (MONTHLY, YEARLY, stepped by month index), or,
+ * with BYWEEKNO, whose period is a run of numbered weeks, its weekday and
+ * week-year (the least common multiple of 400 and INTERVAL years earlier:
+ * whole periods, and the Gregorian calendar repeats day for day every 400
+ * years, 146097 days, 20871 weeks). A start before year 0 asks 400 years
+ * on, as often as needed. A MONTHLY or YEARLY rule whose span cannot fit
+ * the range so (BYWEEKNO every 27 years: 10800; any rule whose INTERVAL
+ * nears 10000 years) is started INTERVAL days earlier, as DAILY: its yes
+ * is always right, its no can be wrong, and the start is then also
+ * written as an RDATE.
+ * @param {Record<string, any>} open - the rule without COUNT and UNTIL
+ * @param {number} at
+ * @returns {[number, number]}
+ */
+function probeOf(open, at) {
+  const interval = open.INTERVAL ?? 1;
+  const step = (open.FREQ === 'WEEKLY' ? 7 : 1) * interval * DAY;
+  if (open.FREQ === 'MONTHLY' || open.FREQ === 'YEARLY') {
+    const start = open.BYWEEKNO === undefined ? monthsBefore(at, (open.FREQ === 'YEARLY' ? 12 : 1) * interval)
+      : at - GREGORIAN_CYCLE * (interval / gcd(400, interval));
+    const cycles = start >= FIRST_INSTANT ? 0 : Math.ceil((FIRST_INSTANT - start) / GREGORIAN_CYCLE);
+    if (at + cycles * GREGORIAN_CYCLE <= LAST_INSTANT - DAY)
+      return [start + cycles * GREGORIAN_CYCLE, at + cycles * GREGORIAN_CYCLE];
+  }
+  const probe = at - step >= FIRST_INSTANT ? at : at + GREGORIAN_CYCLE * interval;
+  return [probe - step, probe];
+}
+
+/**
  * The RRULE of a series, and an RDATE of its start when the rule itself
  * would not make that start. RFC 5545 leaves the set of such a rule
  * undefined (RFC 2445 counted DTSTART; some readers drop it); the
@@ -858,13 +922,8 @@ function ruleMakes(compiled, kind, at, context, path) {
  */
 function ruleLines(base, kind, at, context, path, embed) {
   const { COUNT, UNTIL, ...open } = base.rrule;
-  const interval = open.INTERVAL ?? 1;
-  const step = (open.FREQ === 'WEEKLY' ? 7 : 1) * interval * DAY;
-  // the rule started one whole period earlier makes the start exactly when
-  // the rule does; near year 0 the question is asked 400 years on, where the
-  // Gregorian calendar repeats day for day (146097 days, 20871 weeks)
-  const probe = at.at - step >= FIRST_INSTANT ? at.at : at.at + GREGORIAN_CYCLE * interval;
-  const synced = ruleMakes(viaCalendar(() => compileRecurrence({ dtstart: valueAt(kind, probe - step), rrule: open, policy: base.policy }),
+  const [start, probe] = probeOf(open, at.at);
+  const synced = ruleMakes(viaCalendar(() => compileRecurrence({ dtstart: valueAt(kind, start), rrule: open, policy: base.policy }),
     `${path}/series`), kind, probe, context, path);
   if (synced)
     return [`RRULE:${formatRRule(embed === null ? base : embed.base)}`];

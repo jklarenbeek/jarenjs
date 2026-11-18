@@ -4,8 +4,9 @@
  * Recurring events written and read back by the test's own reader: every
  * example of RFC 5545 §3.8.5.3 the calendar enumerates (zoned, expanded
  * under `zones: 'utc'`, against the RFC's own instants), each also
- * floating (written with its rule and re-expanded by an independent
- * oracle; the DAILY and WEEKLY ones also in their canonical form), series with extra
+ * floating (written with the RFC's own rule, in its canonical form, and
+ * re-expanded by an independent oracle), every MONTHLY and YEARLY rule of
+ * the dateutil corpus written and read back to dateutil's set, series with extra
  * dates, excluded dates and overrides in each kind, the weekly-pattern
  * series, a weekly 09:00 series across both 2026 offset changes, and
  * every refusal that stands where a wrong calendar would.
@@ -19,6 +20,7 @@ import { defineSeries, compileRecurrence, expandSeries, weeklyPattern, toUtc, fo
 import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
 import { oracleStarts } from '../core/calendar/rrule-oracle.js';
 import fixture from '../core/calendar/fixtures/rfc5545-recurrence/examples.json' with { type: 'json' };
+import oracleFixture from '../core/calendar/fixtures/rrule-oracle/occurrences.json' with { type: 'json' };
 import { readIcal, physicalLines, unfold, splitLine, prop, props, timeOf, durationOf } from './ical-reader.js';
 import { checkGrammar } from './ical-grammar.js';
 
@@ -159,9 +161,9 @@ function dtstartOf(line) {
 describe('ical series: RFC 5545 §3.8.5.3, every enumerated example', () => {
   // the Friday-13th example removes its own DTSTART with an EXDATE, which these series do not carry
   const rows = /** @type {any[]} */ (fixture.examples).filter((row) => row.expected !== undefined && row.exdate === undefined);
-  const daily = rows.filter((row) => /^FREQ=(DAILY|WEEKLY);/.test(row.rrule));
+  const calendarRows = rows.filter((row) => /^FREQ=(MONTHLY|YEARLY);/.test(row.rrule));
 
-  it('the fixture holds 37 such rows, 15 of them DAILY and WEEKLY', () => assert.deepStrictEqual([rows.length, daily.length], [37, 15]));
+  it('the fixture holds 37 such rows, 22 of them MONTHLY and YEARLY', () => assert.deepStrictEqual([rows.length, calendarRows.length], [37, 22]));
 
   for (const row of rows) {
     it(`zoned, expanded under zones: utc - ${row.rrule}`, () => {
@@ -178,27 +180,93 @@ describe('ical series: RFC 5545 §3.8.5.3, every enumerated example', () => {
     });
   }
 
-  for (const row of daily) {
-    it(`floating, written with its rule - ${row.rrule}`, () => {
+  // every such start is one its rule makes (the RFC's own list begins with it), so each
+  // is written as the RFC writes it: its own RRULE, COUNT kept, DTSTART once
+  for (const row of rows) {
+    it(`floating, written with the RFC's own rule - ${row.rrule}`, () => {
       const start = dtstartOf(row.dtstart);
       const rule = row.rrule.replace(/(UNTIL=\d{8}T\d{6})Z/, '$1');
       const series = { uid: 'rfc', base: { dtstart: floating(start.date, start.time), rrule: rule } };
       const { calendar } = write([series]);
       const [vevent] = calendar.children;
-      assert.strictEqual(prop(vevent, 'RRULE')?.value, formatRRule(compileRecurrence(series.base)));
+      const written = prop(vevent, 'RRULE')?.value ?? '';
+      assert.strictEqual(written, formatRRule(compileRecurrence(series.base)));
+      // the RFC's own parts and values, no more: COUNT kept, no UNTIL added (WKST=MO is the default the canonical form leaves out)
+      const parts = (/** @type {string} */ text) => text.split(';').filter((part) => part !== 'WKST=MO')
+        .map((part) => part.split('=')).map(([name, values]) => `${name}=${values.split(',').sort()}`).sort();
+      assert.deepStrictEqual(parts(written), parts(rule));
       assert.strictEqual(props(vevent, 'RDATE').length, 0, 'a start the rule makes is written once');
       const walls = occurrencesOf(calendar, 'rfc', Date.parse(row.horizon[1])).map((o) => new Date(o.start).toISOString().slice(0, 16));
       assert.deepStrictEqual(walls, row.expected.map((/** @type {string} */ t) => t.slice(0, 16)));
     });
   }
+});
 
-  for (const row of rows.filter((candidate) => !daily.includes(candidate))) {
-    it(`floating, written and read back as the RFC's set - ${row.rrule}`, () => {
-      const start = dtstartOf(row.dtstart);
-      const rule = row.rrule.replace(/(UNTIL=\d{8}T\d{6})Z/, '$1');
-      const { calendar } = write([{ uid: 'rfc', base: { dtstart: floating(start.date, start.time), rrule: rule } }]);
-      const walls = occurrencesOf(calendar, 'rfc', Date.parse(row.horizon[1])).map((o) => new Date(o.start).toISOString().slice(0, 16));
-      assert.deepStrictEqual(walls, row.expected.map((/** @type {string} */ t) => t.slice(0, 16)));
+describe('ical series: the dateutil MONTHLY and YEARLY corpus, written and read back', () => {
+  const cases = /** @type {[string, string, string, number[]][]} */ (oracleFixture.cases);
+
+  it('holds 3000 rules', () => assert.strictEqual(cases.length, 3000));
+
+  // each DTSTART is its rule's first occurrence by construction (PROVENANCE.md), so dateutil lists it
+  it('every rule makes its start, so each is written once with the rule as given, and reads back to dateutil\'s set', () => {
+    for (const [rrule, dtstart, end, offsets] of cases) {
+      const isDate = !dtstart.includes('T');
+      const at = Date.parse(isDate ? `${dtstart}T00:00:00Z` : `${dtstart}Z`);
+      const stop = Date.parse(isDate ? `${end}T00:00:00Z` : `${end}Z`);
+      const series = { uid: 'o', base: { dtstart: isDate ? date(dtstart) : floating(dtstart.slice(0, 10), dtstart.slice(11)), rrule } };
+      const text = stringifyIcal({ prodId: '-//Example//Test//EN', components: [{ type: 'event', series }] }, { runtime });
+      const calendar = readIcal(text);
+      const [vevent] = calendar.children;
+      const where = `${rrule} from ${dtstart}`;
+      assert.strictEqual(offsets[0], 0, where);
+      assert.strictEqual(props(vevent, 'RDATE').length, 0, where);
+      assert.strictEqual(prop(vevent, 'RRULE')?.value, formatRRule(compileRecurrence(series.base)), where);
+      assert.deepStrictEqual(occurrencesOf(calendar, 'o', stop).map((o) => o.start).filter((s) => s < stop), offsets.map((s) => at + s * 1000), where);
+    }
+  });
+});
+
+describe('ical series: whether a MONTHLY or YEARLY rule makes its start', () => {
+  // [series, horizon, RRULE, RDATEs]: a start the rule makes keeps its rule as given, COUNT and all
+  const cases = /** @type {[string, any, any[], string, string[]][]} */ ([
+    ['a 31st two months on from months that lack it', { uid: 'm31', base: { dtstart: floating('2026-08-31', '09:00'), rrule: 'FREQ=MONTHLY;INTERVAL=2;COUNT=3' } },
+      [floating('2026-01-01', '00:00'), floating('2028-01-01', '00:00')], 'FREQ=MONTHLY;COUNT=3;INTERVAL=2', []],
+    ['29 February every third year', { uid: 'y29', base: { dtstart: floating('2024-02-29', '09:00'), rrule: 'FREQ=YEARLY;INTERVAL=3;COUNT=3' } },
+      [floating('2024-01-01', '00:00'), floating('2050-01-01', '00:00')], 'FREQ=YEARLY;COUNT=3;INTERVAL=3', []],
+    ['29 February as a date', { uid: 'd29', base: { dtstart: date('2024-02-29'), rrule: 'FREQ=YEARLY;COUNT=3' } },
+      [date('2024-01-01'), date('2034-01-01')], 'FREQ=YEARLY;COUNT=3', []],
+    ['a utc 31st', { uid: 'u31', base: { dtstart: utc('2026-01-31T09:00:00Z'), rrule: 'FREQ=MONTHLY;COUNT=3' } },
+      YEAR_2026, 'FREQ=MONTHLY;COUNT=3', []],
+    ['a 31st in year 0, asked 400 years on', { uid: 'z31', base: { dtstart: floating('0000-01-31', '09:00'), rrule: 'FREQ=MONTHLY;COUNT=3' } },
+      [floating('0000-01-01', '00:00'), floating('0001-01-01', '00:00')], 'FREQ=MONTHLY;COUNT=3', []],
+    ['week 1 of the next week-year, every other year', { uid: 'w1', base: { dtstart: floating('2024-12-30', '09:00'), rrule: 'FREQ=YEARLY;INTERVAL=2;BYWEEKNO=1;BYDAY=MO;COUNT=3' } },
+      [floating('2024-01-01', '00:00'), floating('2030-01-01', '00:00')], 'FREQ=YEARLY;COUNT=3;INTERVAL=2;BYDAY=MO;BYWEEKNO=1', []],
+    ['a numbered week on DTSTART\'s weekday', { uid: 'w20', base: { dtstart: floating('2026-05-11', '09:00'), rrule: 'FREQ=YEARLY;BYWEEKNO=20;COUNT=2' } },
+      [floating('2026-01-01', '00:00'), floating('2028-01-01', '00:00')], 'FREQ=YEARLY;COUNT=2;BYWEEKNO=20', []],
+    ['a start the rule does not make', { uid: 'f13', base: { dtstart: floating('2026-03-02', '09:00'), rrule: 'FREQ=MONTHLY;BYDAY=FR;BYMONTHDAY=13;COUNT=3' } },
+      [floating('2026-01-01', '00:00'), floating('2027-01-01', '00:00')], 'FREQ=MONTHLY;UNTIL=20261113T090000;BYDAY=FR;BYMONTHDAY=13', ['20260302T090000']],
+    ['week 1 every 25 years, asked 400 years earlier', { uid: 'w25', base: { dtstart: floating('2024-12-30', '09:00'), rrule: 'FREQ=YEARLY;INTERVAL=25;BYWEEKNO=1;BYDAY=MO;COUNT=2' } },
+      [floating('2024-01-01', '00:00'), floating('2051-01-01', '00:00')], 'FREQ=YEARLY;COUNT=2;INTERVAL=25;BYDAY=MO;BYWEEKNO=1', []],
+    ['week 1 every third year, asked 1200 years earlier', { uid: 'w3', base: { dtstart: floating('2024-12-30', '09:00'), rrule: 'FREQ=YEARLY;INTERVAL=3;BYWEEKNO=1;BYDAY=MO;COUNT=2' } },
+      [floating('2024-01-01', '00:00'), floating('2029-01-01', '00:00')], 'FREQ=YEARLY;COUNT=2;INTERVAL=3;BYDAY=MO;BYWEEKNO=1', []],
+    // 10800 years (27 × 400) leave the range: asked 27 days earlier, in the week-year before, so also an RDATE
+    ['week 1 every 27 years', { uid: 'w27', base: { dtstart: floating('2024-12-30', '09:00'), rrule: 'FREQ=YEARLY;INTERVAL=27;BYWEEKNO=1;BYDAY=MO;COUNT=2' } },
+      [floating('2024-01-01', '00:00'), floating('2053-01-01', '00:00')], 'FREQ=YEARLY;UNTIL=20520101T090000;INTERVAL=27;BYDAY=MO;BYWEEKNO=1', ['20241230T090000']],
+    // so are 9990 years back from 2026 (20 cycles on reach 10026), and 300000, which no Date holds
+    ['every 9990 years', { uid: 'y9990', base: { dtstart: floating('2026-03-15', '09:00'), rrule: 'FREQ=YEARLY;INTERVAL=9990;COUNT=1' } },
+      [floating('2026-01-01', '00:00'), floating('2027-01-01', '00:00')], 'FREQ=YEARLY;UNTIL=20260315T090000;INTERVAL=9990', ['20260315T090000']],
+    ['every 300000 years', { uid: 'y300k', base: { dtstart: floating('2026-03-15', '09:00'), rrule: 'FREQ=YEARLY;INTERVAL=300000;COUNT=1' } },
+      [floating('2026-01-01', '00:00'), floating('2027-01-01', '00:00')], 'FREQ=YEARLY;UNTIL=20260315T090000;INTERVAL=300000', ['20260315T090000']],
+  ]);
+
+  for (const [title, series, horizon, rrule, rdates] of cases) {
+    it(title, () => {
+      const { calendar } = write([series]);
+      const [vevent] = calendar.children;
+      assert.deepStrictEqual([prop(vevent, 'RRULE')?.value, props(vevent, 'RDATE').map((p) => p.value)], [rrule, rdates]);
+      const end = expected(series, horizon);
+      const stop = /** @type {number} */ (end.at(-1)?.start) + 1;
+      assert.deepStrictEqual(occurrencesOf(calendar, series.uid, stop), end);
     });
   }
 });

@@ -1155,13 +1155,6 @@ what each does is its own documentation's job
   `…/rrule.schema.json`) and binds floating occurrences with `bindFloating`.
   Recurring job schedules (`@jarenjs/db/schedules`, JOBS-FORMAT §11) take the same frequencies and refuse
   the others with the same code at schedule time.
-- [ ] **`@jarenjs/josl/ical` writes some MONTHLY and YEARLY series in a longer form than they need.**
-  Its writer asks whether the rule makes its own start by starting the rule INTERVAL days
-  earlier. For MONTHLY and YEARLY that moves the day DTSTART supplies, so a start the rule does
-  make is also written as an RDATE, and COUNT as the UNTIL of the last occurrence. Five RFC 5545
-  §3.8.5.3 examples are written this way (`FREQ=YEARLY;COUNT=10;BYMONTH=6,7` becomes
-  `UNTIL=20010710T090000` plus an RDATE). The set read back is the same. The probe should start
-  the rule one month or year earlier, by month index.
 - [ ] **`@jarenjs/josl/ical` writes no VTIMEZONE by RRULE and reads no VAVAILABILITY or scheduling
   method.** Events, recurring series and free/busy spans are written by kind; under `zones: 'utc'` a
   zoned time is written as the UTC instant `toUtc` answers, and a zoned recurring series as its
