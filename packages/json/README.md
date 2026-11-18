@@ -898,6 +898,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/json/patch` | JavaScript | declared |
 | `@jarenjs/json/write` | JavaScript | declared |
 | `@jarenjs/json/query` | JavaScript | declared |
+| `@jarenjs/json/query/calendar` | JavaScript | declared |
 | `@jarenjs/json/jslt` | JavaScript | declared |
 | `@jarenjs/json/jtlt` | JavaScript | declared |
 | `@jarenjs/json/xquery` | JavaScript | declared |
