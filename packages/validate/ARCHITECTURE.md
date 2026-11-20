@@ -941,6 +941,15 @@ always built):
   the survival rule (a passing unit inside passing units), the wrapper
   errors a failed subschema already explains, and the pruning of the flat
   and condensed forms.
+- **Texts are rendered once and kept renderable.** A unit's text joins the
+  messages `convertInternalErrors` rendered (`joinErrorMessages`); each
+  projection lists, as it builds the units, which object holds each text,
+  its member name and the `ValidationError`s it joins, and `keepOutputTexts`
+  files that list in a `WeakMap` under the returned document (one entry per
+  validation, nothing enumerable on any unit). `localizeErrors(document,
+  catalog)` walks the list: it localizes each text's errors by the
+  collected errors' own rules and joins them again. A copy of the document
+  is not in the map, so it re-renders nothing.
 
 ### Strict Structured-Output Profiles (strict-profile.js)
 

@@ -245,11 +245,25 @@ export function renderErrorMessage(error, catalog = undefined) {
  * msgid, so it stays while no catalog carries the msgid. Any other error
  * whose `msgid` resolves in no catalog falls back to its keyword. A plain
  * copy that kept `inlineMessage` (an error's `toJSON`) reads the same way.
- * @param {ValidationError[]} errors - Errors from a collect-mode validation
+ *
+ * Given the document a validation compiled with an output format returned
+ * instead of an array, every text in it is rendered again from the errors
+ * it was rendered from, by the same rules: a 2020-12 unit's `error`, each
+ * entry of a `list`/`hierarchical` unit's `errors`, each part of a joined
+ * text, and a `basic` branch unit's `subschema` message. Those errors are
+ * kept beside the document, not in it: a JSON or structured copy of it,
+ * a spread of it and one of its units carry the texts only, and
+ * re-render nothing.
+ * @template {ValidationError[] | object} T
+ * @param {T} errors - Errors from a collect-mode validation, or an output format's document
  * @param {Readonly<Record<string, (params: object, error?: object) => string>>} catalog - A compiled catalog (see {@link compileMessageCatalog})
- * @returns {ValidationError[]} The same array, messages re-rendered
+ * @returns {T} The same array or document, messages re-rendered
  */
 export function localizeErrors(errors, catalog) {
+  if (errors !== null && typeof errors === 'object' && !Array.isArray(errors)) {
+    localizeOutput(errors, catalog);
+    return errors;
+  }
   for (let i = 0; i < errors.length; ++i) {
     const error = errors[i];
     // @ts-ignore - marker property, non-enumerable
@@ -279,6 +293,55 @@ export function localizeErrors(errors, catalog) {
     // text came from the spec's inline fallback).
   }
   return errors;
+}
+
+/**
+ * The messages of errors as one text: each distinct non-empty message
+ * once, in order, joined by `; ` (an output unit's text).
+ * @param {readonly ValidationError[]} errors
+ * @returns {string}
+ */
+export function joinErrorMessages(errors) {
+  /** @type {string[]} */
+  const messages = [];
+  for (const error of errors)
+    if (error.message !== '' && !messages.includes(error.message)) messages.push(error.message);
+  return messages.join('; ');
+}
+
+/**
+ * What each text of an output format's document was rendered from, by the
+ * document: a flat list of triples, the object holding the text (a
+ * 2020-12 unit, a `list` unit's `errors`), the text's member name there,
+ * and the error or errors it joins.
+ * @type {WeakMap<object, unknown[]>}
+ */
+const OUTPUT_TEXTS = new WeakMap();
+
+/**
+ * Record what the texts of an output format's document were rendered from,
+ * so {@link localizeErrors} renders them again: `holder[key]` is
+ * `joinErrorMessages` of the errors.
+ * @param {object} document - The document a validation returned
+ * @param {unknown[]} texts - Triples: holder, member name, a `ValidationError` or an array of them
+ */
+export function keepOutputTexts(document, texts) {
+  if (texts.length !== 0) OUTPUT_TEXTS.set(document, texts);
+}
+
+/**
+ * Render every text of an output format's document again.
+ * @param {object} document
+ * @param {Readonly<Record<string, (params: object, error?: object) => string>>} catalog
+ */
+function localizeOutput(document, catalog) {
+  const texts = OUTPUT_TEXTS.get(document);
+  if (texts === undefined) return;
+  for (let i = 0; i < texts.length; i += 3) {
+    const sources = texts[i + 2];
+    const errors = /** @type {ValidationError[]} */ (Array.isArray(sources) ? sources : [sources]);
+    /** @type {Record<string, string>} */ (texts[i])[/** @type {string} */ (texts[i + 1])] = joinErrorMessages(localizeErrors(errors, catalog));
+  }
 }
 
 //#endregion

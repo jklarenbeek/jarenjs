@@ -200,10 +200,6 @@ delete it or fix it.
   loader that serves that URI, which the README teaches and which answers
   right, so it waits on a decision to change the default (a minor with an
   upgrade sentence).
-- [ ] **The output formats answer in English only.** A unit carries rendered
-  text, so `localizeErrors` does not reach it and the packs' `subschema` entry
-  is never read. A catalog on the output path (or units that keep `msgid` and
-  `params`) is a new API (a minor).
 - [ ] **The normalizer compiles a chain of references recursively per link.**
   `compileNormalizer` builds each `$ref` target where it meets it, so a schema
   whose references chain one target to the next (`$defs` `d0` … `dN`, each `{

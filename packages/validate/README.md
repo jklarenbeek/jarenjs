@@ -1959,7 +1959,12 @@ What the units say:
   `patternProperties`, `additionalProperties` and `unevaluatedProperties`
   applied to, the indexes `contains` matched, and the largest index or `true`
   of `prefixItems`, `items`, `additionalItems` and `unevaluatedItems`.
-  Unknown keywords are not reported as annotations, nor a keyword of a later
+  The instance is an object or an array by the validator's own tests, so a
+  null-prototype object, a class instance, an `Array` subclass and an array
+  of another realm are annotated as their keywords applied to them. *Upgrade:
+  the annotations read the instance's `constructor`, so these four got none,
+  and an object whose `constructor` member was `Array` got the item
+  keywords' annotations.* Unknown keywords are not reported as annotations, nor a keyword of a later
   draft (`readOnly`, `writeOnly`, `contentEncoding` and `contentMediaType`
   before draft-07, `deprecated` and `contentSchema` before 2019-09). Before
   2019-09 a `$ref` makes its siblings inert, so no format reports them.
@@ -2000,10 +2005,8 @@ What the units say:
   used to list such keywords as passing units.*
 - **Messages and `errorMessage` are the collected errors' own**: the
   English messages render them, an `errorMessage` replaces them, and
-  `messages: false` leaves them `''`. A unit carries the rendered text
-  only, so `localizeErrors`, which re-renders collected errors from their
-  `msgid` and `params`, does not reach an output: the formats answer in
-  English.
+  `messages: false` leaves them `''`. `localizeErrors` renders them again
+  in any catalog, after the fact (below).
 
 `outputFormat` takes precedence over `collectErrors`. `flagOutput` runs the
 boolean validator, which stops at the first failure; the other five record a
@@ -2017,6 +2020,75 @@ reports what its own keywords produced), where the example shows it on
 some failed units and not others. `list` lists no branch units: its own
 specification's example has none (*upgrade: `basic` used to leave out the
 2020-12 example's branch units*).
+
+### In the reader's language
+
+`localizeErrors`, the door that renders collected errors in a locale pack,
+takes the document an output format returned as well, and renders every
+text in it again, in place: a 2020-12 unit's `error`, each entry of a
+`list` or `hierarchical` unit's `errors`, and `basic`'s branch units, from
+the pack's `subschema` entry. One validation answers several readers: each
+call renders the texts from the errors they came from, and the built-in
+English catalog gives the original text back. The rules are the collected
+errors' own (so a `$msgid` spec's fallback text, once a catalog carried its
+msgid, keeps that render where a later catalog has none, as a collected
+error does): a text joined from several errors renders each part (`; `
+between them, once each), an `errorMessage` without `$msgid` stays as
+written, a `$msgid` renders where the catalog carries it, and an Arabic
+message keeps the isolates the `ar` pack writes.
+Under `messages: false` the texts are `''` until a catalog renders them.
+
+```javascript
+import { JarenValidator, compileMessageCatalog, localizeErrors } from '@jarenjs/validate';
+import { listOutput } from '@jarenjs/validate/output';
+import { nl } from '@jarenjs/locales';
+
+// orderSchema and order are the two documents above
+const output = new JarenValidator({ outputFormat: listOutput }).compile(orderSchema)(order);
+localizeErrors(output, compileMessageCatalog(nl)); // the same document, every text in Dutch
+```
+
+returns the `list` output above, in Dutch:
+
+```json
+{
+  "valid": false,
+  "details": [
+    {
+      "valid": false,
+      "evaluationPath": "",
+      "schemaLocation": "https://example.com/order#",
+      "instanceLocation": "",
+      "errors": { "required": "moet de verplichte eigenschap 'id' bevatten" },
+      "droppedAnnotations": { "properties": ["lines"] }
+    },
+    {
+      "valid": false,
+      "evaluationPath": "/properties/lines/items/$ref/properties/qty",
+      "schemaLocation": "https://example.com/order#/$defs/line/properties/qty",
+      "instanceLocation": "/lines/0/qty",
+      "errors": { "minimum": "moet >= 1 zijn" }
+    },
+    {
+      "valid": false,
+      "evaluationPath": "/properties/lines/items/$ref",
+      "schemaLocation": "https://example.com/order#/$defs/line",
+      "instanceLocation": "/lines/1",
+      "errors": { "required": "moet de verplichte eigenschap 'sku' bevatten" },
+      "droppedAnnotations": { "properties": ["qty"] }
+    }
+  ]
+}
+```
+
+What a text was rendered from is kept beside the document, not in it, so
+the output stays exactly the JSON above: no member is added, and a unit's
+keys are the specification's. The record belongs to the document the
+validator returned. A `JSON.stringify` or `structuredClone` copy, a spread
+of the document, and a unit passed alone carry the texts only:
+`localizeErrors` leaves them as they are. Render the document, then copy it.
+*Upgrade: the formats answered in English only, and `basic`'s branch units
+never read a pack's `subschema` entry.*
 
 ## Normalization
 
@@ -2795,7 +2867,9 @@ localizeErrors(result.errors, catalog);       // Dutch, re-rendered from msgid +
 ```
 
 The locale is chosen at **report time**; switching locale never recompiles
-anything. Catalog entries are plain functions, so packs use the platform's
+anything. `localizeErrors` takes the document a standard output format
+returned the same way, and renders its every text in the pack (see
+[In the reader's language](#in-the-readers-language)). Catalog entries are plain functions, so packs use the platform's
 `Intl.PluralRules`/`Intl.NumberFormat` — see
 [`@jarenjs/locales`](../locales/README.md) for the pack-authoring guide.
 
@@ -2808,6 +2882,9 @@ their own resolver), skip English rendering entirely:
 const validator = new JarenValidator({ collectErrors: true, messages: false });
 // errors arrive with message: '', params and msgid still set
 ```
+
+With an output format, `messages: false` leaves every text `''` and the
+document still renders through `localizeErrors`.
 
 ## Not planned
 

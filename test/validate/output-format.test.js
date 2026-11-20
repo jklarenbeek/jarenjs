@@ -2,7 +2,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { JarenValidator, ValidatorOptions, ValidationOptions, SchemaCompileError, VALIDATE_CODES } from '@jarenjs/validate';
+import vm from 'node:vm';
+import { JarenValidator, ValidatorOptions, ValidationOptions, SchemaCompileError, VALIDATE_CODES, compileMessageCatalog, localizeErrors } from '@jarenjs/validate';
+import { nl } from '@jarenjs/locales';
 import { stringFormats } from '@jarenjs/formats';
 import { getSchemaDraftByName } from '@jarenjs/refs';
 import { flagOutput, basicOutput, detailedOutput, verboseOutput, listOutput, hierarchicalOutput } from '@jarenjs/validate/output';
@@ -273,14 +275,15 @@ describe('the JSON-Schema-Test-Suite output tests', () => {
 });
 
 describe('the README example', () => {
-  it('returns the list and basic outputs the README prints', () => {
+  it('returns the list and basic outputs the README prints, and the list in Dutch', () => {
     const readme = fs.readFileSync(new URL('../../packages/validate/README.md', import.meta.url), 'utf8');
     const section = readme.slice(readme.indexOf('## Standard output formats'), readme.indexOf('## Normalization'));
     const fences = [...section.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => JSON.parse(m[1]));
-    assert.equal(fences.length, 4);
-    const [schema, order, list, basic] = fences;
+    assert.equal(fences.length, 5);
+    const [schema, order, list, basic, dutch] = fences;
     assert.deepEqual(output('list', schema, order), list);
     assert.deepEqual(output('basic', schema, order), basic);
+    assert.deepEqual(localizeErrors(output('list', schema, order), compileMessageCatalog(nl)), dutch);
   });
 });
 
@@ -478,6 +481,34 @@ describe('output units', () => {
       [{ properties: ['a'], patternProperties: ['xb'], additionalProperties: ['c'] }]);
     assert.deepEqual(output('list', { $schema: 'http://json-schema.org/draft-07/schema#', $id: 'https://ex.test/app', items: [true, {}], additionalItems: true }, [1, 2, 3]).details[0].annotations,
       { items: 1, additionalItems: true });
+  });
+
+  it('annotate an instance exactly where its keyword applied, read by the validator\'s own object and array tests', () => {
+    const app = (/** @type {object} */ schema) => ({ $schema: S, $id: 'https://ex.test/app', ...schema });
+    /** The annotation of the root's `keyword` in `format`, or undefined. */
+    const annotationAt = (/** @type {string} */ format, /** @type {object} */ schema, /** @type {unknown} */ data, /** @type {string} */ keyword) => {
+      const out = output(format, app(schema), data);
+      assert.equal(out.valid, true);
+      // `detailed` condenses a root holding one unit to that unit
+      return [out, ...(out.annotations ?? [])].find((/** @type {any} */ u) => u.keywordLocation === '/' + keyword)?.annotation;
+    };
+    class List extends Array {}
+    class Point { a = 1; }
+    const nullProto = Object.assign(Object.create(null), { a: 1 });
+    for (const format of ['detailed', 'verbose']) {
+      // an object whose constructor member is Array is no array: no array keyword reads it
+      assert.equal(annotationAt(format, { items: {} }, { constructor: Array, 0: 1, length: 1 }, 'items'), undefined, format);
+      // an Array subclass instance and an array of another realm are arrays: items applied to them
+      assert.equal(annotationAt(format, { items: {} }, List.from([1]), 'items'), true, format);
+      assert.equal(annotationAt(format, { items: {} }, vm.runInNewContext('[1]'), 'items'), true, format);
+      assert.equal(annotationAt(format, { items: {} }, [1], 'items'), true, format);
+      // properties applied to a null-prototype object and a class instance
+      assert.deepEqual(annotationAt(format, { properties: { a: {} } }, nullProto, 'properties'), ['a'], format);
+      assert.deepEqual(annotationAt(format, { properties: { a: {} } }, new Point(), 'properties'), ['a'], format);
+      assert.deepEqual(annotationAt(format, { properties: { a: {} } }, { a: 1 }, 'properties'), ['a'], format);
+    }
+    assert.deepEqual(output('list', app({ properties: { a: {} } }), nullProto).details[0].annotations, { properties: ['a'] });
+    assert.deepEqual(output('list', app({ prefixItems: [{}], items: {} }), List.from([1, 2])).details[0].annotations, { prefixItems: 0, items: true });
   });
 
   it('annotate format, and report it when it asserts', () => {

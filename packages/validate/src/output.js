@@ -27,10 +27,10 @@
 
 import { isArrayClass, isObjectClass } from '@jarenjs/core';
 import { encodeJSONPointerSegment, decodeJSONPointerSegment } from '@jarenjs/json/pointer';
-import { convertInternalErrors, renderErrorMessage } from './messages.js';
+import { convertInternalErrors, renderErrorMessage, joinErrorMessages, keepOutputTexts, ValidationError } from './messages.js';
 import { ASSERTION_SINCE, readsSince, readPrefixItems, TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, admitsPropertyDependencies } from './schema-keywords.js';
 import { admitsDynamicReference } from './dynamic-ref.js';
-import { REF_SIBLING_KEYWORDS } from './tools.js';
+import { REF_SIBLING_KEYWORDS, isObjectInstance } from './tools.js';
 import { createJsonPointer } from './traverse.js';
 
 /**
@@ -357,13 +357,14 @@ function annotationOf(unit, keyword, children) {
   if (VALUE_ANNOTATIONS.has(keyword)) return schema[keyword];
   if (STRING_ANNOTATIONS.has(keyword)) return typeof unit.data === 'string' ? schema[keyword] : undefined;
   if (MEMBER_ANNOTATIONS.has(keyword)) {
-    if (children.length === 0 || !isObjectClass(unit.data)) return undefined;
+    if (children.length === 0 || !isObjectInstance(unit.data)) return undefined;
     /** @type {Set<string>} */
     const names = new Set();
     for (const child of children) names.add(lastToken(child.instanceLocation));
     return [...names];
   }
-  if (!isArrayClass(unit.data)) return undefined;
+  // The validator's own tests: what its object and array keywords apply to.
+  if (!Array.isArray(unit.data)) return undefined;
   const length = /** @type {unknown[]} */ (unit.data).length;
   if (keyword === 'contains') {
     // `contains: true` matches every item without a subschema to record.
@@ -449,18 +450,6 @@ function keywordResults(unit, verbose) {
 }
 
 /**
- * The messages of a keyword's errors as one string.
- * @param {import('./messages.js').ValidationError[]} errors
- * @returns {string}
- */
-function joinMessages(errors) {
-  const messages = [];
-  for (const error of errors)
-    if (error.message !== '' && !messages.includes(error.message)) messages.push(error.message);
-  return messages.join('; ');
-}
-
-/**
  * Whether a child belongs to a pruned form: it decides its parent's answer.
  * A passing subschema under a failing one changes nothing, nor does a
  * failing probe under a keyword that passed; a failing probe explains its
@@ -514,15 +503,18 @@ function falseSubschemaSegment(unit, keyword, instanceLocation) {
  * @param {string} segment - Where the subschema lies below `unit`
  * @param {string} instanceLocation
  * @param {import('./messages.js').ValidationError[]} errors - The errors raised there
+ * @param {unknown[]} texts - Receives what the unit's text was rendered from (see `keepOutputTexts`)
  * @returns {Record<string, unknown>}
  */
-function falseSubschemaUnit(unit, segment, instanceLocation, errors) {
+function falseSubschemaUnit(unit, segment, instanceLocation, errors, texts) {
+  const messages = { '': joinErrorMessages(errors) };
+  texts.push(messages, '', errors);
   return {
     valid: false,
     evaluationPath: unit.evaluationPath + segment,
     schemaLocation: unit.schemaLocation + segment,
     instanceLocation,
-    errors: { '': joinMessages(errors) },
+    errors: messages,
   };
 }
 
@@ -532,9 +524,10 @@ function falseSubschemaUnit(unit, segment, instanceLocation, errors) {
  * @param {KeywordResult[]} results
  * @param {boolean} surviving - Whether this unit and every enclosing unit passed
  * @param {Record<string, unknown>[]} refused - Receives the units of the `false` subschemas the unit's keywords applied at other instances, in order
+ * @param {unknown[]} texts - Receives what each text was rendered from (see `keepOutputTexts`)
  * @returns {Record<string, unknown>}
  */
-function subschemaUnit(unit, results, surviving, refused) {
+function subschemaUnit(unit, results, surviving, refused, texts) {
   /** @type {Record<string, unknown>} */
   const out = {
     valid: unit.valid,
@@ -559,11 +552,12 @@ function subschemaUnit(unit, results, surviving, refused) {
       else elsewhere.set(error.instancePath, { segment, raised: [error] });
     }
     if (here.length !== 0) {
-      errors[result.keyword] = joinMessages(here);
+      errors[result.keyword] = joinErrorMessages(here);
+      texts.push(errors, result.keyword, here);
       hasErrors = true;
     }
     for (const [instanceLocation, { segment, raised }] of elsewhere)
-      refused.push(falseSubschemaUnit(unit, segment, instanceLocation, raised));
+      refused.push(falseSubschemaUnit(unit, segment, instanceLocation, raised, texts));
     if (result.annotation !== undefined && (surviving || !unit.valid)) {
       annotations[result.keyword] = result.annotation;
       hasAnnotations = true;
@@ -577,15 +571,16 @@ function subschemaUnit(unit, results, surviving, refused) {
 /**
  * The `hierarchical` output: every unit, nested by evaluation.
  * @param {OutputUnit} unit
- * @param {boolean} [surviving]
+ * @param {boolean} surviving
+ * @param {unknown[]} texts - Receives what each text was rendered from
  * @returns {Record<string, unknown>}
  */
-function projectHierarchical(unit, surviving = unit.valid) {
+function projectHierarchical(unit, surviving, texts) {
   /** @type {Record<string, unknown>[]} */
   const refused = [];
-  const out = subschemaUnit(unit, keywordResults(unit, false), surviving, refused);
+  const out = subschemaUnit(unit, keywordResults(unit, false), surviving, refused, texts);
   if (unit.children.length !== 0 || refused.length !== 0)
-    out.details = [...unit.children.map((child) => projectHierarchical(child, surviving && child.valid)), ...refused];
+    out.details = [...unit.children.map((child) => projectHierarchical(child, surviving && child.valid, texts)), ...refused];
   return out;
 }
 
@@ -593,16 +588,18 @@ function projectHierarchical(unit, surviving = unit.valid) {
  * The `list` output: the units that carry errors or annotations, flat, from
  * the subschemas that decide the answer.
  * @param {OutputUnit} root
+ * @param {unknown} validation
+ * @param {unknown[]} texts - Receives what each text was rendered from
  * @returns {{ valid: boolean, details: Record<string, unknown>[] }}
  */
-function projectList(root) {
+function projectList(root, validation, texts) {
   /** @type {Record<string, unknown>[]} */
   const details = [];
   const visit = (/** @type {OutputUnit} */ unit, /** @type {boolean} */ surviving) => {
     const results = keywordResults(unit, false);
     /** @type {Record<string, unknown>[]} */
     const refused = [];
-    const out = subschemaUnit(unit, results, surviving, refused);
+    const out = subschemaUnit(unit, results, surviving, refused, texts);
     if (out.errors !== undefined || out.annotations !== undefined) details.push(out);
     details.push(...refused);
     const byKeyword = new Map(results.map((result) => [result.keyword, result]));
@@ -624,6 +621,7 @@ function projectList(root) {
  * @property {string} [absoluteKeywordLocation]
  * @property {string} instanceLocation
  * @property {string} [error]
+ * @property {import('./messages.js').ValidationError|import('./messages.js').ValidationError[]} [sources] - The error or errors `error` joins
  * @property {unknown} [annotation]
  * @property {KeywordNode[]} kids
  */
@@ -647,7 +645,8 @@ function keywordTree(unit, surviving, verbose) {
   };
   for (const result of keywordResults(unit, verbose)) {
     if (result.keyword === '') {
-      node.error = joinMessages(result.reported);
+      node.error = joinErrorMessages(result.reported);
+      node.sources = result.reported;
       continue;
     }
     const keywordLocation = unit.evaluationPath + '/' + encodeJSONPointerSegment(result.keyword);
@@ -657,7 +656,7 @@ function keywordTree(unit, surviving, verbose) {
       // Each error is its own unit at the instance it names; errors at the
       // members of the instance (an `additionalProperties: false`) sit
       // under the keyword's own unit at the instance.
-      const leaves = result.reported.map((error) => ({ valid: false, keywordLocation, absoluteKeywordLocation, instanceLocation: error.instancePath, error: error.message, kids: [] }));
+      const leaves = result.reported.map((error) => ({ valid: false, keywordLocation, absoluteKeywordLocation, instanceLocation: error.instancePath, error: error.message, sources: error, kids: [] }));
       if (leaves.every((leaf) => leaf.instanceLocation === unit.instanceLocation)) node.kids.push(...leaves);
       else node.kids.push({ valid: false, keywordLocation, absoluteKeywordLocation, instanceLocation: unit.instanceLocation, kids: leaves });
       continue;
@@ -666,13 +665,14 @@ function keywordTree(unit, surviving, verbose) {
     // a unit of its own there, beside the subschemas it applied.
     const here = result.reported.filter((error) => error.instancePath === unit.instanceLocation);
     const elsewhere = result.reported.filter((error) => error.instancePath !== unit.instanceLocation)
-      .map((error) => ({ valid: false, keywordLocation, absoluteKeywordLocation, instanceLocation: error.instancePath, error: error.message, kids: [] }));
+      .map((error) => ({ valid: false, keywordLocation, absoluteKeywordLocation, instanceLocation: error.instancePath, error: error.message, sources: error, kids: [] }));
     node.kids.push({
       valid: result.valid,
       keywordLocation,
       absoluteKeywordLocation,
       instanceLocation: unit.instanceLocation,
-      error: here.length !== 0 ? joinMessages(here) : undefined,
+      error: here.length !== 0 ? joinErrorMessages(here) : undefined,
+      sources: here,
       annotation,
       // A `true` subschema has no keywords: its node would hold nothing.
       kids: [...result.children.filter((child) => child.schema !== true)
@@ -687,16 +687,20 @@ function keywordTree(unit, surviving, verbose) {
  * failed and `annotations` when it passed.
  * @param {KeywordNode} node
  * @param {KeywordNode[]} kids
+ * @param {unknown[]} texts - Receives what each text was rendered from (see `keepOutputTexts`)
  * @returns {Record<string, unknown>}
  */
-function keywordUnit(node, kids) {
+function keywordUnit(node, kids, texts) {
   /** @type {Record<string, unknown>} */
   const out = { valid: node.valid, keywordLocation: node.keywordLocation };
   if (node.absoluteKeywordLocation !== undefined) out.absoluteKeywordLocation = node.absoluteKeywordLocation;
   out.instanceLocation = node.instanceLocation;
-  if (node.error !== undefined) out.error = node.error;
+  if (node.error !== undefined) {
+    out.error = node.error;
+    texts.push(out, 'error', node.sources ?? []);
+  }
   if (node.annotation !== undefined) out.annotation = node.annotation;
-  if (kids.length !== 0) out[node.valid ? 'annotations' : 'errors'] = kids.map((kid) => keywordUnit(kid, kid.kids));
+  if (kids.length !== 0) out[node.valid ? 'annotations' : 'errors'] = kids.map((kid) => keywordUnit(kid, kid.kids, texts));
   return out;
 }
 
@@ -732,22 +736,26 @@ function condense(node) {
 /**
  * The `verbose` output: every keyword of every applied subschema.
  * @param {OutputUnit} root
+ * @param {unknown} validation
+ * @param {unknown[]} texts - Receives what each text was rendered from
  * @returns {Record<string, unknown>}
  */
-function projectVerbose(root) {
+function projectVerbose(root, validation, texts) {
   const tree = keywordTree(root, root.valid, true);
-  return keywordUnit(tree, tree.kids);
+  return keywordUnit(tree, tree.kids, texts);
 }
 
 /**
  * The `detailed` output: the condensed hierarchy.
  * @param {OutputUnit} root
+ * @param {unknown} validation
+ * @param {unknown[]} texts - Receives what each text was rendered from
  * @returns {Record<string, unknown>}
  */
-function projectDetailed(root) {
+function projectDetailed(root, validation, texts) {
   const tree = keywordTree(root, root.valid, false);
   const kept = condense(tree);
-  return kept === null ? keywordUnit(tree, []) : keywordUnit(kept, kept.kids);
+  return kept === null ? keywordUnit(tree, [], texts) : keywordUnit(kept, kept.kids, texts);
 }
 
 /**
@@ -758,14 +766,20 @@ function projectDetailed(root) {
  * `subschema` message, "A subschema had errors.".
  * @param {OutputUnit} root
  * @param {{ options?: { messages?: boolean } }} validation - The compilation's `ValidationRoot`
+ * @param {unknown[]} texts - Receives what each text was rendered from
  * @returns {Record<string, unknown>}
  */
-function projectBasic(root, validation) {
-  const branch = validation.options?.messages === false ? '' : renderErrorMessage({ keyword: 'subschema' });
+function projectBasic(root, validation, texts) {
+  /** @type {ValidationError|null} The branch units' message, made on first need */
+  let branch = null;
   const units = [];
   const visit = (/** @type {KeywordNode} */ node) => {
-    if (carries(node)) units.push(keywordUnit(node, []));
-    else if (!node.valid) units.push(keywordUnit({ ...node, error: branch }, []));
+    if (carries(node)) units.push(keywordUnit(node, [], texts));
+    else if (!node.valid) {
+      branch ??= new ValidationError({ keyword: 'subschema', instancePath: '', schemaPath: '', params: {},
+        message: validation.options?.messages === false ? '' : renderErrorMessage({ keyword: 'subschema' }) });
+      units.push(keywordUnit({ ...node, error: branch.message, sources: branch }, [], texts));
+    }
     for (const kid of node.kids) visit(kid);
   };
   const kept = condense(keywordTree(root, root.valid, false));
@@ -860,7 +874,7 @@ function createRecorder(schemas) {
 /**
  * @template R
  * @param {string} name
- * @param {(root: OutputUnit, validation: any) => R} projection - Projects the recorded units; `validation` is the compilation's `ValidationRoot`
+ * @param {(root: OutputUnit, validation: any, texts: unknown[]) => R} projection - Projects the recorded units; `validation` is the compilation's `ValidationRoot`, `texts` receives what each text was rendered from
  * @returns {Readonly<OutputFormat<R>>}
  */
 function recordingFormat(name, projection) {
@@ -872,7 +886,12 @@ function recordingFormat(name, projection) {
       const recorder = root.recorder;
       return (/** @type {unknown} */ data) => {
         const recorded = recorder.run(() => root.validate(data));
-        return projection(unitOf(recorded.root, null, recorded.schemas), root);
+        /** @type {unknown[]} */
+        const texts = [];
+        const document = projection(unitOf(recorded.root, null, recorded.schemas), root, texts);
+        // kept beside the document, for localizeErrors to render its texts again
+        keepOutputTexts(/** @type {object} */ (document), texts);
+        return document;
       };
     },
   });
@@ -923,4 +942,4 @@ export const listOutput = recordingFormat('list', projectList);
  * `hierarchical`: every applied subschema, nested under `details`.
  * @type {Readonly<OutputFormat<EvaluationOutputUnit>>}
  */
-export const hierarchicalOutput = recordingFormat('hierarchical', (root) => projectHierarchical(root));
+export const hierarchicalOutput = recordingFormat('hierarchical', (root, validation, texts) => projectHierarchical(root, root.valid, texts));
