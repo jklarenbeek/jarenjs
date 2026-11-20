@@ -49,6 +49,7 @@ export {
   createInitialData,
   createItemValue,
   parseFieldInput,
+  parseJsonText,
   parsePointer,
   getValueAtPointer,
   setValueAtPointer,

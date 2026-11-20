@@ -12,6 +12,7 @@ import {
   jsonFormatTesters,
   dateTimeFormatTesters,
   numberFormatTesters,
+  integerFormatTesters,
   geoFormatTesters,
 } from '@jarenjs/formats';
 
@@ -70,5 +71,19 @@ describe('Format tester registry', function () {
     assert.isFalse(formatTesters['int8'](128));
     assert.isTrue(formatTesters['uint32'](4294967295));
     assert.isFalse(formatTesters['uint32'](-1));
+  });
+
+  it('should name the integer formats, which test a bigint by their own range', function () {
+    assert.deepEqual(Object.keys(integerFormatTesters), ['int8', 'int16', 'int32', 'int64', 'uint8', 'uint16', 'uint32', 'uint64']);
+    for (const name of Object.keys(integerFormatTesters)) {
+      assert.isTrue(numberFormatTesters[name] === integerFormatTesters[name], `${name} is one tester in both tables`);
+      assert.isTrue(integerFormatTesters[name](0n) && integerFormatTesters[name](0), `${name} takes 0n and 0`);
+    }
+    assert.deepEqual(Object.keys(numberFormatTesters).filter((name) => !(name in integerFormatTesters)), ['float16', 'float32', 'float64', 'float', 'double']);
+    assert.isTrue(integerFormatTesters['int64'](2n ** 63n - 1n));
+    assert.isFalse(integerFormatTesters['int64'](2n ** 63n));
+    assert.isFalse(integerFormatTesters['uint8'](256n));
+    assert.isFalse(integerFormatTesters['uint64'](-1n));
+    assert.isFalse(formatTesters['float'](5n), 'a floating point tester takes a number only');
   });
 });

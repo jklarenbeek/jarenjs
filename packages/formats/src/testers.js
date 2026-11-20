@@ -196,21 +196,48 @@ export const geoFormatTesters = {
 };
 
 /**
+ * The test of an integer format: a number by the core predicate (an
+ * integer in range; a safe integer for the 64-bit formats, the integers a
+ * number holds exactly), and a bigint by the format's own range, exactly
+ * and never as the number it converts to.
+ * @param {(value: number) => boolean} isNumber - The number predicate
+ * @param {bigint} minimum - The least integer of the format
+ * @param {bigint} maximum - The greatest integer of the format
+ * @returns {(value: number | bigint) => boolean}
+ */
+function integerTester(isNumber, minimum, maximum) {
+  return function isInteger(value) {
+    return typeof value === 'bigint' ? value >= minimum && value <= maximum : isNumber(value);
+  };
+}
+
+/**
+ * Integer format testers: the number formats that judge a bigint too.
+ * Each takes a NUMBER or a BIGINT, not a string.
+ * @type {Record<string, (value: number | bigint) => boolean>}
+ */
+export const integerFormatTesters = {
+  // Signed integer types
+  'int8': integerTester(isValidInt8, -128n, 127n),
+  'int16': integerTester(isValidInt16, -32768n, 32767n),
+  'int32': integerTester(isValidInt32, -(2n ** 31n), 2n ** 31n - 1n),
+  'int64': integerTester(isValidInt64, -(2n ** 63n), 2n ** 63n - 1n),
+  // Unsigned integer types
+  'uint8': integerTester(isValidUInt8, 0n, 255n),
+  'uint16': integerTester(isValidUInt16, 0n, 65535n),
+  'uint32': integerTester(isValidUInt32, 0n, 2n ** 32n - 1n),
+  'uint64': integerTester(isValidUInt64, 0n, 2n ** 64n - 1n),
+};
+
+/**
  * Number format testers (the number.js compiler group). These take the
- * NUMBER value, not a string.
+ * NUMBER value, not a string; an integer format's takes a bigint too
+ * ({@link integerFormatTesters}), a floating point format's describes no
+ * bigint.
  * @type {Record<string, NumberFormatTester>}
  */
 export const numberFormatTesters = {
-  // Signed integer types
-  'int8': isValidInt8,
-  'int16': isValidInt16,
-  'int32': isValidInt32,
-  'int64': isValidInt64,
-  // Unsigned integer types
-  'uint8': isValidUInt8,
-  'uint16': isValidUInt16,
-  'uint32': isValidUInt32,
-  'uint64': isValidUInt64,
+  ...integerFormatTesters,
   // Floating point types
   'float16': isValidFloat16,
   'float32': isValidFloat32,

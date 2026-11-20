@@ -188,7 +188,7 @@ it does not require Node's `Buffer` global.
 
 ### 🔑 Keywords for format
 
-- format
+- format | _a format judges the values of its own type and takes every other value: a string format a string, a number format of [`@jarenjs/formats`](../formats) (`int8` … `uint64`, `float16`, `float32`, `float64`, `float`, `double`) a number. An integer format also judges a `bigint`, by its own range and exactly (`int64` takes `2n ** 63n - 1n` and refuses `2n ** 63n`); a floating point format takes a `bigint`. *Upgrade: a number format read every value as the number `Number()` converts it to, so `{ "format": "int32" }` refused `'abc'`, `{}` and `[1, 2]`, which it takes now as a string format takes a number (`''`, `true` and `'12'` were taken, and are); and a `bigint` was judged as the number it converts to, so `int64` refused `2n ** 63n - 1n`, which it takes now. A number out of range, or one that is no integer under an integer format, is refused as before.*_
 - formatMinimum / formatMaximum<br />or formatExclusiveMinimum / formatExclusiveMaximum
 
 ### 🔑 Keywords for array
@@ -1519,7 +1519,7 @@ import * as formats from '@jarenjs/formats';
 const jaren = new JarenValidator()
   .addFormats(formats.stringFormats)     // email, uri, uuid, hostname, iban, ...
   .addFormats(formats.dateTimeFormats)   // date-time, date, time, duration
-  .addFormats(formats.numberFormats)     // int32, double, decimal, ...
+  .addFormats(formats.numberFormats)     // int32, int64, float, double, ...
   .addFormats(formats.jsonFormats)       // json-pointer, json-path, regex, ...
   .addFormats(formats.geoFormats);       // geohash, lat-long, ...
 ```

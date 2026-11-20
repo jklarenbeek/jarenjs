@@ -57,7 +57,10 @@ import {
 } from './formats.js';
 
 import {
+  assertionsOf,
+  countOfKeyword,
   declaredTypes,
+  numberOfKeyword,
 } from './model.js';
 
 import {
@@ -86,36 +89,6 @@ function getPatternTester(source) {
       return null;
     }
   });
-}
-
-/**
- * A keyword value as the number the validator reads it as: a number, or
- * a string whose text is one (`"5"`). Any other value (a bigint, which
- * bounds no number; `null`, a boolean, an object, blank text) is none:
- * the validator refuses such a schema when it compiles (`JK0013`), so
- * the keyword asserts nothing per keystroke, as a pattern that does not
- * compile.
- * @param {unknown} value - A keyword's value
- * @returns {number | undefined}
- */
-function numberOfKeyword(value) {
-  const number = typeof value === 'number' ? value
-    : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
-  return Number.isNaN(number) ? undefined : number;
-}
-
-/**
- * A keyword value as the count the validator reads it as (`minLength`,
- * `maxItems`, ...): a non-negative integer, written as a number, a
- * bigint or a number string. Any other value is none (see
- * {@link numberOfKeyword}).
- * @param {unknown} value - A keyword's value
- * @returns {number | undefined}
- */
-function countOfKeyword(value) {
-  const number = typeof value === 'bigint' ? value : numberOfKeyword(value);
-  return number !== undefined && number >= 0 && (typeof number === 'bigint' || Number.isInteger(number))
-    ? Number(number) : undefined;
 }
 
 /**
@@ -249,71 +222,34 @@ function lengthIn(unit, value) {
  */
 function pushError(errors, catalog, keyword, params) {
   const msgid = `form/${keyword}`;
-  errors.push({
-    keyword,
-    params,
-    msgid,
-    message: renderFormsMessage(catalog, msgid, params),
-  });
+  const message = renderFormsMessage(catalog, msgid, params);
+  // two places of a schema may assert one thing (a `$ref` reached twice): it is said once
+  if (errors.some((error) => error.msgid === msgid && error.message === message)) return;
+  errors.push({ keyword, params, msgid, message });
 }
 
 /**
- * Validate a single field value against its own constraints, as the
- * validator judges the field's schema: every keyword the field check
- * implements applies to a value of that keyword's type, whatever the
- * field's kind, and to no other value.
- *
- * - `type`: only where the schema declares one (see {@link refusingType});
- *   `const` and `enum` on every value.
- * - `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum` and
- *   `multipleOf`: a number by the number bounds and steps, a bigint by
- *   the bigint ones alone, exactly; a bound of the other kind does not
- *   apply.
- * - `minLength`, `maxLength` (in the field's `lengthUnit`) and `pattern`:
- *   a string; `format`: the values its format judges.
- * - `minItems`, `maxItems`, `uniqueItems`: an array; `minProperties`,
- *   `maxProperties`: an object.
- *
- * @param {import('./model.js').FormField} field - Field from buildFormModel
- * @param {any} value - The TYPED value (see parseFieldInput); undefined = absent
- * @param {Readonly<Record<string, (params: object, error?: object) => string>>} [catalog] - Optional compiled message catalog (see messages.js), default English
- * @returns {FieldError[]} Empty when the value passes every per-field check
- * @example
- * const errors = validateField(emailField, 'not-an-email');
- * // [{ keyword: 'format', params: { format: 'email' },
- * //    msgid: 'form/format', message: 'Must be a valid email' }]
+ * Judge a value by the keywords one place of a field's schema asserts,
+ * as the validator judges them: each keyword on a value of its own type
+ * and on no other.
+ * @param {FieldError[]} errors - The output array
+ * @param {Readonly<Record<string, (params: object, error?: object) => string>>|undefined} catalog
+ * @param {Record<string, any>} c - The keywords the place asserts (see `assertionsOf` in model.js)
+ * @param {any} value - A value that is not `undefined`
+ * @param {unknown} lengthUnit - The field's length unit
  */
-export function validateField(field, value, catalog = undefined) {
-  /** @type {FieldError[]} */
-  const errors = [];
-  if (field == null) return errors;
-
-  // Absent value: only `required` applies. `null` is a value, as it is
-  // to the validator: a nullable field accepts it, and every other field
-  // judges it below like any value.
-  if (value === undefined) {
-    if (field.required && field.kind !== 'boolean') {
-      pushError(errors, catalog, 'required', {});
-    }
-    return errors;
-  }
-  if (value === null && field.nullable) return errors;
-
-  const schema = /** @type {Record<string, any>} */ (field.schema ?? {});
-  const c = /** @type {Record<string, any>} */ (field.constraints ?? {});
-
-  const type = refusingType(schema, value);
+function judge(errors, catalog, c, value, lengthUnit) {
+  const type = refusingType(c, value);
   if (type !== undefined) pushError(errors, catalog, 'type', { type });
 
-  const constant = schema.const;
+  const constant = c.const;
   if (constant !== undefined
     && !(constant === null || isScalarType(constant) ? constant === value : equalsDeep(constant, value))) {
     pushError(errors, catalog, 'const', { constValue: constant });
   }
   // the options of an `enum`, or of the oneOf const/title idiom the model reads as one
-  const options = Array.isArray(schema.enum) ? schema.enum : field.enumValues;
-  if (options != null && !isOption(options, value)) {
-    pushError(errors, catalog, 'enum', { enumValues: options });
+  if (c.enum !== undefined && !isOption(c.enum, value)) {
+    pushError(errors, catalog, 'enum', { enumValues: c.enum });
   }
 
   if (typeof value === 'number' || typeof value === 'bigint') {
@@ -347,7 +283,7 @@ export function validateField(field, value, catalog = undefined) {
     const minLength = countOfKeyword(c.minLength);
     const maxLength = countOfKeyword(c.maxLength);
     if (minLength !== undefined || maxLength !== undefined) {
-      const len = lengthIn(field.lengthUnit, value);
+      const len = lengthIn(lengthUnit, value);
       if (minLength !== undefined && len < minLength) {
         pushError(errors, catalog, 'minLength', { limit: c.minLength, len });
       }
@@ -394,6 +330,59 @@ export function validateField(field, value, catalog = undefined) {
         pushError(errors, catalog, 'maxProperties', { limit: c.maxProperties });
       }
     }
+  }
+}
+
+/**
+ * Validate a single field value against its own constraints, as the
+ * validator judges the field's schema: every keyword the field check
+ * implements applies to a value of that keyword's type, whatever the
+ * field's kind, and to no other value. Every place of the schema that
+ * asserts is judged on its own (`field.asserted`: the node, the schema
+ * its `$ref` names, each `allOf` branch), so a keyword two places hold is
+ * judged twice; one fault is reported once.
+ *
+ * - `type`: only where the schema declares one (see {@link refusingType});
+ *   `const` and `enum` on every value.
+ * - `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum` and
+ *   `multipleOf`: a number by the number bounds and steps, a bigint by
+ *   the bigint ones alone, exactly; a bound of the other kind does not
+ *   apply.
+ * - `minLength`, `maxLength` (in the field's `lengthUnit`) and `pattern`:
+ *   a string; `format`: the values its format judges.
+ * - `minItems`, `maxItems`, `uniqueItems`: an array; `minProperties`,
+ *   `maxProperties`: an object.
+ *
+ * @param {import('./model.js').FormField} field - Field from buildFormModel
+ * @param {any} value - The TYPED value (see parseFieldInput); undefined = absent
+ * @param {Readonly<Record<string, (params: object, error?: object) => string>>} [catalog] - Optional compiled message catalog (see messages.js), default English
+ * @returns {FieldError[]} Empty when the value passes every per-field check
+ * @example
+ * const errors = validateField(emailField, 'not-an-email');
+ * // [{ keyword: 'format', params: { format: 'email' },
+ * //    msgid: 'form/format', message: 'Must be a valid email' }]
+ */
+export function validateField(field, value, catalog = undefined) {
+  /** @type {FieldError[]} */
+  const errors = [];
+  if (field == null) return errors;
+
+  // Absent value: only `required` applies. `null` is a value, as it is
+  // to the validator: a nullable field accepts it, and every other field
+  // judges it below like any value.
+  if (value === undefined) {
+    if (field.required && field.kind !== 'boolean') {
+      pushError(errors, catalog, 'required', {});
+    }
+    return errors;
+  }
+  if (value === null && field.nullable) return errors;
+
+  // every place of the schema that asserts is judged on its own: the node,
+  // the schema its `$ref` names and each `allOf` branch, as the validator
+  // applies each
+  for (const asserted of field.asserted ?? [assertionsOf(field.schema ?? {}) ?? {}]) {
+    judge(errors, catalog, asserted, value, field.lengthUnit);
   }
 
   // a json control writes null for half-typed input: where no keyword

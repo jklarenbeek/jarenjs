@@ -2,7 +2,7 @@
 
 // The name -> predicate bindings live in ONE place: testers.js. This
 // module only wraps them in the validator's compiler contract.
-import { numberFormatTesters } from './testers.js';
+import { integerFormatTesters, numberFormatTesters } from './testers.js';
 
 /**
  * @typedef {{format?: string, formatMinimum?: string, formatExclusiveMinimum?: string, formatMaximum?: string, formatExclusiveMaximum?: string}} JSONSchema
@@ -15,28 +15,27 @@ import { numberFormatTesters } from './testers.js';
 /**
  * Creates a number format compiler function.
  *
+ * A number format judges numbers, and takes every value of another type,
+ * as every format takes the values its type does not cover: a string, a
+ * boolean, an array or an object is no number, whatever it would convert
+ * to. An integer format judges a bigint too, by its own range and
+ * exactly (a bigint is never judged as the number it converts to, as the
+ * validator's bounds never do); a floating point format describes no
+ * bigint and takes one.
+ *
  * @param {string} formatName - The name of the format (e.g., 'int32', 'float64')
- * @param {(value: number) => boolean} isNumberTest - The function to test if a number matches the format constraints
+ * @param {(value: any) => boolean} isNumberTest - The function to test if a number (or, for an integer format, a bigint) matches the format constraints
  * @returns {(schemaObj: ValidationObject, jsonSchema: JSONSchema) => (data: unknown, dataPath?: string) => boolean} A compiler function that creates number format validators
  * @example
- * const compiler = createNumberFormatCompiler('int8', isValidInt8);
+ * const compiler = createNumberFormatCompiler('int8', numberFormatTesters['int8']);
  * const validator = compiler(schemaObj, { format: 'int8' });
  * validator(127); // true
- * validator('127'); // true (coerced to number)
  * validator(128); // false (out of int8 range)
+ * validator(128n); // false (a bigint out of int8 range)
+ * validator('128'); // true (a string is no number: the format takes it)
  */
 function createNumberFormatCompiler(formatName, isNumberTest) {
-  // `Number()` runs the value's own `toString`/`valueOf`, so an instance
-  // carrying a member of that name that is not a function throws; such a
-  // value is simply not a number.
-  const numberOf = (data) => {
-    try {
-      return Number(data);
-    }
-    catch {
-      return NaN;
-    }
-  };
+  const judgesBigInt = Object.hasOwn(integerFormatTesters, formatName);
 
   return function compileNumberFormat(schemaObj, jsonSchema) {
     if (jsonSchema.format !== formatName)
@@ -45,9 +44,9 @@ function createNumberFormatCompiler(formatName, isNumberTest) {
     const addError = schemaObj.createErrorHandler(formatName, 'format');
 
     return function validateNumberFormat(data, dataPath) {
-      return (data == null
-        || isNumberTest(numberOf(data))
-        || addError(data, dataPath));
+      return (typeof data !== 'number' && !(judgesBigInt && typeof data === 'bigint'))
+        || isNumberTest(data)
+        || addError(data, dataPath);
     };
   };
 }
@@ -66,7 +65,7 @@ function createNumberFormatCompiler(formatName, isNumberTest) {
  * @example
  * compileInt8Format(schemaObj, { format: 'int8' })(127); // true
  * compileInt8Format(schemaObj, { format: 'int8' })(128); // false (with error)
- * compileInt8Format(schemaObj, { format: 'int8' })('64'); // true (coerced)
+ * compileInt8Format(schemaObj, { format: 'int8' })('64'); // true (a string is no number)
  */
 export const compileInt8Format = createNumberFormatCompiler('int8', numberFormatTesters['int8']);
 

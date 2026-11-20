@@ -10,7 +10,8 @@
  * validation (see validate.js).
  */
 
-import { isJsonObject } from '@jarenjs/core/object';
+import { getInclusiveExclusiveBounds } from '@jarenjs/core';
+import { equalsDeep, isJsonObject } from '@jarenjs/core/object';
 import { createWeakCache } from '@jarenjs/core/cache';
 import { formatMessageValue } from '@jarenjs/core/message';
 import {
@@ -60,7 +61,13 @@ const DEFAULT_MAX_DEPTH = 24;
  * @property {any} defaultValue
  * @property {string|undefined} placeholder
  * @property {import('./formats.js').FormatPreview|null} preview - The format's preview hint (formats.js), for a host with a renderer for it; null otherwise
- * @property {object} constraints - minLength/maxLength/pattern/minimum/... extracted for the UI
+ * @property {object} constraints - minLength/maxLength/pattern/minimum/... extracted for the UI:
+ *   where several places of the schema hold a bound (the node, the schema its `$ref` names,
+ *   an `allOf` branch), the tightest
+ * @property {Array<Record<string, any>>} asserted - What the field check judges: the keywords
+ *   of each place of the schema that asserts (the node itself, the schema its `$ref` names
+ *   and every `allOf` branch, each followed alike), one record per place. A keyword two
+ *   places hold is judged twice, never merged
  * @property {LengthUnit} lengthUnit - What `minLength`/`maxLength` count on this field: the
  *   unit the model was built with (`buildFormModel`'s `lengthUnit`), graphemes by default
  * @property {object|null} rules - The raw `x-form` rules annotation, if any (see rules.js)
@@ -133,55 +140,229 @@ function resolveLocalRef(ref, rootSchema) {
   return target === undefined ? null : target;
 }
 
+// The reading of a keyword's value, as the validator admits it when a
+// schema compiles: one reading for the field check (validate.js) and for
+// the bounds a control is given.
+
 /**
- * Resolve local $refs and shallowly merge allOf branches into a single
- * effective schema object for form purposes.
+ * A keyword value as the number the validator reads it as: a number, or
+ * a string whose text is one (`"5"`). Any other value (a bigint, which
+ * bounds no number; `null`, a boolean, an object, blank text) is none:
+ * the validator refuses such a schema when it compiles (`JK0013`), so
+ * the keyword asserts nothing per keystroke, as a pattern that does not
+ * compile.
+ * @param {unknown} value - A keyword's value
+ * @returns {number | undefined}
+ */
+export function numberOfKeyword(value) {
+  const number = typeof value === 'number' ? value
+    : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+  return Number.isNaN(number) ? undefined : number;
+}
+
+/**
+ * A keyword value as the count the validator reads it as (`minLength`,
+ * `maxItems`, ...): a non-negative integer, written as a number, a
+ * bigint or a number string. Any other value is none (see
+ * {@link numberOfKeyword}).
+ * @param {unknown} value - A keyword's value
+ * @returns {number | undefined}
+ */
+export function countOfKeyword(value) {
+  const number = typeof value === 'bigint' ? value : numberOfKeyword(value);
+  return number !== undefined && number >= 0 && (typeof number === 'bigint' || Number.isInteger(number))
+    ? Number(number) : undefined;
+}
+
+/**
+ * The places of a schema that assert a value, in the order a control
+ * reads them: the node itself, the schema its `$ref` names and every
+ * `allOf` branch, each followed alike. The validator applies every one
+ * (the keywords beside a `$ref` as the latest draft reads them), so the
+ * field check judges every one. A schema reached twice is one place, so
+ * a reference back into a schema it is being read from ends there;
+ * `false`, which no value passes, is a place, and `true` is none.
+ * @param {unknown} schema
+ * @param {object} rootSchema
+ * @param {number} depth
+ * @param {Array<Record<string, any> | false>} [places] - The places found so far
+ * @returns {Array<Record<string, any> | false>}
+ */
+function assertingPlaces(schema, rootSchema, depth, places = []) {
+  if (schema === false ? places.includes(false) : !isJsonObject(schema) || places.includes(schema)) return places;
+  places.push(schema);
+  if (schema === false || depth > DEFAULT_MAX_DEPTH) return places;
+  if (typeof schema.$ref === 'string') {
+    const target = resolveLocalRef(schema.$ref, rootSchema);
+    if (target !== null) assertingPlaces(target, rootSchema, depth + 1, places);
+  }
+  if (Array.isArray(schema.allOf)) {
+    for (const branch of schema.allOf) assertingPlaces(branch, rootSchema, depth + 1, places);
+  }
+  return places;
+}
+
+/** The keywords a place holds beside the ones that lead to other places. @param {string} key */
+const leadsOn = (key) => key === 'allOf' || key === '$ref';
+
+/**
+ * One schema for the several a position is given: itself, or the `allOf`
+ * of them, which the field built from it judges branch by branch.
+ * @param {unknown[]} schemas
+ * @returns {unknown}
+ */
+const allOfThem = (schemas) => (schemas.length === 1 ? schemas[0] : { allOf: schemas });
+
+/**
+ * The tightest of the bounds several places hold on one side of a range,
+ * for a control: the greatest lower or the least upper inclusive bound
+ * and the tightest exclusive one, a draft-04 boolean read as the bound it
+ * makes exclusive. Bounds a control can use are numbers; where no place
+ * holds one, the bigint bounds are compared instead.
+ * @param {Array<Record<string, any>>} places
+ * @param {'minimum' | 'maximum'} inclusive
+ * @param {'exclusiveMinimum' | 'exclusiveMaximum'} exclusive
+ * @param {Record<string, any>} merged - Where the two bounds are written
+ */
+function foldBounds(places, inclusive, exclusive, merged) {
+  const holders = places.filter((place) => place[inclusive] !== undefined || place[exclusive] !== undefined);
+  if (holders.length < 2) return;
+  const lower = inclusive === 'minimum';
+  /** The tightest of the bounds one family holds, or undefined for none. @param {Array<number | bigint | undefined>} bounds */
+  const tightest = (bounds) => bounds.reduce((tight, bound) => (
+    bound === undefined || (tight !== undefined && (lower ? bound <= tight : bound >= tight)) ? tight : bound), undefined);
+  for (const read of [numberOfKeyword, (/** @type {unknown} */ bound) => (typeof bound === 'bigint' ? bound : undefined)]) {
+    const pairs = holders.map((place) => getInclusiveExclusiveBounds(read, place[inclusive], place[exclusive]));
+    const [inclusiveBound, exclusiveBound] = [0, 1].map((side) => tightest(pairs.map((pair) => pair[side])));
+    if (inclusiveBound === undefined && exclusiveBound === undefined) continue;
+    delete merged[inclusive];
+    delete merged[exclusive];
+    if (inclusiveBound !== undefined) merged[inclusive] = inclusiveBound;
+    if (exclusiveBound !== undefined) merged[exclusive] = exclusiveBound;
+    return;
+  }
+}
+
+/** The counts a control can use the tightest of: the greatest minimum, the least maximum. */
+const FOLDED_COUNTS = /** @type {const} */ ([
+  ['minLength', Math.max], ['maxLength', Math.min], ['minItems', Math.max], ['maxItems', Math.min],
+  ['minProperties', Math.max], ['maxProperties', Math.min],
+]);
+
+/**
+ * The type names every one of several `type` declarations takes, in the
+ * first one's order: `integer` where one says `number` and another
+ * `integer`. The first declaration's names where they share none (no
+ * value passes such a schema; a control still has to be chosen).
+ * @param {unknown[][]} declarations
+ * @returns {unknown[]}
+ */
+function intersectTypes(declarations) {
+  const shared = declarations.slice(1).reduce((names, others) => names.flatMap((name) => (
+    others.includes(name) ? [name]
+      : (name === 'number' && others.includes('integer')) || (name === 'integer' && others.includes('number')) ? ['integer'] : [])),
+  declarations[0]);
+  return shared.length > 0 ? shared : declarations[0];
+}
+
+/**
+ * The items a place describes: the schemas of its leading positions and
+ * the schema of every position after them, in either spelling
+ * (`prefixItems` with `items`, or an `items` array with `additionalItems`).
+ * @param {Record<string, any>} place
+ * @returns {{ prefix: unknown[], rest: unknown } | null} `null` for a place that describes none
+ */
+function itemsOf(place) {
+  if (Array.isArray(place.prefixItems)) return { prefix: place.prefixItems, rest: Array.isArray(place.items) ? undefined : place.items };
+  if (Array.isArray(place.items)) return { prefix: place.items, rest: place.additionalItems };
+  return place.items === undefined ? null : { prefix: [], rest: place.items };
+}
+
+/**
+ * The one schema a control is drawn from, for the several places that
+ * assert a value: what a control can show, where the field check judges
+ * each place on its own (`field.asserted`).
+ *
+ * - An annotation, and a keyword a control holds one of (`pattern`,
+ *   `format`, `multipleOf`, `const`), is the first place's that holds it,
+ *   the node's own before its `$ref`'s and its branches'.
+ * - A bound or a count two places hold is the tightest; `uniqueItems`
+ *   holds where one place asks it; `enum` is the options every place
+ *   lists; `type` the names every place takes.
+ * - `required` is every place's; a member, an item or a tuple slot two
+ *   places describe is the `allOf` of them, so the field built from it
+ *   judges each.
+ * @param {Array<Record<string, any>>} places - At least two
+ * @returns {Record<string, any>}
+ */
+function foldPlaces(places) {
+  /** @type {Record<string, any>} */
+  const merged = {};
+  for (const place of places) {
+    for (const key of Object.keys(place)) {
+      if (!leadsOn(key) && merged[key] === undefined) merged[key] = place[key];
+    }
+  }
+
+  // members: a place's before those of the places read before it, as the form has always listed them
+  /** @type {Map<string, unknown[]>} */
+  let members = new Map();
+  for (const place of places) {
+    if (!isJsonObject(place.properties)) continue;
+    const before = members;
+    members = new Map(Object.keys(place.properties).map((name) => [name, []]));
+    for (const [name, schemas] of before) members.set(name, schemas);
+    for (const name of Object.keys(place.properties)) /** @type {unknown[]} */ (members.get(name)).push(place.properties[name]);
+  }
+  if (members.size > 0) merged.properties = Object.fromEntries([...members].map(([name, schemas]) => [name, allOfThem(schemas)]));
+  const required = places.filter((place) => Array.isArray(place.required)).flatMap((place) => place.required);
+  if (required.length > 0) merged.required = [...new Set(required)];
+
+  // items: each position is given the schema of every place that describes it
+  const described = places.map(itemsOf).filter((items) => items !== null);
+  if (described.length > 1) {
+    const slots = Math.max(...described.map((items) => items.prefix.length));
+    const at = (/** @type {number} */ position) => described
+      .map((items) => (position < items.prefix.length ? items.prefix[position] : items.rest)).filter((schema) => schema !== undefined);
+    delete merged.items;
+    delete merged.additionalItems;
+    delete merged.prefixItems;
+    if (slots > 0) merged.prefixItems = Array.from({ length: slots }, (_, position) => allOfThem(at(position)));
+    const rest = at(slots);
+    if (rest.length > 0) merged.items = rest.includes(false) ? false : allOfThem(rest);
+  }
+
+  foldBounds(places, 'minimum', 'exclusiveMinimum', merged);
+  foldBounds(places, 'maximum', 'exclusiveMaximum', merged);
+  for (const [keyword, tighter] of FOLDED_COUNTS) {
+    const counts = places.map((place) => countOfKeyword(place[keyword])).filter((count) => count !== undefined);
+    if (counts.length > 1) merged[keyword] = tighter(...counts);
+  }
+  if (places.some((place) => place.uniqueItems === true)) merged.uniqueItems = true;
+  const enums = places.filter((place) => Array.isArray(place.enum)).map((place) => place.enum);
+  if (enums.length > 1) merged.enum = enums[0].filter((option) => enums.every((list) => list.some((other) => equalsDeep(other, option))));
+  const types = places.map((place) => declaredTypes(place.type)).filter((names) => names !== null && names.length > 0);
+  if (types.length > 1) {
+    const shared = intersectTypes(/** @type {unknown[][]} */ (types));
+    merged.type = shared.length === 1 ? shared[0] : shared;
+  }
+  return merged;
+}
+
+/**
+ * The effective schema a control is drawn from: local `$ref`s followed
+ * and `allOf` branches folded into the node (see {@link foldPlaces}). A
+ * schema with neither is itself. The field check does not read it for
+ * its answers: it judges each place that asserts on its own.
  * @param {object|boolean} schema
  * @param {object} rootSchema
  * @param {number} depth
  * @returns {object|boolean}
  */
 export function resolveSchema(schema, rootSchema, depth = 0) {
-  if (depth > DEFAULT_MAX_DEPTH) return schema;
   if (!isJsonObject(schema)) return schema;
-
-  let resolved = schema;
-
-  if (typeof schema.$ref === 'string') {
-    const target = resolveLocalRef(schema.$ref, rootSchema);
-    if (target != null && typeof target === 'object') {
-      const deref = resolveSchema(target, rootSchema, depth + 1);
-      // 2019-09+: siblings apply together with the referenced schema
-      const { $ref: _$ref, ...siblings } = schema;
-      resolved = (deref && typeof deref === 'object')
-        ? { ...deref, ...siblings }
-        : deref;
-    }
-  }
-
-  if (resolved && typeof resolved === 'object' && Array.isArray(resolved.allOf)) {
-    const merged = { ...resolved };
-    delete merged.allOf;
-    const requiredSets = merged.required ? [merged.required] : [];
-    for (const branch of resolved.allOf) {
-      const sub = resolveSchema(branch, rootSchema, depth + 1);
-      if (sub == null || typeof sub !== 'object') continue;
-      if (sub.properties) {
-        merged.properties = { ...sub.properties, ...(merged.properties || {}) };
-      }
-      if (Array.isArray(sub.required)) requiredSets.push(sub.required);
-      for (const key of Object.keys(sub)) {
-        if (key === 'properties' || key === 'required' || key === 'allOf') continue;
-        if (merged[key] === undefined) merged[key] = sub[key];
-      }
-    }
-    if (requiredSets.length > 0) {
-      merged.required = [...new Set(requiredSets.flat())];
-    }
-    resolved = merged;
-  }
-
-  return resolved;
+  const places = assertingPlaces(schema, rootSchema, depth).filter((place) => place !== false);
+  return places.length < 2 ? schema : foldPlaces(/** @type {Array<Record<string, any>>} */ (places));
 }
 
 /**
@@ -212,37 +393,76 @@ export function declaredTypes(type) {
 }
 
 /**
- * Whether a resolved schema admits `null` — what layer 1 reads so an
+ * Whether one place of a schema admits `null` — what layer 1 reads so an
  * explicit `null` is judged as the validator judges it: a type that lists
  * `null` (an `enum` or `const` beside it must admit `null` too), OpenAPI's
  * `nullable: true` (which the validator honours), an `anyOf`/`oneOf` with
- * a branch that admits it, or a schema with none of these: without a
+ * a branch that admits it, or a place with none of these: without a
  * `type`, the keywords a form reads (`minLength`, `maximum`,
  * `properties`, …) judge only values of their own type and let `null`
  * through, unless `nullable: false` stands there, which refuses it.
+ * @param {Record<string, any> | false} place
+ * @param {object} rootSchema
+ * @param {number} depth
+ * @returns {boolean}
+ */
+function placeAdmitsNull(place, rootSchema, depth) {
+  if (place === false) return false;
+  if (Array.isArray(place.enum) && !place.enum.includes(null)) return false;
+  if (Object.hasOwn(place, 'const') && place.const !== null) return false;
+  if (place.nullable === true) return true;
+  const types = declaredTypes(place.type);
+  if (types !== null) return types.includes('null');
+  // without a `type`, OpenAPI's `nullable: false` refuses null, as to the validator
+  if (place.nullable === false) return false;
+  if (Array.isArray(place.enum) || Object.hasOwn(place, 'const')) return true;
+  let union = false;
+  for (const key of ['anyOf', 'oneOf']) {
+    const branches = place[key];
+    if (!Array.isArray(branches)) continue;
+    if (branches.some((branch) => admitsNull(branch, rootSchema, depth + 1))) return true;
+    union = true;
+  }
+  return !union;
+}
+
+/**
+ * Whether a schema admits `null`: every place of it that asserts does
+ * (the node, the schema its `$ref` names, each `allOf` branch).
  * @param {unknown} schema
  * @param {object} rootSchema
  * @param {number} depth
  * @returns {boolean}
  */
 function admitsNull(schema, rootSchema, depth) {
-  if (!isJsonObject(schema) || depth > DEFAULT_MAX_DEPTH) return false;
-  if (Array.isArray(schema.enum) && !schema.enum.includes(null)) return false;
-  if (Object.hasOwn(schema, 'const') && schema.const !== null) return false;
-  if (schema.nullable === true) return true;
-  const types = declaredTypes(schema.type);
-  if (types !== null) return types.includes('null');
-  // without a `type`, OpenAPI's `nullable: false` refuses null, as to the validator
-  if (schema.nullable === false) return false;
-  if (Array.isArray(schema.enum) || Object.hasOwn(schema, 'const')) return true;
-  let union = false;
-  for (const key of ['anyOf', 'oneOf']) {
-    const branches = schema[key];
-    if (!Array.isArray(branches)) continue;
-    if (branches.some((branch) => admitsNull(resolveSchema(branch, rootSchema, depth + 1), rootSchema, depth + 1))) return true;
-    union = true;
+  return depth <= DEFAULT_MAX_DEPTH
+    && assertingPlaces(schema, rootSchema, depth).every((place) => placeAdmitsNull(place, rootSchema, depth));
+}
+
+/** The keywords the field check judges, in the order a record lists them. */
+const ASSERTED_KEYWORDS = ['type', 'nullable', 'const', 'enum', ...STRING_CONSTRAINTS, ...NUMERIC_CONSTRAINTS, ...ARRAY_CONSTRAINTS, ...OBJECT_CONSTRAINTS];
+
+/**
+ * What one place of a schema asserts, as the field check judges it: the
+ * keywords layer 1 implements, as the place writes them, and the options
+ * of the `oneOf` const/title idiom as an `enum`. `null` for a place that
+ * holds none (and for `false`, which names no keyword).
+ * @param {Record<string, any> | false} place
+ * @returns {Record<string, any> | null}
+ */
+export function assertionsOf(place) {
+  if (place === false) return null;
+  /** @type {Record<string, any>} */
+  const asserted = {};
+  for (const keyword of ASSERTED_KEYWORDS) {
+    if (place[keyword] !== undefined) asserted[keyword] = place[keyword];
   }
-  return !union;
+  if (!Array.isArray(asserted.enum)) {
+    delete asserted.enum;
+    const options = getOneOfConstBranches(place);
+    if (options !== null) asserted.enum = options.map((branch) => branch.const);
+  }
+  return Object.keys(asserted).length > 0 ? asserted : null;
 }
 
 /**
@@ -403,6 +623,7 @@ function getConstraints(schema) {
  * @returns {FormField}
  */
 function buildField(rawSchema, rootSchema, pointer, key, required, depth, t, lengthUnit) {
+  const places = assertingPlaces(rawSchema, rootSchema, depth);
   const resolved = resolveSchema(rawSchema, rootSchema, depth);
   // One meaning for the two nullable spellings (@jarenjs/core/schema): an
   // anyOf/oneOf of one branch and null renders as its branch — with the
@@ -411,10 +632,12 @@ function buildField(rawSchema, rootSchema, pointer, key, required, depth, t, len
   // const/title idiom is not a nullable spelling: its null branch is one
   // of the options (a "none" choice), so it stays an enum.
   const split = isJsonObject(resolved) && getOneOfConstBranches(resolved) !== null ? null : splitNullable(resolved);
-  const nullable = admitsNull(resolved, rootSchema, depth);
-  const schema = split !== null && !Array.isArray(resolved.type)
-    ? resolveSchema(split.schema, rootSchema, depth + 1)
-    : resolved;
+  const nullable = admitsNull(rawSchema, rootSchema, depth);
+  const branch = split !== null && !Array.isArray(resolved.type) ? split.schema : null;
+  const schema = branch !== null ? resolveSchema(branch, rootSchema, depth + 1) : resolved;
+  // what the field check judges: each place that asserts, on its own
+  const asserted = /** @type {Array<Record<string, any>>} */ ((branch !== null ? assertingPlaces(branch, rootSchema, depth + 1) : places)
+    .map(assertionsOf).filter((record) => record !== null));
   const effective = (schema != null && typeof schema === 'object') ? schema : {};
   const kind = getFieldKind(schema);
   const control = getControl(kind, effective);
@@ -463,6 +686,7 @@ function buildField(rawSchema, rootSchema, pointer, key, required, depth, t, len
     placeholder: t(`${base}#placeholder`, placeholder),
     preview: formatInfo?.preview ?? null,
     constraints: getConstraints(effective),
+    asserted,
     lengthUnit,
     // The raw `x-form` annotation only - compiling its query documents is
     // rules.js territory, so model building stays query-engine-free.

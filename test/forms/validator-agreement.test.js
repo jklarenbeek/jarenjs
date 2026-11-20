@@ -15,8 +15,12 @@
  * This file holds the two side by side over a fixed grid of single-field
  * schemas and values: the faults layer 1 reports (`pointer#keyword`) must
  * be the faults a collecting validator reports, compiled with the same
- * length unit, every format group registered and format assertion on (a
- * form asserts a format under every draft). The field is judged twice, as
+ * length unit and every format group registered. The form model reads a
+ * schema's keywords as the latest draft reads them whatever the document
+ * declares, so the validator reads each schema that declares no draft as
+ * a 2020-12 document, with format and content assertion on; the three
+ * differences from a validator reading an older or an annotating draft
+ * are rows below, each with its witness. The field is judged twice, as
  * the root field and as a required member of an object.
  *
  * Where the two differ by design, the difference is a named row of
@@ -164,6 +168,88 @@ const UNIONS = [
   [{ oneOf: [{ const: 1 }, { const: null, title: 'None' }] }, { enum: [1, null] }],
 ];
 
+/** Definitions the `$ref`s below name. */
+const DEFS = { x: { minimum: 7 }, s: { type: 'string', minLength: 3 }, a: { $ref: '#/$defs/b', minimum: 2 }, b: { maximum: 8 } };
+
+/**
+ * `allOf` compositions: every branch asserts, and so do the node's own
+ * keywords and the schema a `$ref` names. Two and three branches, a
+ * keyword two places hold, a nested `allOf`, a branch behind a `$ref`,
+ * the keywords beside a `$ref`, and a member, an item or a tuple slot two
+ * places describe.
+ */
+const ALL_OF = [
+  { allOf: [{ minimum: 5 }, { minimum: 7 }] },
+  { allOf: [{ maximum: 5 }, { maximum: 3 }] },
+  { allOf: [{ exclusiveMinimum: 5 }, { minimum: 5 }] },
+  { allOf: [{ minimum: 5, exclusiveMinimum: true }, { minimum: 7 }] },
+  { allOf: [{ minimum: 5n }, { minimum: 7 }] },
+  { allOf: [{ type: 'string' }, { type: 'number' }] },
+  { allOf: [{ type: ['string', 'number'] }, { type: 'number' }] },
+  { allOf: [{ type: 'number' }, { type: 'integer' }] },
+  { allOf: [{ type: ['string', 'null'] }, { type: 'string' }] },
+  { allOf: [{ type: ['string', 'null'] }, { minLength: 2 }] },
+  { allOf: [{ minLength: 2 }, { minLength: 3 }] },
+  { allOf: [{ maxLength: 3 }, { maxLength: 1 }] },
+  { allOf: [{ pattern: '^a' }, { pattern: 'b$' }] },
+  { allOf: [{ multipleOf: 2 }, { multipleOf: 3 }] },
+  { allOf: [{ format: 'email' }, { minLength: 20 }] },
+  { allOf: [{ enum: [1, 2, 'a', [1]] }, { enum: [2, 'a', null, [1]] }] },
+  { allOf: [{ const: 1 }, { enum: [1, 2] }] },
+  { allOf: [{ const: 1 }, { const: 2 }] },
+  { allOf: [{ minItems: 1 }, { minItems: 2 }, { uniqueItems: true }] },
+  { allOf: [{ maxProperties: 2 }, { maxProperties: 1 }] },
+  { allOf: [{ minimum: 3 }, { maximum: 6 }, { multipleOf: 2 }] },
+  { allOf: [{ type: 'string' }, { minLength: 2 }, { pattern: '^a' }] },
+  { minimum: 5, allOf: [{ minimum: 7 }] },
+  { maxLength: 3, allOf: [{ maxLength: 1 }] },
+  { type: 'string', allOf: [{ maxLength: 2 }, { minLength: 1 }] },
+  { enum: [1, 2, 3], allOf: [{ minimum: 2 }] },
+  { type: ['number', 'null'], allOf: [{ type: 'number' }] },
+  { allOf: [{ allOf: [{ minimum: 5 }, { multipleOf: 2 }] }, { maximum: 9 }] },
+  { allOf: [{ allOf: [{ allOf: [{ type: 'integer' }] }] }], minimum: 1 },
+  { $defs: DEFS, allOf: [{ $ref: '#/$defs/x' }, { maximum: 9 }] },
+  { $defs: DEFS, allOf: [{ $ref: '#/$defs/s' }, { $ref: '#/$defs/s' }, { maxLength: 4 }] },
+  { $defs: DEFS, $ref: '#/$defs/x' },
+  { $defs: DEFS, $ref: '#/$defs/x', minimum: 5 },
+  { $defs: DEFS, $ref: '#/$defs/x', minimum: 9 },
+  { $defs: DEFS, $ref: '#/$defs/s', maxLength: 4 },
+  { $defs: DEFS, $ref: '#/$defs/a' },
+  { $defs: DEFS, $ref: '#/$defs/a', multipleOf: 3 },
+  { allOf: [{ properties: { a: { type: 'string' } } }, { properties: { a: { minLength: 3 }, b: { minimum: 5 } }, required: ['a'] }] },
+  { properties: { a: { minimum: 5 } }, allOf: [{ properties: { a: { maximum: 3 } } }, { required: ['a'] }] },
+  { $defs: DEFS, properties: { a: { $ref: '#/$defs/s', maxLength: 4 } }, allOf: [{ properties: { a: { pattern: '^x' } } }] },
+  { allOf: [{ items: { type: 'string' } }, { items: { minLength: 3 } }] },
+  { items: { minimum: 5 }, allOf: [{ items: { maximum: 3 } }, { minItems: 1 }] },
+  { allOf: [{ prefixItems: [{ type: 'string' }] }, { items: { minLength: 3 } }] },
+  { allOf: [{ prefixItems: [{ type: 'string' }, { minimum: 5 }] }, { prefixItems: [{ minLength: 2 }], items: { type: 'number' } }] },
+  // a place no value passes: the other places are judged as before
+  { allOf: [false] },
+  { allOf: [false, { minimum: 7 }] },
+  { minimum: 7, allOf: [false] },
+  { allOf: [{ allOf: [false] }, { maxLength: 2 }] },
+  { $defs: { none: false }, $ref: '#/$defs/none', minimum: 7 },
+  { $defs: { none: false }, allOf: [{ $ref: '#/$defs/none' }, { type: 'string' }] },
+];
+
+const DRAFT_07 = 'http://json-schema.org/draft-07/schema#';
+const DRAFT_2020 = 'https://json-schema.org/draft/2020-12/schema';
+
+/**
+ * The three differences from a validator that reads an older draft, or
+ * one that annotates: `[row, schema, the validator's options there]`.
+ * Layer 1 answers each schema as the latest draft reads it.
+ * @type {[string, Record<string, any>, object][]}
+ */
+const OLDER_READINGS = [
+  ['no draft: the keywords beside a $ref', { $schema: DRAFT_07, definitions: { x: { type: 'number' } }, $ref: '#/definitions/x', minimum: 5 }, {}],
+  ['no draft: the keywords beside a $ref', { $schema: DRAFT_07, definitions: { s: { minLength: 1 } }, type: 'object', properties: { a: { $ref: '#/definitions/s', maxLength: 2 } } }, {}],
+  ['no draft: prefixItems', { $schema: DRAFT_07, prefixItems: [{ type: 'string' }, { minimum: 5 }] }, {}],
+  ['no draft: prefixItems', { $schema: 'https://json-schema.org/draft/2019-09/schema', prefixItems: [{ type: 'string' }], items: { type: 'number' } }, {}],
+  ['no draft: a format asserted', { $schema: DRAFT_2020, format: 'email' }, { formatAssertion: null }],
+  ['no draft: a format asserted', { $schema: DRAFT_2020, type: 'object', properties: { a: { format: 'date' } } }, { formatAssertion: null }],
+];
+
 /** Keyword values the validator refuses when the schema compiles: layer 1 asserts nothing for them. */
 const REFUSED = [
   { multipleOf: 0 }, { multipleOf: 0n }, { multipleOf: null }, { multipleOf: true }, { multipleOf: [5] }, { multipleOf: ' ' },
@@ -180,7 +266,10 @@ const REFUSED = [
 /**
  * Keywords layer 1 does not implement: the submit layer's. A fault the
  * validator raises at one, or in a subschema one holds, is no fault of
- * layer 1. Each is tried by a schema and a value it refuses.
+ * layer 1. Each is tried by a schema and a value it refuses. A schema
+ * that is `false` is one of them, by the name the validator gives it: no
+ * value passes, and no keyword of layer 1 says so (as an `allOf` branch
+ * the validator names it by the `allOf` alone).
  * @type {Record<string, [object, unknown]>}
  */
 const SUBMIT_LAYER = {
@@ -207,6 +296,7 @@ const SUBMIT_LAYER = {
   formatExclusiveMinimum: [{ format: 'date', formatExclusiveMinimum: '2024-01-01' }, '2024-01-01'],
   formatExclusiveMaximum: [{ format: 'date', formatExclusiveMaximum: '2024-01-01' }, '2024-01-01'],
   nullable: [{ nullable: false }, null],
+  'false schema': [{ properties: { a: false } }, { a: 1 }],
 };
 
 /**
@@ -223,11 +313,15 @@ const ROWS = {
   'empty text and format': 'an empty string is what a cleared text control holds (an array element always, a member where clearing writes it): layer 1 does not call it malformed per keystroke, the submit layer refuses it',
   'geojson as text': 'a geojson field holds the text of the object: layer 1 parses the text and judges the object, where the validator judges an object and takes every string',
   'required null under a json control': 'a required field with a json control holding a null no keyword of its own refuses reports required: null is what the control writes for half-typed input',
+  'no draft: the keywords beside a $ref': 'the form model reads a schema\'s keywords as the latest draft reads them, whatever the document declares: the keywords beside a $ref apply, where a validator reading draft-07 or an older one lets the $ref replace them. A form that ignored them would show a control that checks less than its author wrote',
+  'no draft: prefixItems': 'prefixItems builds tuple slots under every document, where a validator does not read the keyword in one that declares a draft before 2020-12',
+  'no draft: a format asserted': 'a format is asserted under every document, where a validator reading 2020-12 annotates it unless formatAssertion is set',
   'union read as its branch': 'a two-branch union with a null branch is read as its other branch, and the oneOf const/title idiom as an enum: layer 1 names the branch\'s keyword (or enum), compared here with the validator on that reading, and the verdict with the validator on the union',
 };
 
 /** @type {Record<string, number>} */
-const used = Object.fromEntries([...Object.keys(SUBMIT_LAYER).map((keyword) => `submit layer: ${keyword}`), ...Object.keys(ROWS)].map((row) => [row, 0]));
+const used = Object.fromEntries([...Object.keys(SUBMIT_LAYER).map((keyword) => `submit layer: ${keyword}`),
+  ...Object.keys(ROWS).filter((row) => !row.startsWith('no draft:'))].map((row) => [row, 0]));
 
 //#endregion
 
@@ -241,14 +335,16 @@ const FORMAT_GROUPS = [stringFormats, dateTimeFormats, numberFormats, jsonFormat
 
 /**
  * The validator of a field schema, first-failure and collecting, or the
- * error that refused the schema.
- * @param {object} schema @param {object} options
+ * error that refused the schema: a schema that declares no draft is read
+ * as a 2020-12 document, with format and content assertion on unless the
+ * options say otherwise.
+ * @param {Record<string, any>} schema @param {object} options
  */
 function validatorsOf(schema, options) {
   const compile = (/** @type {boolean} */ collectErrors) => {
-    const jaren = new JarenValidator({ ...options, collectErrors, formatAssertion: true });
+    const jaren = new JarenValidator({ formatAssertion: true, contentValidation: true, ...options, collectErrors });
     for (const group of FORMAT_GROUPS) jaren.addFormats(group);
-    return jaren.compile(schema);
+    return jaren.compile(schema.$schema === undefined ? { $schema: DRAFT_2020, ...schema } : schema);
   };
   try {
     return { first: compile(false), collect: compile(true), refusal: null };
@@ -269,6 +365,16 @@ function fieldFaults(model, data, below = '') {
     for (const error of errors) faults.push(`${pointer.slice(below.length)}#${error.keyword}`);
   }
   return [...new Set(faults)].sort();
+}
+
+/**
+ * The document that holds a field schema as its required member `n`,
+ * the definitions its `$ref`s name moved to the document's root.
+ * @param {Record<string, any>} schema
+ */
+function asMember(schema) {
+  const { $defs, ...field } = schema;
+  return { type: 'object', ...($defs === undefined ? {} : { $defs }), properties: { n: field }, required: ['n'] };
 }
 
 /** The field a model holds at a data pointer, or null. @param {any} model @param {string} pointer */
@@ -293,14 +399,18 @@ function valueAt(data, pointer) {
 /** The schema keywords from the document root to a validator error. @param {{ schemaPath: string }} error */
 const placeOf = (error) => error.schemaPath.slice(error.schemaPath.indexOf('#') + 1).split('/').slice(1).map(decodeURIComponent);
 
+/** The schema a document holds at such a place. @param {any} document @param {string[]} place */
+const schemaAt = (document, place) => place.reduce((held, segment) => held?.[segment], document);
+
 /**
  * The validator's faults in layer 1's vocabulary: those of the submit
  * layer left out, a missing member moved to the member's field, an
  * applicator named beside its own fault left out. Counts the rows used.
  * @param {any[]} errors - The collecting validator's errors
  * @param {any} model - The form model of the same schema
+ * @param {object} document - The schema the errors are located in
  */
-function validatorFaults(errors, model) {
+function validatorFaults(errors, model, document) {
   /** @type {string[]} */
   const faults = [];
   const places = errors.map(placeOf);
@@ -324,7 +434,12 @@ function validatorFaults(errors, model) {
     if (error.keyword === 'items' || error.keyword === 'allOf') {
       const below = places.some((other, at) => at !== index && other.length > place.length && other[place.length] !== undefined
         && place.every((segment, i) => other[i] === segment) && ['items', 'prefixItems', 'additionalItems', 'allOf'].includes(other[place.length]));
-      used[below ? 'applicator named too' : 'item no schema admits']++;
+      // a fault behind a $ref is located at its target, not below the applicator that led to it
+      const behindRef = error.keyword === 'allOf' && errors.some((other, at) => at !== index && other.instancePath === error.instancePath && places[at][0] === '$defs');
+      if (below || behindRef) used['applicator named too']++;
+      else if (error.keyword === 'items') used['item no schema admits']++;
+      else if (schemaAt(document, place)?.allOf?.includes(false)) used['submit layer: false schema']++;
+      else faults.push(`${error.instancePath}#${error.keyword}`);
       return;
     }
     faults.push(`${error.instancePath}#${error.keyword}`);
@@ -432,6 +547,8 @@ function* grid() {
   for (const [schema, value] of Object.values(SUBMIT_LAYER)) yield { schema, options: {}, values: [value, ...VALUES] };
   // the unions the model reads
   for (const [schema, reading] of UNIONS) yield { schema, options: {}, values: VALUES, reading };
+  // every allOf branch, the node's own keywords and the schema a $ref names
+  for (const schema of ALL_OF) yield { schema, options: {}, values: [...VALUES, ...MEMBERS] };
 }
 
 /**
@@ -492,7 +609,7 @@ describe('layer 1 answers as the validator answers the same field schema', () =>
       assert.equal(refusal, null, `the validator refuses ${show(schema)}: ${refusal?.message}`);
       const read = reading === undefined ? null : validatorsOf(reading, options).collect;
       const root = buildFormModel(schema, options);
-      const parent = buildFormModel({ type: 'object', properties: { n: schema }, required: ['n'] }, options);
+      const parent = buildFormModel(asMember(schema), options);
       for (const value of values) {
         cases++;
         const label = `${show(schema)}${Object.keys(options).length > 0 ? ` under ${show(options)}` : ''} on ${show(value)}`;
@@ -510,11 +627,11 @@ describe('layer 1 answers as the validator answers the same field schema', () =>
           used['union read as its branch']++;
           const reads = read(value);
           if (value === null ? (form.length === 0) !== result.valid : reads.valid !== result.valid) differs('verdict', form, result.valid ? [] : ['(refused)'], label);
-          const faults = value === null ? form : validatorFaults(reads.errors, root);
+          const faults = value === null ? form : validatorFaults(reads.errors, root, /** @type {object} */ (reading));
           if (show(form) !== show(faults) && !explain(reading, options, root, value, form, faults)) differs('as read', form, faults, label);
           continue;
         }
-        const faults = validatorFaults(result.errors, root);
+        const faults = validatorFaults(result.errors, root, schema);
         if (show(form) !== show(faults) && !explain(schema, options, root, value, form, faults)) differs('field', form, faults, label);
       }
     }
@@ -560,6 +677,28 @@ describe('layer 1 answers as the validator answers the same field schema', () =>
       const result = new JarenValidator({ ...options, collectErrors: true }).compile(schema)(data);
       assert.deepEqual(Object.fromEntries(result.errors.map((/** @type {any} */ error) => [error.instancePath, [error.keyword]])), faults, `the validator under ${show(options)} on ${show(text)}`);
     }
+  });
+
+  it('reads a schema as the latest draft reads it, and differs from an older or annotating reading in three named ways', () => {
+    /** @type {string[]} */
+    const wrong = [];
+    /** @type {Record<string, number>} */
+    const fired = {};
+    for (const [row, schema, older] of OLDER_READINGS) {
+      assert.ok(Object.hasOwn(ROWS, row), row);
+      const latest = validatorsOf({ ...schema, $schema: DRAFT_2020 }, {}).collect;
+      const declared = validatorsOf(schema, older).collect;
+      const model = buildFormModel(schema);
+      for (const value of [...VALUES, ...MEMBERS]) {
+        const form = fieldFaults(model, value);
+        const read = validatorFaults(latest(value).errors, model, schema);
+        if (show(form) !== show(read) && !explain({ ...schema, $schema: DRAFT_2020 }, {}, model, value, form, read))
+          wrong.push(`${show(schema)} on ${show(value)}: layer 1 [${form}], the latest reading [${read}]`);
+        if (show(validatorFaults(declared(value).errors, model, schema)) !== show(read)) fired[row] = (fired[row] ?? 0) + 1;
+      }
+    }
+    assert.deepEqual(wrong, []);
+    assert.deepEqual(Object.keys(ROWS).filter((row) => row.startsWith('no draft:') && !(fired[row] > 0)), [], 'a difference no witness shows');
   });
 
   it('asserts nothing for a keyword value the validator refuses when the schema compiles', () => {

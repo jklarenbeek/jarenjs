@@ -30,4 +30,5 @@ export {
   geoFormatTesters,
   dateTimeFormatTesters,
   numberFormatTesters,
+  integerFormatTesters,
 } from './testers.js';

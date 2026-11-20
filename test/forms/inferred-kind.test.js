@@ -145,17 +145,22 @@ describe('a kind chooses the control and never an answer', () => {
     assert.deepEqual(keywordsOf({ minLength: 2, minimum: 5 }, 4), ['minimum']);
   });
 
-  it('judges a number format on every value as the number it converts to, as its validator does', () => {
+  it('judges a number by a number format and takes every value of another type, as its validator does', () => {
     const validate = new JarenValidator({ formatAssertion: true }).addFormats(numberFormats).compile({ format: 'int32' });
     const field = fieldOf({ format: 'int32' });
     /** @type {[unknown, boolean][]} */
-    const table = [[12, true], ['12', true], [2 ** 31, false], ['abc', false], [{}, false], [[5], true], [null, true], [5n, true], [1.5, false]];
+    const table = [[12, true], [2 ** 31, false], [1.5, false], ['12', true], ['abc', true], ['', true], [{}, true], [[1, 2], true], [true, true], [null, true],
+      [5n, true], [2n ** 31n, false]];
     for (const [value, takes] of table) {
       const label = JSON.stringify(value, (key, x) => (typeof x === 'bigint' ? `${x}n` : x));
       assert.equal(validate(value), takes, `the validator on ${label}`);
       assert.equal(validateField(field, value).length === 0, takes, `the field on ${label}`);
     }
-    assert.deepEqual(validateField(field, 'abc').map((error) => error.message), ['Must be a valid int32']);
+    assert.deepEqual(validateField(field, 2 ** 31).map((error) => error.message), ['Must be a valid int32']);
+    // an integer format judges a bigint by its own range, exactly; a floating point format takes one
+    assert.deepEqual(keywordsOf({ format: 'int64' }, 2n ** 63n - 1n), []);
+    assert.deepEqual(keywordsOf({ format: 'int64' }, 2n ** 63n), ['format']);
+    assert.deepEqual(keywordsOf({ format: 'float' }, 10n ** 60n), []);
   });
 
   it('holds a value the control cannot show as it is: no error of the field, and the type error where a type is declared', () => {

@@ -295,6 +295,10 @@ export function createItemValue(itemField) {
  * under a declared number `type` the field check reports it as a `type`
  * error, and a number field whose kind was only inferred from its
  * keywords (`{ minimum: 5 }`) holds it as the string its schema takes.
+ * An option of an `enum` field is found by the `key` the view model gives
+ * it (its JSON text, a bigint as its digits and `n`), which names one
+ * option exactly, or else by its own text (`String(value)`), so a select
+ * hands back the typed option, a bigint one too.
  * @param {import('./model.js').FormField} field
  * @param {any} raw - Raw input value (string, or boolean for checkboxes)
  * @returns {any}
@@ -312,11 +316,115 @@ export function parseFieldInput(field, raw) {
       return Number.isFinite(num) ? num : raw;
     }
     case 'enum': {
-      // Map the selected option string back to the typed enum value
-      const match = field.enumValues?.find((v) => String(v) === String(raw));
+      // Map the selected option string back to the typed enum value: the
+      // key the view model gives it, which names one option exactly, or
+      // the option's own text
+      const options = field.enumValues ?? [];
+      const at = options.findIndex((v) => jsonTextOf(v) === raw);
+      const match = at >= 0 ? options[at] : options.find((v) => String(v) === String(raw));
       return match !== undefined ? match : raw;
     }
     default:
       return raw;
   }
 }
+
+//#region JSON text
+
+/**
+ * The JSON text of a form value, as a `json` control shows it and as a
+ * select carries an option: `JSON.stringify`'s text. A bigint, which JSON
+ * cannot spell, is written as JavaScript writes one, its digits followed
+ * by `n` (`5n`, `[5n]`), at any depth: a text {@link parseJsonText} reads
+ * back to the same value.
+ * @param {unknown} value
+ * @param {number} [indent] - Spaces per level, none by default
+ * @returns {string | undefined} `undefined` where `JSON.stringify` gives none (`undefined`, a function)
+ * @throws {TypeError} For a value that holds itself
+ */
+export function jsonTextOf(value, indent = 0) {
+  try {
+    return JSON.stringify(value, null, indent);
+  }
+  catch (error) {
+    // a bigint (a cycle throws again below): each is written as a string
+    // behind a tag no text of the value holds, then spelled as digits and `n`
+    let tag = '#bigint#';
+    let plain;
+    try {
+      plain = JSON.stringify(value, (key, held) => (typeof held === 'bigint' ? '' : held), indent);
+    }
+    catch {
+      throw error;
+    }
+    while (plain.includes(tag)) tag += '#';
+    return JSON.stringify(value, (key, held) => (typeof held === 'bigint' ? `${tag}${held}` : held), indent)
+      .replaceAll(new RegExp(`"${tag}(-?\\d+)"`, 'g'), '$1n');
+  }
+}
+
+/** A JSON number at a text position. */
+const JSON_NUMBER = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+
+/**
+ * Read the text of a `json` control back into a value: JSON, in which an
+ * integer followed by `n` is a bigint (`12n`, `[5n]`), as the view model
+ * writes one ({@link jsonTextOf}). A host that holds no bigint may as
+ * well use `JSON.parse`, which reads every other text alike.
+ * @param {unknown} text
+ * @returns {unknown} The value, or `undefined` for text that is neither JSON nor JSON with such integers
+ * @example
+ * parseJsonText('{ "id": 9007199254740993n }'); // { id: 9007199254740993n }
+ * parseJsonText('[1, 2');                        // undefined
+ */
+export function parseJsonText(text) {
+  if (typeof text !== 'string') return undefined;
+  try {
+    return JSON.parse(text);
+  }
+  catch {
+    // not JSON: read on for integers written with an `n`
+  }
+  // a tag no string of the text holds, written plainly or with escapes
+  const spelled = text.replace(/\\u([0-9a-fA-F]{4})/g, (escape, hex) => String.fromCharCode(Number.parseInt(hex, 16)));
+  let tag = '#bigint#';
+  while (spelled.includes(tag)) tag += '#';
+  let json = '';
+  for (let at = 0; at < text.length;) {
+    const char = text[at];
+    if (char === '"') {
+      // a string is copied whole: nothing in it is a number
+      let end = at + 1;
+      while (end < text.length && text[end] !== '"') end += text[end] === '\\' ? 2 : 1;
+      json += text.slice(at, end + 1);
+      at = end + 1;
+      continue;
+    }
+    JSON_NUMBER.lastIndex = at;
+    const number = JSON_NUMBER.exec(text);
+    if (number === null) {
+      json += char;
+      at++;
+      continue;
+    }
+    at += number[0].length;
+    if (text[at] !== 'n') {
+      json += number[0];
+      continue;
+    }
+    // a bigint is a value: before a `:` it would be a member name
+    if (/^\s*:/.test(text.slice(at + 1))) return undefined;
+    json += `"${tag}${number[0]}"`;
+    at++;
+  }
+  try {
+    // `BigInt` refuses a number that is no integer (`12.5n`, `1e3n`), and
+    // JSON whatever follows an `n` that ends no value (`5nn`)
+    return JSON.parse(json, (key, held) => (typeof held === 'string' && held.startsWith(tag) ? BigInt(held.slice(tag.length)) : held));
+  }
+  catch {
+    return undefined;
+  }
+}
+
+//#endregion

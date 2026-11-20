@@ -22,7 +22,7 @@
 import { equalsJson } from '@jarenjs/core/object';
 import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
 
-import { getValueAtPointer, createItemValue, changedPointers } from './data.js';
+import { getValueAtPointer, createItemValue, changedPointers, jsonTextOf } from './data.js';
 import { evaluateFormRules } from './rules.js';
 import { validateAllFields } from './validate.js';
 
@@ -55,10 +55,13 @@ const EMPTY_STATE = Object.freeze({});
  * @property {Array<{value: any, key: string, label: string, selected: boolean}>|null} options
  *   Select options, `selected` precomputed against the current value.
  *   `key` is the option's value as JSON text — what a string-valued
- *   control (a DOM `<option>`) can carry and hand back losslessly.
+ *   control (a DOM `<option>`) can carry and hand back losslessly; a
+ *   bigint option's is its digits and `n` (`5n`), which `JSON.parse`
+ *   does not read: `parseFieldInput(field, key)` hands the option back.
  * @property {string} [json] - The value as indented JSON text, on
  *   `json`-control nodes only: the editable text for a structured
- *   value, precomputed like `options`.
+ *   value, precomputed like `options`. A bigint in it is written as its
+ *   digits and `n` (`5n`); `parseJsonText` reads the text back.
  * @property {string[]} errors - Localized messages: field validation
  *   first, then rule asserts.
  * @property {boolean} element - True when this node is an array element
@@ -359,7 +362,7 @@ function buildNode(field, pointer, raw, ruleState, fieldErrors, element, removab
     // renderer needs no encoder, mirroring how `options` are precomputed
     node.json = node.value === null || node.value === undefined
       ? ''
-      : JSON.stringify(node.value, null, 2);
+      : jsonTextOf(node.value, 2);
   }
 
   if (field.enumValues !== null && field.enumValues !== undefined) {
@@ -368,8 +371,10 @@ function buildNode(field, pointer, raw, ruleState, fieldErrors, element, removab
       // `key` is the JSON text of `value`: a DOM select carries strings,
       // so a renderer needs something reversible to put in the control
       // and hand back. Encoding here keeps the round trip lossless for
-      // number, boolean and null enums, which `String(v)` is not.
-      key: JSON.stringify(v) ?? 'null',
+      // number, boolean and null enums, which `String(v)` is not, and
+      // for a bigint option (`5n`), which `parseFieldInput` and
+      // `parseJsonText` read back.
+      key: jsonTextOf(v) ?? 'null',
       label: field.enumLabels?.[i] ?? String(v),
       selected: equalsJson(v, node.value),
     }));

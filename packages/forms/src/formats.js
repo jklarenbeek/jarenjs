@@ -14,6 +14,7 @@
 
 import {
   formatTesters,
+  integerFormatTesters,
   numberFormatTesters,
 } from '@jarenjs/formats';
 
@@ -178,28 +179,13 @@ export function isNumberFormat(format) {
 }
 
 /**
- * The number a number format judges a value as, as the validator's
- * number format compilers read it: what `Number()` converts it to, and
- * no number (NaN) for a value `Number()` cannot convert.
- * @param {unknown} value
- * @returns {number}
- */
-function numberOf(value) {
-  try {
-    return Number(value);
-  }
-  catch {
-    return NaN;
-  }
-}
-
-/**
  * Whether a value passes a field's `format`, as layer 1 judges it: by
  * the values the validator's compiler of that format judges, so the two
  * agree on every value.
  *
- * - A number format judges every value but `null` as the number it
- *   converts to: `'12'` is an `int32`, `'abc'` and `{}` are none.
+ * - A number format judges a number, and an integer format a bigint too,
+ *   by its own range and exactly; it takes every value of another type
+ *   (`'12'` and `'abc'` are no numbers).
  * - `geojson` judges an object; a form field also holds the object as
  *   its text, which is parsed and judged (the validator takes every
  *   string).
@@ -216,7 +202,10 @@ function numberOf(value) {
 export function passesFormat(format, value) {
   const info = getFormatInfo(/** @type {string|undefined} */ (format));
   if (info === null) return true;
-  if (isNumberFormat(format)) return value == null || info.test(/** @type {any} */ (numberOf(value)));
+  if (isNumberFormat(format)) {
+    const judged = typeof value === 'number' || (typeof value === 'bigint' && Object.hasOwn(integerFormatTesters, /** @type {string} */ (format)));
+    return !judged || info.test(/** @type {any} */ (value));
+  }
   if (typeof value === 'string') return value === '' || info.test(value);
   return format !== 'geojson' || !isJsonObject(value) || isValidGeoJson(value);
 }

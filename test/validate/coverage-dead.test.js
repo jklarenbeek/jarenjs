@@ -7,6 +7,7 @@ import {
 } from '@jarenjs/validate';
 
 import {
+  dateTimeFormats,
   numberFormats,
 } from '@jarenjs/formats';
 
@@ -114,11 +115,15 @@ describe('The data keyword with an uncompilable reference or numeric format', fu
     assert.isTrue(working({ threshold: 1, value: 5 }), 'working ref: 5 >= 1 passes');
   });
 
-  it('should apply a number format resolved through the data keyword', function () {
-    // data.js -> the mock schemaObj createErrorHandler (number format compilers
-    // call createErrorHandler even under skipErrors; string formats skip it)
+  it('should apply a format resolved through the data keyword', function () {
+    // data.js -> the mock schemaObj createErrorHandler (the number and date
+    // format compilers call createErrorHandler even under skipErrors; string
+    // formats skip it). A format named this way is handed strings only, and
+    // a number format takes a string as a value of another type, where it
+    // read '200' as the number it converts to.
     const compiler = new JarenValidator();
     compiler.addFormats(numberFormats);
+    compiler.addFormats(dateTimeFormats);
     const validate = compiler.compile({
       type: 'object',
       properties: {
@@ -127,8 +132,10 @@ describe('The data keyword with an uncompilable reference or numeric format', fu
       },
     });
 
-    assert.isTrue(validate({ fmt: 'int8', v: '100' }), '100 is within int8 range');
-    assert.isFalse(validate({ fmt: 'int8', v: '200' }), '200 exceeds int8 range');
+    assert.isTrue(validate({ fmt: 'int8', v: '100' }), 'a string is no number: int8 takes it');
+    assert.isTrue(validate({ fmt: 'int8', v: '200' }), 'a string is no number: int8 takes it, whatever it would convert to');
+    assert.isTrue(validate({ fmt: 'date', v: '2024-01-15' }), 'a date');
+    assert.isFalse(validate({ fmt: 'date', v: '2024-13-45' }), 'no date');
     assert.isTrue(validate({ v: 'anything' }), 'an absent format reference asserts nothing');
   });
 });
@@ -172,10 +179,13 @@ describe('$data references with an unresolvable pointer or numeric format', func
     }
   });
 
-  it('should apply a number format resolved through a $data reference', function () {
-    // dollar-data.js -> the mock schemaObj createErrorHandler
+  it('should apply a format resolved through a $data reference', function () {
+    // dollar-data.js -> the mock schemaObj createErrorHandler. A format named
+    // this way is handed strings only, and a number format takes a string as
+    // a value of another type, where it read '300' as the number it converts to.
     const compiler = new JarenValidator();
     compiler.addFormats(numberFormats);
+    compiler.addFormats(dateTimeFormats);
     const validate = compiler.compile({
       type: 'object',
       properties: {
@@ -184,8 +194,10 @@ describe('$data references with an unresolvable pointer or numeric format', func
       },
     });
 
-    assert.isTrue(validate({ fmt: 'uint8', v: '200' }), '200 is within uint8 range');
-    assert.isFalse(validate({ fmt: 'uint8', v: '300' }), '300 exceeds uint8 range');
+    assert.isTrue(validate({ fmt: 'uint8', v: '200' }), 'a string is no number: uint8 takes it');
+    assert.isTrue(validate({ fmt: 'uint8', v: '300' }), 'a string is no number: uint8 takes it, whatever it would convert to');
+    assert.isTrue(validate({ fmt: 'date', v: '2024-01-15' }), 'a date');
+    assert.isFalse(validate({ fmt: 'date', v: '2024-13-45' }), 'no date');
   });
 });
 
