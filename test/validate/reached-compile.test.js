@@ -209,22 +209,10 @@ describe('every place of a held document answers as the place of the document co
   });
 });
 
-describe('a compile that meets a reference no walk recorded reads every schema the validator holds', () => {
-  const open = () => ({ $id: 'https://f.test/open.json', 'x-defs': { a: { $ref: '#/x-defs/b' }, b: { type: 'string' } }, properties: { p: { $ref: '#/x-defs/a' } } });
+describe('a meta-schema held by addMetaSchema is read as a registered document', () => {
   const dangling = () => ({ $id: 'https://f.test/dangling.json', properties: { x: { $ref: 'https://f.test/none.json' } } });
 
-  it('answers as before where everything resolves', () => {
-    const validator = new JarenValidator().addSchema(open()).addSchema({ $id: 'https://f.test/other.json', type: 'number' });
-    assert.deepEqual(answers(validator.compile({ $ref: 'https://f.test/open.json' }), [{ p: 'x' }, { p: 1 }]), [true, false]);
-  });
-
-  it('is refused, without a place, for a held reference nothing resolves; a compile that does not meet one is not', () => {
-    const validator = new JarenValidator().addSchema(open()).addSchema(dangling());
-    assert.deepEqual(outcome(() => validator.compile({ $ref: 'https://f.test/open.json' })), unresolved('https://f.test/none.json#'));
-    assert.deepEqual(answers(validator.compile({ type: 'string' }), ['x', 1]), [true, false]);
-  });
-
-  it('reads a meta-schema held by addMetaSchema as a registered document: only what it reaches', () => {
+  it('reads only what the compile reaches of it', () => {
     const meta = getSchemaDraftByName('draft7');
     const validator = new JarenValidator().addMetaSchema(meta.schema, meta.draft).addSchema(dangling());
     assert.deepEqual(answers(validator.compile({ $ref: 'http://json-schema.org/draft-07/schema#' }), [{ type: 'string' }, { type: 5 }]), [true, false]);

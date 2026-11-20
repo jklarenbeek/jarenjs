@@ -662,9 +662,32 @@ validator holds, only what it reaches (`reachedKeys`, traverse.js):
   against the base its identifier sets and against the one it leaves, so both
   readings of an undeclared document are covered (`places.refs`; a compile's
   own documents record into a map of that compile); and, for each identified
-  object, the base its identifier was read against (`places.idBases`).
-  `addMetaSchema` records the same, so a held meta-schema is read like any
-  registered document.
+  object, the base its identifier was read against (`places.idBases`). An
+  object read twice (one `$ref` object held at two places, or in two
+  documents) keeps its record where both readings ask for the same targets;
+  where they differ its references are not known.
+  Every schema object a walk reads has an entry in `places.refs`, so a
+  place a walk read is told from one no walk entered. `addMetaSchema`
+  records the same, so a held meta-schema is read like any registered
+  document. Where a walk leaves part of a place unread that a compile may
+  read — a place declaring an identifier a second time, a
+  `propertyDependencies` it does not read as a keyword — and a
+  reference-shaped object lies in that part, the place's entry is `null`:
+  its references are not known.
+- **Walked when named.** A target no walk read lies below a keyword no draft
+  defines (an operation's schema in a contract document, a member of
+  `components/schemas`). The compile that first reaches it walks it then:
+  `storeSchemaIdsInMap` under the id that names it, under the compile's
+  traversal options and from no declared draft, into maps of that one read,
+  so nothing is registered. What its references ask for is read from that
+  walk and kept per id. The walk answers only where the compile is known to
+  ask the same: the place declares no identifier (no walk registered one,
+  and the build reads it by what it has built), and the base its key builds
+  it against (`pointerBase`, which the build shares) is its document's. Below
+  a place a walk read, a reference-shaped object without an entry is no
+  reference of that place — data, or below such a keyword — and is passed
+  over; a compile's own documents are read strictly, and such an object in
+  them makes the compile read everything.
 - **Collected per compile.** One descent of the documents the compile was
   handed, then what each target reaches, gives the keys and targets it
   reaches, each with the place of the `$ref` naming it. `restoreSchemaRefsInMap`
@@ -674,12 +697,15 @@ validator holds, only what it reaches (`reachedKeys`, traverse.js):
   compiles, at that place.
 - **Kept per held set.** `places.kept` holds, until the next `addSchema` or
   `addMetaSchema`, the object each held key names, the keys naming each
-  object, what each named object reaches next, the named object above each
-  held object, the named objects that build each target when they compile,
-  the features of the held schemas (a compile scans only what it added), and
-  the first held schema whose identifier is no URI reference, which every
-  compile reaches and is refused for (`JK0010`). None of it depends on the
-  compile that reads it; resolution itself stays per compile, under that
+  object, what each place reaches next (per object a walk read, per id for
+  a place walked when named), what is built above each held object, what
+  builds each target when it compiles, what every compile reaches, and the
+  features of the held schemas with the objects that scan read (a compile
+  scans only what it added: its own entries, and the targets it restored,
+  without the held objects below them). What builds what is read from the
+  held set alone, when the first compile after a registration reads every
+  held key and every target an item reference names; none of it depends on
+  the compiles before. Resolution itself stays per compile, under that
   compile's reading.
 - **Built in the same order.** A reference to a schema already built is
   called directly; one to a schema not built yet is resolved on first use,
@@ -691,12 +717,26 @@ validator holds, only what it reaches (`reachedKeys`, traverse.js):
   one holding a lone `$ref` to it at an item position (the item shortcut
   builds the end of the chain such a reference starts when its holder
   compiles), and one that is itself a `$ref` to it (a link of such a chain).
-  Each then comes into being where a compile of everything built it.
-- **The fallback.** A reference no walk recorded (below a keyword no draft
-  defines, `$ref`-shaped data in a `const` or an `enum`), or one whose targets
-  are not known (no URI reference; an object two documents hold under two
-  bases), makes the compile that reaches it read every held schema, as every
-  compile did.
+  Such a reference may build a place no key names, which builds the next at
+  once: that place is followed by its id to the key that starts the chain.
+  A held schema whose identifier is no URI reference is built by every
+  compile, and the build refuses the first of them (`JK0010`), as it refused
+  every compile. A held place whose references are not known is built by
+  every compile that holds a reference (one that holds none calls nothing
+  another build could have built first): what it builds at once is not
+  known either. Entered without a place, it and what builds it do not
+  refuse the compile with the failures a build passes on (a query literal
+  that compiles its own document, a reference cycle); a key whose base
+  cannot be read, one that crosses an identifier that is no URI reference,
+  still refuses it (`JK0010`). Each then comes into being where a compile
+  of everything built it.
+- **The fallback.** A compile that reaches a place whose references are not
+  known reads every held schema, as every compile did: a `$ref` that is no
+  URI reference; a `$ref` object read at two places whose bases give it two
+  targets; a place a walk left partly unread with a reference in that part;
+  a place walked when named that declares an identifier, or lies under one
+  setting another base than its document's; and, in the compile's own
+  documents, a reference-shaped object its walk did not record.
 
 ### JSON Pointer Handling
 

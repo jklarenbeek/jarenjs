@@ -14,6 +14,7 @@ import {
   withParsedPointers,
   restoreSchemaRefsInMap,
   reachedKeys,
+  pointerBase,
   placeAt,
   isRefCycleError,
   RefCycleError,
@@ -822,23 +823,25 @@ export class ValidationRoot {
     // skipErrors mode (see #unevaluatedForcesTracking).
     const flags = { dollarData: false, unevaluated: false, dynamic: false, canElide: opts.skipErrors === true };
     const mapMaps = opts.propertyDependencies === true;
-    /** @param {typeof flags} found @param {Map<string, any>} entries */
-    const scan = (found, entries) => {
-      const seen = new Set();
-      entries.forEach((value, id) => {
-        // every feature found ends the scan; what the validator holds was scanned for its held set
-        if (!(found.dollarData && found.unevaluated && found.dynamic) && (found !== flags || held?.get(id) !== value))
-          ValidationRoot.#scanSchemaFeatures(value, seen, found, mapMaps);
-      });
-    };
+    /** @param {typeof flags} found @param {Map<string, any>} entries @param {Set<object>} seen */
+    const scan = (found, entries, seen) => entries.forEach((value, id) => {
+      // every feature found ends the scan; what the validator holds was scanned for its held set
+      if (!(found.dollarData && found.unevaluated && found.dynamic) && (found !== flags || held?.get(id) !== value))
+        ValidationRoot.#scanSchemaFeatures(value, seen, found, mapMaps);
+    });
+    const own = new Set();
+    let seen = own;
     if (held !== undefined && this.#places !== undefined) {
       // the compile's reach made it (`reachedKeys`)
       const kept = /** @type {import('./traverse.js').HeldKept} */ (this.#places.kept);
       // (one validator compiles under one set of the options the scan reads)
-      if (kept.scan === undefined) scan(kept.scan = { ...flags }, held);
+      if (kept.scan === undefined) scan(kept.scan = { ...flags }, held, kept.scanned = new Set());
       Object.assign(flags, kept.scan);
+      // a target the compile restored is read once more; the held schema objects below it were
+      const theirs = /** @type {Set<object>} */ (kept.scanned);
+      seen = /** @type {Set<object>} */ ({ has: (value) => theirs.has(value) || own.has(value), add: (value) => own.add(value) });
     }
-    scan(flags, schemas);
+    scan(flags, schemas, seen);
     this.#usesDollarData = flags.dollarData;
     // Recording runs every branch of an `anyOf` (each passing branch has
     // annotations to report), which annotation tracking already does.
@@ -2463,7 +2466,7 @@ export class JarenValidator {
     // documents are read whole, a held schema only where a reference leads.
     // (the map of a compile's own records: one that holds schemas, and has its places)
     const reached = refs instanceof Map
-      ? reachedKeys(Array.isArray(schemas) ? [schema, ...schemas] : [schema], refs, /** @type {import('./traverse.js').SchemaPlaces} */ (places), /** @type {Map<string, any>} */ (fromMap))
+      ? reachedKeys(Array.isArray(schemas) ? [schema, ...schemas] : [schema], refs, /** @type {import('./traverse.js').SchemaPlaces} */ (places), /** @type {Map<string, any>} */ (fromMap), opts)
       : undefined;
 
     // make sure the schemas this compile reads are connected
@@ -2923,7 +2926,15 @@ export class JarenValidator {
     // are built. A held schema whose identifier is no URI reference is among
     // them for every compile (`reachedKeys`): the first pass refuses it.
     /** @param {string} id @param {any} schema @returns {boolean} Whether the entry is a held schema this compile does not reach */
-    const unreached = (id, schema) => held?.get(id) === schema && !/** @type {Map<string, string>} */ (reached).has(id);
+    const unreached = (id, schema) => held?.get(id) === schema && !/** @type {Map<string, string|null>} */ (reached).has(id);
+    /**
+     * Whether a failure to build the schema under `id` is the compile's: a
+     * query literal that compiles its own document, a reference cycle in the
+     * compiled document. In a place built only because its references are
+     * not known (`reachedKeys` enters it without a place) neither is.
+     * @param {unknown} error @param {string} id @returns {boolean}
+     */
+    const fails = (error, id) => reached?.get(id) !== null && (isRecursiveQueryCompileError(error) || (isRefCycleError(error) && inDocument(id, origin)));
 
     // First pass: Create objects for schemas with $id (canonical paths)
     // These establish the base URIs for their descendants
@@ -2946,7 +2957,7 @@ export class JarenValidator {
         try {
           root.createObject(id, schema, origin);
         } catch (_e) {
-          if (isRecursiveQueryCompileError(_e) || (isRefCycleError(_e) && inDocument(id, origin))) throw _e;
+          if (fails(_e, id)) throw _e;
           // May fail if dependencies not resolved yet
         }
       }
@@ -2992,37 +3003,12 @@ export class JarenValidator {
       let baseUri = origin;
 
       if (isJsonPointerPath) {
-        // JSON pointer path - traverse from root to find nearest $id ancestor
-        const hashIndex = id.indexOf('#/');
-        const baseDoc = id.substring(0, hashIndex);
-        const pointer = id.substring(hashIndex + 1);
-        const pointerParts = pointer.split('/').filter(p => p);
-
-        let currentSchema = schemas.get(baseDoc + '#');
-        let currentBaseUri = baseDoc;
-
-        // Traverse and find the nearest $id ancestor. Each identifier is
-        // read against the base the walk that registered its object read
-        // it against (the root's then names the document again), or, for
-        // an object no walk identified, against the base so far.
-        for (let i = 0; i < pointerParts.length && currentSchema; i++) {
-          const part = pointerParts[i];
-
-          // Check if current schema has $id (before moving to child)
-          const currentIdentifier = root.identifierOf(currentSchema);
-          if (currentIdentifier !== undefined) {
-            const { id: resolvedId } = createJsonPointer(currentIdentifier, places.idBases.get(currentSchema) ?? currentBaseUri, undefined, currentSchema.$id ? '$id' : 'id');
-            currentBaseUri = resolvedId.endsWith('#') ? resolvedId.slice(0, -1) : resolvedId;
-          }
-
-          // Move to next level - handle both direct properties and definitions/$defs
-          const nextSchema = currentSchema[part] ||
-                            currentSchema.$defs?.[part] ||
-                            currentSchema.definitions?.[part];
-          currentSchema = nextSchema;
-        }
-
-        baseUri = currentBaseUri;
+        // JSON pointer path: the nearest identifier above the place sets its
+        // base. Each identifier is read against the base the walk that
+        // registered its object read it against (the root's then names the
+        // document again), or, for an object no walk identified, against
+        // the base so far.
+        baseUri = pointerBase(schemas, id, places);
       } else if (hasId && isCanonicalPath) {
         // Canonical $id path that wasn't handled in first pass: a relative
         // $id, which names another URI when it is read against the origin.
@@ -3034,7 +3020,7 @@ export class JarenValidator {
       try {
         root.createObject(id, hop ?? schema, baseUri);
       } catch (_e) {
-        if (isRecursiveQueryCompileError(_e) || (isRefCycleError(_e) && inDocument(id, origin))) throw _e;
+        if (fails(_e, id)) throw _e;
         // Ref may not be resolvable yet, that's ok
       }
     }

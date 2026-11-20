@@ -118,14 +118,6 @@ delete it or fix it.
   `$defs` unencoded (`https://held.test/root.json#/$defs/a/%24ref`). One
   spelling needs the compiler to carry each object's document pointer; it
   changes `docPath` (an upgrade note).
-- [ ] **A compile that reads every held schema refuses a held reference
-  without a place.** A compile that reaches a reference no registration
-  records — one below a keyword no draft defines (`x-defs`, an OpenAPI
-  `components`), or `$ref`-shaped data in a `const`, an `enum` or a `default`
-  — reads every schema its validator holds and is refused `JK0009` without a
-  `docPath` for a held reference nothing resolves, whether it reaches that
-  reference or not. Recording what a compile asks for at the places the walks
-  do not enter is the open work.
 - [ ] **A percent-encoded unreserved character is not the character in a
   reference.** `$ref: '#%41'` does not reach `$anchor: 'A'`, nor
   `http://x.test/%61.json` an `$id` of `http://x.test/a.json` (JK0009): URIs

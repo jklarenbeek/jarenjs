@@ -1063,11 +1063,25 @@ reaches it, when it compiles, at the reference's own place: with
 `{ "$id": "https://h.test/b.json", "properties": { "x": { "$ref": "https://h.test/missing.json" } } }`
 held, `compile({ "$ref": "https://h.test/b.json" })` is refused `JK0009` with the `docPath`
 `https://h.test/b.json#/properties/x/%24ref`, and every compile that does not reach it
-answers. Two exceptions read every held schema, as every compile did. A compile that
-reaches a reference no registration could record (one below a keyword no draft defines,
-such as `x-defs`, or `$ref`-shaped data in a `const`, an `enum` or a `default`) is
-refused, without a place, for any held reference nothing resolves. And a registered
-document whose own `$id` is no URI reference still refuses every compile (`JK0010`).
+answers. A reference may name a place no registration walks, a schema below a keyword no
+draft defines: an operation's schema in a contract document
+(`…#/operations/thing.get/input`), a member of `components/schemas` in an OpenAPI
+document, a place under `x-defs`. A compile that reaches such a place walks it then, as a
+registration walks a document, and reads what it reaches like any other place; a
+reference of it that nothing resolves is refused naming its own place
+(`…#/x-defs/a/properties/n/%24ref`). An object that only looks like a reference is none
+in a held document: `$ref`-shaped data in a `const`, an `enum` or a `default`, and one
+below such a keyword that no reference names. A few compiles still read every held
+schema, as every compile did, and are refused, without a place, for any held reference
+nothing resolves: one whose own schema holds a `$ref`-shaped object that is no reference
+of it (data, or one below a keyword no draft defines); one that reaches a `$ref` that is
+no URI reference, or one `$ref` object held at two places whose bases give it two
+targets; one that reaches a place no registration walked that declares an `$id` of its
+own, or that lies under an `$id` setting another base than its document's (through that
+identifier it is read by what it reaches); and one that reaches a place a registration
+left unread — an identifier declared twice, or a `propertyDependencies` the registration
+did not read as a keyword — with a reference below it. And a registered document whose
+own `$id` is no URI reference still refuses every compile (`JK0010`).
 *Upgrade: every compile read every schema its validator held. One held document with a
 reference nothing resolved therefore refused every later compile on the validator,
 `compile({ "type": "object" })` and `compile(true)` among them, with `JK0009` and no
