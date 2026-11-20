@@ -104,8 +104,8 @@ describe('unevaluated* reads a long evaluation log in one pass', () => {
     const result = /** @type {any} */ (validate({ x: 1, ...data, kid: { x: 0 }, y: 2 }));
     assert.equal(result.valid, false);
     assert.deepEqual(result.errors.map((/** @type {any} */ e) => [e.keyword, e.instancePath, e.params]), [
-      ['unevaluatedProperties', '', { unevaluatedProperty: 'x' }],
-      ['unevaluatedProperties', '', { unevaluatedProperty: 'y' }],
+      ['unevaluatedProperties', '/x', { unevaluatedProperty: 'x' }],
+      ['unevaluatedProperties', '/y', { unevaluatedProperty: 'y' }],
     ]);
     const tuple = new JarenValidator({ collectErrors: true })
       .compile({ $schema: D2020, allOf: [{ prefixItems }], unevaluatedItems: false });

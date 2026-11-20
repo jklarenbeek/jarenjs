@@ -62,8 +62,9 @@ describe('additionalItems beside an empty items array applies to every element',
   }
 
   it('reports what a one-position tuple reports past its last position', () => {
-    assert.deepEqual(collected({ items: [], additionalItems: false }, [1]), collected({ items: [{}], additionalItems: false }, [0, 1]));
-    assert.deepEqual(collected({ items: [], additionalItems: false }, [1]), [['items', '', '#']]);
+    // Each at the first element past the positions, which the `false` refused.
+    assert.deepEqual(collected({ items: [{}], additionalItems: false }, [0, 1]), [['items', '/1', '#']]);
+    assert.deepEqual(collected({ items: [], additionalItems: false }, [1]), [['items', '/0', '#']]);
     assert.deepEqual(collected({ items: [], additionalItems: { type: 'string' } }, [1]),
       [['type', '/0', '#/additionalItems'], ['items', '', '#']]);
   });

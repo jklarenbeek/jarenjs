@@ -961,9 +961,9 @@ import { parseJSONPointerPath } from '@jarenjs/json';
 parseJSONPointerPath('/items/0/id');   // ['items', 0, 'id']
 ```
 
-And for `additionalProperties: false`, Jaren points `instancePath` at the
-offending member (`/nested/extra`) where Ajv points at the parent object —
-deliberate, and spec-truer.
+And for `additionalProperties: false` and `unevaluatedProperties: false`, Jaren
+points `instancePath` at the offending member (`/nested/extra`) where Ajv points
+at the parent object — deliberate, and spec-truer (see below).
 
 `allOf` keeps its branches' errors, because every branch must hold, so a branch that fails deep inside reports its own fault and then one `allOf` error at the schema that holds the keyword, once per failing branch. A `false` branch reports nothing but that wrapper, so dropping every `allOf` error would hide it. A consumer that wants one issue per fault drops a wrapper only when an error from one of its own branches was reported since the previous wrapper at that location:
 
@@ -986,32 +986,51 @@ walks back up from that same escaped location. *Upgrade: these names used to
 appear unescaped (`/a/b`), which read as two nested members and made a
 `$data` reference from such a member resolve against the wrong location.*
 
-A subschema's errors, and any relative `$data` reference inside it, are located
-at the instance the subschema applies to. `dependentSchemas`, `propertyDependencies`
-and the schema form of draft 7 `dependencies` apply to the object that holds the
-trigger member, so their errors sit at that object (`required` at `""`, not at `/x`);
-the schema form of `unevaluatedProperties` and `unevaluatedItems` applies to
-each leftover member or item, so its errors sit there. A failed draft 7 array
-`dependencies` entry reports the keyword `dependencies`. `dependentRequired` and
-the array form of `dependencies` name a member that must exist beside the trigger
-member and no subschema runs, so they keep reporting the trigger member's
-location (`/x`), like `required` and `additionalProperties` do for the member
-they name. *Upgrade: these used
-the trigger member's location (or the parent's, for unevaluated members), so a
-`$data` reference inside such a subschema resolved against the wrong place, and
-the array form reported the dependent member's name as its keyword.*
+One rule locates every failure: at the instance its failing subschema or
+assertion is applied to. A subschema's errors, and any relative `$data` reference
+inside it, are located at the instance the subschema applies to.
 
-An `unevaluatedProperties` or `unevaluatedItems` failure names the member in its
-`params` (`unevaluatedProperty`, the member name; `unevaluatedItem`, the index), while
-its `instancePath` stays at the object or array that holds it (`additionalProperties`
-reports at the member). That is the JSON Schema reading: the keyword applies to the object
-or array, over what the other keywords left unevaluated, so its result belongs to that
-instance, and the leftover members are what it found there. The schema form is the one
-place a member is applied to:
-what its subschema finds wrong in a member sits at the member (`type` at `/q`) beside
-the keyword's own failure at the holder (`unevaluatedProperties` at `""`). A consumer that
-wants the member's location joins the holder's `instancePath` and the member from
-`params` (as one pointer token: `/` and `~` escaped). *Upgrade: `params` used to be empty, so two failing members read alike.*
+- **A subschema applied to a member or an element fails there.** `properties`,
+  `patternProperties`, `additionalProperties` and `unevaluatedProperties` apply
+  their subschema, `false` included, to each member they reach, so
+  `additionalProperties: false` and `unevaluatedProperties: false` report each
+  member they refuse at that member (`/x`), and the schema forms report what they
+  find wrong there (`type` at `/q`, beside `unevaluatedProperties` at `/q`).
+  `items`, `prefixItems`, `additionalItems` and `unevaluatedItems` apply theirs to
+  each element: `unevaluatedItems` reports at the element, `items: false`, a
+  `false` position and `additionalItems: false` report their one `items` error at
+  the first element they refused (`/2`); where only schemas refused elements,
+  their errors sit at those elements and the one `items` error at the array.
+- **An assertion about the object or array itself fails at the object or
+  array.** `required`, `minProperties`, `maxProperties`, `dependentRequired`, the
+  array form of draft 7 `dependencies` (a failed entry reports the keyword
+  `dependencies`), `propertyNames` (a member name is no instance), `minItems`,
+  `maxItems`, `uniqueItems`, `contains`, `minContains` and `maxContains` report at
+  `""` for the root. `dependentSchemas`, `propertyDependencies` and the schema
+  form of `dependencies` apply to the object that holds the trigger member, so
+  their errors sit at that object too (`required` at `""`, not at `/x`).
+- **`params` name the members involved**, so nothing is lost where a failure
+  sits at the object: `additionalProperty` and `unevaluatedProperty` (the member
+  name), `unevaluatedItem` (the index), `property` and `missingProperty`
+  (`dependentRequired` and a `dependencies` list: the member that is present and
+  the first one the object lacks), and `propertyName` on each error a
+  `propertyNames` subschema raised (`maxLength` at `""` with `{ limit: 1,
+  propertyName: 'ab' }`).
+
+*Upgrade: the trigger member's location (or the parent's, for unevaluated
+members) was handed to a dependency or unevaluated subschema, so a `$data`
+reference inside it resolved against the wrong place, and the array form of
+`dependencies` reported the dependent member's name as its keyword.*
+*Upgrade: `unevaluatedProperties` and `unevaluatedItems`, both forms, reported at
+the object or array that holds the member or item (`""`), and `items: false`,
+a `false` position and `additionalItems: false` at the array; they report at the
+member or element now (`/x`, `/2`). `dependentRequired` and a `dependencies` list
+reported at the member that is present (`/a`); they report at the object now
+(`""`), the member still in `params.property`. A `propertyNames` failure named
+the member nowhere; its errors carry `params.propertyName` now. A consumer that
+read the member from `params` and joined it to the holder's `instancePath` reads
+`instancePath` as it is. `params` of `unevaluated*` used to be empty, so two
+failing members read alike.*
 
 Collected errors carry what every keyword found. Beside a failed sibling,
 `unevaluatedProperties` and `unevaluatedItems` still report the members and
@@ -1029,7 +1048,13 @@ failing `$data`/`data` keyword, and the item walk stopped at `maxItems` (where
 a `contains` that only an item past it matched also reported a `contains`
 failure), so the collected error lists and the output formats' error units,
 and their counts, grow; `verbose` used to list such an `unevaluatedProperties`,
-`unevaluatedItems` or `$data` keyword unit as passing.*
+`unevaluatedItems` or `$data` keyword unit as passing.* *Upgrade: beside
+`contains`, the element walk refused with no error of its own: `{ "prefixItems":
+[false], "contains": {} }` on `[1]` answered `valid: false` with no errors at all,
+and `{ "items": { "type": "string" }, "contains": {} }` on `[1]` reported `type` at
+`/0` and no `items` error. It reports its `items` error as it does without
+`contains` (at `/0` for the first, at `""` beside the second's `type`), so such
+lists grow by one.*
 
 A reference from `items`, `prefixItems` or a tuple form back to a schema that is
 still being compiled (`{ "type": "array", "items": { "$ref": "#" } }`, or a cycle through
@@ -1945,10 +1970,16 @@ What the units say:
   own; the failed subschemas do. An applicator that fails by itself reports
   its message: `not`, `oneOf` matching twice, an `anyOf` or `contains` that
   matched nothing (beside the failed probes), and a boolean `false`
-  subschema the validator evaluates in place, such as
-  `additionalProperties: false` (in `list` and `hierarchical` at the unit
-  holding it; a `false` schema evaluated as a subschema keys its message by
-  `""`). `basic` also lists, as the 2020-12 example does, each failed unit
+  subschema, such as `additionalProperties: false`: in `list` and
+  `hierarchical` that subschema is a unit of its own at the member or element
+  it refused, as `properties: { "x": false }` is (`evaluationPath`
+  `/additionalProperties`, `/prefixItems/1`, `/additionalItems`;
+  `instanceLocation` `/x`), its message keyed by `""`, and the 2020-12 formats
+  put the error at that member or element. *Upgrade: `additionalProperties`,
+  `unevaluatedProperties`, `items`, `additionalItems`, `unevaluatedItems` and a
+  `prefixItems` position holding `false` reported their message in the unit
+  holding the keyword, keyed by the keyword, and the 2020-12 formats put the
+  failure of all but `additionalProperties` at the object or array.* `basic` also lists, as the 2020-12 example does, each failed unit
   of the condensed hierarchy that holds two or more failed units, with the
   error "A subschema had errors." (the `subschema` message; `''` under
   `messages: false`). Two errors of one keyword in one unit (two missing `required`

@@ -21,7 +21,6 @@ import {
 
 import {
   getBoolOrObjectClass,
-  isOfSchemaType,
   extendsChildLocations,
   annotatesFailedMembers,
   hasSchemaReference,
@@ -250,10 +249,13 @@ function compileArrayItemsBoolean(schemaObj, jsonSchema) {
   const addError = schemaObj.createErrorHandler(false, 'items');
   const root = schemaObj.root;
   const logFailed = root.usesUnevaluated && annotatesFailedMembers(schemaObj);
+  // The `false` subschema applies to each element: the error is located at
+  // the first, where errors are kept.
+  const keeps = !schemaObj.options.skipErrors;
   return function validateArrayItemsFalse(data, dataPath) {
     if (data.length === 0) return true;
     if (logFailed) root.evalLog.add(data, -1);
-    return addError(data, dataPath);
+    return addError(data, keeps ? dataPath + '/0' : dataPath);
   };
 }
 
@@ -577,6 +579,10 @@ function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
       const arr = data;
 
       let invalid = 0;
+      // The first element a `false` position (or a `false` past them)
+      // refused: it raises no error of its own, so the keyword's error is
+      // located there. A refusing schema has its own errors at its element.
+      let refusedAt = -1;
       for (let i = 0; i < len; ++i) {
         const itemPath = extendPaths ? dataPath + '/' + i : dataPath;
         const item = arr[i];
@@ -587,11 +593,14 @@ function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
           : i < count
             ? positions[i](item, itemPath, dataRoot)
             : rest(item, itemPath, dataRoot)) === true;
-        if (!ok) invalid++;
+        if (!ok) {
+          invalid++;
+          if (refusedAt < 0 && (i < count ? positions[i] : rest) === falseThat) refusedAt = i;
+        }
         if (track && i < evalLimit && (ok || logFailed)) root.evalLog.add(data, i);
       }
       return invalid === 0
-        || addError(invalid, dataPath);
+        || addError(invalid, extendPaths && refusedAt >= 0 ? dataPath + '/' + refusedAt : dataPath);
     };
   }
 
@@ -624,6 +633,8 @@ function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
 
   // Combined: both items and contains
   const containsValidator = validateContains;
+  // The element walk's own error, as the items walk above reports it.
+  const addItemsError = schemaObj.createErrorHandler(0, 'items');
 
   const stopAtFirstContains = schemaObj.options.skipErrors;
   return function validateArrayChildren(data, dataPath, dataRoot) {
@@ -632,6 +643,7 @@ function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
     const arr = data;
 
     let invalid = 0;
+    let refusedAt = -1;
     let contains = 0;
     for (let i = 0; i < len; ++i) {
       const obj = arr[i];
@@ -642,7 +654,10 @@ function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
         : i < count
           ? positions[i](obj, itemPath, dataRoot)
           : rest(obj, itemPath, dataRoot)) === true;
-      if (!ok) invalid++;
+      if (!ok) {
+        invalid++;
+        if (refusedAt < 0 && (i < count ? positions[i] : rest) === falseThat) refusedAt = i;
+      }
       if (track && i < evalLimit && (ok || logFailed)) root.evalLog.add(data, i);
       // A contains candidate is a probe: not matching is not a fault.
       const containsMark = root.errorMark();
@@ -655,7 +670,8 @@ function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
       root.rollbackErrors(containsMark);
     }
     // Failing items and the contains count are independent tallies.
-    const itemsOk = invalid === 0;
+    const itemsOk = invalid === 0
+      || addItemsError(invalid, extendPaths && refusedAt >= 0 ? dataPath + '/' + refusedAt : dataPath);
     if (stopAtFirstContains && !itemsOk) return false;
     return validateMinMax(contains, dataPath) && itemsOk;
   };
@@ -673,9 +689,8 @@ function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
  * @returns {Function | undefined}
  */
 export function compileArraySchema(schemaObj, jsonSchema, typed = null) {
-  if (isOfSchemaType(jsonSchema, 'set'))
-    return undefined;
-
+  // The array keywords apply to an array whatever else the type names (a
+  // `set` type takes a Set, which no array keyword reads).
   const compiledPrimitives = compileArrayPrimitives(schemaObj, jsonSchema);
   const compiledItemsBoolean = compileArrayItemsBoolean(schemaObj, jsonSchema);
   const compiledContainsBoolean = compileArrayContainsBoolean(schemaObj, jsonSchema);

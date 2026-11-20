@@ -2,6 +2,7 @@
 
 import {
   isArrayClass,
+  isMapClass,
   getObjectType,
 } from '@jarenjs/core';
 
@@ -11,6 +12,7 @@ import {
 
 import { createSchemaPatternTester } from './string.js';
 import { readsSince } from './schema-keywords.js';
+import { nameErrorRecords } from './messages.js';
 
 import {
   trueThat,
@@ -145,10 +147,22 @@ function compilePropertyNames(schemaObj, jsonSchema) {
 
   const propertyNamesValidator = schemaObj.createValidator(propNames, 'propertyNames');
   // The property NAME is the validated data; the object's data path is
-  // threaded through so name failures report a usable instancePath.
-  return function validatePropertyNames(dataKey, dataPath) {
-    return propertyNamesValidator(dataKey, dataPath);
+  // threaded through so name failures report a usable instancePath: the
+  // name is no instance, so they fail at the object.
+  if (schemaObj.options.skipErrors) {
+    return function validatePropertyNames(dataKey, dataPath) {
+      return propertyNamesValidator(dataKey, dataPath);
+    };
   }
+  // Errors are kept: each one the name raised names it in its params
+  // (`propertyName`), as an `additionalProperties` error names its member.
+  const root = schemaObj.root;
+  return function validateNamedPropertyNames(dataKey, dataPath) {
+    const from = root.errorMark();
+    const valid = propertyNamesValidator(dataKey, dataPath);
+    if (valid === false) nameErrorRecords(root.errors, from, dataKey);
+    return valid;
+  };
 }
 
 function buildPropertyValidators(schemaObj, jsonSchema) {
@@ -280,15 +294,17 @@ function compileDependentRequired(schemaObj, jsonSchema) {
   if (Object.keys(dependentRequired).length === 0)
     return undefined;
 
-  // Keyed handler: addError(dataKey, data, dataPath) - dataKey names the
-  // triggering property, rest[0] is the instance data path.
+  // Keyed handler: addError(dataKey, data, ownerPath) - dataKey names the
+  // triggering property, rest[0] is the object's location: the keyword
+  // asserts which members the object holds, so it fails at the object (as
+  // `required` does).
   const addError = schemaObj.createErrorHandler(false, ['dependentRequired']);
 
-  return function validateDependentRequiredItem(data, dataPath, dataRoot, dataKey) {
+  return function validateDependentRequiredItem(data, dataPath, dataRoot, dataKey, ownerPath = dataPath) {
     if (Object.hasOwn(dependentRequired, dataKey)) {
       const required = dependentRequired[dataKey];
       return hasOwnAll(data, required)
-        || addError(dataKey, data, dataPath);
+        || addError(dataKey, data, ownerPath);
     }
     return true;
   };
@@ -368,10 +384,11 @@ function compileDependencies(schemaObj, jsonSchema) {
   // Single required dependency - common case
   if (requiredDeps.length === 1 && schemaDeps.length === 0) {
     const { key, required, addError } = requiredDeps[0];
-    return function validateSingleRequiredDep(data, dataPath, dataRoot, dataKey) {
+    // A list asserts which members the object holds: it fails at the object.
+    return function validateSingleRequiredDep(data, dataPath, dataRoot, dataKey, ownerPath = dataPath) {
       return dataKey !== key
         || hasOwnAll(data, required)
-        || addError(dataKey, data, dataPath);
+        || addError(dataKey, data, ownerPath);
     };
   }
 
@@ -397,7 +414,7 @@ function compileDependencies(schemaObj, jsonSchema) {
     if (reqDep != null) {
       const { required, addError } = reqDep;
       return hasOwnAll(data, required)
-        || addError(dataKey, data, dataPath);
+        || addError(dataKey, data, ownerPath);
     }
     return true;
   };
@@ -641,7 +658,7 @@ function compileObjectProperty(schemaObj, jsonSchema) {
     result.addValid(validateName(dataKey, dataPath))
       .addResult(validateProperty(data, newPath, dataRoot, dataKey))
       .addResult(validatePattern(data, newPath, dataRoot, dataKey))
-      .addValid(validateDepRequired(data, newPath, dataRoot, dataKey))
+      .addValid(validateDepRequired(data, newPath, dataRoot, dataKey, dataPath))
       .addValid(validateDepSchemas(data, newPath, dataRoot, dataKey, dataPath))
       .addValid(validateDependency(data, newPath, dataRoot, dataKey, dataPath));
 
@@ -659,7 +676,7 @@ function compileObjectProperty(schemaObj, jsonSchema) {
     validateTrigger: function validateDependencyTrigger(data, dataPath, dataRoot, dataKey) {
       const newPath = memberPath(dataPath ?? '', dataKey);
       return new ValidationResult()
-        .addValid(validateDepRequired(data, newPath, dataRoot, dataKey))
+        .addValid(validateDepRequired(data, newPath, dataRoot, dataKey, dataPath))
         .addValid(validateDepSchemas(data, newPath, dataRoot, dataKey, dataPath))
         .addValid(validateDependency(data, newPath, dataRoot, dataKey, dataPath));
     },
@@ -724,7 +741,7 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
    * @returns {boolean}
    */
   const validateTriggered = function validateTriggeredDependencies(data, childPath, dataRoot, dataKey, dataPath) {
-    return (depRequiredValidator === null || depRequiredValidator(data, childPath, dataRoot, dataKey) !== false)
+    return (depRequiredValidator === null || depRequiredValidator(data, childPath, dataRoot, dataKey, dataPath) !== false)
       && (depSchemasValidator === null || depSchemasValidator(data, childPath, dataRoot, dataKey, dataPath) !== false)
       && (dependencyValidator === null || dependencyValidator(data, childPath, dataRoot, dataKey, dataPath) !== false);
   };
@@ -785,7 +802,7 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
         if (at !== undefined) {
           if (at < 31) met |= 1 << at;
           if (childPath === null) childPath = extendPaths ? memberPath(dataPath, dataKey) : dataPath;
-          if (depRequiredValidator !== null && depRequiredValidator(data, childPath, dataRoot, dataKey) === false)
+          if (depRequiredValidator !== null && depRequiredValidator(data, childPath, dataRoot, dataKey, dataPath) === false)
             return false;
           if (depSchemasValidator !== null && depSchemasValidator(data, childPath, dataRoot, dataKey, dataPath) === false)
             return false;
@@ -924,6 +941,13 @@ export function compileObjectSchema(schemaObj, jsonSchema, typed = null) {
   const validate = compileObjectGroup(schemaObj, jsonSchema, typed === null ? null : typed.error);
   if (typed !== null && validate !== undefined)
     typed.taken = true;
+  // A Map that a `map` type takes is that type's to read, not the object
+  // keywords'; they apply to every other object whatever else the type names.
+  if (validate !== undefined && isOfSchemaType(jsonSchema, 'map')) {
+    return function validateObjectBesideMap(data, dataPath, dataRoot, dataKey) {
+      return isMapClass(data) || validate(data, dataPath, dataRoot, dataKey);
+    };
+  }
   return validate;
 }
 
@@ -1068,9 +1092,6 @@ function compilePropertiesWalk(schemaObj, jsonSchema, propsMap, closed, typeErro
 }
 
 function compileObjectGroup(schemaObj, jsonSchema, typeError) {
-  if (isOfSchemaType(jsonSchema, 'map'))
-    return undefined;
-
   // Fast path: properties(+required) in skipErrors mode, alone or with
   // additionalProperties. Alone, the walk iterates the (fixed) schema keys
   // with direct property access instead of allocating Object.keys(data) and

@@ -68,18 +68,32 @@ argument is ALWAYS the instance data path, so `instancePath` is a straight
 read. A charCode guard keeps a non-pointer value from ever becoming a
 wrong path (it yields `''`).
 
-### Deliberate `additionalProperties` divergence from ajv
+### One location rule, and the divergence from ajv
 
-An `additionalProperties: false` failure reports `instancePath` at the
-**offending member** (`/nested/extra`), not at the parent object
-(`/nested`). The object compiler passes the child path
-(`${dataPath}/${dataKey}`) as the error's data path, so the pointer lands
-on the disallowed property itself. This is spec-correct (the failing
+A failure is located at the instance its failing subschema or assertion is
+applied to. A subschema applied to a member or an element fails **at that
+member or element**: an `additionalProperties: false` or
+`unevaluatedProperties: false` failure reports `instancePath` at the
+offending member (`/nested/extra`), not at the parent object (`/nested`), and
+`items: false`, a `false` position of `prefixItems` or an `items` array,
+`additionalItems: false` and `unevaluatedItems: false` at the first element
+they refused (`/list/2`). An assertion about the object or array itself fails
+**at the object or array**: `required`, `minProperties`, `maxProperties`,
+`dependentRequired`, the array form of `dependencies`, `propertyNames` (a
+member name is no instance), `minItems`, `maxItems`, `uniqueItems`,
+`contains`, `minContains` and `maxContains`. The `params` name the members
+involved either way (`additionalProperty`, `unevaluatedProperty`,
+`unevaluatedItem`, `property` + `missingProperty`, and `propertyName` on each
+error a `propertyNames` subschema raised). This is spec-correct (the failing
 location *is* that property) and friendlier for a UI that highlights the
 field. ajv reports the parent object's path with the property name in
 `params.additionalProperty`; Jaren carries the same `additionalProperty`
 param, so a consumer diffing error sets against ajv should treat the
-`instancePath` difference as intentional, not a bug.
+`instancePath` difference as intentional, not a bug. *Upgrade:
+`unevaluatedProperties` and `unevaluatedItems` (both forms) were located at
+the object or array, `items: false` and the other `false` positions at the
+array, and `dependentRequired` and a `dependencies` list at the member that
+is present (`/a`); a `propertyNames` failure named the member nowhere.*
 
 ## 2. The message-key registry
 
@@ -87,7 +101,7 @@ One flat namespace:
 
 | Producer | Keys | Params carried |
 |---|---|---|
-| validate keywords | the keyword itself: `type`, `required`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `additionalProperties`, `minProperties`, `maxProperties`, `minItems`, `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `items`, `allOf`, `anyOf`, `oneOf`, `not`, `format`, `contentEncoding`, `contentMediaType`, `nullable`, `if`, `then`, `else`, `false schema`, `const`, `enum`, `dependentRequired`, `dependencies`, `unevaluatedProperties`, `unevaluatedItems`, `$query` | `type`/`types`; `missingProperty`; `limit` (+ `comparison` for the numeric bounds); `multipleOf`; `pattern`; `additionalProperty`; `format`; `encoding` (`contentEncoding`, and `contentMediaType` beside `contentEncoding: 'base64'`, whose check decodes the string first); `mediaType`; `allowedValue` (`const`: the value it expected); `allowedValues` (`enum`: the list it allows); `property` + `missingProperty` (`dependentRequired` and the array form of `dependencies`: the present property and the first dependency the object lacks); `unevaluatedProperty` (the member name); `unevaluatedItem` (the index) |
+| validate keywords | the keyword itself: `type`, `required`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `additionalProperties`, `minProperties`, `maxProperties`, `minItems`, `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `items`, `allOf`, `anyOf`, `oneOf`, `not`, `format`, `contentEncoding`, `contentMediaType`, `nullable`, `if`, `then`, `else`, `false schema`, `const`, `enum`, `dependentRequired`, `dependencies`, `unevaluatedProperties`, `unevaluatedItems`, `$query` | `type`/`types`; `missingProperty`; `limit` (+ `comparison` for the numeric bounds); `multipleOf`; `pattern`; `additionalProperty`; `format`; `encoding` (`contentEncoding`, and `contentMediaType` beside `contentEncoding: 'base64'`, whose check decodes the string first); `mediaType`; `allowedValue` (`const`: the value it expected); `allowedValues` (`enum`: the list it allows); `property` + `missingProperty` (`dependentRequired` and the array form of `dependencies`: the present property and the first dependency the object lacks); `unevaluatedProperty` (the member name); `unevaluatedItem` (the index); `propertyName` beside its own params on every error a `propertyNames` subschema raised (the member name it refused) |
 | app state check | `app/not-json`: a value `createJsonStateValidator` (`@jarenjs/app`) finds in the state that is not JSON, "is not a JSON value" (keyword `json`) | none |
 | `basic` output | `subschema`: the error of a branch unit, "A subschema had errors." (rendered in English: an output format takes no catalog, so the packs' entry is not read yet) | none |
 | query runtime via `$query` | the `JQ2xxx` code of a failure that judges the instance (`JQ2001` to `JQ2005`, `JQ2008`; every other runtime refusal is thrown) | `{ code, docPath }` |

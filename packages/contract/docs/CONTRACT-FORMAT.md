@@ -914,6 +914,15 @@ member name or a declared error code. `details` follows
 `policy.errors.details` for a validation failure: `none` → absent;
 `paths` → `[{ path, keyword }]` (instance path + keyword, no values, no
 schema); `full` → the validator's own error records with their `params`.
+A `path` is the validator's `instancePath`: a subschema applied to a member
+fails at that member, an assertion about an object at the object.
+*Upgrade: an `unevaluatedProperties` or `unevaluatedItems` failure crossed with
+the object's or array's path and now crosses with the member's or element's
+(`/x`, `/2`), as `additionalProperties` always did, and `items: false` and
+the other `false` positions with the first element they refused;
+`dependentRequired` and a
+draft 7 `dependencies` list crossed with the member that is present (`/a`) and
+now cross with the object's (`""`).*
 For a **declared** failure, `details` is what the handler gave to
 `ctx.fail`, validated against `errors[code].schema` when the declaration
 has one (a mismatch is `JC2010` — the handler broke its own error

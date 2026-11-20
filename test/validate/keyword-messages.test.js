@@ -61,9 +61,9 @@ describe('enum names the values it allows', () => {
 });
 
 describe('dependentRequired names the property and the dependency it misses', () => {
-  it('one error per present property, at the property, naming its first missing dependency', () => {
+  it('one error per present property, at the object, naming the property and its first missing dependency', () => {
     assert.deepEqual(failures({ dependentRequired: { a: ['b', 'c'] } }, { a: 1, c: 2 }, 'dependentRequired'),
-      [{ instancePath: '/a', msgid: 'dependentRequired', params: { property: 'a', missingProperty: 'b' }, message: "must have property 'b' when property 'a' is present" }]);
+      [{ instancePath: '', msgid: 'dependentRequired', params: { property: 'a', missingProperty: 'b' }, message: "must have property 'b' when property 'a' is present" }]);
     assert.deepEqual(failures({ dependentRequired: { a: ['b', 'c'], d: ['c'] } }, { a: 1, b: 2, d: 3 }, 'dependentRequired').map((e) => e.params),
       [{ property: 'a', missingProperty: 'c' }, { property: 'd', missingProperty: 'c' }]);
   });
@@ -75,7 +75,7 @@ describe('dependentRequired names the property and the dependency it misses', ()
 
   it('draft-07 dependencies, its array form, says the same', () => {
     assert.deepEqual(failures({ dependencies: { a: ['b'] } }, { a: 1 }, 'dependencies', 7),
-      [{ instancePath: '/a', msgid: 'dependencies', params: { property: 'a', missingProperty: 'b' }, message: "must have property 'b' when property 'a' is present" }]);
+      [{ instancePath: '', msgid: 'dependencies', params: { property: 'a', missingProperty: 'b' }, message: "must have property 'b' when property 'a' is present" }]);
     assert.deepEqual(failures({ dependencies: { a: ['b'], c: { required: ['d'] }, e: ['f', 'g'] } }, { a: 1, e: 1, f: 1 }, 'dependencies', 7).map((e) => e.params),
       [{ property: 'a', missingProperty: 'b' }, { property: 'e', missingProperty: 'g' }]);
   });
@@ -84,11 +84,11 @@ describe('dependentRequired names the property and the dependency it misses', ()
 describe('unevaluatedProperties and unevaluatedItems name what they rejected', () => {
   it('the false form and the schema form', () => {
     assert.deepEqual(failures({ properties: { a: {} }, unevaluatedProperties: false }, { a: 1, x: 2 }, 'unevaluatedProperties'),
-      [{ instancePath: '', msgid: 'unevaluatedProperties', params: { unevaluatedProperty: 'x' }, message: "unevaluated property 'x' fails the 'unevaluatedProperties' schema" }]);
+      [{ instancePath: '/x', msgid: 'unevaluatedProperties', params: { unevaluatedProperty: 'x' }, message: "unevaluated property 'x' fails the 'unevaluatedProperties' schema" }]);
     assert.deepEqual(failures({ unevaluatedProperties: { type: 'string' } }, { p: 1, q: 'a' }, 'unevaluatedProperties').map((e) => e.message),
       ["unevaluated property 'p' fails the 'unevaluatedProperties' schema"]);
     assert.deepEqual(failures({ prefixItems: [{}], unevaluatedItems: false }, [1, 2], 'unevaluatedItems'),
-      [{ instancePath: '', msgid: 'unevaluatedItems', params: { unevaluatedItem: 1 }, message: "unevaluated item at index 1 fails the 'unevaluatedItems' schema" }]);
+      [{ instancePath: '/1', msgid: 'unevaluatedItems', params: { unevaluatedItem: 1 }, message: "unevaluated item at index 1 fails the 'unevaluatedItems' schema" }]);
     assert.deepEqual(failures({ unevaluatedItems: { type: 'string' } }, ['a', 2], 'unevaluatedItems').map((e) => e.message),
       ["unevaluated item at index 1 fails the 'unevaluatedItems' schema"]);
   });

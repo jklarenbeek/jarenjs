@@ -64,8 +64,9 @@ function compileUnevaluatedProperties(schemaObj, jsonSchema) {
       let valid = true;
       for (let i = 0; i < keys.length; ++i) {
         const key = keys[i];
+        // The `false` subschema applies to the member: it fails there.
         if (index === null ? !log.hasKey(data, key, mark) : !index.has(key))
-          valid = addError(key, dataPath) && valid;
+          valid = addError(key, extendPaths ? memberPath(dataPath, key) : dataPath) && valid;
       }
       return valid;
     };
@@ -84,10 +85,11 @@ function compileUnevaluatedProperties(schemaObj, jsonSchema) {
     for (let i = 0; i < keys.length; ++i) {
       const key = keys[i];
       if (index === null ? log.hasKey(data, key, mark) : index.has(key) || log.hasKey(data, key, end)) continue;
-      if (validator(data[key], extendPaths ? memberPath(dataPath, key) : dataPath, dataRoot, key) === true)
+      const keyPath = extendPaths ? memberPath(dataPath, key) : dataPath;
+      if (validator(data[key], keyPath, dataRoot, key) === true)
         log.add(data, key);
       else
-        valid = addError(key, dataPath) && valid;
+        valid = addError(key, keyPath) && valid;
     }
     return valid;
   };
@@ -134,8 +136,9 @@ function compileUnevaluatedItems(schemaObj, jsonSchema) {
       const index = log.index(data, mark, data.length);
       if (index !== null && index.has(-1)) return true;
       for (let i = 0; i < data.length; ++i) {
+        // The `false` subschema applies to the element: it fails there.
         if (index === null ? !log.hasItem(data, i, mark) : !index.has(i))
-          return addError(i, dataPath);
+          return addError(i, extendPaths ? dataPath + '/' + i : dataPath);
       }
       return true;
     };
@@ -158,7 +161,7 @@ function compileUnevaluatedItems(schemaObj, jsonSchema) {
         : validator(item, itemPath, dataRoot, i)) === true)
         log.add(data, i);
       else
-        valid = addError(i, dataPath) && valid;
+        valid = addError(i, itemPath) && valid;
     }
     return valid;
   };

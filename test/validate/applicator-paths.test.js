@@ -54,17 +54,18 @@ describe('error locations of applicator subschemas', function () {
 
   it('reports the failure of an unevaluated member or item at that member or item', function () {
     assert.deepStrictEqual(paths({ unevaluatedProperties: { type: 'string' } }, { a: 1, 'b/c': 2 }),
-      ['type@/a', 'unevaluatedProperties@', 'type@/b~1c', 'unevaluatedProperties@']);
+      ['type@/a', 'unevaluatedProperties@/a', 'type@/b~1c', 'unevaluatedProperties@/b~1c']);
     assert.deepStrictEqual(paths({ prefixItems: [{}], unevaluatedItems: { type: 'string' } }, [0, 1, 'x', 2]),
-      ['type@/1', 'unevaluatedItems@', 'type@/3', 'unevaluatedItems@']);
+      ['type@/1', 'unevaluatedItems@/1', 'type@/3', 'unevaluatedItems@/3']);
   });
 
-  it('names the failed keyword of a draft 7 array dependency, not the member', function () {
+  it('names the failed keyword of a draft 7 array dependency, at the object', function () {
     for (const schema of [{ dependencies: { x: ['q'] } }, { dependencies: { x: ['q'], y: { required: ['z'] } } }]) {
       const [error] = new JarenValidator({ collectErrors: true, skipErrors: false }).compile(schema)({ x: 1 }).errors;
       assert.strictEqual(error.keyword, 'dependencies');
       assert.strictEqual(error.msgid, 'dependencies');
-      assert.strictEqual(error.instancePath, '/x');
+      assert.strictEqual(error.instancePath, '');
+      assert.deepStrictEqual(error.params, { property: 'x', missingProperty: 'q' });
     }
   });
 });

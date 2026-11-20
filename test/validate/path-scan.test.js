@@ -439,9 +439,9 @@ describe('a reader still sees its own location through every route', () => {
       [{ items: { type: 'string' } }, ['a', 1],
         [['type', '/1', { type: 'string' }], ['items', '', {}]]],
       [{ prefixItems: [{}], unevaluatedItems: { type: 'string' } }, [0, 1],
-        [['type', '/1', { type: 'string' }], ['unevaluatedItems', '', { unevaluatedItem: 1 }]]],
+        [['type', '/1', { type: 'string' }], ['unevaluatedItems', '/1', { unevaluatedItem: 1 }]]],
       [{ unevaluatedProperties: { type: 'string' } }, { q: 1 },
-        [['type', '/q', { type: 'string' }], ['unevaluatedProperties', '', { unevaluatedProperty: 'q' }]]],
+        [['type', '/q', { type: 'string' }], ['unevaluatedProperties', '/q', { unevaluatedProperty: 'q' }]]],
     ];
     for (const [schema, data, expected] of cases) {
       const reader = { properties: { z: { minimum: { $data: '1/y' } } } };

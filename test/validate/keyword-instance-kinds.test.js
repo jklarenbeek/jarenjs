@@ -323,3 +323,37 @@ describe('an object whose prototype is an array and whose length is 2 ** 53', ()
     assert.strictEqual(result.stdout, 'true\n');
   });
 });
+
+// A type that also names the validator's own `set` or `map` kind: the array
+// keywords still apply to an array and the object keywords to an object; a
+// Set or a Map that type takes is read by none of them.
+describe('a type naming set or map beside array or object', () => {
+  const TYPED = [
+    [{ type: ['array', 'set'], maxItems: 0 }, [[1], false], [[], true], [new Set([1]), true]],
+    [{ type: ['array', 'set'], items: { type: 'string' } }, [[1], false], [['a'], true], [new Set([1]), true]],
+    [{ type: ['set', 'array'], uniqueItems: true, minItems: 3 }, [[1, 1], false], [[1, 2, 3], true], [new Set([1]), true]],
+    [{ type: ['object', 'map'], required: ['a'], maxProperties: 0 }, [{ b: 1 }, false], [{}, false], [new Map([['b', 1]]), true], [new Map(), true]],
+    [{ type: ['object', 'map'], properties: { a: { type: 'string' } } }, [{ a: 1 }, false], [{ a: 's' }, true], [new Map([['a', 1]]), true]],
+    [{ type: ['map', 'object'], additionalProperties: false }, [{ a: 1 }, false], [{}, true], [new Map([['a', 1]]), true]],
+    [{ type: 'map', minProperties: 1 }, [new Map([['a', 1]]), true], [new Map(), true], [{}, false]],
+    [{ type: 'set', maxItems: 0 }, [new Set([1]), true], [[1], false]],
+  ];
+  for (const [mode, modeOptions, read] of MODES) {
+    it(`answers as the array or object type alone does for an array or object, ${mode}`, () => {
+      for (const [schema, ...cells] of TYPED) {
+        const validate = new JarenValidator(modeOptions).compile(schema);
+        for (const [instance, expected] of cells)
+          assert.strictEqual(read(validate(instance)), expected, `${JSON.stringify(schema)} on ${instance?.constructor?.name} ${JSON.stringify(instance instanceof Map || instance instanceof Set ? [...instance] : instance)}`);
+      }
+    });
+  }
+
+  it('reports the array and object keywords beside the type in collected errors', () => {
+    const keywords = (schema, instance) => new JarenValidator({ collectErrors: true }).compile(schema)(instance).errors
+      .map((e) => `${e.keyword}@${e.instancePath}`);
+    assert.deepEqual(keywords({ type: ['array', 'set'], maxItems: 0 }, [1]), ['maxItems@']);
+    assert.deepEqual(keywords({ type: ['object', 'map'], required: ['a'], maxProperties: 0 }, { b: 1 }), ['maxProperties@', 'required@']);
+    assert.deepEqual(keywords({ type: 'set', maxItems: 0 }, [1]), ['type@', 'maxItems@']);
+    assert.deepEqual(keywords({ type: 'map', required: ['a'] }, new Map([['b', 1]])), []);
+  });
+});

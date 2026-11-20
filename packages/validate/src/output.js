@@ -28,7 +28,7 @@
 import { isArrayClass, isObjectClass } from '@jarenjs/core';
 import { encodeJSONPointerSegment, decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { convertInternalErrors, renderErrorMessage } from './messages.js';
-import { ASSERTION_SINCE, readsSince, TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, admitsPropertyDependencies } from './schema-keywords.js';
+import { ASSERTION_SINCE, readsSince, readPrefixItems, TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, admitsPropertyDependencies } from './schema-keywords.js';
 import { admitsDynamicReference } from './dynamic-ref.js';
 import { REF_SIBLING_KEYWORDS } from './tools.js';
 import { createJsonPointer } from './traverse.js';
@@ -480,13 +480,61 @@ function decides(parent, child, results) {
 //#region list and hierarchical
 
 /**
+ * Where below `unit` the `false` subschema lies whose failure at another
+ * instance a keyword of `unit` reported (an `additionalProperties: false` at
+ * a member, an `items: false` at an element), or null for an error that is
+ * none: such a subschema compiles to no unit of its own, yet it is one. The
+ * element walk reports a refused position (`prefixItems`, an `items` array)
+ * and `additionalItems` as `items`: the segment names the subschema that
+ * refused the element.
+ * @param {OutputUnit} unit
+ * @param {string} keyword
+ * @param {string} instanceLocation - Where the error is located
+ * @returns {string|null} The evaluation path segment (`/additionalProperties`, `/prefixItems/0`)
+ */
+function falseSubschemaSegment(unit, keyword, instanceLocation) {
+  const schema = unit.schema;
+  if (instanceLocation === unit.instanceLocation || !isObjectClass(schema)) return null;
+  if (keyword !== 'items') return schema[keyword] === false ? '/' + encodeJSONPointerSegment(keyword) : null;
+  const at = Number(lastToken(instanceLocation));
+  const prefix = readPrefixItems(/** @type {any} */ (unit), schema);
+  const positions = prefix ?? (isArrayClass(schema.items) ? schema.items : null);
+  if (positions === null) return schema.items === false ? '/items' : null;
+  const positionsKeyword = prefix === undefined ? 'items' : 'prefixItems';
+  if (at < positions.length) return positions[at] === false ? `/${positionsKeyword}/${at}` : null;
+  const past = prefix === undefined ? 'additionalItems' : 'items';
+  return schema[past] === false ? '/' + past : null;
+}
+
+/**
+ * The unit of a `false` subschema a keyword of `unit` applied at
+ * `instanceLocation` (see {@link falseSubschemaSegment}): its failure is its
+ * only error, keyed '' as a `false` schema's own.
+ * @param {OutputUnit} unit
+ * @param {string} segment - Where the subschema lies below `unit`
+ * @param {string} instanceLocation
+ * @param {import('./messages.js').ValidationError[]} errors - The errors raised there
+ * @returns {Record<string, unknown>}
+ */
+function falseSubschemaUnit(unit, segment, instanceLocation, errors) {
+  return {
+    valid: false,
+    evaluationPath: unit.evaluationPath + segment,
+    schemaLocation: unit.schemaLocation + segment,
+    instanceLocation,
+    errors: { '': joinMessages(errors) },
+  };
+}
+
+/**
  * One unit of the `list`/`hierarchical` shape.
  * @param {OutputUnit} unit
  * @param {KeywordResult[]} results
  * @param {boolean} surviving - Whether this unit and every enclosing unit passed
+ * @param {Record<string, unknown>[]} refused - Receives the units of the `false` subschemas the unit's keywords applied at other instances, in order
  * @returns {Record<string, unknown>}
  */
-function subschemaUnit(unit, results, surviving) {
+function subschemaUnit(unit, results, surviving, refused) {
   /** @type {Record<string, unknown>} */
   const out = {
     valid: unit.valid,
@@ -501,10 +549,21 @@ function subschemaUnit(unit, results, surviving) {
   let hasErrors = false;
   let hasAnnotations = false;
   for (const result of results) {
-    if (result.reported.length !== 0) {
-      errors[result.keyword] = joinMessages(result.reported);
+    /** @type {Map<string, { segment: string, raised: import('./messages.js').ValidationError[] }>} */
+    const elsewhere = new Map();
+    const here = [];
+    for (const error of result.reported) {
+      const segment = falseSubschemaSegment(unit, result.keyword, error.instancePath);
+      if (segment === null) here.push(error);
+      else if (elsewhere.has(error.instancePath)) /** @type {any} */ (elsewhere.get(error.instancePath)).raised.push(error);
+      else elsewhere.set(error.instancePath, { segment, raised: [error] });
+    }
+    if (here.length !== 0) {
+      errors[result.keyword] = joinMessages(here);
       hasErrors = true;
     }
+    for (const [instanceLocation, { segment, raised }] of elsewhere)
+      refused.push(falseSubschemaUnit(unit, segment, instanceLocation, raised));
     if (result.annotation !== undefined && (surviving || !unit.valid)) {
       annotations[result.keyword] = result.annotation;
       hasAnnotations = true;
@@ -522,9 +581,11 @@ function subschemaUnit(unit, results, surviving) {
  * @returns {Record<string, unknown>}
  */
 function projectHierarchical(unit, surviving = unit.valid) {
-  const out = subschemaUnit(unit, keywordResults(unit, false), surviving);
-  if (unit.children.length !== 0)
-    out.details = unit.children.map((child) => projectHierarchical(child, surviving && child.valid));
+  /** @type {Record<string, unknown>[]} */
+  const refused = [];
+  const out = subschemaUnit(unit, keywordResults(unit, false), surviving, refused);
+  if (unit.children.length !== 0 || refused.length !== 0)
+    out.details = [...unit.children.map((child) => projectHierarchical(child, surviving && child.valid)), ...refused];
   return out;
 }
 
@@ -539,8 +600,11 @@ function projectList(root) {
   const details = [];
   const visit = (/** @type {OutputUnit} */ unit, /** @type {boolean} */ surviving) => {
     const results = keywordResults(unit, false);
-    const out = subschemaUnit(unit, results, surviving);
+    /** @type {Record<string, unknown>[]} */
+    const refused = [];
+    const out = subschemaUnit(unit, results, surviving, refused);
     if (out.errors !== undefined || out.annotations !== undefined) details.push(out);
+    details.push(...refused);
     const byKeyword = new Map(results.map((result) => [result.keyword, result]));
     for (const child of unit.children)
       if (decides(unit, child, byKeyword)) visit(child, surviving && child.valid);
@@ -598,16 +662,21 @@ function keywordTree(unit, surviving, verbose) {
       else node.kids.push({ valid: false, keywordLocation, absoluteKeywordLocation, instanceLocation: unit.instanceLocation, kids: leaves });
       continue;
     }
+    // An error the keyword located at another instance than the unit's is
+    // a unit of its own there, beside the subschemas it applied.
+    const here = result.reported.filter((error) => error.instancePath === unit.instanceLocation);
+    const elsewhere = result.reported.filter((error) => error.instancePath !== unit.instanceLocation)
+      .map((error) => ({ valid: false, keywordLocation, absoluteKeywordLocation, instanceLocation: error.instancePath, error: error.message, kids: [] }));
     node.kids.push({
       valid: result.valid,
       keywordLocation,
       absoluteKeywordLocation,
       instanceLocation: unit.instanceLocation,
-      error: result.reported.length !== 0 ? joinMessages(result.reported) : undefined,
+      error: here.length !== 0 ? joinMessages(here) : undefined,
       annotation,
       // A `true` subschema has no keywords: its node would hold nothing.
-      kids: result.children.filter((child) => child.schema !== true)
-        .map((child) => keywordTree(child, surviving && child.valid, verbose)),
+      kids: [...result.children.filter((child) => child.schema !== true)
+        .map((child) => keywordTree(child, surviving && child.valid, verbose)), ...elsewhere],
     });
   }
   return node;

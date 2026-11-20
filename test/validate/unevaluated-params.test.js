@@ -44,26 +44,26 @@ describe('the member an unevaluated failure names', () => {
       ]);
   });
 
-  it('keeps the error at the object or array that holds the member', () => {
+  it('locates the error at the member or item the false subschema refused', () => {
     const validate = new JarenValidator({ collectErrors: true, draftVersion: 2020 })
       .compile({ properties: { o: { unevaluatedProperties: false } } });
     const result = validate({ o: { k: 1 } });
-    assert.deepEqual(result.errors.map((/** @type {any} */ e) => [e.keyword, e.instancePath]), [['unevaluatedProperties', '/o']]);
+    assert.deepEqual(result.errors.map((/** @type {any} */ e) => [e.keyword, e.instancePath]), [['unevaluatedProperties', '/o/k']]);
   });
 
-  it('keeps the error of an array at the array, and a schema form at the member beside it', () => {
+  it('locates the error of an item at the item, and a schema form beside its own errors there', () => {
     const where = (/** @type {any} */ schema, /** @type {any} */ data) => new JarenValidator({ collectErrors: true, draftVersion: 2020 })
       .compile(schema)(data).errors.map((/** @type {any} */ e) => [e.keyword, e.instancePath]);
     assert.deepEqual(
       where({ properties: { l: { prefixItems: [{}], unevaluatedItems: false } } }, { l: [1, 2] }),
-      [['unevaluatedItems', '/l']]);
-    // The keyword's own failure is the holder's; what the schema form found
-    // wrong in the member is the member's, as for every subschema.
+      [['unevaluatedItems', '/l/1']]);
+    // The subschema applies to the member: the keyword's failure is there,
+    // beside what the schema form found wrong in it.
     assert.deepEqual(
       where({ unevaluatedProperties: { type: 'string' } }, { q: 1 }),
-      [['type', '/q'], ['unevaluatedProperties', '']]);
+      [['type', '/q'], ['unevaluatedProperties', '/q']]);
     assert.deepEqual(
       where({ prefixItems: [{}], unevaluatedItems: { type: 'string' } }, [0, 1]),
-      [['type', '/1'], ['unevaluatedItems', '']]);
+      [['type', '/1'], ['unevaluatedItems', '/1']]);
   });
 });

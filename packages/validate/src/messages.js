@@ -460,6 +460,22 @@ function resolveErrorMessageSpec(registry, errorPath, keyword, params) {
   return null;
 }
 
+/** @type {WeakMap<object, string>} The member name each error a `propertyNames` subschema raised is about, by its internal record */
+const PROPERTY_NAMES = new WeakMap();
+
+/**
+ * Name the member a `propertyNames` subschema refused in the errors it
+ * raised: `records[from]` onwards each get `params.propertyName` when
+ * converted.
+ * @param {readonly object[]} records - The root's internal error records
+ * @param {number} from - The first record the name's validation raised
+ * @param {string} name - The member name
+ */
+export function nameErrorRecords(records, from, name) {
+  for (let i = from; i < records.length; ++i)
+    PROPERTY_NAMES.set(records[i], name);
+}
+
 /**
  * Convert internal validation errors to the public ValidationError format.
  * Params extraction is table-driven off the failed keyword; message text
@@ -535,6 +551,10 @@ export function convertInternalErrors(internalErrors) {
         params.docPath = err.rest[2];
       }
     }
+
+    // A `propertyNames` failure is at the object: the name it is about.
+    const propertyName = PROPERTY_NAMES.get(err);
+    if (propertyName !== undefined) params.propertyName = propertyName;
 
     // Validators pass the instance data path as the first meta argument to
     // the error handler (the handler-contract invariant); the charCode

@@ -204,12 +204,6 @@ delete it or fix it.
   text, so `localizeErrors` does not reach it and the packs' `subschema` entry
   is never read. A catalog on the output path (or units that keep `msgid` and
   `params`) is a new API (a minor).
-- [ ] **A disallowed member is located two ways.** `additionalProperties:
-  false` places each failure at the member (`/x`), `unevaluatedProperties:
-  false` at the object (`""`, the member in the message), and
-  `dependentRequired` at the present member (`/a`) in collected errors and
-  `basic`, at the object in `list`. One rule changes collected `instancePath`
-  (an upgrade note).
 - [ ] **The normalizer compiles a chain of references recursively per link.**
   `compileNormalizer` builds each `$ref` target where it meets it, so a schema
   whose references chain one target to the next (`$defs` `d0` … `dN`, each `{

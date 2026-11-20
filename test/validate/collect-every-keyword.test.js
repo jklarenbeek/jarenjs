@@ -29,20 +29,20 @@ describe('unevaluatedProperties and unevaluatedItems beside a failed sibling', (
   it('report the member nothing evaluated, and only that one', () => {
     assert.deepEqual(collected({ properties: { a: { type: 'string' } }, unevaluatedProperties: false }, { a: 1, x: 1 }), [
       ['type', '/a', { type: 'string' }],
-      ['unevaluatedProperties', '', { unevaluatedProperty: 'x' }],
+      ['unevaluatedProperties', '/x', { unevaluatedProperty: 'x' }],
     ]);
     assert.deepEqual(collected({ patternProperties: { '^a': { type: 'string' } }, unevaluatedProperties: false }, { ab: 1, x: 1 }), [
       ['type', '/ab', { type: 'string' }],
-      ['unevaluatedProperties', '', { unevaluatedProperty: 'x' }],
+      ['unevaluatedProperties', '/x', { unevaluatedProperty: 'x' }],
     ]);
     assert.deepEqual(collected({ required: ['q'], properties: { a: true }, unevaluatedProperties: false }, { a: 1, x: 1 }), [
       ['required', '', { missingProperty: 'q' }],
-      ['unevaluatedProperties', '', { unevaluatedProperty: 'x' }],
+      ['unevaluatedProperties', '/x', { unevaluatedProperty: 'x' }],
     ]);
     assert.deepEqual(collected({ required: ['q'], unevaluatedProperties: { type: 'string' } }, { x: 1, y: 'a' }), [
       ['required', '', { missingProperty: 'q' }],
       ['type', '/x', { type: 'string' }],
-      ['unevaluatedProperties', '', { unevaluatedProperty: 'x' }],
+      ['unevaluatedProperties', '/x', { unevaluatedProperty: 'x' }],
     ]);
   });
 
@@ -57,7 +57,7 @@ describe('unevaluatedProperties and unevaluatedItems beside a failed sibling', (
       ['type', '/x', { type: 'string' }],
       ['allOf', '', {}],
     ]);
-    assert.deepEqual(collected({ items: false, unevaluatedItems: false }, [1]), [['items', '', {}]]);
+    assert.deepEqual(collected({ items: false, unevaluatedItems: false }, [1]), [['items', '/0', {}]]);
     assert.deepEqual(collected({ items: { type: 'string' }, unevaluatedItems: false }, [1, 'a']), [
       ['type', '/0', { type: 'string' }],
       ['items', '', {}],
@@ -70,7 +70,7 @@ describe('unevaluatedProperties and unevaluatedItems beside a failed sibling', (
       ['type', '/x', { type: 'string' }],
       ['required', '', { missingProperty: 'q' }],
       ['anyOf', '', {}],
-      ['unevaluatedProperties', '', { unevaluatedProperty: 'x' }],
+      ['unevaluatedProperties', '/x', { unevaluatedProperty: 'x' }],
     ]);
   });
 
@@ -78,11 +78,11 @@ describe('unevaluatedProperties and unevaluatedItems beside a failed sibling', (
     assert.deepEqual(collected({ prefixItems: [{ type: 'string' }], unevaluatedItems: false }, [1, 2]), [
       ['type', '/0', { type: 'string' }],
       ['items', '', {}],
-      ['unevaluatedItems', '', { unevaluatedItem: 1 }],
+      ['unevaluatedItems', '/1', { unevaluatedItem: 1 }],
     ]);
     assert.deepEqual(collected({ minItems: 3, unevaluatedItems: false }, [1]), [
       ['minItems', '', { limit: 3 }],
-      ['unevaluatedItems', '', { unevaluatedItem: 0 }],
+      ['unevaluatedItems', '/0', { unevaluatedItem: 0 }],
     ]);
   });
 
@@ -139,7 +139,7 @@ describe('a recording output format', () => {
 
   it('records the same keywords collect mode reports', () => {
     assert.deepEqual(basic({ properties: { a: { type: 'string' } }, unevaluatedProperties: false }, { a: 1, x: 1 }),
-      [false, [['', ''], ['/properties/a/type', '/a'], ['/unevaluatedProperties', '']]]);
+      [false, [['', ''], ['/properties/a/type', '/a'], ['/unevaluatedProperties', '/x']]]);
     assert.deepEqual(basic({ properties: { n: { const: { $data: '1/w' }, minimum: { $data: '1/m' } } } }, { n: 1, w: 2, m: 5 }),
       [false, [['/properties/n', '/n'], ['/properties/n/const', '/n'], ['/properties/n/minimum', '/n']]]);
     assert.deepEqual(basic({ maxItems: 1, contains: { const: 5 } }, [1, 5]), [false, [['/maxItems', '']]]);
