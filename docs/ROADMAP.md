@@ -103,10 +103,12 @@ delete it or fix it.
 
 ## @jarenjs/validate
 
-- [ ] **The form validator and the normalizer count string length in graphemes whatever the validator's unit.**
-  @jarenjs/forms validate.js calls `getStringLength(value, true)`; compileNormalizer's internal validator is built
-  without `useGrapheme`/`lengthUnit`. A host that sets `lengthUnit: 'codepoint'` gets a form, and a normalizer branch
-  choice, that count graphemes. Needs an option threaded through both.
+- [ ] **The normalizer counts string length in graphemes whatever the
+  validator's unit.** compileNormalizer's internal validator is built without
+  `useGrapheme`/`lengthUnit`, and `compileNormalizer` refuses both as unknown
+  options. A host that sets `lengthUnit: 'codepoint'` gets a normalizer branch
+  choice, and a checked default, that count graphemes. Needs the option
+  threaded through it, as `buildFormModel` now takes it.
 - [ ] **A compile refusal names an embedded resource's place two ways.** The
   walks name a place by its pointer into the document
   (`#/%24defs/n/properties/a/%24id`), while a `$query`, `$recursiveRef` or
@@ -234,27 +236,6 @@ delete it or fix it.
   3,000 in a fresh process), where the validator compiles the schema (it
   resolves a reference on first use) and refuses a validation nesting them
   past its reference bound (`JK2001`).
-- [ ] **A form field reads a bigint as a number where the validator's bigint
-  keywords judge it.** A field whose `type` names `bigint`, or that declares
-  none (a number field by its bounds), reads a bigint as the number it
-  converts to, where the validator judges a bigint by its bigint bounds and
-  `multipleOf` alone: `{ minimum: 5 }` refuses `1n`, `{ maximum: 5 }` `21n`
-  and `{ multipleOf: 2 }` `3n`, which the validator takes (`{ type: 'bigint',
-  minimum: 5 }` refuses `1n` alike); `{ multipleOf: 2n }` takes `3n` and
-  `{ maximum: 2n ** 60n }` takes `2n ** 60n + 1n` (compared after rounding),
-  which the validator refuses; and a `type` held as a `Set` is not read
-  (`{ type: new Set(['number']), minimum: 0 }` takes `21n`). Judging a bigint
-  by the bigint keywords alone, exactly, refuses values the field took (a
-  minor).
-- [ ] **A form field without a `type` refuses a value that is not a number.**
-  `{ minimum: 5 }` (no `type`) builds a number field, and `validateAllFields`
-  reports `type` for `'abc'` and `[1]`, where the validator, with no `type`,
-  judges only numbers by `minimum` and takes both.
-- [ ] **A form field with an exclusive bound alone checks nothing.**
-  `buildFormModel` infers a number field from `minimum`, `maximum` or
-  `multipleOf` but not from `exclusiveMinimum` or `exclusiveMaximum`, so
-  `{ exclusiveMinimum: 5 }` builds an `unknown` field (a `json` control) and
-  layer 1 takes `5`, which the validator refuses.
 - [ ] **A `$ref` target below a keyword no draft defines is not refused where
   its dialect requires a vocabulary the validator does not implement.** Under
   a held dialect whose `$vocabulary` requires (`true`) a vocabulary this

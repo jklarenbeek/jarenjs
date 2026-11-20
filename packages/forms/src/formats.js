@@ -20,6 +20,7 @@ import {
 import {
   isValidGeoJson,
 } from '@jarenjs/core/geo';
+import { isJsonObject } from '@jarenjs/core/object';
 
 /**
  * @typedef {object} FormatInfo
@@ -163,4 +164,59 @@ FORM_FORMATS['multiline'] = { test: acceptAnything, control: 'textarea' };
 export function getFormatInfo(format) {
   if (typeof format !== 'string') return null;
   return Object.hasOwn(FORM_FORMATS, format) ? FORM_FORMATS[format] : null;
+}
+
+/**
+ * Whether a format name is one of the number formats (`int32`, `uint8`,
+ * `float`, ...): the formats whose test takes a number, and whose field
+ * is a number field.
+ * @param {unknown} format - The `format` keyword's value
+ * @returns {boolean}
+ */
+export function isNumberFormat(format) {
+  return typeof format === 'string' && Object.hasOwn(numberFormatTesters, format);
+}
+
+/**
+ * The number a number format judges a value as, as the validator's
+ * number format compilers read it: what `Number()` converts it to, and
+ * no number (NaN) for a value `Number()` cannot convert.
+ * @param {unknown} value
+ * @returns {number}
+ */
+function numberOf(value) {
+  try {
+    return Number(value);
+  }
+  catch {
+    return NaN;
+  }
+}
+
+/**
+ * Whether a value passes a field's `format`, as layer 1 judges it: by
+ * the values the validator's compiler of that format judges, so the two
+ * agree on every value.
+ *
+ * - A number format judges every value but `null` as the number it
+ *   converts to: `'12'` is an `int32`, `'abc'` and `{}` are none.
+ * - `geojson` judges an object; a form field also holds the object as
+ *   its text, which is parsed and judged (the validator takes every
+ *   string).
+ * - Every other format judges strings and takes any other value.
+ *
+ * An empty string is not judged: it is what a cleared text control holds,
+ * and the submit layer says what the schema makes of it. A name the form
+ * does not register asserts nothing, as an unknown format to the
+ * validator.
+ * @param {unknown} format - The `format` keyword's value
+ * @param {unknown} value - The field's value
+ * @returns {boolean}
+ */
+export function passesFormat(format, value) {
+  const info = getFormatInfo(/** @type {string|undefined} */ (format));
+  if (info === null) return true;
+  if (isNumberFormat(format)) return value == null || info.test(/** @type {any} */ (numberOf(value)));
+  if (typeof value === 'string') return value === '' || info.test(value);
+  return format !== 'geojson' || !isJsonObject(value) || isValidGeoJson(value);
 }

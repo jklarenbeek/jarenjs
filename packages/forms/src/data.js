@@ -291,8 +291,10 @@ export function createItemValue(itemField) {
  * value for a field. An empty string means "absent" (undefined) so that
  * required/optional semantics stay correct. A number field keeps the raw
  * string unless it reads as a finite number, so blank or non-finite text
- * (`'  '`, `'Infinity'`) is reported as a type error instead of becoming
- * `0` or a value JSON cannot carry.
+ * (`'  '`, `'Infinity'`) never becomes `0` or a value JSON cannot carry:
+ * under a declared number `type` the field check reports it as a `type`
+ * error, and a number field whose kind was only inferred from its
+ * keywords (`{ minimum: 5 }`) holds it as the string its schema takes.
  * @param {import('./model.js').FormField} field
  * @param {any} raw - Raw input value (string, or boolean for checkboxes)
  * @returns {any}

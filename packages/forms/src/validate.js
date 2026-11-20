@@ -4,9 +4,9 @@
  * Preemptive per-field validation.
  *
  * These checks run synchronously on every keystroke, powered directly by
- * @jarenjs/core primitives (grapheme-aware string length, deep equality,
- * the reading of the exclusive bounds the validator shares), the format
- * testers, the validator's own `pattern` reading
+ * @jarenjs/core primitives (string length in the validator's units, deep
+ * equality, the reading of the exclusive bounds the validator shares), the
+ * format testers, the validator's own `pattern` reading
  * (`createSchemaPatternTester`) and its own `multipleOf` test
  * (`multipleOfTester`). They give the user immediate feedback per
  * field BEFORE the complete compiled schema validation runs - which
@@ -14,17 +14,30 @@
  * dependencies, unevaluatedProperties, ...). Cross-field feedback per
  * keystroke is rules.js territory (the `x-form` annotation).
  *
+ * A field is judged as the validator judges its schema: keyword by
+ * keyword, each keyword on the values of its own type and on no other.
+ * The field's kind chooses its control and never an answer, so a field
+ * whose kind was inferred from its keywords asserts no `type`, and a
+ * field with a `json` control is judged by every keyword it holds.
+ *
  * Every failure is structured: a stable `msgid`
  * (`form/<keyword>`) plus raw `params`, with `message` rendered eagerly -
  * failure-only, cheap - through a catalog (messages.js), so consumers can
  * re-render in another locale from `msgid` + `params`.
  */
 
-import { getInclusiveExclusiveBounds } from '@jarenjs/core';
 import {
+  getInclusiveExclusiveBounds,
+  isArrayClass,
+  isMapClass,
+  isScalarType,
+  isSetClass,
+} from '@jarenjs/core';
+import {
+  countCodePoints,
   getStringLength,
+  isRegExpType,
 } from '@jarenjs/core/string';
-import { getNumbishType } from '@jarenjs/core/number';
 import { multipleOfTester } from '@jarenjs/core/math';
 import { createSchemaPatternTester } from '@jarenjs/validate/references';
 
@@ -40,8 +53,12 @@ import {
 } from '@jarenjs/json/pointer';
 
 import {
-  getFormatInfo,
+  passesFormat,
 } from './formats.js';
+
+import {
+  declaredTypes,
+} from './model.js';
 
 import {
   renderFormsMessage,
@@ -71,48 +88,155 @@ function getPatternTester(source) {
   });
 }
 
-// Bounded LRU of `multipleOf` testers, one per step: the validator's own
-// test, on the decimals the value and the step spell. A step is what the
-// validator reads as one: a number, or a string whose text is one (`"5"`).
-// A bigint bounds no number, and zero or a value of another shape is
-// refused when the schema compiles (`JK0013`), so it asserts nothing per
-// keystroke (`null`), as a pattern that does not compile.
-const multipleOfCache = createBoundedCache(500);
-function getMultipleOfTester(multipleOf) {
-  const step = typeof multipleOf === 'number' || typeof multipleOf === 'string' ? getNumbishType(multipleOf) : undefined;
-  return step ? multipleOfCache.getOrCreate(step, multipleOfTester) : null;
+/**
+ * A keyword value as the number the validator reads it as: a number, or
+ * a string whose text is one (`"5"`). Any other value (a bigint, which
+ * bounds no number; `null`, a boolean, an object, blank text) is none:
+ * the validator refuses such a schema when it compiles (`JK0013`), so
+ * the keyword asserts nothing per keystroke, as a pattern that does not
+ * compile.
+ * @param {unknown} value - A keyword's value
+ * @returns {number | undefined}
+ */
+function numberOfKeyword(value) {
+  const number = typeof value === 'number' ? value
+    : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+  return Number.isNaN(number) ? undefined : number;
+}
+
+/**
+ * A keyword value as the count the validator reads it as (`minLength`,
+ * `maxItems`, ...): a non-negative integer, written as a number, a
+ * bigint or a number string. Any other value is none (see
+ * {@link numberOfKeyword}).
+ * @param {unknown} value - A keyword's value
+ * @returns {number | undefined}
+ */
+function countOfKeyword(value) {
+  const number = typeof value === 'bigint' ? value : numberOfKeyword(value);
+  return number !== undefined && number >= 0 && (typeof number === 'bigint' || Number.isInteger(number))
+    ? Number(number) : undefined;
 }
 
 /**
  * A bound as the field check compares a number with it: as the schema
  * writes it, which JavaScript compares by value (a number string as its
- * number), except that a bigint bounds no number, as to the validator
- * (and as a bigint `multipleOf` step).
+ * number), where the validator reads it as one; none otherwise, a bigint
+ * among them (a bigint bounds no number, as to the validator).
  * @param {unknown} bound
  * @returns {any}
  */
-const numberBound = (bound) => (typeof bound === 'bigint' ? undefined : bound);
+const numberBound = (bound) => (numberOfKeyword(bound) === undefined ? undefined : bound);
 
 /**
- * A bound as the field check compares a bigint the field takes with it:
- * as the schema writes it.
+ * A bound as the field check compares a bigint with it: a bigint, as
+ * the validator's bigint keywords read it (a number bounds no bigint).
  * @param {unknown} bound
  * @returns {any}
  */
-const asWritten = (bound) => bound;
+const bigintBound = (bound) => (typeof bound === 'bigint' ? bound : undefined);
+
+// Bounded LRU of `multipleOf` testers, one per step: the validator's own
+// test, on the decimals the value and the step spell.
+const multipleOfCache = createBoundedCache(500);
 
 /**
- * Whether a field's declared `type` takes a bigint, as the validator's
- * does: of the type names only its extended `bigint` takes one (`number`
- * and `integer` refuse every bigint). A `type` that is neither a name nor
- * a list of names (none declared: a number field by its bounds) is not
- * checked here.
- * @param {unknown} type - The field schema's `type`
+ * Whether a number or a bigint is a multiple of a field's `multipleOf`,
+ * as the validator judges it: a number by a step that is a number or a
+ * number string, on their decimals (`multipleOfTester`); a bigint by a
+ * bigint step, exactly. A step of the other kind does not apply to the
+ * value, and zero or a step of another shape is refused when the schema
+ * compiles, so neither asserts anything.
+ * @param {unknown} multipleOf - The keyword's value
+ * @param {number | bigint} value
  * @returns {boolean}
  */
-function typeTakesBigInt(type) {
-  if (typeof type === 'string') return type === 'bigint';
-  return !Array.isArray(type) || type.includes('bigint');
+function isMultipleOf(multipleOf, value) {
+  if (typeof value === 'bigint')
+    return typeof multipleOf !== 'bigint' || multipleOf === 0n || value % multipleOf === 0n;
+  const step = numberOfKeyword(multipleOf);
+  return step === undefined || step === 0 || multipleOfCache.getOrCreate(step, multipleOfTester)(value);
+}
+
+/**
+ * The test of each type name, as the validator's `type` reads a value:
+ * a number is no NaN, an integer is what `Number.isInteger` takes (no
+ * bigint), an object is any non-null `typeof` 'object' value that is no
+ * array; `bigint` and the validator's own kinds (`set`, `map`, `tuple`,
+ * `regex`) are its extended names.
+ * @type {Record<string, (value: unknown) => boolean>}
+ */
+const TYPE_TESTS = {
+  // no prototype: a `type` named like an Object.prototype member is an unknown name
+  __proto__: null,
+  null: (value) => value === null,
+  boolean: (value) => value === true || value === false,
+  integer: (value) => Number.isInteger(value),
+  bigint: (value) => typeof value === 'bigint',
+  number: (value) => typeof value === 'number' && !Number.isNaN(value),
+  string: (value) => typeof value === 'string',
+  object: isJsonObject,
+  array: Array.isArray,
+  set: isSetClass,
+  map: isMapClass,
+  tuple: isArrayClass,
+  regex: isRegExpType,
+};
+
+/**
+ * The type name a field's declared `type` refuses a value under, or
+ * `undefined` when it takes the value, as the validator's `type` does: a
+ * value passes when one declared name takes it (a name, a list or a
+ * `Set` of names), and `null` passes under OpenAPI's `nullable: true`.
+ * A schema that declares no `type` asserts none, whatever kind its
+ * keywords gave the field; a name the validator does not know refuses
+ * the schema when it compiles, so it asserts nothing either.
+ *
+ * The name returned is the one the `form/type` message shows: the first
+ * declared name that is not `null`, an `integer` field saying `number`
+ * for a value that is no number at all.
+ * @param {{ type?: unknown, nullable?: unknown }} schema - The field's schema
+ * @param {unknown} value
+ * @returns {string | undefined}
+ */
+function refusingType(schema, value) {
+  const names = declaredTypes(schema.type);
+  if (names === null || names.length === 0) return undefined;
+  if (value === null && schema.nullable === true) return undefined;
+  let refused = true;
+  for (const name of names) {
+    const test = typeof name === 'string' ? TYPE_TESTS[name] : undefined;
+    if (test === undefined) return undefined;
+    if (test(value)) refused = false;
+  }
+  if (!refused) return undefined;
+  const shown = /** @type {string} */ (names.find((name) => name !== 'null') ?? 'null');
+  return shown === 'integer' && typeof value !== 'number' ? 'number' : shown;
+}
+
+/**
+ * Whether a value is one of a field's options, as the validator's `enum`
+ * compares: a scalar or `null` by identity, anything else deeply.
+ * @param {unknown[]} options
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isOption(options, value) {
+  if (value === null || typeof value !== 'object') return options.includes(value);
+  return options.some((option) => equalsDeep(option, value));
+}
+
+/**
+ * A string's length in a field's unit: code points, UTF-16 code units,
+ * or grapheme clusters (the default, and what a field without a unit
+ * counts).
+ * @param {unknown} unit - The field's `lengthUnit`
+ * @param {string} value
+ * @returns {number}
+ */
+function lengthIn(unit, value) {
+  if (unit === 'codepoint') return countCodePoints(value);
+  return getStringLength(value, unit !== 'utf16');
 }
 
 /**
@@ -134,7 +258,21 @@ function pushError(errors, catalog, keyword, params) {
 }
 
 /**
- * Validate a single field value against its own constraints.
+ * Validate a single field value against its own constraints, as the
+ * validator judges the field's schema: every keyword the field check
+ * implements applies to a value of that keyword's type, whatever the
+ * field's kind, and to no other value.
+ *
+ * - `type`: only where the schema declares one (see {@link refusingType});
+ *   `const` and `enum` on every value.
+ * - `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum` and
+ *   `multipleOf`: a number by the number bounds and steps, a bigint by
+ *   the bigint ones alone, exactly; a bound of the other kind does not
+ *   apply.
+ * - `minLength`, `maxLength` (in the field's `lengthUnit`) and `pattern`:
+ *   a string; `format`: the values its format judges.
+ * - `minItems`, `maxItems`, `uniqueItems`: an array; `minProperties`,
+ *   `maxProperties`: an object.
  *
  * @param {import('./model.js').FormField} field - Field from buildFormModel
  * @param {any} value - The TYPED value (see parseFieldInput); undefined = absent
@@ -152,7 +290,7 @@ export function validateField(field, value, catalog = undefined) {
 
   // Absent value: only `required` applies. `null` is a value, as it is
   // to the validator: a nullable field accepts it, and every other field
-  // judges it below like any value of the wrong type.
+  // judges it below like any value.
   if (value === undefined) {
     if (field.required && field.kind !== 'boolean') {
       pushError(errors, catalog, 'required', {});
@@ -161,144 +299,110 @@ export function validateField(field, value, catalog = undefined) {
   }
   if (value === null && field.nullable) return errors;
 
-  const c = field.constraints;
+  const schema = /** @type {Record<string, any>} */ (field.schema ?? {});
+  const c = /** @type {Record<string, any>} */ (field.constraints ?? {});
 
-  switch (field.kind) {
-    case 'const': {
-      if (!equalsDeep(value, field.constValue)) {
-        pushError(errors, catalog, 'const', { constValue: field.constValue });
-      }
-      return errors;
+  const type = refusingType(schema, value);
+  if (type !== undefined) pushError(errors, catalog, 'type', { type });
+
+  const constant = schema.const;
+  if (constant !== undefined
+    && !(constant === null || isScalarType(constant) ? constant === value : equalsDeep(constant, value))) {
+    pushError(errors, catalog, 'const', { constValue: constant });
+  }
+  // the options of an `enum`, or of the oneOf const/title idiom the model reads as one
+  const options = Array.isArray(schema.enum) ? schema.enum : field.enumValues;
+  if (options != null && !isOption(options, value)) {
+    pushError(errors, catalog, 'enum', { enumValues: options });
+  }
+
+  if (typeof value === 'number' || typeof value === 'bigint') {
+    // the bounds as the validator reads them, under every draft: a
+    // number `exclusiveMinimum` is a bound of its own beside `minimum`,
+    // and the draft-04 boolean makes `minimum` exclusive (`true`) or
+    // leaves it inclusive (`false`); `exclusiveMaximum` alike. A number
+    // is compared with the number bounds and a bigint with the bigint
+    // ones, each exactly, by the validator's own comparisons (a value
+    // passes a bound it satisfies). An error names the bound as written.
+    const read = typeof value === 'bigint' ? bigintBound : numberBound;
+    const [minimum, exclusiveMinimum] = getInclusiveExclusiveBounds(read, c.minimum, c.exclusiveMinimum);
+    const [maximum, exclusiveMaximum] = getInclusiveExclusiveBounds(read, c.maximum, c.exclusiveMaximum);
+    if (minimum !== undefined && !(value >= minimum)) {
+      pushError(errors, catalog, 'minimum', { limit: minimum });
     }
-
-    case 'enum': {
-      if (!field.enumValues?.some((option) => equalsDeep(value, option))) {
-        pushError(errors, catalog, 'enum', { enumValues: field.enumValues });
-      }
-      return errors;
+    if (maximum !== undefined && !(value <= maximum)) {
+      pushError(errors, catalog, 'maximum', { limit: maximum });
     }
-
-    case 'string': {
-      if (typeof value !== 'string') {
-        pushError(errors, catalog, 'type', { type: 'string' });
-        return errors;
-      }
-      let len = -1;
-      if (c.minLength !== undefined || c.maxLength !== undefined) {
-        len = getStringLength(value, true); // grapheme-aware, like the validator
-      }
-      if (c.minLength !== undefined && len < c.minLength) {
+    if (exclusiveMinimum !== undefined && !(value > exclusiveMinimum)) {
+      pushError(errors, catalog, 'exclusiveMinimum', { limit: exclusiveMinimum });
+    }
+    if (exclusiveMaximum !== undefined && !(value < exclusiveMaximum)) {
+      pushError(errors, catalog, 'exclusiveMaximum', { limit: exclusiveMaximum });
+    }
+    if (c.multipleOf !== undefined && !isMultipleOf(c.multipleOf, value)) {
+      pushError(errors, catalog, 'multipleOf', { multipleOf: c.multipleOf });
+    }
+  }
+  else if (typeof value === 'string') {
+    const minLength = countOfKeyword(c.minLength);
+    const maxLength = countOfKeyword(c.maxLength);
+    if (minLength !== undefined || maxLength !== undefined) {
+      const len = lengthIn(field.lengthUnit, value);
+      if (minLength !== undefined && len < minLength) {
         pushError(errors, catalog, 'minLength', { limit: c.minLength, len });
       }
-      if (c.maxLength !== undefined && len > c.maxLength) {
+      if (maxLength !== undefined && len > maxLength) {
         pushError(errors, catalog, 'maxLength', { limit: c.maxLength, len });
       }
-      if (c.pattern !== undefined) {
-        const matches = getPatternTester(c.pattern);
-        if (matches != null && !matches(value)) {
-          pushError(errors, catalog, 'pattern', { pattern: c.pattern });
-        }
-      }
-      if (c.format !== undefined && value !== '') {
-        const info = getFormatInfo(c.format);
-        if (info != null && !info.test(value)) {
-          pushError(errors, catalog, 'format', { format: c.format });
-        }
-      }
-      return errors;
     }
-
-    case 'number':
-    case 'integer': {
-      // only a number is a number, as to the validator: a string, an array
-      // or a date that merely converts to one is not, and neither is a
-      // bigint where the field's `type` names no `bigint`. A field whose
-      // `type` names `bigint`, or that declares none, reads a bigint as
-      // the number it converts to.
-      const num = typeof value === 'number' ? value
-        : typeof value === 'bigint' && typeTakesBigInt(/** @type {{ type?: unknown }} */ (field.schema).type) ? Number(value) : NaN;
-      if (Number.isNaN(num)) {
-        pushError(errors, catalog, 'type', { type: 'number' });
-        return errors;
+    if (c.pattern !== undefined) {
+      const matches = getPatternTester(c.pattern);
+      if (matches != null && !matches(value)) {
+        pushError(errors, catalog, 'pattern', { pattern: c.pattern });
       }
-      if (field.kind === 'integer' && !Number.isInteger(num)) {
-        pushError(errors, catalog, 'type', { type: 'integer' });
-      }
-      // the bounds as the validator reads them, under every draft: a
-      // number `exclusiveMinimum` is a bound of its own beside `minimum`,
-      // and the draft-04 boolean makes `minimum` exclusive (`true`) or
-      // leaves it inclusive (`false`); `exclusiveMaximum` alike. An error
-      // names the bound as written.
-      const read = typeof value === 'bigint' ? asWritten : numberBound;
-      const [minimum, exclusiveMinimum] = getInclusiveExclusiveBounds(read, c.minimum, c.exclusiveMinimum);
-      const [maximum, exclusiveMaximum] = getInclusiveExclusiveBounds(read, c.maximum, c.exclusiveMaximum);
-      if (minimum !== undefined && num < minimum) {
-        pushError(errors, catalog, 'minimum', { limit: minimum });
-      }
-      if (maximum !== undefined && num > maximum) {
-        pushError(errors, catalog, 'maximum', { limit: maximum });
-      }
-      if (exclusiveMinimum !== undefined && num <= exclusiveMinimum) {
-        pushError(errors, catalog, 'exclusiveMinimum', { limit: exclusiveMinimum });
-      }
-      if (exclusiveMaximum !== undefined && num >= exclusiveMaximum) {
-        pushError(errors, catalog, 'exclusiveMaximum', { limit: exclusiveMaximum });
-      }
-      if (c.multipleOf !== undefined) {
-        const isMultipleOf = getMultipleOfTester(c.multipleOf);
-        if (isMultipleOf !== null && !isMultipleOf(num)) {
-          pushError(errors, catalog, 'multipleOf', { multipleOf: c.multipleOf });
-        }
-      }
-      return errors;
     }
+  }
 
-    case 'boolean': {
-      if (typeof value !== 'boolean') {
-        pushError(errors, catalog, 'type', { type: 'boolean' });
-      }
-      return errors;
+  // a format judges the values its own compiler judges: a string format
+  // strings, a number format every value as the number it converts to
+  if (c.format !== undefined && !passesFormat(c.format, value)) {
+    pushError(errors, catalog, 'format', { format: c.format });
+  }
+
+  if (Array.isArray(value)) {
+    const minItems = countOfKeyword(c.minItems);
+    const maxItems = countOfKeyword(c.maxItems);
+    if (minItems !== undefined && value.length < minItems) {
+      pushError(errors, catalog, 'minItems', { limit: c.minItems });
     }
-
-    case 'array': {
-      if (!Array.isArray(value)) {
-        pushError(errors, catalog, 'type', { type: 'array' });
-        return errors;
-      }
-      if (c.minItems !== undefined && value.length < c.minItems) {
-        pushError(errors, catalog, 'minItems', { limit: c.minItems });
-      }
-      if (c.maxItems !== undefined && value.length > c.maxItems) {
-        pushError(errors, catalog, 'maxItems', { limit: c.maxItems });
-      }
-      if (c.uniqueItems === true && !isUniqueDeepArray(value)) {
-        pushError(errors, catalog, 'uniqueItems', {});
-      }
-      return errors;
+    if (maxItems !== undefined && value.length > maxItems) {
+      pushError(errors, catalog, 'maxItems', { limit: c.maxItems });
     }
-
-    case 'object': {
-      if (!isJsonObject(value)) {
-        pushError(errors, catalog, 'type', { type: 'object' });
-        return errors;
-      }
+    if (c.uniqueItems === true && !isUniqueDeepArray(value)) {
+      pushError(errors, catalog, 'uniqueItems', {});
+    }
+  }
+  else if (isJsonObject(value)) {
+    const minProperties = countOfKeyword(c.minProperties);
+    const maxProperties = countOfKeyword(c.maxProperties);
+    if (minProperties !== undefined || maxProperties !== undefined) {
       const size = Object.keys(value).length;
-      if (c.minProperties !== undefined && size < c.minProperties) {
+      if (minProperties !== undefined && size < minProperties) {
         pushError(errors, catalog, 'minProperties', { limit: c.minProperties });
       }
-      if (c.maxProperties !== undefined && size > c.maxProperties) {
+      if (maxProperties !== undefined && size > maxProperties) {
         pushError(errors, catalog, 'maxProperties', { limit: c.maxProperties });
       }
-      return errors;
     }
-
-    default:
-      // a schema layer 1 cannot judge (a json control): a null it does
-      // not admit is what the json control writes for half-typed input,
-      // so a required field says so here, as it does for an absent value
-      if (value === null && field.required) pushError(errors, catalog, 'required', {});
-      return errors;
   }
+
+  // a json control writes null for half-typed input: where no keyword
+  // above refuses that null (a union without a null branch does, at
+  // submit), a required field says so here, as it does for an absent value
+  if (value === null && errors.length === 0 && field.kind === 'unknown' && field.required) {
+    pushError(errors, catalog, 'required', {});
+  }
+  return errors;
 }
 
 /**
@@ -320,7 +424,8 @@ function walkFields(field, value, pointer, result, catalog) {
   const errors = validateField(field, value, catalog);
   if (errors.length > 0) result[pointer] = errors;
 
-  if (field.kind === 'object' && field.children && value != null && typeof value === 'object') {
+  // members are judged where the value is an object, as `properties` judges them
+  if (field.kind === 'object' && field.children && isJsonObject(value)) {
     for (const child of field.children) {
       // RFC 6901-encoded, the walk convention shared with the model
       // and rule pointers — a member name containing '/' or '~' stays

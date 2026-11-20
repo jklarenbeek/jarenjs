@@ -12,9 +12,10 @@
 
 import { isJsonObject } from '@jarenjs/core/object';
 import { createWeakCache } from '@jarenjs/core/cache';
+import { formatMessageValue } from '@jarenjs/core/message';
 import {
   NUMERIC_CONSTRAINTS, STRING_CONSTRAINTS,
-  ARRAY_CONSTRAINTS, OBJECT_CONSTRAINTS, splitNullable,
+  ARRAY_CONSTRAINTS, OBJECT_CONSTRAINTS, TYPE_SCOPED_KEYWORDS, splitNullable,
 } from '@jarenjs/core/schema';
 
 import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
@@ -25,9 +26,16 @@ import {
 
 import {
   getFormatInfo,
+  isNumberFormat,
 } from './formats.js';
 
 const DEFAULT_MAX_DEPTH = 24;
+
+/**
+ * What `minLength` and `maxLength` count: grapheme clusters, code points
+ * or UTF-16 code units, the units a validator's `lengthUnit` names.
+ * @typedef {'grapheme'|'codepoint'|'utf16'} LengthUnit
+ */
 
 /**
  * @typedef {object} FormField
@@ -53,6 +61,8 @@ const DEFAULT_MAX_DEPTH = 24;
  * @property {string|undefined} placeholder
  * @property {import('./formats.js').FormatPreview|null} preview - The format's preview hint (formats.js), for a host with a renderer for it; null otherwise
  * @property {object} constraints - minLength/maxLength/pattern/minimum/... extracted for the UI
+ * @property {LengthUnit} lengthUnit - What `minLength`/`maxLength` count on this field: the
+ *   unit the model was built with (`buildFormModel`'s `lengthUnit`), graphemes by default
  * @property {object|null} rules - The raw `x-form` rules annotation, if any (see rules.js)
  * @property {Array<FormField>|null} children - Child fields for object kinds
  * @property {FormField|null} item - Template field for array items
@@ -189,6 +199,19 @@ function getOneOfConstBranches(schema) {
 }
 
 /**
+ * The type names a schema's `type` declares, as the validator reads the
+ * keyword: one name, or the names of a list or of a `Set` (a `null`
+ * member is the name `'null'`); `null` when it declares none.
+ * @param {unknown} type - The `type` keyword's value
+ * @returns {unknown[] | null}
+ */
+export function declaredTypes(type) {
+  if (typeof type === 'string') return [type];
+  const names = Array.isArray(type) ? type : type instanceof Set ? [...type] : null;
+  return names === null ? null : names.map((name) => (name === null ? 'null' : name));
+}
+
+/**
  * Whether a resolved schema admits `null` — what layer 1 reads so an
  * explicit `null` is judged as the validator judges it: a type that lists
  * `null` (an `enum` or `const` beside it must admit `null` too), OpenAPI's
@@ -196,7 +219,7 @@ function getOneOfConstBranches(schema) {
  * a branch that admits it, or a schema with none of these: without a
  * `type`, the keywords a form reads (`minLength`, `maximum`,
  * `properties`, …) judge only values of their own type and let `null`
- * through.
+ * through, unless `nullable: false` stands there, which refuses it.
  * @param {unknown} schema
  * @param {object} rootSchema
  * @param {number} depth
@@ -207,8 +230,10 @@ function admitsNull(schema, rootSchema, depth) {
   if (Array.isArray(schema.enum) && !schema.enum.includes(null)) return false;
   if (Object.hasOwn(schema, 'const') && schema.const !== null) return false;
   if (schema.nullable === true) return true;
-  const type = schema.type;
-  if (type !== undefined) return type === 'null' || (Array.isArray(type) && type.includes('null'));
+  const types = declaredTypes(schema.type);
+  if (types !== null) return types.includes('null');
+  // without a `type`, OpenAPI's `nullable: false` refuses null, as to the validator
+  if (schema.nullable === false) return false;
   if (Array.isArray(schema.enum) || Object.hasOwn(schema, 'const')) return true;
   let union = false;
   for (const key of ['anyOf', 'oneOf']) {
@@ -221,7 +246,70 @@ function admitsNull(schema, rootSchema, depth) {
 }
 
 /**
- * Derive the field kind from a resolved schema.
+ * The kinds a keyword can infer, each with the keywords that constrain
+ * only values of its type (`TYPE_SCOPED_KEYWORDS` of `@jarenjs/core/schema`).
+ * @type {ReadonlyArray<['string'|'number'|'array'|'object', readonly string[]]>}
+ */
+const INFERRED_KINDS = [
+  ['string', TYPE_SCOPED_KEYWORDS.string],
+  ['number', TYPE_SCOPED_KEYWORDS.number],
+  ['array', TYPE_SCOPED_KEYWORDS.array],
+  ['object', TYPE_SCOPED_KEYWORDS.object],
+];
+
+/** The object keywords that describe members, and the array keywords that describe items: what an object or array control is drawn from. */
+const MEMBER_KEYWORDS = ['properties', 'patternProperties', 'additionalProperties'];
+const ITEM_KEYWORDS = ['items', 'prefixItems'];
+
+/**
+ * The kind of a schema that declares no `type` a control exists for,
+ * from its keywords. A kind chooses the control and nothing else.
+ *
+ * A schema that describes members (`properties`, `patternProperties`,
+ * `additionalProperties`) is an object field, and one that describes
+ * items (`items`, `prefixItems`) an array field, whatever stands beside
+ * them: only that control makes the members or items fields of their
+ * own.
+ *
+ * Any other schema is a number or a string field where its keywords
+ * agree on that: every keyword that constrains values of one type alone
+ * belongs to the same type. Two readings decide a keyword's type: a
+ * `format` that names a number format (`int32`, `float`) is a number
+ * keyword, and `required` is an object keyword as a list of names only.
+ *
+ * Everything else is `unknown`, the `json` control, which holds any
+ * value: keywords of two types (`minLength` beside `minimum`), none, and
+ * the array and object keywords that are left (`minItems`, `uniqueItems`,
+ * `minProperties`, `required`, ...). Those describe no item and no member
+ * a control could show, and an array field starts as `[]`, never absent,
+ * which a `minItems` alone would refuse on an untouched form.
+ * @param {Record<string, any>} schema
+ * @returns {string}
+ */
+function inferFieldKind(schema) {
+  const holds = (/** @type {string} */ keyword) => schema[keyword] !== undefined;
+  if (MEMBER_KEYWORDS.some(holds)) return 'object';
+  if (ITEM_KEYWORDS.some(holds)) return 'array';
+  /** @type {string | null} */
+  let kind = null;
+  for (const [candidate, keywords] of INFERRED_KINDS) {
+    for (const keyword of keywords) {
+      if (!holds(keyword) || (keyword === 'required' && !Array.isArray(schema.required))) continue;
+      const inferred = keyword === 'format' && isNumberFormat(schema.format) ? 'number' : candidate;
+      if (kind !== null && kind !== inferred) return 'unknown';
+      kind = inferred;
+    }
+  }
+  return kind === 'number' || kind === 'string' ? kind : 'unknown';
+}
+
+/**
+ * Derive the field kind from a resolved schema: what chooses the field's
+ * control. A declared `type` gives it (the first name of a list or of a
+ * `Set` that is not `null`); without one a control exists for, the
+ * schema's keywords do (see {@link inferFieldKind}). The kind asserts
+ * nothing: layer 1 judges a value by the schema's keywords, as the
+ * validator does.
  * @param {object|boolean} schema
  * @returns {string}
  */
@@ -235,12 +323,9 @@ export function getFieldKind(schema) {
   const split = splitNullable(schema);
   if (split !== null && !Array.isArray(schema.type)) return getFieldKind(split.schema);
 
-  let type = schema.type;
-  if (Array.isArray(type)) {
-    // Pick the first non-null type for rendering purposes
-    type = type.find((t) => t !== 'null') ?? type[0];
-  }
-  switch (type) {
+  // Pick the first non-null type for rendering purposes
+  const types = declaredTypes(schema.type);
+  switch (types === null ? undefined : (types.find((t) => t !== 'null') ?? types[0])) {
     case 'string': return 'string';
     case 'number': return 'number';
     case 'integer': return 'integer';
@@ -250,12 +335,7 @@ export function getFieldKind(schema) {
     default: break;
   }
 
-  // Infer from structural keywords when type is absent
-  if (schema.properties || schema.patternProperties || schema.additionalProperties !== undefined) return 'object';
-  if (schema.items !== undefined || schema.prefixItems !== undefined) return 'array';
-  if (schema.minLength !== undefined || schema.maxLength !== undefined || schema.pattern !== undefined || schema.format !== undefined) return 'string';
-  if (schema.minimum !== undefined || schema.maximum !== undefined || schema.multipleOf !== undefined) return 'number';
-  return 'unknown';
+  return inferFieldKind(schema);
 }
 
 /**
@@ -319,9 +399,10 @@ function getConstraints(schema) {
  * @param {boolean} required
  * @param {number} depth
  * @param {TranslateHook} t - The static-text translation hook
+ * @param {LengthUnit} lengthUnit - What `minLength`/`maxLength` count, on this field and below it
  * @returns {FormField}
  */
-function buildField(rawSchema, rootSchema, pointer, key, required, depth, t) {
+function buildField(rawSchema, rootSchema, pointer, key, required, depth, t, lengthUnit) {
   const resolved = resolveSchema(rawSchema, rootSchema, depth);
   // One meaning for the two nullable spellings (@jarenjs/core/schema): an
   // anyOf/oneOf of one branch and null renders as its branch — with the
@@ -382,6 +463,7 @@ function buildField(rawSchema, rootSchema, pointer, key, required, depth, t) {
     placeholder: t(`${base}#placeholder`, placeholder),
     preview: formatInfo?.preview ?? null,
     constraints: getConstraints(effective),
+    lengthUnit,
     // The raw `x-form` annotation only - compiling its query documents is
     // rules.js territory, so model building stays query-engine-free.
     rules: isJsonObject(effective['x-form']) ? effective['x-form'] : null,
@@ -398,7 +480,7 @@ function buildField(rawSchema, rootSchema, pointer, key, required, depth, t) {
       buildField(
         propSchema, rootSchema,
         `${pointer}/${encodeJSONPointerSegment(name)}`, name,
-        requiredSet.has(name), depth + 1, t));
+        requiredSet.has(name), depth + 1, t, lengthUnit));
   }
 
   if (kind === 'array') {
@@ -407,17 +489,17 @@ function buildField(rawSchema, rootSchema, pointer, key, required, depth, t) {
       : (Array.isArray(effective.items) ? effective.items : null);
     if (prefix) {
       field.tuple = prefix.map((itemSchema, i) =>
-        buildField(itemSchema, rootSchema, `${pointer}/${i}`, String(i), false, depth + 1, t));
+        buildField(itemSchema, rootSchema, `${pointer}/${i}`, String(i), false, depth + 1, t, lengthUnit));
       const rest = Array.isArray(effective.items) ? effective.additionalItems : effective.items;
       if (rest != null && typeof rest === 'object') {
-        field.item = buildField(rest, rootSchema, `${pointer}/-`, '-', false, depth + 1, t);
+        field.item = buildField(rest, rootSchema, `${pointer}/-`, '-', false, depth + 1, t, lengthUnit);
       }
     }
     else if (effective.items != null && typeof effective.items === 'object') {
-      field.item = buildField(effective.items, rootSchema, `${pointer}/-`, '-', false, depth + 1, t);
+      field.item = buildField(effective.items, rootSchema, `${pointer}/-`, '-', false, depth + 1, t, lengthUnit);
     }
     else {
-      field.item = buildField({}, rootSchema, `${pointer}/-`, '-', false, depth + 1, t);
+      field.item = buildField({}, rootSchema, `${pointer}/-`, '-', false, depth + 1, t, lengthUnit);
     }
   }
 
@@ -437,6 +519,24 @@ export function escapePointerKey(key) {
 }
 
 /**
+ * The unit a model's fields count `minLength` and `maxLength` in, from
+ * the two options a validator takes for it: `lengthUnit` when set, else
+ * `useGrapheme` read for truth (unset or true is `'grapheme'`, false is
+ * `'utf16'`), so the options a host hands its validator build a form
+ * that counts as that validator does.
+ * @param {{ lengthUnit?: unknown, useGrapheme?: unknown } | null | undefined} options
+ * @returns {LengthUnit}
+ * @throws {TypeError} When `lengthUnit` names no unit: read on, a misspelt unit would count graphemes
+ */
+function lengthUnitOf(options) {
+  const unit = options?.lengthUnit;
+  if (unit === 'grapheme' || unit === 'codepoint' || unit === 'utf16') return unit;
+  if (unit != null)
+    throw new TypeError(`buildFormModel: lengthUnit must be 'grapheme', 'codepoint' or 'utf16', got ${formatMessageValue(unit)}`);
+  return (options?.useGrapheme ?? true) ? 'grapheme' : 'utf16';
+}
+
+/**
  * Build the form model for a JSON schema.
  *
  * Static text (labels, descriptions, placeholders, enum option labels) is
@@ -446,10 +546,17 @@ export function escapePointerKey(key) {
  * `<base>#label`, `<base>#description`, `<base>#placeholder`,
  * `<base>#enum/<String(value)>` - and the schema-derived fallback text.
  *
+ * The length unit is the validator's: hand `buildFormModel` the
+ * `lengthUnit` (or `useGrapheme`) the host's `JarenValidator` was made
+ * with, and every field's `minLength`/`maxLength` count in it.
+ *
  * @param {object|boolean} schema - The root JSON schema
  * @param {object} [options]
  * @param {TranslateHook} [options.t] - Static-text translation hook, default the zero-cost identity `(id, fb) => fb`
+ * @param {LengthUnit} [options.lengthUnit] - What `minLength`/`maxLength` count on every field: `'grapheme'` clusters (the default), `'codepoint'` code points or `'utf16'` code units, as the validator's option of that name. Another value is a TypeError
+ * @param {boolean} [options.useGrapheme] - The validator's older spelling: `false` counts UTF-16 code units. `lengthUnit` wins when both are given
  * @returns {FormField} The root field descriptor (kind 'object' for object schemas)
+ * @throws {TypeError} When `options.lengthUnit` names no unit
  * @example
  * const model = buildFormModel({
  *   type: 'object',
@@ -462,9 +569,14 @@ export function escapePointerKey(key) {
  * const nlModel = buildFormModel(schema, {
  *   t: (msgid, fallback) => staticTextNl[msgid] ?? fallback,
  * });
+ * @example
+ * // a host that validates in code points gets a form that counts code points
+ * const options = { lengthUnit: 'codepoint' };
+ * const validate = new JarenValidator(options).compile(schema);
+ * const model = buildFormModel(schema, options);
  */
 export function buildFormModel(schema, options = undefined) {
   const rootSchema = (schema != null && typeof schema === 'object') ? schema : {};
   const t = options != null && typeof options.t === 'function' ? options.t : identityT;
-  return buildField(schema, rootSchema, '', '', false, 0, t);
+  return buildField(schema, rootSchema, '', '', false, 0, t, lengthUnitOf(options));
 }

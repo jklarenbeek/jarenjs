@@ -47,7 +47,11 @@ const EMPTY_STATE = Object.freeze({});
  *   format's preview hint, carried through for a host that renders it;
  *   a host without a renderer for `preview.kind` ignores it.
  * @property {any} value - The current value (`x-form.computed` wins);
- *   `null` when the field is absent from the data.
+ *   `null` when the field is absent from the data. It is the value as
+ *   held, also where the node's control cannot show it: a kind inferred
+ *   from keywords chooses the control and refuses no value, so a number
+ *   control may hold `'abc'` (`{ minimum: 5 }` takes it) with no error;
+ *   what the control then displays is the renderer's.
  * @property {Array<{value: any, key: string, label: string, selected: boolean}>|null} options
  *   Select options, `selected` precomputed against the current value.
  *   `key` is the option's value as JSON text — what a string-valued
