@@ -28,6 +28,7 @@ import {
   isJsonContainer,
   isJsonObject,
   isPlainOptions,
+  isStackExhausted,
   refuseUnknownMembers,
   setObjectMember,
 } from '@jarenjs/core/object';
@@ -51,8 +52,8 @@ import { DEFAULT_ORIGIN, encodeJsonPointerPath } from './origin.js';
 import { admitsDynamicReference } from './dynamic-ref.js';
 import { heldDialects } from './validator-state.js';
 import {
-  REFERENCE_DEPTH_CEILING, SCHEMA_DEPTH_CEILING, SchemaRuntimeError, assertDepthOption, boundReference, schemaTooDeep,
-  unimplementedVocabulary,
+  REFERENCE_DEPTH_CEILING, SCHEMA_DEPTH_CEILING, SchemaCompileError, SchemaRuntimeError, assertDepthOption, boundReference,
+  schemaTooDeep, unimplementedVocabulary,
 } from './errors.js';
 import { JarenValidator } from './index.js';
 import { RefCycleError } from './traverse.js';
@@ -113,6 +114,12 @@ const hasOwn = Object.hasOwn;
  *   dialects the schema's `$schema` URIs may name ({@link heldDialects}), each place read with the
  *   vocabularies its dialect declares ({@link withoutUnreadVocabularies}). Without it a `$schema`
  *   is read by its name alone: a custom dialect reads as draft-07
+ * @property {(bounds: { maxReferenceDepth: number, maxSchemaDepth: number }) => JarenValidator} [createValidator] - Returns a
+ *   new `JarenValidator` configured as the one the host validates with (its options, such as
+ *   `lengthUnit`, its formats, the documents it holds), taking the normalizer's two bounds among its
+ *   options; the defaults are checked with it. Called at most once per normalizer, on the first
+ *   check, and never with a validator the host also validates with: the normalizer registers the
+ *   document and its dialects in it. Without it the checks run on `new JarenValidator(bounds)`
  * @property {number} [maxSchemaDepth=128] - The deepest nesting of subschemas the compile builds
  *   before it throws `JK0017`, counted as the validator's `maxSchemaDepth` counts it (a positive
  *   safe integer, else `JK0002` when the normalizer compiles). Fixed by default so the answer is the
@@ -167,6 +174,13 @@ function coerceToType(value, type) {
 }
 
 /**
+ * The members of a schema object whose value is instance data, or a
+ * keyword's own structure, and never a schema: a reading does not enter
+ * them (a `type` in a `default` is data).
+ */
+const DATA_MEMBERS = new Set(['default', 'examples', 'example', 'const', 'enum', '$data', 'data', '$query', 'errorMessage', '$vocabulary']);
+
+/**
  * A document as the validator holding its dialects reads it: each place
  * reads the vocabularies of the dialect governing it — the nearest
  * `$schema` at or above it in its own document — so where that dialect's
@@ -176,7 +190,9 @@ function coerceToType(value, type) {
  * place drops one, as always without `dialects` (a `$schema` is then read
  * by its name alone); else a copy without them, sharing every value that is
  * no schema object. Exported for `@jarenjs/emit` and the strict profile,
- * which read a document as this normalizer does.
+ * which read a document as this normalizer does; the normalizer also reads
+ * a reference's target below a member no walk enters under the dialect on
+ * the way to it ({@link readUnderDialects}).
  * @param {object|boolean} document
  * @param {{ dialects?: object }} [options] - `dialects`: a `JarenValidator` whose held meta-schemas name the dialects
  * @param {string} [who] - The function the option was given to, for its refusal
@@ -187,39 +203,74 @@ function coerceToType(value, type) {
 export function withoutUnreadVocabularies(document, options = {}, who = 'withoutUnreadVocabularies') {
   const held = heldDialects(options.dialects, who);
   if (held === undefined || !isJsonObject(document)) return document;
+  return readUnderDialects(document, held, undefined);
+}
+
+/**
+ * The reading of {@link withoutUnreadVocabularies}, and, given `reached`,
+ * also of the objects below a member no walk enters (a keyword no draft
+ * defines, as an OpenAPI document's `components/schemas`) that a reference
+ * reaches: each read, with its subschemas, under the nearest `$schema` on
+ * the way to it, as the validator reads a reference's target there
+ * (`unwalkedReading`). Nothing else below such a member is read: an
+ * annotation there stays as written. A dialect requiring a vocabulary this
+ * package does not implement leaves such a target as written.
+ * @param {object} document
+ * @param {{ get(key: string): unknown }} held - The schemas the `dialects` validator holds
+ * @param {Set<object>|undefined} reached - The objects below such a member a reference reaches ({@link unwalkedTargets})
+ * @returns {object|boolean}
+ */
+function readUnderDialects(document, held, reached) {
   /** @type {Map<string, boolean>} Whether each dialect keeps the validation vocabulary on */
   const dialects = new Map();
-  /** @param {string} uri @param {string} at - Where the `$schema` naming it sits */
-  const validationOf = (uri, at) => {
+  /** @type {Map<string, string|undefined>} The vocabulary each dialect requires that this package does not implement */
+  const refusing = new Map();
+  /**
+   * @param {string} uri @param {string} at - Where the `$schema` naming it sits
+   * @param {boolean} unwalked - Whether the place lies below a member no walk enters
+   * @returns {boolean|undefined} Undefined for a dialect refused below such a member
+   */
+  const validationOf = (uri, at, unwalked) => {
     let validation = dialects.get(uri);
-    if (validation === undefined) {
+    if (validation === undefined && !refusing.has(uri)) {
       const { validation: on, unimplemented } = dialectVocabulary(uri, (key) => held.get(key), detectSchemaDraft({ $schema: uri }, held));
-      if (unimplemented !== undefined) throw unimplementedVocabulary(uri, unimplemented, encodeJsonPointerPath(at, '$schema'));
-      dialects.set(uri, validation = on);
+      if (unimplemented !== undefined) refusing.set(uri, unimplemented);
+      else dialects.set(uri, validation = on);
     }
-    return validation;
+    if (validation !== undefined) return validation;
+    // below a member no walk enters, a place is read only where a reference
+    // reaches it: the validator refuses it then, so it is left as written
+    if (unwalked) return undefined;
+    throw unimplementedVocabulary(uri, /** @type {string} */ (refusing.get(uri)), encodeJsonPointerPath(at, '$schema'));
   };
-  /** @type {Map<unknown, unknown>[]} The node each object reads as, under the validation vocabulary off and on */
-  const read = [new Map(), new Map()];
+  /** @type {Map<unknown, unknown>[]} The node each object reads as, under the validation vocabulary off and on, at a walked place, on the way to a reached one and reached */
+  const read = [new Map(), new Map(), new Map(), new Map(), new Map(), new Map()];
   // The reading is a walk of generators, each yielding the reading of a
   // subschema to `runReading` and resuming with its answer, so a document
   // nested past the host's call stack is read at any depth.
   /**
    * @param {unknown} value @param {boolean} validation - Whether the place's dialect keeps the vocabulary on
-   * @param {string} at @returns {Generator<Generator<any, unknown, unknown>, unknown, any>}
+   * @param {string} at @param {0|1|2} [unwalked] - 0 at a place a walk enters, 1 below a member no walk
+   *   enters (only its `$schema` read, on the way), 2 at or below an object there a reference reaches
+   * @returns {Generator<Generator<any, unknown, unknown>, unknown, any>}
    */
-  function* readSchemas(value, validation, at) {
+  function* readSchemas(value, validation, at, unwalked = 0) {
     if (Array.isArray(value)) {
       let out = value;
       for (let i = 0; i < value.length; i++) {
-        const item = isJsonContainer(value[i]) ? yield readSchemas(value[i], validation, `${at}/${i}`) : value[i];
+        const item = isJsonContainer(value[i]) ? yield readSchemas(value[i], validation, `${at}/${i}`, unwalked) : value[i];
         if (item !== value[i]) (out === value ? (out = value.slice()) : out)[i] = item;
       }
       return out;
     }
     if (!isJsonObject(value)) return value;
-    if (typeof value.$schema === 'string') validation = validationOf(value.$schema, at);
-    const memo = read[validation ? 1 : 0];
+    if (unwalked === 1 && reached?.has(value)) unwalked = 2;
+    if (typeof value.$schema === 'string') {
+      const declared = validationOf(value.$schema, at, unwalked !== 0);
+      if (declared === undefined) return value;
+      validation = declared;
+    }
+    const memo = read[(validation ? 1 : 0) + unwalked * 2];
     if (memo.has(value)) return memo.get(value);
     memo.set(value, value);
     /** @type {Record<string, unknown>|undefined} */
@@ -229,19 +280,21 @@ export function withoutUnreadVocabularies(document, options = {}, who = 'without
       const key = keys[i];
       const member = value[key];
       let next = member;
-      if (!validation && VALIDATION_KEYWORDS.includes(key)) next = undefined;
-      else if (TRAVERSE_SCHEMA_OBJECTS.includes(key)) next = isJsonContainer(member) ? yield readSchemas(member, validation, encodeJsonPointerPath(at, key)) : member;
+      if (!validation && unwalked !== 1 && VALIDATION_KEYWORDS.includes(key)) next = undefined;
+      else if (TRAVERSE_SCHEMA_OBJECTS.includes(key)) next = isJsonContainer(member) ? yield readSchemas(member, validation, encodeJsonPointerPath(at, key), unwalked) : member;
       else if ((TRAVERSE_SCHEMA_MAPS.includes(key) || TRAVERSE_SCHEMA_MAP_MAPS.includes(key)) && isJsonObject(member)) {
         const deep = TRAVERSE_SCHEMA_MAP_MAPS.includes(key);
         for (const name of Object.keys(member)) {
           const inner = !isJsonContainer(member[name]) ? member[name] : yield (deep && isJsonObject(member[name])
-            ? readMap(member[name], validation, encodeJsonPointerPath(at, key, name))
-            : readSchemas(member[name], validation, encodeJsonPointerPath(at, key, name)));
+            ? readMap(member[name], validation, encodeJsonPointerPath(at, key, name), unwalked)
+            : readSchemas(member[name], validation, encodeJsonPointerPath(at, key, name), unwalked));
           if (inner === member[name]) continue;
           if (next === member) next = { ...member };
           setObjectMember(/** @type {Record<string, unknown>} */ (next), name, inner);
         }
       }
+      else if (reached !== undefined && isJsonContainer(member) && !VALIDATION_KEYWORDS.includes(key) && !DATA_MEMBERS.has(key))
+        next = yield readSchemas(member, validation, encodeJsonPointerPath(at, key), 1);
       if (next === member) {
         if (out !== undefined) setObjectMember(out, key, member);
         continue;
@@ -257,13 +310,13 @@ export function withoutUnreadVocabularies(document, options = {}, who = 'without
     return result;
   }
   /**
-   * @param {Record<string, unknown>} map @param {boolean} validation @param {string} at
+   * @param {Record<string, unknown>} map @param {boolean} validation @param {string} at @param {0|1|2} unwalked
    * @returns {Generator<Generator<any, unknown, unknown>, unknown, any>}
    */
-  function* readMap(map, validation, at) {
+  function* readMap(map, validation, at, unwalked) {
     let out = map;
     for (const name of Object.keys(map)) {
-      const inner = isJsonContainer(map[name]) ? yield readSchemas(map[name], validation, encodeJsonPointerPath(at, name)) : map[name];
+      const inner = isJsonContainer(map[name]) ? yield readSchemas(map[name], validation, encodeJsonPointerPath(at, name), unwalked) : map[name];
       if (inner === map[name]) continue;
       if (out === map) out = { ...map };
       setObjectMember(out, name, inner);
@@ -378,6 +431,7 @@ function composeSteps(steps) {
  * @property {object[]} nodes - The objects that read its members or items ({@link PLACE_KEYWORDS});
  *   the others apply nothing below it
  * @property {Map<string, DefaultPlace>} children - The places below it, by site
+ * @property {boolean} [whole] - Whether its schemas read its whole value ({@link readsWholeValue}), once read
  */
 
 /**
@@ -584,7 +638,7 @@ function defaultPlace(sure, maybe, ctx) {
     queue.push(...subschemas, ...branches);
   }
   const entries = [...new Set([...certain, ...possible])];
-  place = { id, entries, refuses: entries.map((entry) => !certain.includes(entry)), objects, sure: always, nodes, children: new Map() };
+  place = { id, entries, refuses: entries.map((entry) => !certain.includes(entry)), objects, sure: always, nodes, children: new Map(), whole: undefined };
   ctx.defaultPlaces.set(id, place);
   return place;
 }
@@ -692,7 +746,7 @@ function itemPlace(place, index, rest, ctx) {
  * @returns {any}
  */
 function below(ctx, site, ...args) {
-  return ctx.defaultPlace === undefined ? ctx : { ...ctx, defaultPlace: site(ctx.defaultPlace, ...args, ctx) };
+  return ctx.defaultPlace === undefined ? ctx : { ...ctx, defaultPlace: site(ctx.defaultPlace, ...args, ctx), guard: undefined };
 }
 
 /**
@@ -863,17 +917,34 @@ function checksOf(ctx) {
   const checks = fills.checks = new Map();
   /** @type {Map<string, [object, unknown][]>} Each group's schemas, with what its schema applies for each */
   const groups = new Map();
+  /** @type {string|undefined} The root's place, where the root is checked */
+  let rooted;
   for (const schema of fills.targets) {
     const place = ctx.resources.places.get(schema);
     if (place?.pointer === undefined) continue;
+    if (schema === ctx.document && fills.reads?.rooted === true) {
+      rooted = `${place.base}${place.pointer}`;
+      continue;
+    }
     const alone = standsAlone(schema);
     const group = alone ? `${place.dialect ?? ''}` : '#';
     if (!groups.has(group)) groups.set(group, []);
     /** @type {[object, unknown][]} */ (groups.get(group)).push([schema, alone ? cloneJson(schema) : { $ref: `${place.base}${place.pointer}` }]);
   }
-  // the compile's bounds, so a check reads as deep a value as the normalizer does
-  const validator = new JarenValidator({ maxReferenceDepth: ctx.options.maxReferenceDepth, maxSchemaDepth: ctx.options.maxSchemaDepth });
+  const validator = checkerOf(ctx);
   holdDialects(validator, ctx.resources.named, ctx.resources.held);
+  if (rooted !== undefined) {
+    // the root is checked on the value itself, so a pointer from the
+    // instance's root (`$data: '/a'`, a `$query`) reads that value
+    validator.addSchema(ctx.document, DEFAULT_ORIGIN);
+    try {
+      const compiled = validator.compile({ $id: `${CHECKS_BASE}root.json`, allOf: [{ $ref: rooted }] });
+      checks.set(/** @type {object} */ (ctx.document), (value) => accepted(compiled(value)));
+    }
+    catch {
+      // the document does not compile on its own: the root's check answers none
+    }
+  }
   let n = 0;
   for (const [group, members] of groups) {
     let depth = 1;
@@ -900,7 +971,7 @@ function checksOf(ctx) {
         checks.set(members[target][0], (value) => {
           let data = value;
           for (const name of names) data = { [name]: data };
-          return compiled(data) === true;
+          return accepted(compiled(data));
         });
       }
     }
@@ -909,6 +980,34 @@ function checksOf(ctx) {
     }
   }
   return checks;
+}
+
+/**
+ * The validator a compile's defaults are checked with: the host's
+ * `createValidator` called with the compile's bounds, so a check reads as
+ * deep a value as the normalizer does, else a validator of those bounds.
+ * @param {object} ctx
+ * @returns {JarenValidator}
+ * @throws {TypeError} When `createValidator` returns no `JarenValidator`
+ */
+function checkerOf(ctx) {
+  const bounds = { maxReferenceDepth: ctx.options.maxReferenceDepth, maxSchemaDepth: ctx.options.maxSchemaDepth };
+  const create = ctx.options.createValidator;
+  if (create === undefined) return new JarenValidator(bounds);
+  const validator = create(bounds);
+  if (!(validator instanceof JarenValidator))
+    throw new TypeError("compileNormalizer: 'createValidator' must return a new JarenValidator");
+  return validator;
+}
+
+/**
+ * Whether a compiled validator's answer accepts: `true`, or a result whose
+ * `valid` is (collecting errors, or an output format).
+ * @param {unknown} answer
+ * @returns {boolean}
+ */
+function accepted(answer) {
+  return answer === true || (isJsonObject(answer) && answer.valid === true);
 }
 
 /** How many members wide each level of a checker's schema is. */
@@ -1083,12 +1182,18 @@ function settleFill(fill, ctx) {
   }
   if (how === 'always' && readsPresence(fill.place, fill.key, ctx)) how = 'check';
   fill.fill = how;
-  if (how !== 'always') {
-    let keys = ctx.unfilled.get(fill.holder);
-    if (keys === undefined) ctx.unfilled.set(fill.holder, keys = new Set());
-    keys.add(fill.key);
-  }
+  if (how !== 'always') unfilledAt(ctx, fill.holder, fill.key);
   return fill.fill;
+}
+
+/**
+ * Record a default some instance leaves unfilled ({@link unfilledDefaults}).
+ * @param {any} ctx @param {object} holder - The object whose `properties` declares it @param {string} key
+ */
+function unfilledAt(ctx, holder, key) {
+  let keys = ctx.unfilled.get(holder);
+  if (keys === undefined) ctx.unfilled.set(holder, keys = new Set());
+  keys.add(key);
 }
 
 /**
@@ -1118,8 +1223,7 @@ function fillChecked(object, checked, ctx) {
   const before = placeAnswers(place, object, ctx);
   if (before === undefined) return withMembers(checked, (_, filled) => filled);
   /** @param {boolean[]} from @param {boolean[]|undefined} after */
-  const changes = (from, after) => after === undefined
-    || after.some((answer, e) => answer !== from[e] && (from[e] || place.refuses[e]));
+  const changes = (from, after) => after === undefined || answersChange(place, from, after);
   if (!changes(before, placeAnswers(place, withMembers(checked, (fill) => fill.filled), ctx)))
     return withMembers(checked, (_, filled) => filled);
   let out = object;
@@ -1131,6 +1235,17 @@ function fillChecked(object, checked, ctx) {
     answered = after;
   }
   return out;
+}
+
+/**
+ * Whether the answers of a place's entries change for a value the way a
+ * default may not change them: an entry applied for certain comes to
+ * refuse, or one under a branch answers otherwise either way.
+ * @param {DefaultPlace} place @param {boolean[]} from @param {boolean[]} after
+ * @returns {boolean}
+ */
+function answersChange(place, from, after) {
+  return after.some((answer, e) => answer !== from[e] && (from[e] || place.refuses[e]));
 }
 
 /**
@@ -1150,6 +1265,236 @@ function placeAnswers(place, object, ctx) {
   }
   return out;
 }
+
+/**
+ * The keywords whose subschemas apply to the value of the object holding
+ * them, and those applying to a member's or an item's value, as an
+ * instance reference below a place climbs back to it.
+ */
+const IN_PLACE_SCHEMAS = new Set(['allOf', 'anyOf', 'oneOf', 'not', 'if', 'then', 'else', 'dependentSchemas', 'dependencies']);
+const BELOW_SCHEMAS = new Set(['properties', 'patternProperties', 'additionalProperties', 'unevaluatedProperties', 'items',
+  'prefixItems', 'additionalItems', 'contains', 'unevaluatedItems']);
+
+/**
+ * How many levels an instance reference (a `$data` or `data` pointer)
+ * climbs from the value it applies at: a Relative JSON Pointer's prefix,
+ * one more where it moves along the array holding that value (`0+1`);
+ * undefined for a pointer from the root, or any other spelling, which
+ * may read the instance anywhere.
+ * @param {unknown} pointer
+ * @returns {number|undefined}
+ */
+function climbOf(pointer) {
+  if (typeof pointer !== 'string') return undefined;
+  const prefix = /^(0|[1-9][0-9]*)([+-](?:0|[1-9][0-9]*))?/.exec(pointer);
+  return prefix === null ? undefined : Number(prefix[1]) + (prefix[2] === undefined ? 0 : 1);
+}
+
+/**
+ * The instance references of a schema object's own keywords: a `$data`
+ * keyword value, the members of a `data` keyword, and a `$query` (read as
+ * from the root). Each is its climb ({@link climbOf}), undefined for one
+ * that may read anywhere.
+ * @param {Record<string, unknown>} node
+ * @returns {(number|undefined)[]}
+ */
+function instanceReads(node) {
+  /** @type {(number|undefined)[]} */
+  const reads = [];
+  for (const key of Object.keys(node)) {
+    const value = node[key];
+    if (key === '$query') reads.push(undefined);
+    else if (key === 'data' && isJsonObject(value)) for (const pointer of Object.values(value)) reads.push(climbOf(pointer));
+    else if (isJsonObject(value) && hasOwn(value, '$data') && !ANNOTATED_DATA.has(key)) reads.push(climbOf(value.$data));
+  }
+  return reads;
+}
+
+/** The members holding instance data that no keyword reads as a reference: a `$data` in them is data. */
+const ANNOTATED_DATA = new Set(['default', 'examples', 'example']);
+
+/**
+ * The instance references a document holds, read once: whether one may
+ * read anywhere (from the root, a `$query`, or one below `propertyNames`
+ * or `contentSchema`, whose value is no place of the instance), and the
+ * most levels one climbs.
+ * @param {unknown} document
+ * @returns {{ rooted: boolean, climb: number }}
+ */
+function documentReads(document) {
+  let rooted = false;
+  let climb = -1;
+  const seen = new Set();
+  /** @type {[unknown, boolean][]} The schema objects to read, each with whether its value is no place of the instance */
+  const queue = [[document, false]];
+  while (queue.length > 0) {
+    const [value, aside] = /** @type {[unknown, boolean]} */ (queue.pop());
+    if (!isJsonContainer(value) || seen.has(value)) continue;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      for (const item of value) queue.push([item, aside]);
+      continue;
+    }
+    for (const reads of instanceReads(value)) {
+      if (reads === undefined || aside) rooted = true;
+      else if (reads > climb) climb = reads;
+    }
+    // schema positions, as the readings walk them, and the members no walk
+    // enters, which a reference may reach; never a member name or data
+    for (const key of Object.keys(value)) {
+      const member = value[key];
+      const off = aside || key === 'propertyNames' || key === 'contentSchema';
+      if ((TRAVERSE_SCHEMA_MAPS.includes(key) || TRAVERSE_SCHEMA_MAP_MAPS.includes(key)) && isJsonObject(member)) {
+        for (const inner of Object.values(member)) {
+          if (TRAVERSE_SCHEMA_MAP_MAPS.includes(key) && isJsonObject(inner)) for (const deep of Object.values(inner)) queue.push([deep, off]);
+          else queue.push([inner, off]);
+        }
+      }
+      else if (TRAVERSE_SCHEMA_OBJECTS.includes(key) || (!VALIDATION_KEYWORDS.includes(key) && !DATA_MEMBERS.has(key)))
+        queue.push([member, off]);
+    }
+  }
+  return { rooted, climb };
+}
+
+/**
+ * Whether the schemas applied at a place read its whole value, so a
+ * default filled anywhere below it can change their answer: one of its
+ * objects compares or counts the value (`enum`, `const`, `uniqueItems`),
+ * an instance reference below it climbs back to it, or, at the root, one
+ * may read anywhere ({@link documentReads}). Read once per place.
+ * @param {DefaultPlace} place @param {any} ctx
+ * @returns {boolean}
+ */
+function readsWholeValue(place, ctx) {
+  if (place.whole !== undefined) return place.whole;
+  const reads = ctx.fills.reads ??= documentReads(ctx.document);
+  place.whole = (place === ctx.rootPlace && reads.rooted)
+    || place.objects.some((node) => node.enum !== undefined || node.const !== undefined
+      || (node.uniqueItems !== undefined && node.uniqueItems !== false))
+    || (reads.climb >= 0 && climbsTo(place, reads.climb, ctx));
+  return place.whole;
+}
+
+/**
+ * Whether an instance reference in the subschemas of a place's objects
+ * climbs back to the place's value: one `d` levels below it that climbs
+ * `d`, through the keywords applied in place and below
+ * ({@link IN_PLACE_SCHEMAS}, {@link BELOW_SCHEMAS}) and the references
+ * they hold, no deeper than the most any reference climbs.
+ * @param {DefaultPlace} place @param {number} most @param {any} ctx
+ * @returns {boolean}
+ */
+function climbsTo(place, most, ctx) {
+  /** @type {Map<object, Set<number>>} */
+  const seen = new Map();
+  /** @type {[unknown, number][]} */
+  const queue = place.objects.map((node) => [node, 0]);
+  /** @param {unknown} value @param {number} depth */
+  const push = (value, depth) => {
+    if (Array.isArray(value)) for (const item of value) queue.push([item, depth]);
+    else queue.push([value, depth]);
+  };
+  while (queue.length > 0) {
+    const [node, depth] = /** @type {[any, number]} */ (queue.pop());
+    if (!isJsonObject(node) || depth > most) continue;
+    let depths = seen.get(node);
+    if (depths === undefined) seen.set(node, depths = new Set());
+    if (depths.has(depth)) continue;
+    depths.add(depth);
+    if (instanceReads(node).includes(depth)) return true;
+    for (const key of Object.keys(node)) {
+      const value = node[key];
+      const map = key === 'properties' || key === 'patternProperties' || key === 'dependentSchemas' || key === 'dependencies';
+      if (IN_PLACE_SCHEMAS.has(key)) {
+        if (map && isJsonObject(value)) for (const inner of Object.values(value)) push(inner, depth);
+        else push(value, depth);
+      }
+      else if (BELOW_SCHEMAS.has(key)) {
+        if (map && isJsonObject(value)) for (const inner of Object.values(value)) push(inner, depth + 1);
+        else push(value, depth + 1);
+      }
+    }
+    if (typeof node.$ref === 'string') push(refTarget(node, ctx), depth);
+    push(dynamicTargets(node, draftOf(node, ctx), ctx), depth);
+  }
+  return false;
+}
+
+/**
+ * The step of a place whose schemas read its whole value
+ * ({@link readsWholeValue}): a call that filled a default below it runs
+ * the value through the same steps without those defaults too, and keeps
+ * the defaults only where every schema applied at the place answers the
+ * two alike ({@link answersChange}); else that value, normalized without
+ * them. All the defaults below the place are kept or left out together,
+ * after every such place below it has decided; where the checker cannot
+ * answer they are kept, as before. The steps without defaults are built
+ * once the document has compiled ({@link settleDocument}).
+ * @param {object} node - The schema object reached at the place
+ * @param {Function|null} step - Its step
+ * @param {DefaultPlace} place @param {any} ctx
+ * @returns {Function|null}
+ */
+function guardedStep(node, step, place, ctx) {
+  if (step === null || !defaultBelow(node, ctx)) return step;
+  const fills = ctx.fills;
+  for (const entry of place.entries) fills.targets.add(entry);
+  /** @type {{ step: Function|null }} */
+  const bare = { step: null };
+  fills.bare.push(() => {
+    // the same objects, compiled with no default below them, a member's depth below the root
+    bare.step = compileNode(node, { ...ctx, defaultPlace: undefined, mode: 'n', guard: undefined, compiling: [BARE_FRAME] }, FROM_BELOW);
+  });
+  return function normalizeGuarded(value) {
+    const filled = fills.filled;
+    const out = step(value);
+    if (fills.filled === filled) return out;
+    const without = bare.step === null ? value : bare.step(value);
+    const before = placeAnswers(place, without, ctx);
+    const after = before === undefined ? undefined : placeAnswers(place, out, ctx);
+    return after === undefined || !answersChange(place, before, after) ? out : without;
+  };
+}
+
+/**
+ * Whether a default lies in what the normalizer compiles of a schema
+ * object, at any depth: through the members, items, `allOf` branches and
+ * `$ref` targets it walks. Read once per object.
+ * @param {object} start @param {any} ctx
+ * @returns {boolean}
+ */
+function defaultBelow(start, ctx) {
+  const known = ctx.fills.below;
+  let answer = known.get(start);
+  if (answer !== undefined) return answer;
+  answer = false;
+  const seen = new Set();
+  const queue = [start];
+  while (queue.length > 0 && !answer) {
+    const node = queue.pop();
+    if (!isJsonObject(node) || seen.has(node)) continue;
+    seen.add(node);
+    if (known.get(node) === true) answer = true;
+    for (const key of ['properties', 'patternProperties']) {
+      if (!isJsonObject(node[key])) continue;
+      for (const sub of Object.values(node[key])) {
+        if (isJsonObject(sub) && sub.default !== undefined) answer = true;
+        queue.push(sub);
+      }
+    }
+    for (const key of ['additionalProperties', 'items', 'prefixItems', 'additionalItems', 'allOf']) {
+      if (Array.isArray(node[key])) queue.push(...node[key]);
+      else queue.push(node[key]);
+    }
+    if (typeof node.$ref === 'string') queue.push(refTarget(node, ctx));
+  }
+  known.set(start, answer);
+  return answer;
+}
+
+/** The frame a step without defaults is compiled below ({@link guardedStep}): no object, a member's depth from the root. */
+const BARE_FRAME = Object.freeze({ node: null, deferred: null, built: null, at: 0, depth: -1, below: 0 });
 
 //#endregion
 
@@ -1184,9 +1529,12 @@ function buildObjectStep(node, ctx) {
       if (step !== null) hasStep = true;
       // Keep the property's step with its default. Matching pattern steps
       // are composed below so absent and supplied members normalize alike.
-      if (isJsonObject(sub) && sub.default !== undefined && !readsRefAlone(sub, ctx.declaredDraft, ctx.resources.held)
-        && resolveNormalizeSwitch(options.useDefaults, sub))
+      if (isJsonObject(sub) && sub.default !== undefined && ctx.mode !== 'n' && !readsRefAlone(sub, ctx.declaredDraft, ctx.resources.held)
+        && resolveNormalizeSwitch(options.useDefaults, sub)) {
         defaults.push(key, sub.default, step, defaultFill(node, key, sub.default, ctx));
+        // below a place that reads its whole value it is filled per instance
+        if (ctx.mode === 'g') unfilledAt(ctx, node, key);
+      }
     }
   }
 
@@ -1301,6 +1649,7 @@ function buildObjectStep(node, ctx) {
       // copy runs through the property and every matching pattern, in the
       // same order as a supplied value.
       const step = defaults[i + 2];
+      fills.filled++;
       const materialized = cloneJson(defaults[i + 1]);
       const filled = step === null ? materialized : fills.guarding ? copyThrough(ctx, node, key, step, materialized) : step(materialized);
       if (fills.copies !== null && filled !== null && typeof filled === 'object') fills.copies.set(filled, [node, key]);
@@ -1487,16 +1836,19 @@ function compileNode(node, ctx, from) {
     const declaredDraft = detectSchemaDraft(node, ctx.resources.held);
     if (declaredDraft !== ctx.declaredDraft) ctx = { ...ctx, declaredDraft };
   }
+  // a member's, an item's or the root's place whose schemas read its whole
+  // value guards the defaults below it ({@link guardedStep})
+  ctx = guardAt(node, ctx, from);
 
   // One node reached under two drafts (inline and as a reference target)
   // normalizes per draft, and at two places per place (the defaults it
-  // fills: {@link defaultPlace}).
-  const memoKey = `${ctx.allowStrip}${ctx.declaredDraft}${ctx.defaultPlace?.id ?? ''}`;
+  // fills: {@link defaultPlace}), below a guarded place or not, or with no default.
+  const memoKey = `${ctx.allowStrip}${ctx.declaredDraft}${ctx.defaultPlace?.id ?? ''}${ctx.mode}`;
   let memo = ctx.memos.get(memoKey);
   if (memo === undefined) ctx.memos.set(memoKey, memo = new Map());
   // the node's step, or while it is being built its frame: reaching it then closes a loop
   const cached = memo.get(node);
-  if (cached !== undefined) return cached === null || typeof cached === 'function' ? cached : enterAgain(cached, ctx, from);
+  if (cached !== undefined) return reachedAgain(cached, ctx, from);
 
   const frame = openFrame(node, ctx, from);
   memo.set(node, frame);
@@ -1559,7 +1911,44 @@ function compileNode(node, ctx, from) {
   ctx.compiling.pop();
   // Callers that resolved this node while it was being built hold its
   // deferring step; everyone else gets the direct function.
-  return built === null ? null : frame.deferred;
+  return built === null ? null : guarding(frame.deferred, ctx, from);
+}
+
+/**
+ * The context of an object reached as a member, an item or the root, at a
+ * place whose schemas read its whole value: it guards there
+ * ({@link guarding}), and below it every default is filled per instance.
+ * Kept out of {@link compileNode}, as {@link guarding} and
+ * {@link reachedAgain} are: every link of a chain of references holds its
+ * frame on the host's stack, so it holds no more than it did.
+ * @param {object} node @param {any} ctx @param {number} from
+ * @returns {any}
+ */
+function guardAt(node, ctx, from) {
+  return (from === FROM_BELOW || from === FROM_ROOT) && ctx.defaultPlace !== undefined && readsWholeValue(ctx.defaultPlace, ctx)
+    ? { ...ctx, mode: 'g', guard: { place: ctx.defaultPlace, node } }
+    : ctx;
+}
+
+/**
+ * The step a reach of a schema object returns: guarded where the place it
+ * is reached at as a member, an item or the root guards ({@link guardedStep}).
+ * @param {Function|null} step @param {any} ctx @param {number} from
+ * @returns {Function|null}
+ */
+function guarding(step, ctx, from) {
+  return ctx.guard === undefined || (from !== FROM_BELOW && from !== FROM_ROOT) ? step : guardedStep(ctx.guard.node, step, ctx.guard.place, ctx);
+}
+
+/**
+ * The step of a schema object reached again: the one built, or, while it
+ * is being built, a reach of its frame ({@link enterAgain}), guarded as a
+ * first reach is ({@link guarding}).
+ * @param {Function|CompileFrame|null} cached @param {any} ctx @param {number} from
+ * @returns {Function|null}
+ */
+function reachedAgain(cached, ctx, from) {
+  return guarding(cached === null || typeof cached === 'function' ? cached : enterAgain(cached, ctx, from), ctx, from);
 }
 
 // How `compileNode` reaches a schema object: as the document's root, as a
@@ -1664,6 +2053,33 @@ function locationOf(node, ctx) {
 }
 
 /**
+ * The objects below a member no walk enters (a keyword no draft defines)
+ * that a reference of an indexed document reaches, through the targets
+ * such references reach in turn: the objects the reading reads under the
+ * dialect on the way to them ({@link readUnderDialects}).
+ * @param {SchemaResources} resources
+ * @returns {Set<object>}
+ */
+function unwalkedTargets(resources) {
+  const places = resources.places;
+  const walked = new Set(places.keys());
+  /** @type {Set<object>} */
+  const reached = new Set();
+  const queue = [...walked];
+  while (queue.length > 0) {
+    const node = /** @type {any} */ (queue.pop());
+    for (const keyword of ['$ref', '$dynamicRef', '$recursiveRef']) {
+      if (typeof node[keyword] !== 'string') continue;
+      const before = places.size;
+      const target = resolveSchemaReference(node[keyword], /** @type {any} */ (places.get(node)).refBase, resources);
+      if (isJsonObject(target) && !walked.has(target)) reached.add(target);
+      if (places.size > before) queue.push(...[...places.keys()].slice(before));
+    }
+  }
+  return reached;
+}
+
+/**
  * The compile context of a normalizer of `schema`: the options resolved,
  * the document's resources and, where defaults are filled, the place of its
  * root ({@link defaultPlace}).
@@ -1679,8 +2095,18 @@ function normalizerContext(schema, options) {
   assertDepthOption('maxReferenceDepth', maxReferenceDepth);
   assertDepthOption('maxSchemaDepth', maxSchemaDepth);
   // the document as read under its dialects: without the validation
-  // keywords where the dialect governing a place leaves them out
+  // keywords where the dialect governing a place leaves them out, a
+  // reference's target below a member no walk enters among them
+  const written = schema;
   schema = withoutUnreadVocabularies(schema, { dialects: options.dialects });
+  let resources = indexSchemaResources(schema, { dialects: options.dialects });
+  if (resources.held !== undefined && isJsonObject(written)) {
+    const reached = unwalkedTargets(resources);
+    if (reached.size > 0) {
+      schema = readUnderDialects(written, resources.held, reached);
+      resources = indexSchemaResources(schema, { dialects: options.dialects });
+    }
+  }
   const resolved = {
     useDefaults: options.useDefaults,
     removeAdditional: options.removeAdditional === 'all'
@@ -1691,13 +2117,14 @@ function normalizerContext(schema, options) {
     coerceJsonText: options.coerceJsonText,
     maxReferenceDepth,
     maxSchemaDepth,
+    createValidator: options.createValidator,
   };
   const ctx = {
     options: resolved,
     /** The document compiled: the schema as read under its dialects ({@link withoutUnreadVocabularies}) */
     document: schema,
     /** The document's resources: the base each reference resolves against, the draft each node is read under */
-    resources: indexSchemaResources(schema, { dialects: options.dialects }),
+    resources,
     /** @type {number|null} The draft the schema being compiled declares, or null when none does */
     declaredDraft: null,
     /** @type {Map<string, Map<object, Function|CompileFrame|null>>} The compiled steps per stripping mode, draft and place (the frame of one being compiled) */
@@ -1707,6 +2134,12 @@ function normalizerContext(schema, options) {
     allowStrip: true,
     /** @type {DefaultPlace|undefined} The place being compiled, where defaults are filled */
     defaultPlace: undefined,
+    /** @type {DefaultPlace|undefined} The document root's place, where defaults are filled */
+    rootPlace: undefined,
+    /** @type {''|'g'|'n'} `'g'` below a place that reads its whole value ({@link guardedStep}), `'n'` where no default is filled (the steps such a place falls back on) */
+    mode: '',
+    /** @type {{ place: DefaultPlace, node: object }|undefined} The place a member's, an item's or the root's object is being compiled at, and that object, where the place guards */
+    guard: undefined,
     /** @type {Map<string, DefaultPlace>} Every place met, by its id */
     defaultPlaces: new Map(),
     /** The defaults met, their checks' targets and the validator answering them ({@link settleFills}) */
@@ -1725,6 +2158,14 @@ function normalizerContext(schema, options) {
       guarding: false,
       /** @type {Map<object, [object, string]>|null} During a call of {@link recordingCopies}: each copy a default filled, with that default */
       copies: null,
+      /** How many defaults the calls have filled: a guarded place compares it before and after its step */
+      filled: 0,
+      /** @type {(() => void)[]} The builds of the steps without defaults the guarded places fall back on */
+      bare: [],
+      /** @type {{ rooted: boolean, climb: number }|undefined} The document's instance references ({@link documentReads}) */
+      reads: undefined,
+      /** @type {Map<object, boolean>} Whether a default lies below each object a guarded place reaches ({@link defaultBelow}) */
+      below: new Map(),
     },
     /** @type {Map<object, unknown>} Each `$ref`'s target */
     targets: new Map(),
@@ -1738,36 +2179,72 @@ function normalizerContext(schema, options) {
     unfilled: new Map(),
   };
   if ((resolved.useDefaults === true || typeof resolved.useDefaults === 'function') && holdsDefault(schema))
-    ctx.defaultPlace = defaultPlace([schema], [], ctx);
+    ctx.defaultPlace = ctx.rootPlace = defaultPlace([schema], [], ctx);
   return ctx;
 }
 
 /**
  * The defaults `compileNormalizer(schema, options)` leaves unfilled at some
- * place of the document, or for some instances: one a schema applying there
- * for certain refuses (its copy as the place holds it, an
+ * place of the document, or for some instances (as the validator
+ * `createValidator` returns decides, where it is given): one a schema
+ * applying there for certain refuses (its copy as the place holds it, an
  * `additionalProperties` or `unevaluatedProperties` it meets — `false`
  * among them —, `propertyNames`), and one filled per instance (a branch, a
- * member count, a presence or the whole object read there). Exported for
+ * member count, a presence or the whole object read there, or a place
+ * above it that reads its whole value: {@link guardedStep}). Exported for
  * `@jarenjs/emit`, whose normalized types claim a defaulted member present
  * only where the normalizer fills it. The objects named are those of the
  * document as read under its dialects ({@link withoutUnreadVocabularies}),
  * which is the document itself unless `dialects` drops a validation keyword.
  * @param {object|boolean} schema - The schema a normalizer is compiled from
- * @param {NormalizeOptions} [options] - Its options (`useDefaults`, `dialects` and the two depth bounds decide)
+ * @param {NormalizeOptions} [options] - Its options (`useDefaults`, `dialects`, `createValidator` and the two depth bounds decide)
  * @returns {Map<object, Set<string>>} The member names, by the schema object whose `properties` declares them
  * @throws {TypeError|SchemaCompileError} As {@link compileNormalizer} does
  */
 export function unfilledDefaults(schema, options = {}) {
   const ctx = normalizerContext(schema, options);
-  compileNode(ctx.document, ctx, FROM_ROOT);
-  settleFills(ctx);
+  // compiled here, as in {@link compileNormalizer}, so the host's stack holds no frame more
+  try {
+    compileNode(ctx.document, ctx, FROM_ROOT);
+    settleDocument(ctx);
+  }
+  catch (error) {
+    throw compileStackRefusal(error, ctx);
+  }
   return ctx.unfilled;
+}
+
+/**
+ * Settle a compiled document: build the steps without defaults its
+ * guarded places fall back on ({@link guardedStep}), then its defaults
+ * ({@link settleFills}).
+ * @param {any} ctx
+ */
+function settleDocument(ctx) {
+  for (const build of ctx.fills.bare) build();
+  settleFills(ctx);
+}
+
+/**
+ * What a normalizer's compile throws for an error it met: a call stack the
+ * host cannot grow far enough for the compile (a chain of references is
+ * built one link inside the next) is refused `JK0017`, at the schema object
+ * being built when it gave out, the host's error its `cause`; any other
+ * error as it is.
+ * @param {unknown} error @param {any} ctx
+ * @returns {unknown}
+ */
+function compileStackRefusal(error, ctx) {
+  if (!isStackExhausted(error)) return error;
+  const frame = ctx.compiling[ctx.compiling.length - 1];
+  return new SchemaCompileError('JK0017', 'the schema nests subschemas and references deeper than this host\'s call stack '
+    + 'compiles; nest them less deeply, or give the process a larger stack', frame === undefined ? undefined : locationOf(frame.node, ctx),
+  { cause: error });
 }
 
 /** The members of `NormalizeOptions`; any other is refused. */
 const NORMALIZE_OPTIONS = Object.freeze(['useDefaults', 'removeAdditional', 'coerceTypes', 'trimStrings', 'coerceJsonText', 'dialects',
-  'maxSchemaDepth', 'maxReferenceDepth']);
+  'createValidator', 'maxSchemaDepth', 'maxReferenceDepth']);
 
 /**
  * Refuse a malformed options object before anything compiles: every
@@ -1788,6 +2265,8 @@ function admitNormalizeOptions(options) {
   const strip = options.removeAdditional;
   if (strip !== undefined && typeof strip !== 'boolean' && strip !== 'all')
     throw new TypeError("compileNormalizer: 'removeAdditional' must be true, false or 'all'");
+  if (options.createValidator !== undefined && typeof options.createValidator !== 'function')
+    throw new TypeError("compileNormalizer: 'createValidator' must be a function returning a new JarenValidator");
   heldDialects(options.dialects, 'compileNormalizer');
 }
 
@@ -1828,9 +2307,15 @@ function admitNormalizeOptions(options) {
  * instance where a branch, a member count, a presence or the whole object
  * could change an answer — only where every schema applied at the place
  * answers the filled object as it answered the object without it — and
- * always else ({@link unfilledDefaults}). A document the validator cannot
- * compile alone (a `$ref` to another document) fills its defaults as
- * written.
+ * always else ({@link unfilledDefaults}). A place above it whose schemas
+ * read its whole value (an `enum`, `const` or `uniqueItems`, an instance
+ * reference climbing back to it, at the root one that may read anywhere)
+ * keeps the defaults below it only where its schemas answer the value as
+ * they answer it without them ({@link guardedStep}). The checks run on the
+ * validator `createValidator` returns (else one of the normalizer's
+ * bounds); a default whose check reaches a document that validator does not
+ * hold, or that lies below a target under a keyword no draft defines, is
+ * filled as written.
  *
  * **Which dialect.** A `$schema` is read by its name: a URI naming a known
  * draft reads as that draft, and any other — a custom dialect — as draft-07.
@@ -1852,12 +2337,15 @@ function admitNormalizeOptions(options) {
  * @throws {TypeError} When `options` is not a plain object, names a member
  *   outside `NormalizeOptions`, or gives one a value of the wrong type - a
  *   misspelt switch would otherwise compile a normalizer that does nothing
- *   (`dialects` that is no `JarenValidator` included)
+ *   (`dialects` that is no `JarenValidator` included); and, when the defaults
+ *   are first checked, a `createValidator` that returns no `JarenValidator`
  * @throws {SchemaCompileError} `JK0016` where a dialect `dialects` holds requires a
  *   vocabulary this package does not implement, as the validator refuses it;
  *   `JK0002` for a `maxSchemaDepth` or `maxReferenceDepth` that is not a
  *   positive safe integer; `JK0017` for a subschema it compiles nested past
- *   `maxSchemaDepth` (default 128) from the root or a reference's target;
+ *   `maxSchemaDepth` (default 128) from the root or a reference's target, or
+ *   one the host's call stack cannot hold (a chain of references builds one
+ *   link inside the next), the host's error its `cause`;
  *   `JK0001` for a loop of `$ref`s and `allOf` branches every call runs into
  *   before reading anything below the value. The returned normalizer throws
  *   `SchemaRuntimeError` `JK2001` for a call that nests the references closing
@@ -1881,8 +2369,14 @@ export function compileNormalizer(schema, options = {}) {
   const ctx = normalizerContext(schema, options);
   const resolved = ctx.options;
   schema = ctx.document;
-  const compiled = compileNode(schema, ctx, FROM_ROOT);
-  settleFills(ctx);
+  let compiled;
+  try {
+    compiled = compileNode(schema, ctx, FROM_ROOT);
+    settleDocument(ctx);
+  }
+  catch (error) {
+    throw compileStackRefusal(error, ctx);
+  }
   const step = compiled !== null && ctx.fills.reentered ? recordingCopies(ctx.fills, compiled) : compiled;
 
   // A root `default` answers the "the whole document was absent" case, which

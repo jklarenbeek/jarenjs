@@ -103,12 +103,6 @@ delete it or fix it.
 
 ## @jarenjs/validate
 
-- [ ] **The normalizer counts string length in graphemes whatever the
-  validator's unit.** compileNormalizer's internal validator is built without
-  `useGrapheme`/`lengthUnit`, and `compileNormalizer` refuses both as unknown
-  options. A host that sets `lengthUnit: 'codepoint'` gets a normalizer branch
-  choice, and a checked default, that count graphemes. Needs the option
-  threaded through it, as `buildFormModel` now takes it.
 - [ ] **A compile refusal names an embedded resource's place two ways.** The
   walks name a place by its pointer into the document
   (`#/%24defs/n/properties/a/%24id`), while a `$query`, `$recursiveRef` or
@@ -150,24 +144,20 @@ delete it or fix it.
   bundle than the validator's budget and measured no faster than the log on
   suite-size instances; a smaller encoding of it, or gating that pays for
   itself, is the open work.
-- [ ] **A default the normalizer fills can fail a schema above its place.** The
-  validator decides each default against the schemas it meets at its place,
-  not against one above it that reads the whole value or the member through an
-  instance reference: `{ o: {} }` still normalizes to a value the validator
-  refuses under `{ enum: [{ o: {} }], properties: { o: { properties: { a: {
-  default: 1 } } } } }`, `[{}, { a: 1 }]` under `{ type: 'array', uniqueItems:
-  true, items: { properties: { a: { default: 1 } } } }`, and `{ b: 9 }` under
-  `{ properties: { a: { default: 5 }, b: { maximum: { $data: '1/a' } } } }`. A
-  document the checking validator cannot compile alone (a `$ref` to another
-  document) fills its defaults as written, and the checks assert no `format`
-  (they register none). Deciding them needs the dependent places found, or the
-  whole normalized document validated.
-- [ ] **Checking defaults costs a validator compile.** A normalizer with
-  `useDefaults` compiles a `JarenValidator` of the schemas its defaults meet
-  (a copy of the self-contained ones, `$ref`s to the rest), once, and a bundle
-  that imports `compileNormalizer` carries the validator whether or not it
-  fills defaults. A smaller check (shared across the normalizers of one
-  document, or skipped where no schema met can refuse) is the open work.
+- [ ] **A default below a place that reads its whole value is decided with
+  every other default there.** The normalizer keeps or leaves out all the
+  defaults below such a place together: `{ o: {} }` under `{ enum: [{ o: {}
+  }, { o: { a: 1 } }], properties: { o: { properties: { a: { default: 1 },
+  b: { default: 2 } } } } }` stays `{ o: {} }`, where `{ o: { a: 1 } }` is
+  valid. An instance reference in a document only the checking validator
+  holds is not read: with `createValidator` holding `{ $id:
+  'https://x.test/b.json', maximum: { $data: '1/a' } }`, `{ properties: { a:
+  { default: 5 }, b: { $ref: 'https://x.test/b.json' } } }` (2020-12) turns
+  `{ b: 9 }` into `{ b: 9, a: 5 }`, which that validator refuses. A default
+  below a subschema a `$ref` reaches under a keyword no draft defines is not
+  checked at all: `{ properties: { v: { $ref: '#/x/m' } }, x: { m: {
+  properties: { a: { type: 'integer', default: 'x' } } } } }` turns `{ v: {}
+  }` into `{ v: { a: 'x' } }` (the `$defs` twin leaves it out).
 - [ ] **Deriving a strict profile compiles once per place.**
   `deriveStrictProfile` decides each place by compiling a `{ $ref }` to it
   against the held document. A compile reads what it reaches, so a place costs
@@ -200,15 +190,6 @@ delete it or fix it.
   loader that serves that URI, which the README teaches and which answers
   right, so it waits on a decision to change the default (a minor with an
   upgrade sentence).
-- [ ] **The normalizer compiles a chain of references recursively per link.**
-  `compileNormalizer` builds each `$ref` target where it meets it, so a schema
-  whose references chain one target to the next (`$defs` `d0` … `dN`, each `{
-  properties: { x: { $ref: '#/$defs/d<i+1>' } } }`, the root `{ $ref:
-  '#/$defs/d0' }`) holds the host's stack per link: with 20,000 links it
-  throws an uncoded `RangeError` while it compiles on a default stack (with
-  3,000 in a fresh process), where the validator compiles the schema (it
-  resolves a reference on first use) and refuses a validation nesting them
-  past its reference bound (`JK2001`).
 - [ ] **A broken document's collected errors grow with the branches tried to
   the power of the nesting.** A failing `oneOf` or `anyOf` keeps every
   branch's errors, and each branch that descends repeats the errors of the

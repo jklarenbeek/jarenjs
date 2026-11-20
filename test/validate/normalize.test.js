@@ -425,8 +425,8 @@ describe('compileNormalizer — a closed option set', () => {
     refuses({ coerceType: true }, "compileNormalizer: unknown option 'coerceType' — did you mean 'coerceTypes'?");
     refuses({ useDefault: true }, "compileNormalizer: unknown option 'useDefault' — did you mean 'useDefaults'?");
     refuses({ strip: true },
-      "compileNormalizer: unknown option 'strip'; the options are useDefaults, removeAdditional, coerceTypes, trimStrings, coerceJsonText, dialects, maxSchemaDepth, maxReferenceDepth");
-    refuses({ maxDepth: 5 }, "compileNormalizer: unknown option 'maxDepth'; the options are useDefaults, removeAdditional, coerceTypes, trimStrings, coerceJsonText, dialects, maxSchemaDepth, maxReferenceDepth");
+      "compileNormalizer: unknown option 'strip'; the options are useDefaults, removeAdditional, coerceTypes, trimStrings, coerceJsonText, dialects, createValidator, maxSchemaDepth, maxReferenceDepth");
+    refuses({ maxDepth: 5 }, "compileNormalizer: unknown option 'maxDepth'; the options are useDefaults, removeAdditional, coerceTypes, trimStrings, coerceJsonText, dialects, createValidator, maxSchemaDepth, maxReferenceDepth");
     refuses({ maxSchemaDepths: 5 }, "compileNormalizer: unknown option 'maxSchemaDepths' — did you mean 'maxSchemaDepth'?");
   });
 

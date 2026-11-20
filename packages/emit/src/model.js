@@ -1093,7 +1093,7 @@ export function compileEmitModel(schema, options = {}) {
     // the members whose default the normalizer leaves unfilled at some
     // place of the document, by the object declaring them
     unfilled: useDefaults === true || typeof useDefaults === 'function'
-      ? unfilledDefaults(schema, { useDefaults, dialects: options.dialects,
+      ? unfilledDefaults(schema, { useDefaults, dialects: options.dialects, createValidator: normalize.createValidator,
         maxSchemaDepth: normalize.maxSchemaDepth, maxReferenceDepth: normalize.maxReferenceDepth })
       : new Map(),
     differs: new Map(),

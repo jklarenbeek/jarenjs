@@ -2117,10 +2117,11 @@ so each is a decision you make rather than one you inherit.
 `compileNormalizer(schema)` with no options is the identity. The option set
 is closed, and each refusal is a `TypeError` that says what is wrong: a
 member other than `useDefaults`, `removeAdditional`, `coerceTypes`,
-`trimStrings`, `coerceJsonText`, `dialects`, `maxSchemaDepth` and `maxReferenceDepth` names the nearest one (`coerceType` — did you mean
+`trimStrings`, `coerceJsonText`, `dialects`, `createValidator`, `maxSchemaDepth` and `maxReferenceDepth` names the nearest one (`coerceType` — did you mean
 `coerceTypes`?), a value of the wrong type names the member and what it takes
 (`coerceTypes: 'yes'`, a member set to `null`, a `removeAdditional` other
-than `true`, `false` or `'all'`, a `dialects` that is no `JarenValidator`), and options that are not a plain object —
+than `true`, `false` or `'all'`, a `dialects` that is no `JarenValidator`, a `createValidator` that is no
+function), and options that are not a plain object —
 `null` among them — are refused as such. A misspelt or mistyped switch used
 to compile a normalizer with that switch off, in silence, and `null` options
 used to throw a raw `TypeError` (`Cannot read properties of null`).
@@ -2131,6 +2132,21 @@ normalizer compiles, and `null` or absent means the default.
 `dialects: validator` reads each `$schema` through the meta-schemas that
 validator holds, as its compile does; without it a custom dialect reads as
 draft-07 (see *How a `$schema` is read* under *Vocabularies and cross-draft references*).
+A subschema a `$ref` reaches below a keyword no draft defines (an OpenAPI
+document's `components/schemas`, an `x-` member) is read under the nearest
+`$schema` on the way to it, as the validator reads it, so it normalizes as the
+same subschema under `$defs` does; one whose dialect requires a vocabulary this
+package does not implement is read as written there, and so is anything there
+no `$ref` reaches (an annotation keeps its members). *Upgrade: such a target
+was read under the dialect of the schema around the keyword, so under a held
+dialect without the validation vocabulary `{ $schema: 2020-12, properties: { v:
+{ $ref: '#/x/properties/m' } }, x: { $schema: dialect, properties: { m: { type:
+'integer' } } } }` with `coerceTypes` turned `{ v: '5' }`, which the validator
+accepts as sent, into `{ v: 5 }`; it now stays `{ v: '5' }`.*
+`createValidator: (bounds) => new JarenValidator({ ...hostOptions, ...bounds })`
+checks the defaults with a validator configured as the one you validate with
+(*The validator decides each default*, below); it does not replace `dialects`,
+which decides how each `$schema` is read.
 
 ### Per-field control, not just a global switch
 
@@ -2236,7 +2252,13 @@ where the validator reads another keyword first and compiles (`{ type: 'string',
 copy runs through more than 256 levels of references is filled as written and refused
 by the calls that fill it. The validator builds a reference's target when a validation
 first reaches it, and refuses a target past its depth bound then; the normalizer builds
-every target when it compiles, so it refuses such a document when it compiles. *Upgrade:
+every target when it compiles, so it refuses such a document when it compiles. It builds a
+chain of references one link inside the next, so a chain longer than the host's call stack
+holds is refused when it compiles, by
+`compileNormalizer` and `unfilledDefaults` alike: a `SchemaCompileError` `JK0017` naming
+the host's stack and the object it was building, the host's `RangeError` its `cause`. It
+is the host's refusal that is caught, not a length, so every chain the stack holds
+compiles. *Upgrade: such a chain threw the host's uncoded `RangeError`.* *Upgrade:
 a schema nested past the host's stack threw an uncoded `RangeError` while the normalizer
 compiled it, and so did a call nesting references past the stack, every call of a loop
 that never reads below the value, and a filled default nested past the stack; a schema
@@ -2367,14 +2389,8 @@ dependentRequired: { a: ['b'] } }` `{}` stays `{}` and `{ b: 2 }` becomes `{ b:
 2, a: 1 }`, and a default an `anyOf` branch's `additionalProperties: false`
 refuses is filled where another branch accepts the filled object. A default
 filled always costs nothing per call; one filled per instance costs a
-validation of the object at its place for each schema applied there. The
-checks run on a validator holding the document, compiled once with the
-normalizer and without formats: a document that validator cannot compile
-alone (a `$ref` to another document) fills its defaults as written, and a
-`format` it would need a registered format to assert does not keep a default
-out. A schema above the place that reads the whole value (`enum`, `const`,
-`uniqueItems` of an array holding the object) or reads it through `$data` is
-not consulted. `unfilledDefaults(schema, options)` names, by the schema object
+validation of the object at its place for each schema applied there (the
+validator the checks run on is described below). `unfilledDefaults(schema, options)` names, by the schema object
 whose `properties` declares each, the defaults a normalizer compiled with
 those options never fills or fills per instance, and `@jarenjs/emit` reads
 it. *Upgrade: a default was kept out only where an `additionalProperties:
@@ -2395,6 +2411,53 @@ by-name closer at its place refused it: the 2020-12 `{ $defs: { s: { type:
 'object', properties: { a: { type: 'string', default: 'x' } } } }, $ref:
 '#/$defs/s', properties: { b: { type: 'integer' } }, additionalProperties: false
 }` turned `{}` into `{ a: 'x' }`; it stays `{}`.*
+
+A default is also kept only where **the places above it that read their whole
+value** answer as they answer without it. Such a place holds an `enum`, a
+`const` or a `uniqueItems`, or an instance reference below it climbs back to
+it (a `$data` or `data` pointer such as `1/a`); a reference that may read
+anywhere (a pointer from the root, `/a`, or a `$query`) makes the root such a
+place. A call that filled a default below one also runs the value through the
+same steps without those defaults, and keeps the defaults where every schema
+applied at the place answers the two values alike; else it returns the value
+normalized without them (coerced, trimmed and stripped as before). All the
+defaults below the place are kept or left out together, after each such place
+below it has decided, and a value refused both ways keeps them. So `{ enum: [{
+o: {} }], properties: { o: { properties: { a: { default: 1 } } } } }` leaves `{
+o: {} }` as it is, and `{ properties: { a: { default: 5 }, b: { maximum: {
+$data: '1/a' } } } }` leaves `{ b: 9 }` as it is and fills `{ b: 3 }` to `{ b:
+3, a: 5 }`. A document without such a place pays nothing per call; one with it
+pays the second pass, and two validations of each schema applied at the place,
+only on a call that filled a default below it. `unfilledDefaults` names every default below such a
+place. *Upgrade: those places were not read, so an `enum`, a `const` or a
+`uniqueItems` above the object (`[{}, { a: 1 }]` under `{ uniqueItems: true,
+items: { properties: { a: { default: 1 } } } }`) and a `$data` reading a sibling
+turned a valid input into a value the validator refuses; each now stays as
+sent.*
+
+The checks run on one validator holding the document, built and compiled once
+per normalizer, at the first check: when the normalizer compiles, or on the
+first call that reaches a default filled per instance. A normalizer with no
+`default` in its document, or with `useDefaults` off, builds none; a bundle that
+imports `compileNormalizer` carries the validator. Without `createValidator`
+that validator has the normalizer's bounds and nothing else: it counts string
+length in graphemes, registers no format, and holds no other document. With
+`createValidator`, a function of the normalizer's bounds (`{ maxReferenceDepth,
+maxSchemaDepth }`) that returns a new `JarenValidator` configured as the one you
+validate with — its options such as `lengthUnit`, its formats, the documents it
+holds — the checks answer as that validator does. It is called at most once per
+normalizer, and the normalizer registers the document and its dialects in what
+it returns, so return a new validator, never the one you validate with; pass
+the bounds among its options, or the checks read only as deep as its own
+bounds. A default whose check reaches a document the checking validator does not
+hold (a `$ref` to another document) is filled as written, as is one below a
+subschema a `$ref` reaches under a keyword no draft defines (`#/x/…`), which is
+not checked; every other default is decided. *Upgrade: under `lengthUnit:
+'codepoint'` a default of two code points beside `maxLength: 1` was filled, and
+one beside `minLength: 2` was left out, the reverse of what that validator
+answers; a default its `format` refuses, and one beside a `$ref` to a document
+only that validator holds, were filled; each now answers as that validator does
+when it is passed as `createValidator`.*
 
 Not walked: `anyOf`, `oneOf`, `if`/`then`/`else`, `not`. Which branch applies
 is only known after validating, and normalizing under one branch can change
