@@ -99,6 +99,36 @@ describe('the checks read the documents the host validator holds', () => {
   });
 });
 
+describe('the checks read the instance references in the documents the host validator holds', () => {
+  /** A factory of validators holding `documents`. @param {object[]} documents */
+  const holdingAll = (documents) => () => documents.reduce((validator, document) => validator.addSchema(structuredClone(document)), new JarenValidator());
+
+  it('a $data a held document reads keeps out a default it would break (it was filled into a refusal)', () => {
+    const createValidator = holdingAll([{ $id: 'https://x.test/b.json', maximum: { $data: '1/a' } }]);
+    const schema = { $schema: D20, properties: { a: { default: 5 }, b: { $ref: 'https://x.test/b.json' } } };
+    assert.deepEqual(normalized(schema, { b: 9 }, { createValidator }), { b: 9 });
+    assert.deepEqual(normalized(schema, { b: 3 }, { createValidator }), { b: 3, a: 5 });
+    assert.equal(createValidator().compile(schema)({ b: 9 }), true);
+    assert.deepEqual([...unfilledDefaults(schema, { useDefaults: true, createValidator }).get(schema) ?? []], ['a']);
+  });
+
+  it('through a reference of a held document to another, and from the instance\'s root', () => {
+    const createValidator = holdingAll([{ $id: 'https://x.test/c.json', maximum: { $data: '/a' } },
+      { $id: 'https://x.test/b.json', properties: { c: { $ref: 'c.json' } } }]);
+    const schema = { $schema: D20, properties: { a: { default: 5 }, b: { $ref: 'https://x.test/b.json' } } };
+    assert.deepEqual(normalized(schema, { b: { c: 9 } }, { createValidator }), { b: { c: 9 } });
+    assert.equal(createValidator().compile(schema)({ b: { c: 9 } }), true);
+  });
+
+  it('a held document without an instance reference changes nothing, and no factory means no held document', () => {
+    const plain = holdingAll([{ $id: 'https://x.test/b.json', type: 'integer' }]);
+    const schema = { $schema: D20, properties: { a: { default: 5 }, b: { $ref: 'https://x.test/b.json' } } };
+    assert.deepEqual(normalized(schema, { b: 9 }, { createValidator: plain }), { b: 9, a: 5 });
+    assert.equal(unfilledDefaults(schema, { useDefaults: true, createValidator: plain }).size, 0);
+    assert.deepEqual(normalized(schema, { b: 9 }), { b: 9, a: 5 });
+  });
+});
+
 describe('without the option, as before', () => {
   it('a root the checking validator cannot compile still answers none of the checks grouped with it', () => {
     const schema = { $schema: D20, maxProperties: 5, properties: { a: { $ref: '#/$defs/int', default: 'x' }, r: { $ref: 'https://other.test/x.json' } },

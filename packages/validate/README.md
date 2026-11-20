@@ -2422,7 +2422,15 @@ same steps without those defaults, and keeps the defaults where every schema
 applied at the place answers the two values alike; else it returns the value
 normalized without them (coerced, trimmed and stripped as before). All the
 defaults below the place are kept or left out together, after each such place
-below it has decided, and a value refused both ways keeps them. So `{ enum: [{
+below it has decided, and a value refused both ways keeps them. Deciding them
+together never fills into a refusal; it can fill less than one at a time would:
+`{ o: {} }` under `{ enum: [{ o: {} }, { o: { a: 1 } }], properties: { o: {
+properties: { a: { default: 1 }, b: { default: 2 } } } } }` stays `{ o: {} }`,
+though `{ o: { a: 1 } }` is valid. With `createValidator`, an instance
+reference in a document the validator it returns holds is read as one in the
+document itself: holding `{ $id: 'https://x.test/b.json', maximum: { $data:
+'1/a' } }`, `{ properties: { a: { default: 5 }, b: { $ref:
+'https://x.test/b.json' } } }` leaves `{ b: 9 }` as it is. So `{ enum: [{
 o: {} }], properties: { o: { properties: { a: { default: 1 } } } } }` leaves `{
 o: {} }` as it is, and `{ properties: { a: { default: 5 }, b: { maximum: {
 $data: '1/a' } } } }` leaves `{ b: 9 }` as it is and fills `{ b: 3 }` to `{ b:
@@ -2437,7 +2445,9 @@ sent.*
 
 The checks run on one validator holding the document, built and compiled once
 per normalizer, at the first check: when the normalizer compiles, or on the
-first call that reaches a default filled per instance. A normalizer with no
+first call that reaches a default filled per instance (with `createValidator`,
+also when the normalizer compiles where a `$ref` names another document, to read
+it). A normalizer with no
 `default` in its document, or with `useDefaults` off, builds none; a bundle that
 imports `compileNormalizer` carries the validator. Without `createValidator`
 that validator has the normalizer's bounds and nothing else: it counts string
@@ -2450,14 +2460,18 @@ normalizer, and the normalizer registers the document and its dialects in what
 it returns, so return a new validator, never the one you validate with; pass
 the bounds among its options, or the checks read only as deep as its own
 bounds. A default whose check reaches a document the checking validator does not
-hold (a `$ref` to another document) is filled as written, as is one below a
-subschema a `$ref` reaches under a keyword no draft defines (`#/x/…`), which is
-not checked; every other default is decided. *Upgrade: under `lengthUnit:
+hold (a `$ref` to another document) is filled as written; every other default is
+decided, one below a subschema a `$ref` reaches under a keyword no draft defines
+(`#/x/…`) as its `$defs` twin is. *Upgrade: under `lengthUnit:
 'codepoint'` a default of two code points beside `maxLength: 1` was filled, and
 one beside `minLength: 2` was left out, the reverse of what that validator
 answers; a default its `format` refuses, and one beside a `$ref` to a document
 only that validator holds, were filled; each now answers as that validator does
-when it is passed as `createValidator`.*
+when it is passed as `createValidator`. A default below a subschema a `$ref`
+reaches under a keyword no draft defines was not checked at all, so `{
+properties: { v: { $ref: '#/x/m' } }, x: { m: { properties: { a: { type:
+'integer', default: 'x' } } } } }` turned `{ v: {} }` into `{ v: { a: 'x' } }`,
+which the validator refuses; it now stays `{ v: {} }`, as under `$defs`.*
 
 Not walked: `anyOf`, `oneOf`, `if`/`then`/`else`, `not`. Which branch applies
 is only known after validating, and normalizing under one branch can change

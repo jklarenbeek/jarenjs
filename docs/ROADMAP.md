@@ -144,20 +144,6 @@ delete it or fix it.
   bundle than the validator's budget and measured no faster than the log on
   suite-size instances; a smaller encoding of it, or gating that pays for
   itself, is the open work.
-- [ ] **A default below a place that reads its whole value is decided with
-  every other default there.** The normalizer keeps or leaves out all the
-  defaults below such a place together: `{ o: {} }` under `{ enum: [{ o: {}
-  }, { o: { a: 1 } }], properties: { o: { properties: { a: { default: 1 },
-  b: { default: 2 } } } } }` stays `{ o: {} }`, where `{ o: { a: 1 } }` is
-  valid. An instance reference in a document only the checking validator
-  holds is not read: with `createValidator` holding `{ $id:
-  'https://x.test/b.json', maximum: { $data: '1/a' } }`, `{ properties: { a:
-  { default: 5 }, b: { $ref: 'https://x.test/b.json' } } }` (2020-12) turns
-  `{ b: 9 }` into `{ b: 9, a: 5 }`, which that validator refuses. A default
-  below a subschema a `$ref` reaches under a keyword no draft defines is not
-  checked at all: `{ properties: { v: { $ref: '#/x/m' } }, x: { m: {
-  properties: { a: { type: 'integer', default: 'x' } } } } }` turns `{ v: {}
-  }` into `{ v: { a: 'x' } }` (the `$defs` twin leaves it out).
 - [ ] **Deriving a strict profile compiles once per place.**
   `deriveStrictProfile` decides each place by compiling a `{ $ref }` to it
   against the held document. A compile reads what it reaches, so a place costs

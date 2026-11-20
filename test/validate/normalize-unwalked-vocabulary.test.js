@@ -13,7 +13,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { JarenValidator } from '@jarenjs/validate';
-import { compileNormalizer } from '@jarenjs/validate/normalize';
+import { compileNormalizer, unfilledDefaults } from '@jarenjs/validate/normalize';
+import { stringFormats } from '@jarenjs/formats';
 
 const D20 = 'https://json-schema.org/draft/2020-12/schema';
 const VOCAB = 'https://json-schema.org/draft/2020-12/vocab/';
@@ -37,6 +38,45 @@ const both = (document, instances, options = { coerceTypes: true }) => {
     return [out, validate(instance), validate(out)];
   });
 };
+
+describe('a default below a target under a keyword no draft defines is checked as its $defs twin is', () => {
+  /** @param {string} at @param {object} member @param {object} [beside] */
+  const twin = (at, member, beside = {}) => ({ properties: { v: { $ref: `#/${at}/m` } }, [at]: { m: { properties: { a: member }, ...beside } } });
+
+  it('one its own schema refuses is left out, below the keyword as under $defs (it was filled into a refusal)', () => {
+    for (const at of ['x', '$defs', 'components/schemas']) {
+      const schema = at === 'components/schemas'
+        ? { properties: { v: { $ref: '#/components/schemas/m' } }, components: { schemas: { m: { properties: { a: { type: 'integer', default: 'x' } } } } } }
+        : twin(at, { type: 'integer', default: 'x' });
+      const out = compileNormalizer(schema, { useDefaults: true })({ v: {} });
+      assert.deepEqual(out, { v: {} }, at);
+      assert.equal(new JarenValidator().compile(schema)(out), true, at);
+      assert.deepEqual([...unfilledDefaults(schema, { useDefaults: true }).values()].flatMap((keys) => [...keys]), ['a'], at);
+    }
+  });
+
+  it('one it accepts is filled, and one a member count decides is decided per instance', () => {
+    for (const at of ['x', '$defs']) {
+      assert.deepEqual(compileNormalizer(twin(at, { type: 'integer', default: 1 }), { useDefaults: true })({ v: {} }), { v: { a: 1 } }, at);
+      const counted = twin(at, { default: 1 }, { maxProperties: 1 });
+      assert.deepEqual(compileNormalizer(counted, { useDefaults: true })({ v: { b: 2 } }), { v: { b: 2 } }, at);
+      assert.deepEqual(compileNormalizer(counted, { useDefaults: true })({ v: {} }), { v: { a: 1 } }, at);
+    }
+  });
+
+  it('under the draft on the way: a 2020-12 format annotates, so a default it would refuse is filled', () => {
+    const schema = { $schema: D20, properties: { v: { $ref: '#/x/m' } }, x: { m: { properties: { a: { type: 'string', format: 'email', default: 'nope' } } } } };
+    const createValidator = () => new JarenValidator().addFormats(stringFormats);
+    assert.deepEqual(compileNormalizer(schema, { useDefaults: true, createValidator })({ v: {} }), { v: { a: 'nope' } });
+    assert.equal(createValidator().compile(schema)({ v: { a: 'nope' } }), true);
+  });
+
+  it('under the dialect on the way: a dialect without the validation vocabulary keeps no default out', () => {
+    const schema = { $schema: D20, properties: { v: { $ref: '#/x/m' } }, x: { $schema: OFF, m: { properties: { a: { type: 'integer', default: 'x' } } } } };
+    assert.deepEqual(compileNormalizer(schema, { useDefaults: true, dialects: holding() })({ v: {} }), { v: { a: 'x' } });
+    assert.equal(holding().compile(structuredClone(schema))({ v: { a: 'x' } }), true);
+  });
+});
 
 describe('the normalizer reads a target below a keyword no draft defines under its own dialect', () => {
   it('the entry\'s schema: { v: "5" } is left as sent, as its $defs twin is (it was coerced to { v: 5 })', () => {

@@ -50,7 +50,7 @@ import {
 import { createSchemaPatternTester } from './string.js';
 import { DEFAULT_ORIGIN, encodeJsonPointerPath } from './origin.js';
 import { admitsDynamicReference } from './dynamic-ref.js';
-import { heldDialects } from './validator-state.js';
+import { VALIDATOR_STATE, heldDialects } from './validator-state.js';
 import {
   REFERENCE_DEPTH_CEILING, SCHEMA_DEPTH_CEILING, SchemaCompileError, SchemaRuntimeError, assertDepthOption, boundReference,
   schemaTooDeep, unimplementedVocabulary,
@@ -921,15 +921,20 @@ function checksOf(ctx) {
   let rooted;
   for (const schema of fills.targets) {
     const place = ctx.resources.places.get(schema);
-    if (place?.pointer === undefined) continue;
+    if (place === undefined) continue;
+    // a subschema a `$ref` reaches below a keyword no walk enters has no
+    // pointer of its resource: it is named from the document's root, and
+    // read through it, as the validator reads it, under the dialect on the way
+    const at = place.pointer === undefined ? documentPointer(schema, ctx) : `${place.base}${place.pointer}`;
+    if (at === undefined) continue;
     if (schema === ctx.document && fills.reads?.rooted === true) {
-      rooted = `${place.base}${place.pointer}`;
+      rooted = at;
       continue;
     }
-    const alone = standsAlone(schema);
+    const alone = place.pointer !== undefined && standsAlone(schema);
     const group = alone ? `${place.dialect ?? ''}` : '#';
     if (!groups.has(group)) groups.set(group, []);
-    /** @type {[object, unknown][]} */ (groups.get(group)).push([schema, alone ? cloneJson(schema) : { $ref: `${place.base}${place.pointer}` }]);
+    /** @type {[object, unknown][]} */ (groups.get(group)).push([schema, alone ? cloneJson(schema) : { $ref: at }]);
   }
   const validator = checkerOf(ctx);
   holdDialects(validator, ctx.resources.named, ctx.resources.held);
@@ -991,13 +996,66 @@ function checksOf(ctx) {
  * @throws {TypeError} When `createValidator` returns no `JarenValidator`
  */
 function checkerOf(ctx) {
+  if (ctx.fills.checker !== undefined) return ctx.fills.checker;
   const bounds = { maxReferenceDepth: ctx.options.maxReferenceDepth, maxSchemaDepth: ctx.options.maxSchemaDepth };
   const create = ctx.options.createValidator;
-  if (create === undefined) return new JarenValidator(bounds);
+  if (create === undefined) return ctx.fills.checker = new JarenValidator(bounds);
   const validator = create(bounds);
   if (!(validator instanceof JarenValidator))
     throw new TypeError("compileNormalizer: 'createValidator' must return a new JarenValidator");
-  return validator;
+  return ctx.fills.checker = validator;
+}
+
+/**
+ * The URI of a schema object of the document as a JSON Pointer from the
+ * document's root, for one its resource names by no pointer (a subschema a
+ * `$ref` reaches below a keyword no walk enters); undefined for an object
+ * the document does not hold. The paths are found once, the first path to
+ * an object winning.
+ * @param {object} schema @param {any} ctx
+ * @returns {string|undefined}
+ */
+function documentPointer(schema, ctx) {
+  let paths = ctx.fills.paths;
+  if (paths === undefined) {
+    paths = ctx.fills.paths = new Map();
+    /** @type {[unknown, string][]} */
+    const queue = [[ctx.document, '']];
+    while (queue.length > 0) {
+      const [value, path] = /** @type {[unknown, string]} */ (queue.shift());
+      if (!isJsonContainer(value) || paths.has(value)) continue;
+      paths.set(value, path);
+      if (Array.isArray(value)) value.forEach((item, i) => queue.push([item, `${path}/${i}`]));
+      else for (const key of Object.keys(value)) if (!DATA_MEMBERS.has(key)) queue.push([value[key], encodeJsonPointerPath(path, key)]);
+    }
+  }
+  const path = paths.get(schema);
+  return path === undefined ? undefined : `${schemaPlace(ctx.resources, ctx.document).base}#${path}`;
+}
+
+/**
+ * The schema a `$ref` names: in the document, else, where the host's
+ * `createValidator` is given, in a document the validator it returns holds
+ * (indexed once, each held document under its URI), as that validator
+ * resolves it; undefined where neither holds it. Read only to find the
+ * instance references a checked place depends on ({@link documentReads},
+ * {@link climbsTo}): the normalizer does not normalize through another
+ * document.
+ * @param {any} node @param {any} ctx
+ * @returns {unknown}
+ */
+function referenced(node, ctx) {
+  const own = ctx.resources.places.has(node);
+  const target = own ? refTarget(node, ctx) : undefined;
+  if (target !== undefined || ctx.options.createValidator === undefined) return target;
+  let held = ctx.fills.held;
+  if (held === undefined) {
+    held = ctx.fills.held = { places: new Map(), resources: new Map(), named: new Set() };
+    const state = /** @type {any} */ (VALIDATOR_STATE.get(checkerOf(ctx)));
+    for (const [uri, document] of state.schemas)
+      if (!uri.includes('#') && isJsonContainer(document)) indexSchemaResources(document, { into: held, base: uri });
+  }
+  return resolveSchemaReference(node.$ref, schemaPlace(own ? ctx.resources : held, node).refBase, held);
 }
 
 /**
@@ -1317,11 +1375,12 @@ const ANNOTATED_DATA = new Set(['default', 'examples', 'example']);
  * The instance references a document holds, read once: whether one may
  * read anywhere (from the root, a `$query`, or one below `propertyNames`
  * or `contentSchema`, whose value is no place of the instance), and the
- * most levels one climbs.
- * @param {unknown} document
+ * most levels one climbs; in the documents the checking validator holds
+ * that a reference reaches too ({@link referenced}).
+ * @param {unknown} document @param {any} ctx
  * @returns {{ rooted: boolean, climb: number }}
  */
-function documentReads(document) {
+function documentReads(document, ctx) {
   let rooted = false;
   let climb = -1;
   const seen = new Set();
@@ -1353,6 +1412,8 @@ function documentReads(document) {
       else if (TRAVERSE_SCHEMA_OBJECTS.includes(key) || (!VALIDATION_KEYWORDS.includes(key) && !DATA_MEMBERS.has(key)))
         queue.push([member, off]);
     }
+    // and the documents the checking validator holds that a reference reaches
+    if (typeof value.$ref === 'string' && ctx.options.createValidator !== undefined) queue.push([referenced(value, ctx), aside]);
   }
   return { rooted, climb };
 }
@@ -1368,7 +1429,7 @@ function documentReads(document) {
  */
 function readsWholeValue(place, ctx) {
   if (place.whole !== undefined) return place.whole;
-  const reads = ctx.fills.reads ??= documentReads(ctx.document);
+  const reads = ctx.fills.reads ??= documentReads(ctx.document, ctx);
   place.whole = (place === ctx.rootPlace && reads.rooted)
     || place.objects.some((node) => node.enum !== undefined || node.const !== undefined
       || (node.uniqueItems !== undefined && node.uniqueItems !== false))
@@ -1415,8 +1476,8 @@ function climbsTo(place, most, ctx) {
         else push(value, depth + 1);
       }
     }
-    if (typeof node.$ref === 'string') push(refTarget(node, ctx), depth);
-    push(dynamicTargets(node, draftOf(node, ctx), ctx), depth);
+    if (typeof node.$ref === 'string') push(referenced(node, ctx), depth);
+    if (ctx.resources.places.has(node)) push(dynamicTargets(node, draftOf(node, ctx), ctx), depth);
   }
   return false;
 }
@@ -2166,6 +2227,12 @@ function normalizerContext(schema, options) {
       reads: undefined,
       /** @type {Map<object, boolean>} Whether a default lies below each object a guarded place reaches ({@link defaultBelow}) */
       below: new Map(),
+      /** @type {JarenValidator|undefined} The validator the checks run on, once built ({@link checkerOf}) */
+      checker: undefined,
+      /** @type {SchemaResources|undefined} The documents that validator holds, indexed ({@link referenced}) */
+      held: undefined,
+      /** @type {Map<unknown, string>|undefined} Each container's JSON Pointer from the document's root ({@link documentPointer}) */
+      paths: undefined,
     },
     /** @type {Map<object, unknown>} Each `$ref`'s target */
     targets: new Map(),
@@ -2313,9 +2380,9 @@ function admitNormalizeOptions(options) {
  * keeps the defaults below it only where its schemas answer the value as
  * they answer it without them ({@link guardedStep}). The checks run on the
  * validator `createValidator` returns (else one of the normalizer's
- * bounds); a default whose check reaches a document that validator does not
- * hold, or that lies below a target under a keyword no draft defines, is
- * filled as written.
+ * bounds), an instance reference in a document that validator holds read
+ * as one in the document; a default whose check reaches a document that
+ * validator does not hold is filled as written.
  *
  * **Which dialect.** A `$schema` is read by its name: a URI naming a known
  * draft reads as that draft, and any other — a custom dialect — as draft-07.
