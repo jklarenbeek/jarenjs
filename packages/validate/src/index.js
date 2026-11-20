@@ -13,6 +13,8 @@ import {
   storeSchemaIdsInMap,
   withParsedPointers,
   restoreSchemaRefsInMap,
+  reachedKeys,
+  placeAt,
   isRefCycleError,
   RefCycleError,
   assertRootReadsInstance,
@@ -431,14 +433,7 @@ function dialectVocabularies(uri, schemas, formatOption, contentOption, draftVer
  * @returns {any}
  */
 function placeOf(drafts, schemas, path, schema) {
-  let place = schema;
-  if (!drafts.has(place)) {
-    const pointer = path.indexOf('#/');
-    place = schemas.get(pointer === -1 ? path : path.slice(0, pointer + 1));
-    if (pointer !== -1)
-      for (const part of decodeJsonPointerPath(path.slice(pointer + 1))) place = place?.[part];
-  }
-  return place;
+  return drafts.has(schema) ? schema : placeAt(schemas, path);
 }
 
 /**
@@ -794,8 +789,11 @@ export class ValidationRoot {
    *   dialect a `$schema` URI names switches on; a place under a `$schema`
    *   compiles under it ({@link ValidationRoot#optionsAt}). Without it, every
    *   place compiles under `opts`
+   * @param {Map<string, any>} [held] - The schemas of the owner that `schemas`
+   *   was copied from, for a compile on a validator that holds some: their
+   *   features are scanned once per held set, not by every compile
    */
-  constructor(origin, schemas, formats, opts = new ValidationOptions(), traverse = new TraverseOptions, owner = null, vocabularies = undefined) {
+  constructor(origin, schemas, formats, opts = new ValidationOptions(), traverse = new TraverseOptions, owner = null, vocabularies = undefined, held = undefined) {
     const schema = schemas.get(origin);
     this.#rootOrigin = origin;
     this.#schemas = schemas;
@@ -823,11 +821,24 @@ export class ValidationRoot {
     // short-circuiting at the first failure, so it only holds in
     // skipErrors mode (see #unevaluatedForcesTracking).
     const flags = { dollarData: false, unevaluated: false, dynamic: false, canElide: opts.skipErrors === true };
-    const seen = new Set();
-    for (const value of schemas.values()) {
-      ValidationRoot.#scanSchemaFeatures(value, seen, flags, opts.propertyDependencies === true);
-      if (flags.dollarData && flags.unevaluated && flags.dynamic) break;
+    const mapMaps = opts.propertyDependencies === true;
+    /** @param {typeof flags} found @param {Map<string, any>} entries */
+    const scan = (found, entries) => {
+      const seen = new Set();
+      entries.forEach((value, id) => {
+        // every feature found ends the scan; what the validator holds was scanned for its held set
+        if (!(found.dollarData && found.unevaluated && found.dynamic) && (found !== flags || held?.get(id) !== value))
+          ValidationRoot.#scanSchemaFeatures(value, seen, found, mapMaps);
+      });
+    };
+    if (held !== undefined && this.#places !== undefined) {
+      // the compile's reach made it (`reachedKeys`)
+      const kept = /** @type {import('./traverse.js').HeldKept} */ (this.#places.kept);
+      // (one validator compiles under one set of the options the scan reads)
+      if (kept.scan === undefined) scan(kept.scan = { ...flags }, held);
+      Object.assign(flags, kept.scan);
     }
+    scan(flags, schemas);
     this.#usesDollarData = flags.dollarData;
     // Recording runs every branch of an `anyOf` (each passing branch has
     // annotations to report), which annotation tracking already does.
@@ -2302,7 +2313,7 @@ export class JarenValidator {
   /** @type {TraverseOptions} The traversal options, carrying the `propertyDependencies` switch of the validation options */
   #traverse = new TraverseOptions();
   /** @type {import('./traverse.js').SchemaPlaces} What the walks read at each registered schema's place */
-  #places = { drafts: new WeakMap(), refBases: new WeakMap(), keptRefs: new Set(), unread: new Map(), undecidedBases: new WeakMap(), lateTargets: new Set(), foreign: new WeakSet(), dialects: new WeakMap(), dialectUris: new WeakMap(), contested: new Map() };
+  #places = { drafts: new WeakMap(), refBases: new WeakMap(), keptRefs: new Set(), unread: new Map(), undecidedBases: new WeakMap(), lateTargets: new Set(), foreign: new WeakSet(), dialects: new WeakMap(), dialectUris: new WeakMap(), contested: new Map(), refs: new WeakMap(), idBases: new WeakMap(), kept: undefined };
   /** @type {Map<string, string>} The key of the document each registered identifier came from */
   #registeredIn = new Map();
   /** @type {WeakSet<object>} The documents `addSchema` registered under a key of their own */
@@ -2388,13 +2399,21 @@ export class JarenValidator {
    * @param {import('./traverse.js').SchemaPlaces} [places] - Where the walks record what each place reads
    * @param {boolean} [namesDocument] - Whether a root `$id` with a fragment also names the
    *   document: a compile's own map, which no later compile reads
-   * @returns {{origin:string, map: Map}}
+   * @param {import('./traverse.js').SchemaPlaces} [records] - Where the walks record what each
+   *   reference asks for and the base of each identifier: `places` for a compile, the
+   *   validator's for a meta-schema, which is walked without `places`
+   * @returns {{origin:string, map: Map, reached: Map<string, string>|undefined}} The document's
+   *   id, the schemas, and, for a compile on a validator that holds schemas, what it reaches of them
    */
-  static #traverseSchema(schema, schemas = undefined, fromMap = undefined, opts = new TraverseOptions(), places = undefined, namesDocument = false) {
+  static #traverseSchema(schema, schemas = undefined, fromMap = undefined, opts = new TraverseOptions(), places = undefined, namesDocument = false, records = places) {
     // initialize schema map for all ids and refs
     const schemaMap = new Map(fromMap);
     /** The first `$ref` of the document naming each target, where a refusal to resolve it is located. */
     const sites = new Map();
+    // What the references of a compile's documents ask for is recorded apart
+    // from what the registered documents' do, which is kept per held set,
+    // and only where the validator holds schemas the compile may not reach.
+    const refs = fromMap ? fromMap.size ? new Map() : undefined : records?.refs;
     // The schema's document is read under the draft `compile` reads it
     // under: the one it declares, draft-07 when it declares none.
     const origin = storeSchemaIdsInMap(
@@ -2407,7 +2426,9 @@ export class JarenValidator {
       detectSchemaDraft(schema, schemaMap),
       undefined,
       undefined,
-      sites);
+      sites,
+      refs,
+      records?.idBases);
     // A root `$id` with a fragment (`#root`, `…/s.json#root`) names the
     // document too: its pointers resolve against the URI before the
     // fragment, as `addSchema(document, key)` holds it under the key. The URI
@@ -2429,13 +2450,26 @@ export class JarenValidator {
         ref,
         opts,
         undefined,
-        places));
+        places,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        refs,
+        records?.idBases));
     }
 
-    // make sure all schemas are connected, as this compile reads them
-    restoreSchemaRefsInMap(schemaMap, opts, places, detectSchemaDraft(schema, schemaMap), sites);
+    // What this compile reaches of the schemas the validator holds: its own
+    // documents are read whole, a held schema only where a reference leads.
+    // (the map of a compile's own records: one that holds schemas, and has its places)
+    const reached = refs instanceof Map
+      ? reachedKeys(Array.isArray(schemas) ? [schema, ...schemas] : [schema], refs, /** @type {import('./traverse.js').SchemaPlaces} */ (places), /** @type {Map<string, any>} */ (fromMap))
+      : undefined;
 
-    return { origin: origin, map: schemaMap };
+    // make sure the schemas this compile reads are connected
+    restoreSchemaRefsInMap(schemaMap, opts, places, detectSchemaDraft(schema, schemaMap), sites, reached);
+
+    return { origin: origin, map: schemaMap, reached };
   }
 
   /**
@@ -2464,6 +2498,7 @@ export class JarenValidator {
       schema.forEach((s, index) => this.addSchema(s, key ? `${key}[${index}]` : undefined));
     }
     else if (isBoolOrObjectClass(schema)) {
+      this.#places.kept = undefined;
       const document = this.#heldDocument(schema, key);
       if (document !== schema) this.#originals.set(document, schema);
       schema = document;
@@ -2630,7 +2665,7 @@ export class JarenValidator {
         if (twice === undefined || this.#samePlace(twice.id, twice.first, twice.second)) return;
         const names = `in '${documentName(baseUri)}', at '${twice.firstAt ?? '#'}' and at '${twice.secondAt}'`;
         contested.set(twice.id, names);
-      }, this.#schemas);
+      }, this.#schemas, undefined, this.#places.refs, this.#places.idBases);
     } catch (_e) {
       // the document's own `$id` (see above)
     }
@@ -2789,17 +2824,19 @@ export class JarenValidator {
       'unknownFormats', 'ignore'), 'outputFormat', undefined);
     if (Array.isArray(schema)) {
       const [first, ...siblings] = schema;
-      const { origin, map } = JarenValidator.#traverseSchema(first, siblings, undefined, new TraverseOptions(key));
+      const { origin, map } = JarenValidator.#traverseSchema(first, siblings, undefined, new TraverseOptions(key), undefined, false, this.#places);
       const compiled = JarenValidator.#compileSchema(this, origin, map, validation);
       this.#metaSchemas.set(origin, compiled);
       mergeMap(this.#schemas, map);
     }
     else if (isBoolOrObjectClass(schema)) {
-      const { origin, map } = JarenValidator.#traverseSchema(schema, undefined, undefined, new TraverseOptions(key));
+      const { origin, map } = JarenValidator.#traverseSchema(schema, undefined, undefined, new TraverseOptions(key), undefined, false, this.#places);
       const compiled = JarenValidator.#compileSchema(this, origin, map, validation);
       this.#metaSchemas.set(origin, compiled);
       mergeMap(this.#schemas, map);
     }
+    // what was kept of the held schemas ends here
+    this.#places.kept = undefined;
     return this;
   }
 
@@ -2874,24 +2911,28 @@ export class JarenValidator {
    * @returns {object|undefined}
    */
   static #referenceHopAt(schemas, id, traverse) {
-    const pointer = id.indexOf('#/');
-    let node = schemas.get(id.slice(0, pointer + 1));
-    for (const part of decodeJsonPointerPath(id.slice(pointer + 1))) node = node?.[part];
+    const node = placeAt(schemas, id);
     return isReferenceHop(node, traverse) ? node : undefined;
   }
 
-  static #precompileRefs(root, schemas, origin) {
-    // Pre-create validation objects for all refs in the schemas map
+  static #precompileRefs(root, schemas, origin, places, held = undefined, reached = undefined) {
+    // Pre-create validation objects for the refs in the schemas map
     // This moves ref resolution from validation time to compile time
+
+    // Of the schemas the validator holds, only the ones this compile reaches
+    // are built. A held schema whose identifier is no URI reference is among
+    // them for every compile (`reachedKeys`): the first pass refuses it.
+    /** @param {string} id @param {any} schema @returns {boolean} Whether the entry is a held schema this compile does not reach */
+    const unreached = (id, schema) => held?.get(id) === schema && !/** @type {Map<string, string>} */ (reached).has(id);
 
     // First pass: Create objects for schemas with $id (canonical paths)
     // These establish the base URIs for their descendants
     for (const [id, schema] of schemas.entries()) {
+      // Skip null placeholders, and what this compile does not reach
+      if (schema == null || unreached(id, schema)) continue;
+
       // Skip if already compiled
       if (root.unresolvedObject(id) !== null) continue;
-
-      // Skip null placeholders
-      if (schema == null) continue;
 
       // Only process schemas with $id that are stored under their $id path
       // (not JSON pointer paths)
@@ -2921,11 +2962,11 @@ export class JarenValidator {
     /** Spellings without the fragment whose `#` spelling was not built yet when they were reached */
     const unaliased = [];
     for (const [id, schema] of schemas.entries()) {
+      // Skip null placeholders, and what this compile does not reach
+      if (schema == null || unreached(id, schema)) continue;
+
       // Skip if already compiled
       if (root.unresolvedObject(id) !== null) continue;
-
-      // Skip null placeholders
-      if (schema == null) continue;
 
       // Skip schemas without $id that aren't refs - they're subschemas
       // that will be reached through traversal from a parent
@@ -2957,39 +2998,21 @@ export class JarenValidator {
         const pointer = id.substring(hashIndex + 1);
         const pointerParts = pointer.split('/').filter(p => p);
 
-        const rootId = baseDoc + '#';
-        const rootSchema = schemas.get(rootId);
-
-        // Check if the root schema has an $id that matches the baseDoc.
-        // If so, the baseDoc is already the resolved $id and we shouldn't
-        // apply $id resolution during traversal (that would double-resolve).
-        let rootIdMatchesBaseDoc = false;
-        const rootIdentifier = root.identifierOf(rootSchema);
-        if (rootIdentifier !== undefined) {
-          const { id: resolvedRootId } = createJsonPointer(rootIdentifier, origin, undefined, rootSchema.$id ? '$id' : 'id', keywordLocation(rootId, rootSchema.$id ? '$id' : 'id'));
-          const resolvedRootBase = resolvedRootId.endsWith('#') ? resolvedRootId.slice(0, -1) : resolvedRootId;
-          if (baseDoc === resolvedRootBase) {
-            rootIdMatchesBaseDoc = true;
-          }
-        }
-
-        let currentSchema = rootSchema;
+        let currentSchema = schemas.get(baseDoc + '#');
         let currentBaseUri = baseDoc;
 
-        // Traverse and find the nearest $id ancestor
+        // Traverse and find the nearest $id ancestor. Each identifier is
+        // read against the base the walk that registered its object read
+        // it against (the root's then names the document again), or, for
+        // an object no walk identified, against the base so far.
         for (let i = 0; i < pointerParts.length && currentSchema; i++) {
           const part = pointerParts[i];
 
           // Check if current schema has $id (before moving to child)
           const currentIdentifier = root.identifierOf(currentSchema);
           if (currentIdentifier !== undefined) {
-            const isRootSchema = (i === 0);
-            const shouldApplyId = !isRootSchema || !rootIdMatchesBaseDoc;
-
-            if (shouldApplyId) {
-              const { id: resolvedId } = createJsonPointer(currentIdentifier, currentBaseUri, undefined, currentSchema.$id ? '$id' : 'id');
-              currentBaseUri = resolvedId.endsWith('#') ? resolvedId.slice(0, -1) : resolvedId;
-            }
+            const { id: resolvedId } = createJsonPointer(currentIdentifier, places.idBases.get(currentSchema) ?? currentBaseUri, undefined, currentSchema.$id ? '$id' : 'id');
+            currentBaseUri = resolvedId.endsWith('#') ? resolvedId.slice(0, -1) : resolvedId;
           }
 
           // Move to next level - handle both direct properties and definitions/$defs
@@ -3001,41 +3024,11 @@ export class JarenValidator {
 
         baseUri = currentBaseUri;
       } else if (hasId && isCanonicalPath) {
-        // Canonical $id path that wasn't handled in first pass
-        // This happens when the $id is relative and resolves differently
-        // than against the origin. We need to find the correct base URI.
-
-        // Find any schema in the map that has this schema as a descendant
-        // and use its $id as the base
-        for (const [candidateId, candidateSchema] of schemas.entries()) {
-          if (!candidateSchema || candidateSchema === schema) continue;
-
-          // Check if candidate is an ancestor by checking if our id starts with candidate's path
-          if (isJsonPointerPath && id.startsWith(candidateId.replace('#', '#/') + '/')) {
-            // A descendant of a JSON pointer path is no base for our $id: skip it
-            continue;
-          }
-
-          // If candidate has an $id, it could be our base
-          const candidateIdentifier = root.identifierOf(candidateSchema);
-          if (candidateIdentifier !== undefined) {
-            // Try resolving our $id against this candidate's resolved $id
-            const { id: candidateResolvedId } = createJsonPointer(candidateIdentifier, origin, undefined, candidateSchema.$id ? '$id' : 'id');
-            const candidateBase = candidateResolvedId.endsWith('#') ? candidateResolvedId.slice(0, -1) : candidateResolvedId;
-
-            try {
-              const { id: testResolvedId } = createJsonPointer(identifier, candidateBase, undefined, schema.$id ? '$id' : 'id');
-              const testResolvedIdWithHash = testResolvedId.endsWith('#') ? testResolvedId : testResolvedId + '#';
-
-              if (id === testResolvedIdWithHash || id === testResolvedId) {
-                baseUri = candidateBase;
-                break;
-              }
-            } catch (_e) {
-              // Invalid URL, skip this candidate
-            }
-          }
-        }
+        // Canonical $id path that wasn't handled in first pass: a relative
+        // $id, which names another URI when it is read against the origin.
+        // It is read against the base the walk that registered the object
+        // read it against.
+        baseUri = places.idBases.get(schema) ?? origin;
       }
 
       try {
@@ -3108,7 +3101,9 @@ export class JarenValidator {
    */
   #compileDocument(schema, schemas) {
     schema = JarenValidator.#withResolvedRootId(schema, this.#traverse);
-    const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#traverse, this.#places, true);
+    const { origin, map, reached } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#traverse, this.#places, true);
+    /** The schemas the validator holds, where this compile reads only what it reaches of them. */
+    const held = reached === undefined ? undefined : this.#schemas;
 
     // Detect draft version from schema and update validation options
     const draftVersion = detectSchemaDraft(schema, map);
@@ -3161,11 +3156,12 @@ export class JarenValidator {
       validationOptions,
       this.#traverse,
       this,
-      vocabularies
+      vocabularies,
+      held
     );
 
-    // Pre-create validation objects for all refs
-    JarenValidator.#precompileRefs(root, map, origin);
+    // Pre-create validation objects for the refs this compile reaches
+    JarenValidator.#precompileRefs(root, map, origin, this.#places, held, reached);
 
     // Re-compile with the pre-populated root
     return JarenValidator.#compileSchemaWithRoot(this, origin, map, root);

@@ -148,9 +148,12 @@ describe('a fill the validator accepts is kept', () => {
     assert.deepEqual(unfilledDefaults(schema, { useDefaults: true }), new Map());
   });
 
-  it('a document the validator cannot compile alone (a reference to another document) fills as written', () => {
+  it('a group the validator cannot compile (a reference to another document) fills as written, and no other group', () => {
+    // `a` reads a document nothing holds: its group does not compile, and its default fills as written. `b`
+    // stands alone: its group compiles on the same validator, which reads only what a compile reaches, so
+    // its default is decided, and one its place refuses is left out
     const schema = { $schema: D20, properties: { a: { $ref: 'https://other.test/x.json', default: 1 }, b: { type: 'integer', default: 'x' } } };
-    assert.deepEqual(compileNormalizer(schema, { useDefaults: true })({}), { a: 1, b: 'x' });
+    assert.deepEqual(compileNormalizer(schema, { useDefaults: true })({}), { a: 1 });
     const counted = { $schema: D20, properties: { a: { default: 1 }, r: { $ref: 'https://other.test/x.json' } }, maxProperties: 0 };
     assert.deepEqual(compileNormalizer(counted, { useDefaults: true })({}), { a: 1 });
   });

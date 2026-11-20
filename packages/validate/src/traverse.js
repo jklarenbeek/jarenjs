@@ -303,6 +303,40 @@ function atFragment(uri) {
  *   registered places declare, each with what names both: a compile that
  *   reads one is refused (`JK0012`), as it would answer by whichever place
  *   was registered first
+ * @property {WeakMap<object, string[]|null>} refs - For a schema object of a
+ *   registered document that holds a reference (`$ref`, `$dynamicRef`,
+ *   `$recursiveRef`): the place of its `$ref`, then the targets a compile
+ *   that builds the object asks for; `null` where they are not known, and a
+ *   compile that reaches the object reads every schema the validator holds
+ * @property {WeakMap<object, string>} idBases - For an identified schema
+ *   object, the base its identifier was read against: a compile that builds
+ *   the object as a reference target reads it against the same
+ * @property {HeldKept} [kept] - What is kept of the schemas the validator
+ *   holds, dropped by the next registration
+ */
+
+/**
+ * What is kept of the schemas a validator holds until the next registration:
+ * none of it depends on the compile that reads it.
+ * @typedef {object} HeldKept
+ * @property {Map<string, any>} at - The value each held key, and each
+ *   target met in a held schema, names where it is written ({@link placeAt})
+ * @property {Map<object, string[]>} names - The held keys naming each
+ *   schema object
+ * @property {Map<object, string[]|null>} below - For a schema object a key
+ *   names: what a compile that reaches it reaches next ({@link reachBelow})
+ * @property {Map<object, object>} above - For each held schema object, the
+ *   nearest one above it that a key names
+ * @property {Map<string, object[]>} builders - Per target, the named
+ *   objects whose compile may build it at once: the ones at or above a lone
+ *   `$ref` to it at an item position (the item shortcut resolves such a
+ *   reference, to the end of the chain it starts, when its holder
+ *   compiles), and the ones that are a `$ref` to it themselves (a link of
+ *   such a chain)
+ * @property {{ dollarData: boolean, unevaluated: boolean, dynamic: boolean, canElide: boolean }} [scan] -
+ *   The features of the held schemas (`ValidationRoot`)
+ * @property {string} [fault] - The key of the first held schema whose
+ *   identifier is no URI reference: every compile reaches it, and is refused
  */
 
 /**
@@ -382,9 +416,15 @@ export function keptRefBase(places, schema, reading) {
  *   by that meta-schema's own `$schema`
  * @param {Map<string, string>} [sites] - Where to record the first `$ref` of
  *   the document naming each target (its location in the document)
+ * @param {Map<object, string[]|null>|WeakMap<object, string[]|null>} [refs] -
+ *   Where to record, for each object holding a reference, the place of its
+ *   `$ref` and the targets a compile that builds it asks for
+ *   ({@link SchemaPlaces})
+ * @param {WeakMap<object, string>} [idBases] - Where to record the base each
+ *   identifier was read against ({@link SchemaPlaces})
  * @returns {string} The document's own id
  */
-export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPointerOptions(), onReference = undefined, places = undefined, defaultDraft = null, onFault = undefined, held = undefined, sites = undefined) {
+export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPointerOptions(), onReference = undefined, places = undefined, defaultDraft = null, onFault = undefined, held = undefined, sites = undefined, refs = undefined, idBases = undefined) {
   if (!isObjectClass(schema)) {
     const { id } = createJsonPointer(baseUri, undefined, opts);
     schemas.set(id, schema);
@@ -405,6 +445,8 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     schemas.set(rootUri, schema);
   }
 
+  /** The base the root's `$id` was read against. */
+  const given = baseUri;
   baseUri = rootUri;
 
   /**
@@ -510,6 +552,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       }
       if (!declare(id, obj, path, idName))
         continue;
+      idBases?.set(obj, obj === schema && idName === '$id' ? given : base);
 
       // CHECK: Also store under alternate ID (with/without # suffix) for absolute URIs only
       if (!id.startsWith('#')) {
@@ -597,6 +640,33 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       // parent object (like definitions) even if this one has a $ref.
       // The $ref just means we don't traverse INTO this object's properties,
       // but siblings should still be processed.
+    }
+
+    // What a compile that builds this object asks for: the place of its
+    // `$ref`, then the target each of its references names, read against
+    // the base its identifier sets and against the one it leaves. Where a
+    // reference is no URI reference, or the object was recorded with other
+    // targets (two documents hold it under two bases), they are not known.
+    if (refs !== undefined && (reference !== undefined || isStringType(obj.$dynamicRef) || isStringType(obj.$recursiveRef))) {
+      /** @type {string[]|null} */
+      let asked = null;
+      if (reference === undefined || target !== undefined) {
+        // the place names a registered document's reference; a compile's own are located by `sites`
+        asked = [referenceAt === undefined || refs instanceof Map ? '' : withoutFragment(rootUri) + referenceAt];
+        try {
+          for (const keyword of REFERENCE_KEYWORDS) {
+            if (!isStringType(obj[keyword])) continue;
+            const text = schemaReference(obj, keyword);
+            asked.push(createJsonPointer(text, baseUri, opts).id);
+            if (base !== baseUri) asked.push(createJsonPointer(text, base, opts).id);
+          }
+        }
+        catch (_e) {
+          asked = null;
+        }
+      }
+      const known = refs.get(obj);
+      refs.set(obj, known === undefined || String(known) === String(asked) ? asked : null);
     }
 
     // iterate through all properties
@@ -827,7 +897,8 @@ export function locatedRefusal(error, place) {
 export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new JsonPointerOptions(), places = undefined, tentative = false) {
   const { id: base, leftUri, fragment } = createJsonPointer(refUri, baseUri, opts);
   const id = base;
-  if (!schemas.has(leftUri)) {
+  // a URI only a reference names (a `null` placeholder) holds no schema
+  if (schemas.get(leftUri) == null) {
     if (tentative) return undefined;
     throw unresolvedReference(id);
   }
@@ -846,7 +917,7 @@ export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new Jso
   if (!fragment.startsWith('/')) {
     // The anchor could be stored as just the fragment (e.g., "#foo") or as a full URI
     // Try the full id first (which includes the base URI)
-    if (schemas.has(base)) {
+    if (schemas.get(base) != null) {
       refuseContested(places, base);
       return { id: base, schema: schemas.get(base) };
     }
@@ -928,8 +999,158 @@ export function isRefCycleError(error) {
   return error instanceof RefCycleError;
 }
 
+/** The keywords whose value names another schema. */
+const REFERENCE_KEYWORDS = /** @type {const} */ (['$ref', '$dynamicRef', '$recursiveRef']);
+
 /**
- * Resolve every `null` placeholder the walks left in `schemas`.
+ * The value a schema id names where it is written: the entry of its
+ * document walked by its JSON Pointer, or its own entry where it has none.
+ * @param {Map<string, any>} schemas
+ * @param {string} id - A resolved reference, or a key of the map
+ * @returns {any}
+ */
+export function placeAt(schemas, id) {
+  const pointer = id.indexOf('#/');
+  if (pointer === -1) return schemas.get(id);
+  let node = schemas.get(id.slice(0, pointer + 1));
+  for (const part of decodeJsonPointerPath(id.slice(pointer + 1))) node = node?.[part];
+  return node;
+}
+
+/**
+ * What a compile that reads `start` reaches next: the target of every
+ * reference at and below it, as its walk recorded them, and the keys naming
+ * the registered schema objects met, each followed by the place of the
+ * `$ref` naming it (`''` for none). `null` where a reference no walk
+ * recorded is met (one below a keyword no draft defines, `$ref`-shaped
+ * data), or one whose targets are not known.
+ * @param {any[]} start - The values to read
+ * @param {boolean} held - Whether `start` is one registered schema object:
+ *   another one met below it is left to the keys naming it
+ * @param {{ get(key: object): string[]|null|undefined }} refs - What the walks recorded
+ * @param {Map<object, string[]>} names - The held keys naming each schema object
+ * @param {Map<object, object>} [above] - Where to record `start` as the
+ *   named object above each object read
+ * @param {Map<string, object[]>} [builders] - Where to record `start` as a
+ *   builder of each target it names itself, and of each a lone `$ref` at
+ *   an item position below it names
+ * @returns {string[]|null}
+ */
+function reachBelow(start, held, refs, names, above = undefined, builders = undefined) {
+  /** @type {string[]} */
+  const out = [];
+  const seen = new Set();
+  const stack = start.slice();
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (node === null || typeof node !== 'object' || seen.has(node)) continue;
+    if (seen.size > 0) above?.set(node, start[0]);
+    seen.add(node);
+    if (!Array.isArray(node)) {
+      const keys = names.get(node);
+      if (keys !== undefined) {
+        for (const key of keys) out.push(key, '');
+        if (held && seen.size > 1) continue;
+      }
+      const asked = refs.get(node);
+      if (asked === null || (asked === undefined && (isStringType(node.$ref) || isStringType(node.$dynamicRef) || isStringType(node.$recursiveRef)))) return null;
+      for (let i = 1; asked !== undefined && i < asked.length; i++) out.push(asked[i], asked[0]);
+      for (const item of builders === undefined ? [] : [seen.size > 1 || node, node.items, node.prefixItems].flat()) {
+        const lone = isObjectClass(item) && (item === node || Object.keys(item).length === 1) ? refs.get(item) : undefined;
+        for (let i = 1; lone != null && i < lone.length; i++) builders.set(lone[i], [...builders.get(lone[i]) ?? [], start[0]]);
+      }
+    }
+    for (const value of Object.values(node)) stack.push(value);
+  }
+  return out;
+}
+
+/**
+ * The keys and targets a compile reaches of the schemas a validator holds:
+ * the ones the references of the documents it was handed name, the ones the
+ * references at and below each such target's place name, and the keys
+ * naming every registered schema object on the way, each with the place of
+ * the first `$ref` met naming it (`''` for none). A compile resolves and
+ * builds only those. `undefined` when it meets a reference whose targets
+ * are not known ({@link reachBelow}): it then reads every schema it holds.
+ *
+ * The keys naming a registered schema object that brings one of them into
+ * being are among them too, without what else that object reaches: the one
+ * around it (a place is built as a member of the document around it, at
+ * that document's turn) and the ones that build it at once (a lone `$ref`
+ * at an item position). Built in the order a compile of everything builds
+ * them, each comes into being where it did, so which references are
+ * resolved on first use, and count toward the reference depth bound, does
+ * not change.
+ *
+ * The first held schema whose identifier is no URI reference is among them
+ * for every compile, which the build then refuses (`JK0010`), as it refused
+ * every compile.
+ *
+ * What a registered schema object reaches is read once per held set and
+ * kept in `places.kept` until the next registration.
+ * @param {any[]} roots - The documents the compile was handed
+ * @param {Map<object, string[]|null>} own - What the walks of those documents recorded
+ * @param {SchemaPlaces} places - What the walks of the registered documents read
+ * @param {Map<string, any>} held - The schemas the validator holds
+ * @returns {Map<string, string>|undefined}
+ */
+export function reachedKeys(roots, own, places, held) {
+  let kept = /** @type {Required<HeldKept>|undefined} */ (places.kept);
+  if (kept === undefined) {
+    kept = places.kept = /** @type {Required<HeldKept>} */ ({ at: new Map(), names: new Map(), below: new Map(), above: new Map(), builders: new Map() });
+    for (const [key, value] of held) {
+      const place = placeAt(held, key);
+      kept.at.set(key, place);
+      if (place !== null && typeof place === 'object') kept.names.set(place, [...kept.names.get(place) ?? [], key]);
+      const identifier = identifierOf(value, declaredDraftOf(value, places));
+      try {
+        if (identifier !== undefined) createJsonPointer(identifier, key);
+      }
+      catch (_e) {
+        kept.fault ??= key;
+      }
+    }
+    for (const place of kept.names.keys()) kept.below.set(place, reachBelow([place], true, places.refs, kept.names, kept.above, kept.builders));
+  }
+  const { at, names, below, above, builders } = kept;
+  /** @type {Map<string, string>} */
+  const reached = new Map();
+  if (kept.fault) reached.set(kept.fault, '');
+  /** @type {string[]} */
+  const queue = [];
+  /** @type {string[]|null|undefined} */
+  let next = reachBelow(roots, false, own, names);
+  for (let n = 0; next !== null; n++) {
+    for (let i = 0; i < next.length; i += 2) {
+      if (reached.has(next[i])) continue;
+      reached.set(next[i], next[i + 1]);
+      queue.push(next[i]);
+    }
+    if (n === queue.length) {
+      // the keys added here are read in their turn: what brings them into being is built too
+      for (const key of reached.keys()) {
+        for (const up of [above.get(at.get(key)), ...builders.get(key) ?? []]) {
+          for (const name of names.get(up) ?? []) if (!reached.has(name)) reached.set(name, '');
+        }
+      }
+      return reached;
+    }
+    const id = queue[n];
+    let place = at.get(id);
+    // only a place the held schemas have is kept: a compile's own targets are as many as its compiles
+    if (place === undefined && (place = placeAt(held, id)) !== undefined) at.set(id, place);
+    // a place no key names is read once too; what is no schema object reaches nothing
+    next = below.get(place);
+    if (next === undefined) below.set(place, next = reachBelow([place], true, places.refs, names));
+  }
+  return undefined;
+}
+
+/**
+ * Resolve the `null` placeholders the walks left in `schemas`: every one, or,
+ * for a compile that reaches only some of the schemas its validator holds,
+ * the ones it reaches; the others stay `null`, which reads as not held.
  * @param {Map<string, any>} schemas
  * @param {JsonPointerOptions} [opts]
  * @param {SchemaPlaces} [places] - What the walks read
@@ -937,13 +1158,17 @@ export function isRefCycleError(error) {
  *   declares none under
  * @param {Map<string, string>} [sites] - The `$ref` that names each target in
  *   the compiled document: a refusal to resolve one is located there
+ * @param {Map<string, string>} [reached] - The keys and targets the compile
+ *   reaches ({@link reachedKeys}), each with the place of the `$ref` naming
+ *   it in a registered document: a refusal to resolve one is located there
  * @throws {SchemaCompileError} `JK0008` for a target of a draft-07 `$ref`
  *   whose `$id` does not set its base that nothing resolves, `JK0009` for
  *   any other target nothing resolves
  */
-export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions(), places = undefined, reading = null, sites = undefined) {
+export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions(), places = undefined, reading = null, sites = undefined, reached = undefined) {
   for (const [id, item] of schemas.entries()) {
-    if (item != null)
+    // a target this compile does not reach is left to the compile that does
+    if (item != null || reached?.has(id) === false)
       continue;
 
     // Try to use resolveRefSchemaDeep to flatten ref chains
@@ -967,7 +1192,7 @@ export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions(),
       schemas.set(id, finalSchema);
 
       // Also store under the final ID for direct access if not already present
-      if (finalId !== id && !schemas.has(finalId)) {
+      if (finalId !== id && schemas.get(finalId) == null) {
         schemas.set(finalId, finalSchema);
       }
     } catch (_e) {
@@ -997,7 +1222,7 @@ export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions(),
         }
         const unread = kept ? undefined : places?.unread.get(id);
         throw locatedRefusal(unread !== undefined ? unresolvedReference(id, false, unread)
-          : failure !== undefined && !kept ? failure : unresolvedReference(id, kept), sites?.get(id));
+          : failure !== undefined && !kept ? failure : unresolvedReference(id, kept), sites?.get(id) ?? (reached?.get(id) || undefined));
       }
 
       schemas.set(id, schema);

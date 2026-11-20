@@ -58,12 +58,13 @@ describe('a reference nothing holds is refused JK0009 when the schema compiles',
   for (const [label, schema, place] of [
     ['under an anyOf branch', { anyOf: [{ type: 'string' }, { $ref: 'nope.json' }] }, ' at #/anyOf/1/%24ref'],
     ['under a property', { properties: { a: { $ref: 'nope.json' } } }, ' at #/properties/a/%24ref'],
-    ['in a registered document', null, ''],
+    // a registered document's reference is refused by the compile that reaches it, at the holder's place
+    ['in a registered document', null, ' at https://h.test/b.json#/properties/x/%24ref'],
   ]) {
     it(`${label}, still at compile`, () => {
       const validator = new JarenValidator();
       if (schema === null) validator.addSchema({ $id: 'https://h.test/b.json', properties: { x: { $ref: 'https://h.test/missing.json' } } });
-      assert.deepEqual(refusal(() => validator.compile(schema ?? { type: 'object' })),
+      assert.deepEqual(refusal(() => validator.compile(schema ?? { $ref: 'https://h.test/b.json' })),
         ['JK0009', `JK0009: Can not resolve schema for '${schema === null ? 'https://h.test/missing.json#' : `${BASE}nope.json#`}': ${UNHELD}${place}`]);
     });
   }

@@ -306,7 +306,7 @@ describe('deriveStrictProfile: a value of any shape is carried as JSON text', ()
 
   it('still compiles the original, so a reference only a carrier holds is refused when the profile is derived', () => {
     assert.deepEqual(refusal(() => deriveStrictProfile({ type: 'object', required: ['a'], properties: { a: { items: { $ref: 'https://nowhere.test/x.json' } } } })),
-      ['JK0009', undefined]);
+      ['JK0009', 'jaren-strict:/schema.json#/properties/a/items/%24ref']);
   });
 
   it('carries the schema true as the wrapped value', () => {

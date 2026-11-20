@@ -139,8 +139,10 @@ describe('deriveStrictProfile reads a dialect through the validator it is handed
     const named = { $schema: MINE, id: 'nope', $defs: { t: { type: 'string' } }, type: 'object', properties: { p: { $ref: '#/$defs/t' } } };
     assert.deepEqual([validator.compile(named)({ p: 's' }), validator.compile(named)({ p: 1 })], [true, false]);
     assert.deepEqual(deriveStrictProfile(named, { dialects: validator }).schema.properties, { p: { anyOf: [{ $ref: '#/$defs/t' }, { type: 'null' }] } });
-    // by name, an unknown dialect: the root id names the document, where nothing holds its pointers
-    assert.throws(() => deriveStrictProfile(named), { code: 'JK0009' });
+    // by name, an unknown dialect: the root id names the document, and its pointers are read there, as a
+    // direct compile reads them (a held document answers at every place as the document compiled directly)
+    assert.deepEqual([new JarenValidator().compile(named)({ p: 's' }), new JarenValidator().compile(named)({ p: 1 })], [true, false]);
+    assert.deepEqual(deriveStrictProfile(named).schema.properties, { p: { anyOf: [{ $ref: '#/$defs/t' }, { type: 'null' }] } });
     const member = { $schema: MINE, type: 'object', properties: { a: { id: 'x.json', type: 'string' } } };
     assert.match(deriveStrictProfile(member, { dialects: validator }).schema.properties.a.description, /id "x\.json" is relaxed here/);
     assert.equal(deriveStrictProfile(member).schema.properties.a.description, undefined);

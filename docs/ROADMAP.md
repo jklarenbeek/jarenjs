@@ -116,12 +116,14 @@ delete it or fix it.
   `$defs` unencoded (`https://held.test/root.json#/$defs/a/%24ref`). One
   spelling needs the compiler to carry each object's document pointer; it
   changes `docPath` (an upgrade note).
-- [ ] **A compile refusing a reference of a document registered earlier names
-  no place.** `addSchema({ $id: 'https://h.test/b.json', properties: { x: {
-  $ref: 'https://h.test/missing.json' } } })` then `compile({ type: 'object'
-  })` is refused `JK0009` without a `docPath`: the `$ref` sites are recorded
-  only by the walk of the schema being compiled. Recording them at
-  registration keeps a site per held placeholder on the validator.
+- [ ] **A compile that reads every held schema refuses a held reference
+  without a place.** A compile that reaches a reference no registration
+  records — one below a keyword no draft defines (`x-defs`, an OpenAPI
+  `components`), or `$ref`-shaped data in a `const`, an `enum` or a `default`
+  — reads every schema its validator holds and is refused `JK0009` without a
+  `docPath` for a held reference nothing resolves, whether it reaches that
+  reference or not. Recording what a compile asks for at the places the walks
+  do not enter is the open work.
 - [ ] **A percent-encoded unreserved character is not the character in a
   reference.** `$ref: '#%41'` does not reach `$anchor: 'A'`, nor
   `http://x.test/%61.json` an `$id` of `http://x.test/a.json` (JK0009): URIs
@@ -172,19 +174,22 @@ delete it or fix it.
   that imports `compileNormalizer` carries the validator whether or not it
   fills defaults. A smaller check (shared across the normalizers of one
   document, or skipped where no schema met can refuse) is the open work.
-- [ ] **Deriving a strict profile compiles the held document once per place.**
+- [ ] **Deriving a strict profile compiles once per place.**
   `deriveStrictProfile` decides each place by compiling a `{ $ref }` to it
-  against the held document, so its cost grows with the number of places
-  times the size of the document; one compile of the document, read at each
-  place, is the open work.
+  against the held document. A compile reads what it reaches, so a place costs
+  what it references and the root of the document around it; a place that
+  references most of the document still costs a compile of most of it, once
+  per such place. One compile of the document, read at each place, is the open
+  work.
 - [ ] **A held document without a key whose root `$id` is only a fragment
   refuses its pointers.** `addSchema({ $id: '#root', definitions: { s: { type:
   'string' } }, properties: { a: { $ref: '#/definitions/s' } } })` then
   `compile({ $ref: 'https://github.com/jklarenbeek/jarenjs#root' })` is
-  refused JK0009 (`…jarenjs#/definitions/s`), where `compile` of the document
-  answers. Registering the document under the origin in the validator would
-  make a later compile of a document without `$id` refused JK0012 (it answers
-  today), so it was left.
+  refused JK0009 (`…jarenjs#/definitions/s`, at
+  `…jarenjs#/properties/a/%24ref`), where `compile` of the document answers.
+  Registering the document under the origin in the validator would make a
+  later compile of a document without `$id` refused JK0012 (it answers today),
+  so it was left.
 - [ ] **A dynamic reference keeps instance locations on** — once a `$data`,
   `data` or `$query` reader exists anywhere in the compilation, a `$ref` is
   resolved during the compile-time scan and only a target that reaches a

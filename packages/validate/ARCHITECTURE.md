@@ -221,8 +221,9 @@ compile(schema, schemas)
 ```
 compile()
   ├── Create ValidationRoot(origin, schemaMap, formats, options)
-  ├── #precompileRefs(root, schemaMap, origin)
+  ├── #precompileRefs(root, schemaMap, origin, places, held, reached)
   │     └── For each ref in schemaMap:
+  │           ├── Skip a schema the validator holds that this compile does not reach
   │           ├── Skip if already compiled
   │           ├── An $id's URI without the empty fragment: name the object built under "#"
   │           ├── A pointer to a pure $ref hop: build the hop, not the flattened end
@@ -246,7 +247,7 @@ compile()
 - **Key property**: `#validator` - the compiled function that validates data
 - For refs: `#validator` is the target validator function (direct reference)
 
-**The Critical Optimization**: `#precompileRefs()` iterates through `schemaMap` and creates `ValidationObject` instances for every ref. This moves object creation from validation-time to compile-time. The map holds a chain's end under each pointer to a pure `$ref` hop (`isReferenceHop`); the object under such a pointer is built from the hop itself, so its reference reaches the end under the end's own id, read at the end's place — under the draft that place declares and against its own base — as a `$ref` straight to it reads it. The output formats name each hop from these objects.
+**The Critical Optimization**: `#precompileRefs()` iterates through `schemaMap` and creates `ValidationObject` instances for every ref the compile reaches. This moves object creation from validation-time to compile-time. The compile's own entries are all built; of the schemas the validator holds, only the entries `reachedKeys` (traverse.js) names (see *Reference Resolution System*), so a compile costs what its schema and its references cost, not what the validator holds. A canonical relative `$id`, and the identifiers on the way to a pointer's place, are read against the base the registration walk recorded for their object (`places.idBases`), which is the base a compile of the whole document reads them against. The map holds a chain's end under each pointer to a pure `$ref` hop (`isReferenceHop`); the object under such a pointer is built from the hop itself, so its reference reaches the end under the end's own id, read at the end's place — under the draft that place declares and against its own base — as a `$ref` straight to it reads it. The output formats name each hop from these objects.
 
 ### Phase 4: Validation
 
@@ -497,7 +498,7 @@ sequenceDiagram
     Note over JV: Build schema map with<br/>all $id and $ref locations
 
     JV->>VR: new ValidationRoot(origin, schemas, formats, opts)
-    VR->>VR: Pre-compile all refs
+    VR->>VR: Pre-compile the refs it reaches
 
     VR->>VO: create root ValidationObject
     VO->>VO: compileValidator()
@@ -622,7 +623,7 @@ flowchart TD
 
 ## Reference Resolution System
 
-The `$ref` resolution is one of the most critical performance optimizations. Rather than resolving references at validation time, all references are pre-compiled:
+The `$ref` resolution is one of the most critical performance optimizations. Rather than resolving references at validation time, the references a compile reaches are pre-compiled:
 
 ```mermaid
 flowchart TD
@@ -648,6 +649,54 @@ flowchart TD
     style N fill:#9f9
     style O fill:#ff9
 ```
+
+### What a Compile Reaches
+
+A compile copies the validator's schema map and walks its own schema into the
+copy; it then resolves and builds its own entries, and, of the schemas the
+validator holds, only what it reaches (`reachedKeys`, traverse.js):
+
+- **Recorded at registration.** The walk (`storeSchemaIdsInMap`) records, for
+  each object holding `$ref`, `$dynamicRef` or `$recursiveRef`, the place of
+  its `$ref` and the targets a compile that builds the object asks for, read
+  against the base its identifier sets and against the one it leaves, so both
+  readings of an undeclared document are covered (`places.refs`; a compile's
+  own documents record into a map of that compile); and, for each identified
+  object, the base its identifier was read against (`places.idBases`).
+  `addMetaSchema` records the same, so a held meta-schema is read like any
+  registered document.
+- **Collected per compile.** One descent of the documents the compile was
+  handed, then what each target reaches, gives the keys and targets it
+  reaches, each with the place of the `$ref` naming it. `restoreSchemaRefsInMap`
+  resolves the `null` placeholders among them, in map order, and leaves the
+  others `null`, which every lookup reads as not held; a held reference
+  nothing resolves is thus refused by the compile that reaches it, when it
+  compiles, at that place.
+- **Kept per held set.** `places.kept` holds, until the next `addSchema` or
+  `addMetaSchema`, the object each held key names, the keys naming each
+  object, what each named object reaches next, the named object above each
+  held object, the named objects that build each target when they compile,
+  the features of the held schemas (a compile scans only what it added), and
+  the first held schema whose identifier is no URI reference, which every
+  compile reaches and is refused for (`JK0010`). None of it depends on the
+  compile that reads it; resolution itself stays per compile, under that
+  compile's reading.
+- **Built in the same order.** A reference to a schema already built is
+  called directly; one to a schema not built yet is resolved on first use,
+  and counts toward the depth bound (`JK2001`). So what is built, and when,
+  must not change with what a compile leaves out. The keys naming a
+  registered object that brings a reached one into being are therefore built
+  too, without what else that object reaches: the object around it (a place
+  is built as a member of the document around it, at that document's turn),
+  one holding a lone `$ref` to it at an item position (the item shortcut
+  builds the end of the chain such a reference starts when its holder
+  compiles), and one that is itself a `$ref` to it (a link of such a chain).
+  Each then comes into being where a compile of everything built it.
+- **The fallback.** A reference no walk recorded (below a keyword no draft
+  defines, `$ref`-shaped data in a `const` or an `enum`), or one whose targets
+  are not known (no URI reference; an object two documents hold under two
+  bases), makes the compile that reaches it read every held schema, as every
+  compile did.
 
 ### JSON Pointer Handling
 
@@ -1295,7 +1344,7 @@ Map<string, ValidationObject> {
 | `withoutUnreadVocabularies` / `dialectVocabulary` / `holdDialects` | normalize.js, schema-keywords.js | The document as the validator holding its dialects reads it (no validation keyword where the governing dialect leaves that vocabulary out; `JK0016` for an unimplemented required vocabulary), the one reading of a dialect's `$vocabulary`, and the dialect stubs a reader's own validator holds |
 | `ValidationRoot#optionsAt` / `dialectVocabularies` | index.js | The options a schema object compiles under: the compilation's, with the vocabularies and draft-defaulted assertions of the dialect governing its place |
 | `JarenValidator.compile` | index.js | Main entry point for schema compilation, draft/vocabulary selection |
-| `JarenValidator.#precompileRefs` | index.js | Pre-create ValidationObjects for all refs |
+| `JarenValidator.#precompileRefs` | index.js | Pre-create ValidationObjects for the refs a compile reaches |
 | `ValidationObject.compileValidator` | index.js | Compile validator, ref combination, dynamic-anchor registration |
 | `ValidationRoot.resolveObject` | index.js | Resolve ref to ValidationObject (fallback only) |
 | `ValidationRoot.referencedSchema` | index.js | The id and schema a `$ref` leads to, without building it (the location-reader scan follows references with it) |
@@ -1358,7 +1407,7 @@ document that is (the message then names the step that misses)
 **Check**:
 - Was the schema containing `X` added via `addSchema()`?
 - Is the ref path correct in the schema?
-- After `restoreSchemaRefsInMap`, all refs should have non-null values
+- After `restoreSchemaRefsInMap`, every ref the compile reaches has a non-null value (a held one it does not reach stays `null`)
 - `JK0008` instead: a draft-07 `$ref` beside an `$id` resolves against the
   enclosing base, not the `$id`. In a registered document that declares no
   `$schema` each compile reads it under its own draft: the walk records both
@@ -1416,7 +1465,7 @@ document that is (the message then names the step that misses)
 
 **Check**:
 - Is `#precompileRefs` being called in `compile()`?
-- Are ValidationObjects being created for all refs?
+- Are ValidationObjects being created for the refs the compile reaches (`reachedKeys`)?
 - Verify: `compileValidator` should find targets immediately without fallback
 
 ### Test Interference (tests pass individually but fail together)

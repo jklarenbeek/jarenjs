@@ -901,7 +901,9 @@ below it at `https://x.test/s.json/properties/n` (the document itself at
 under that spelling. It is built once now, so the place of a schema a dynamic
 anchor brings in, `…#/$def-anchor/<n>`, carries another number: `<n>` is a
 running count of the places the compile holds, unique within that compile
-only.*
+only.* *Upgrade: a compile held a place for every schema of its validator; it
+holds the ones it reaches now, so `<n>` is another, smaller number on a
+validator that holds documents the compile does not read.*
 
 Two notes for anyone diffing this against another validator's output. The
 data location is `instancePath`, a **JSON Pointer string** — not the dotted
@@ -1047,6 +1049,37 @@ references in such a document is refused by the compile that reaches it (`JK0001
 not by `addSchema`, so what else it holds answers. *Upgrade: the registration ended at
 such a place, so a compile naming an identifier declared after it was refused `JK0009`
 naming that identifier.*
+
+A compile reads what it reaches of the documents its validator holds: its own schema
+whole, and of each held document the places its references lead to, with what those
+places reference in turn. It resolves those and builds them, with the held schemas that
+bring one of them into being when they compile (the registered document around it, and a
+schema whose `items` is a lone `$ref` to it: each is built without what else it
+references), and nothing else the validator holds, so what a compile costs follows its
+schema and what it references, not how much is held; a document held through
+`addMetaSchema` is read the same way. A held
+document's reference that nothing resolves is therefore refused by the compile that
+reaches it, when it compiles, at the reference's own place: with
+`{ "$id": "https://h.test/b.json", "properties": { "x": { "$ref": "https://h.test/missing.json" } } }`
+held, `compile({ "$ref": "https://h.test/b.json" })` is refused `JK0009` with the `docPath`
+`https://h.test/b.json#/properties/x/%24ref`, and every compile that does not reach it
+answers. Two exceptions read every held schema, as every compile did. A compile that
+reaches a reference no registration could record (one below a keyword no draft defines,
+such as `x-defs`, or `$ref`-shaped data in a `const`, an `enum` or a `default`) is
+refused, without a place, for any held reference nothing resolves. And a registered
+document whose own `$id` is no URI reference still refuses every compile (`JK0010`).
+*Upgrade: every compile read every schema its validator held. One held document with a
+reference nothing resolved therefore refused every later compile on the validator,
+`compile({ "type": "object" })` and `compile(true)` among them, with `JK0009` and no
+`docPath`; so did a held document whose root `$id` is only a fragment and that holds a
+pointer `$ref`, and one whose `$query` holds a schema literal (`JQ0009`, "recursive schema
+compilation"), each for compiles that never read it. Those compiles answer now, and the
+refusal of the compile that does reach the reference names the holder's place. A pointer
+and a whole-document reference to one document nothing holds threw a `TypeError` from
+`compile`; it is `JK0009` at the `$ref`. A held document whose root is named by a
+relative draft-04 `id` (read where its dialect names no draft) was refused `JK0009` when
+referenced as a whole or at a place under its root, its pointers read against the
+compiling schema's URI; it answers as the document compiled directly.*
 
 A reference that resolves to no schema the validator holds — a document nothing
 registered or loaded, or a pointer that misses in a held one — is refused with a

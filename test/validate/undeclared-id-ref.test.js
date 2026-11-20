@@ -68,7 +68,7 @@ describe('a draft-07 compile reads an undeclared document one way', () => {
   it('a target both readings name is still needed when the schema compiles', () => {
     const validator = holding({ $id: ROOT, $defs: { a: { $id: 'a.json', $ref: 'name.json' } } });
     assert.equal(thrown(() => validator.compile({ properties: { p: { $ref: 'https://held.test/a.json' } } })),
-      `JK0009: Can not resolve schema for '${NAME}#': ${UNHELD}`);
+      `JK0009: Can not resolve schema for '${NAME}#': ${UNHELD} at ${ROOT}#/%24defs/a/%24ref`);
   });
 
   it('a loop only the 2019-09 reading makes is no loop for it', () => {
@@ -108,7 +108,7 @@ describe('a 2019-09 compile reads the $id as the base, as before', () => {
 
   it('only the URI draft-07 reads held: refused when it compiles', () => {
     assert.equal(thrown(() => holding(holder(), strings()).compile(schema(D19))),
-      `JK0009: Can not resolve schema for '${SUB_NAME}#': ${UNHELD}`);
+      `JK0009: Can not resolve schema for '${SUB_NAME}#': ${UNHELD} at ${ROOT}#/%24defs/a/%24ref`);
   });
 });
 

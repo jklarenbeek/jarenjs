@@ -118,7 +118,10 @@ describe('compileAsync loads what a schema references', () => {
   it('loads what a schema the validator held references and it does not hold', async () => {
     const validator = new JarenValidator();
     validator.addSchema({ $id: 'https://x.test/held.json', properties: { n: { $ref: 'name.json' } } });
-    assert.throws(() => validator.compile({ type: 'object' }), /Can not resolve schema for 'https:\/\/x.test\/name.json#'/);
+    // a compile that does not reach the held reference answers; the one that reaches it is refused, at the reference
+    assert.equal(validator.compile({ type: 'object' })({}), true);
+    assert.throws(() => validator.compile({ $ref: 'https://x.test/held.json' }),
+      /Can not resolve schema for 'https:\/\/x.test\/name.json#'.* at https:\/\/x\.test\/held\.json#\/properties\/n\/%24ref$/);
     const loader = served({ 'https://x.test/name.json': { type: 'string' } });
     const validate = await compileAsync(validator, { $ref: 'https://x.test/held.json' }, loader);
     assert.deepEqual([validate({ n: 'a' }), validate({ n: 1 })], [true, false]);
