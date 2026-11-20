@@ -101,6 +101,13 @@ const GLOB_TOOLING = 'glob and minimatch under rimraf, c8 (test-exclude), eslint
 const PRISMA = 'deepmerge-ts under prisma\'s config loader, the ORM benchmark rival (benchmark workspace only); '
   + 'the stack exhaustion needs recursive config graphs, unreachable from anything jaren ships';
 
+// the same rival's config loader pins `effect` 3.21.0 exactly (`@prisma/config`);
+// the ReDoS is in effect's Schema.TemplateLiteral regex, which nothing jaren
+// ships reaches, and npm's only fix is prisma 7, another artifact than the
+// one the orm suite measures.
+const PRISMA_EFFECT = 'effect under prisma\'s config loader, the ORM benchmark rival (benchmark workspace only); '
+  + 'the ReDoS is in Schema.TemplateLiteral, unreachable from anything jaren ships; the fix is prisma 7, another artifact than the one measured';
+
 // the ORM benchmark rival: the orm suite measures Drizzle at the version
 // readers actually install; the advisory (identifier escaping in Drizzle's own
 // SQL generation) lives entirely inside the rival's machinery.
@@ -149,6 +156,7 @@ export const KNOWN_TOOLING_ADVISORIES = Object.freeze({
   'GHSA-3g3m-2fjr-6pw4': { package: 'glob', severity: 'moderate', reason: GLOB_TOOLING },
   'GHSA-g3hv-75wg-m249': { package: 'minimatch', severity: 'moderate', reason: GLOB_TOOLING },
   'GHSA-ggr8-5vv4-36mx': { package: 'deepmerge-ts', severity: 'high', reason: PRISMA },
+  'GHSA-7589-6fvf-x4pw': { package: 'effect', severity: 'high', reason: PRISMA_EFFECT },
   'GHSA-gpj5-g38j-94v9': { package: 'drizzle-orm', severity: 'high', reason: DRIZZLE },
   'GHSA-2883-xcg3-v3hh': { package: 'js-yaml', severity: 'high', reason: JS_YAML },
   'GHSA-238p-pmpm-9mq7': { package: 'katex', severity: 'low', reason: KATEX },
