@@ -10,6 +10,7 @@ import {
 
 import {
   getArrayClassMinItems,
+  isComparedDeep,
   undefinedElement,
 } from './tools.js';
 import { isDollarDataRef } from './schema-keywords.js';
@@ -45,10 +46,12 @@ function compileEnum(schemaObj, jsonSchema) {
   const enums = getArrayClassMinItems(jsonSchema.enum, 0);
   if (enums == null) return undefined;
 
+  // `const` and `enum` answer by one relation, core's `equalsDeep`: an
+  // object or a function is listed when a member equals it by that
+  // relation, any other value when the list holds it.
   let hasObjects = false;
   for (let i = 0; i < enums.length; ++i) {
-    const e = enums[i];
-    if (e != null && typeof e === 'object') {
+    if (isComparedDeep(enums[i])) {
       hasObjects = true;
       break;
     }
@@ -56,11 +59,17 @@ function compileEnum(schemaObj, jsonSchema) {
 
   const addError = schemaObj.createErrorHandler(enums, 'enum');
 
+  // `NaN` equals no value, itself included, where `includes` finds it: the
+  // list searched holds none (a hole stays the `undefined` it is read as).
+  const listed = enums.some((e) => e !== e)
+    ? Array.from(enums).filter((e) => e === e)
+    : enums;
+
   if (hasObjects === false) {
     return function validateEnumSimple(data, dataPath) {
       return data === undefined && !undefinedElement
         ? true
-        : enums.includes(data)
+        : listed.includes(data)
           ? true
           : addError(data, dataPath);
     };
@@ -68,8 +77,8 @@ function compileEnum(schemaObj, jsonSchema) {
   else {
     return function validateEnumDeep(data, dataPath) {
       if (data === undefined && !undefinedElement) return true;
-      if (data === null || typeof data !== 'object')
-        return enums.includes(data)
+      if (!isComparedDeep(data))
+        return listed.includes(data)
           ? true
           : addError(data, dataPath);
 

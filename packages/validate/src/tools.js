@@ -56,6 +56,17 @@ export function getBoolOrObjectClass(obj, def = undefined) {
 export function getArrayClassMinItems(obj, len = 1, def = undefined) {
   return (isArrayClass(obj) && obj.length >= len && obj) || def;
 }
+
+/**
+ * Whether `const` and `enum` compare the value by `equalsDeep`: an object
+ * or a function. Any other value equals only itself, and is compared by
+ * identity.
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isComparedDeep(value) {
+  return value !== null && (typeof value === 'object' || typeof value === 'function');
+}
 //#endregion
 
 //#region Schema Helpers
@@ -559,11 +570,13 @@ export function createDataRefCompilers() {
       (data, min) => Object.keys(data).length >= min),
     maxProperties: constraint('maxProperties', isObjectInstance, isNumberType,
       (data, max) => Object.keys(data).length <= max),
+    // as the static forms answer (enum.js): `NaN` is no member of a list
+    // and an object or a function is compared by `equalsDeep`
     enum: constraint('enum', isDefined, Array.isArray,
-      (data, values) => values.includes(data)
-        || (data !== null && typeof data === 'object' && values.some((value) => equalsDeep(value, data)))),
+      (data, values) => (data === data && values.includes(data))
+        || (isComparedDeep(data) && values.some((value) => equalsDeep(value, data)))),
     const: constraint('const', isDefined, isAnyValue,
-      (data, value) => value !== null && typeof value === 'object' ? equalsDeep(value, data) : data === value),
+      (data, value) => data === value || (isComparedDeep(value) && equalsDeep(value, data))),
     format: compileFormat,
   };
 }

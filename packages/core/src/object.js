@@ -1,11 +1,5 @@
 //@ts-check
 
-import {
-  isFn,
-  isScalarType,
-  isBooleanType,
-  isTypedArray,
-} from './index.js';
 import { compareCodePoints, hashContent } from './string.js';
 import { CodedError } from './errors.js';
 import {
@@ -20,139 +14,384 @@ import {
 export { locateCycle, isPastLongestString, isStackExhausted, textTooLong };
 
 const hasOwn = Object.hasOwn;
+const isEnumerable = Object.prototype.propertyIsEnumerable;
 
 /**
- * Deep equality comparison for arbitrary values.
+ * Deep equality comparison for arbitrary values: one relation, the same in
+ * both orders, that tells apart values whose state is not in their members.
  *
- * Generic JavaScript equality: understands Maps, Sets, RegExps, Dates,
- * functions, typed arrays and class instances (prototype constructors
- * must match; an own `constructor` member is data). Not the same as
- * `equalsJson`, which compares JSON values
+ * - A value that is no object equals only itself: a symbol only that
+ *   symbol, `NaN` nothing (itself included), `0` also `-0`. A function
+ *   equals a function of the same text, and no object.
+ * - An object never equals a value that is none: a wrapper object
+ *   (`new String('a')`) is not its primitive.
+ * - Two objects are equal when their prototypes name one constructor (an
+ *   own `constructor` member is data), the state their kind keeps outside
+ *   its members is equal, and their own enumerable members are, each
+ *   compared by this relation. That state is a wrapper's primitive; a
+ *   Date's instant (two invalid Dates are equal); a RegExp's source and
+ *   flags; a Map's entries, keys by identity and values by this relation;
+ *   a Set's members, by identity; a buffer's bytes and the bytes a DataView
+ *   shows; an error's `name`, `message`, `cause` and `errors`; the length
+ *   of an array that is no plain one (a subclass instance, an array of
+ *   another realm). The kind is read from the value: a subclass instance
+ *   and a built-in of another realm are compared by that state too, and an
+ *   object that only inherits from a built-in's prototype, or a Proxy of a
+ *   built-in, by its members alone.
+ * - A plain array is its elements by index (a hole reads as `undefined`)
+ *   and a typed array its elements: named members of either are not read.
+ *
+ * Not read, so two values that differ only there are equal: a
+ * non-enumerable or symbol-keyed member, and state the host keeps to
+ * itself (a private field, the outcome of a Promise, the entries of a
+ * WeakMap, what a Proxy wraps, what a bound function binds).
+ *
+ * Not the same as `equalsJson`, which compares JSON values
  * only and is the hot-path variant — keep both.
  *
- * Past 256 levels the compare keeps its own stack, so a value nested past
- * the host's call stack is compared at any depth. Two values holding
- * cycles compare as the infinite values they unfold to: a pair of
- * containers met again inside its own compare is taken as equal, so the
- * answer is decided by the members that differ, if any (`a = [a]` equals
- * `b = [b]`; `a = [a, 1]` does not equal `b = [b, 2]`).
+ * A pair nested past 256 levels is compared on a stack of the compare's
+ * own, so a value nested past the host's call stack is compared at any
+ * depth. Two values holding cycles compare as the infinite values they
+ * unfold to: a pair of containers met again inside its own compare is
+ * taken as equal, so the answer is decided by the members that differ, if
+ * any (`a = [a]` equals `b = [b]`; `a = [a, 1]` does not equal
+ * `b = [b, 2]`), however many members lead back into the cycle.
  * @param {any} target
  * @param {any} source
  * @returns {boolean}
  */
 export function equalsDeep(target, source) {
-  return equalsDeepAt(target, source, 1);
+  deepWalksLeft = DEEP_WALKS;
+  try {
+    return equalsDeepAt(target, source, 1);
+  }
+  catch (error) {
+    if (error !== PAST_RECURSION) throw error;
+    // the whole pair again, where every pair open on the way down is known
+    return equalsDeepWalk(target, source);
+  }
 }
 
+// The pairs nested past `RECURSIVE_COMPARE_DEPTH` that one compare carries
+// on from where they are, each on a walk of its own: a deep value holds a
+// few. A walk knows only the pairs open below its start, so a cycle that
+// two members lead into is walked once per way of reaching that depth, and
+// those ways double with every level: past this many the compare starts
+// again at its root, on one walk that knows every open pair.
+const DEEP_WALKS = 4;
+let deepWalksLeft = DEEP_WALKS;
+
+// What `equalsDeepAt` throws for a pair nested past `RECURSIVE_COMPARE_DEPTH`
+// once the compare has carried on from `DEEP_WALKS` such pairs.
+const PAST_RECURSION = { nested: 'past the recursive compare' };
+
 /**
- * `equalsDeep` for a pair `depth` containers down from the root.
+ * `equalsDeep` for a pair `depth` containers down from the root, on the
+ * host's stack.
  * @param {any} target
  * @param {any} source
  * @param {number} depth
  * @returns {boolean}
+ * @throws `PAST_RECURSION` for a pair of objects nested deeper than
+ *   `RECURSIVE_COMPARE_DEPTH`, past the first `DEEP_WALKS` of them
  */
 function equalsDeepAt(target, source, depth) {
   if (target === source) return true;
-  // two objects pass every leaf test: only another pair is read by them
-  if (typeof target !== 'object' || typeof source !== 'object' || target === null || source === null) {
-    if (target == null) return false;
-    if (source == null) return false;
-    if (isBooleanType(target)) return false;
-    if (isBooleanType(source)) return false;
+  // only two objects are compared by what they hold: any other value equals
+  // itself alone, but a function, which equals a function of its text
+  if (typeof target !== 'object' || typeof source !== 'object' || target === null || source === null)
+    return typeof target === 'function' && typeof source === 'function' && target.toString() === source.toString();
 
-    if (isFn(target))
-      return isFn(source) && target.toString() === source.toString();
-
-    if (isScalarType(target))
-      return false;
-  }
-
-  if (depth > RECURSIVE_COMPARE_DEPTH)
+  if (depth > RECURSIVE_COMPARE_DEPTH) {
+    if (deepWalksLeft === 0) throw PAST_RECURSION;
+    deepWalksLeft--;
     return equalsDeepWalk(target, source);
+  }
 
   const constructor = Object.getPrototypeOf(target)?.constructor;
   if (constructor !== Object.getPrototypeOf(source)?.constructor)
     return false;
 
-  if (constructor === Object) {
-    const tks = Object.keys(target);
-    const sks = Object.keys(source);
-    if (tks.length !== sks.length)
-      return false;
-    for (let i = 0; i < tks.length; ++i) {
-      const key = tks[i];
-      if (!hasOwn(source, key) || !equalsDeepAt(target[key], source[key], depth + 1))
+  let kind = MEMBERS;
+  if (constructor !== Object) {
+    if (constructor === Array) {
+      if (target.length !== source.length)
         return false;
+      for (let i = 0; i < target.length; ++i) {
+        if (!equalsDeepAt(target[i], source[i], depth + 1))
+          return false;
+      }
+      return true;
     }
-    return true;
-  }
 
-  if (constructor === Map) {
-    if (target.size !== source.size)
-      return false;
-    for (const [key, value] of target) {
-      if (source.has(key) === false)
-        return false;
-      if (!equalsDeepAt(value, source.get(key), depth + 1))
-        return false;
+    kind = equalKind(target, source);
+    if (kind === UNEQUAL) return false;
+    if (kind === TYPED) return true;
+    if (kind === MAP) {
+      for (const [key, value] of Map.prototype.entries.call(target)) {
+        if (!Map.prototype.has.call(source, key) || !equalsDeepAt(value, Map.prototype.get.call(source, key), depth + 1))
+          return false;
+      }
     }
-    return true;
   }
 
-  if (constructor === Array) {
-    if (target.length !== source.length)
-      return false;
-    for (let i = 0; i < target.length; ++i) {
-      if (!equalsDeepAt(target[i], source[i], depth + 1))
-        return false;
-    }
-    return true;
-  }
-
-  if (constructor === Set)
-    return equalSets(target, source);
-
-  if (constructor === RegExp) {
-    return target.toString() === source.toString();
-  }
-
-  // a Date holds its instant in an internal slot, not in a member
-  if (constructor === Date)
-    return Object.is(target.getTime(), source.getTime());
-
-  if (isTypedArray(target))
-    return equalTypedArrays(target, source);
-
-  // we could test for instance of Array, Map and Set in order
-  // to differentiate between types of equality.. but we dont.
   const tkeys = Object.keys(target);
   const skeys = Object.keys(source);
   if (tkeys.length !== skeys.length) return false;
-  if (tkeys.length === 0) return true;
+  if (kind === ERROR && !equalsDeepAt(errorState(target, tkeys), errorState(source, skeys), depth + 1))
+    return false;
   for (let i = 0; i < tkeys.length; ++i) {
     const key = tkeys[i];
-    if (!hasOwn(source, key) || !equalsDeepAt(target[key], source[key], depth + 1))
+    if ((key !== skeys[i] && !isListed(skeys, key, source)) || !equalsDeepAt(target[key], source[key], depth + 1))
       return false;
   }
   return true;
 }
 
 /**
- * Two Sets of the same constructor hold the same members (by identity).
- * @param {Set<any>} target @param {Set<any>} source @returns {boolean}
+ * Whether `key`, an enumerable own key of one object that the other does
+ * not list at the same place, is among the other's enumerable own keys
+ * `names`. An own member the other object keeps non-enumerable is none of
+ * them, whichever of the two is asked. A list of up to 32 names is
+ * searched, which costs less than asking the object; a longer one would
+ * cost its length per key, so the object is asked.
+ * @param {string[]} names
+ * @param {string} key
+ * @param {object} object - the object `names` lists
+ * @returns {boolean}
  */
-function equalSets(target, source) {
-  if (target.size !== source.size)
-    return false;
-  for (const value of target) {
-    if (source.has(value) === false)
+function isListed(names, key, object) {
+  return names.length <= 32 ? names.includes(key) : isEnumerable.call(object, key);
+}
+
+// The kinds of state `equalsDeep` compares besides an object's own
+// enumerable members: none, an error's four members it keeps out of them,
+// the length of an array that is no plain one, a typed array's elements
+// (its members are not read), the bytes a DataView shows, and from `DATE`
+// on the slot of one built-in class of `SlotTables`. `UNEQUAL` stands for
+// two objects of two kinds, or of one kind and two states.
+const UNEQUAL = -1;
+const MEMBERS = 0;
+const ERROR = 1;
+const ARRAY = 2;
+const TYPED = 3;
+const VIEW = 4;
+const DATE = 5;
+const REGEXP = 6;
+const MAP = 7;
+const SET = 8;
+const BUFFER = 9;
+const SHARED = 10;
+const WRAPPER = 11;
+
+/**
+ * A function of a built-in prototype that reads a slot of the object it is
+ * called on and throws for an object without that slot.
+ * @typedef {(this: any) => any} SlotReader
+ */
+
+/**
+ * What `slotKind` tells an object's kind by: `kinds`, the kind each
+ * built-in prototype gives the objects that inherit from it; `tags`, the
+ * kind the tag of a built-in names, by which a value of another realm is
+ * told; `readers`, the slot reader of each kind from `DATE` on (none for
+ * an error: what is compared of it are members); `typedName`, the reader
+ * of a typed array's class name, which answers `undefined` for any other
+ * object.
+ * @typedef {{ kinds: Map<object, number>, tags: Map<string, number>, readers: (SlotReader | null)[], typedName: SlotReader }} SlotTables
+ */
+
+// Built by the first compare that reads a kind, so a bundle that compares
+// nothing carries no table.
+/** @type {SlotTables | undefined} */
+let slotTables;
+
+/**
+ * The getter of an accessor a built-in prototype defines.
+ * @param {object} prototype
+ * @param {string | symbol} name
+ * @returns {SlotReader}
+ */
+function slotGetter(prototype, name) {
+  return /** @type {any} */ (Object.getOwnPropertyDescriptor(prototype, name)).get;
+}
+
+/**
+ * The tables of the built-in classes whose instances keep state in a slot
+ * of their own, outside their members.
+ * @returns {SlotTables}
+ */
+function buildSlotTables() {
+  /** @type {[Function, number, SlotReader | null][]} */
+  const classes = [
+    [Error, ERROR, null],
+    [Date, DATE, Date.prototype.getTime],
+    [RegExp, REGEXP, slotGetter(RegExp.prototype, 'source')],
+    [Map, MAP, slotGetter(Map.prototype, 'size')],
+    [Set, SET, slotGetter(Set.prototype, 'size')],
+    [ArrayBuffer, BUFFER, slotGetter(ArrayBuffer.prototype, 'byteLength')],
+    [Number, WRAPPER, Number.prototype.valueOf],
+    [String, WRAPPER + 1, String.prototype.valueOf],
+    [Boolean, WRAPPER + 2, Boolean.prototype.valueOf],
+    [BigInt, WRAPPER + 3, BigInt.prototype.valueOf],
+    [Symbol, WRAPPER + 4, Symbol.prototype.valueOf],
+  ];
+  // a page that is not cross-origin isolated has no shared buffers
+  if (typeof SharedArrayBuffer === 'function')
+    classes.push([SharedArrayBuffer, SHARED, slotGetter(SharedArrayBuffer.prototype, 'byteLength')]);
+  /** @type {SlotTables} */
+  const tables = {
+    kinds: new Map(),
+    tags: new Map(),
+    readers: [],
+    typedName: slotGetter(Object.getPrototypeOf(Uint8Array.prototype), Symbol.toStringTag),
+  };
+  for (const [constructor, kind, reader] of classes) {
+    tables.kinds.set(constructor.prototype, kind);
+    tables.tags.set(`[object ${constructor.name}]`, kind);
+    tables.readers[kind] = reader;
+  }
+  return tables;
+}
+
+/**
+ * The kind of state an object keeps outside its members, read from the
+ * object itself. The host tells a typed array, a DataView and an array.
+ * Any other kind is that of the first built-in prototype on the object's
+ * chain, so a subclass instance is of its base's kind; a chain that ends
+ * without reaching this realm's `Object.prototype` is a value of another
+ * realm, told by the class its tag names. Either is confirmed by the
+ * kind's slot reader: an object that merely inherits from
+ * `Date.prototype`, and a Proxy of a Date, hold no instant and are of no
+ * kind but their members.
+ * @param {object} value
+ * @returns {number}
+ */
+function slotKind(value) {
+  const tables = slotTables ??= buildSlotTables();
+  if (ArrayBuffer.isView(value))
+    return tables.typedName.call(value) === undefined ? VIEW : TYPED;
+  if (Array.isArray(value))
+    return ARRAY;
+  let proto = Object.getPrototypeOf(value);
+  if (proto === null)
+    return MEMBERS;
+  /** @type {number | undefined} */
+  let kind;
+  do {
+    if (proto === Object.prototype)
+      return MEMBERS;
+    kind = tables.kinds.get(proto);
+    proto = Object.getPrototypeOf(proto);
+  } while (kind === undefined && proto !== null);
+  kind ??= tables.tags.get(Object.prototype.toString.call(value));
+  if (kind === undefined)
+    return MEMBERS;
+  const read = tables.readers[kind];
+  if (read === null)
+    return kind;
+  try {
+    read.call(value);
+    return kind;
+  }
+  catch {
+    return MEMBERS;
+  }
+}
+
+/**
+ * The kind two objects are both of when the state that kind keeps outside
+ * its members is equal, else `UNEQUAL`. Left to the walk, which compares
+ * values at any depth: the values of a Map's entries (its size is compared
+ * here) and an error's four members.
+ * @param {any} target
+ * @param {any} source
+ * @returns {number}
+ */
+function equalKind(target, source) {
+  const kind = slotKind(target);
+  if (kind !== slotKind(source))
+    return UNEQUAL;
+  let equal = true;
+  if (kind >= DATE) {
+    if (kind === REGEXP)
+      equal = RegExp.prototype.toString.call(target) === RegExp.prototype.toString.call(source);
+    else if (kind === BUFFER || kind === SHARED)
+      equal = equalTypedArrays(shownBytes(target, kind), shownBytes(source, kind));
+    else {
+      // a Date's instant, a wrapper's primitive, the size of a Map or a Set:
+      // `slotKind` built the tables and confirmed both objects by this reader
+      const read = /** @type {SlotReader} */ (/** @type {SlotTables} */ (slotTables).readers[kind]);
+      const t = read.call(target);
+      const s = read.call(source);
+      // `NaN` in a wrapper is unlike itself, as outside one; two invalid Dates are one value
+      equal = t === s || (kind === DATE && t !== t && s !== s);
+      if (equal && kind === SET)
+        equal = holdsMembersOf(source, target);
+    }
+  }
+  else if (kind === ARRAY)
+    equal = target.length === source.length;
+  else if (kind === TYPED)
+    equal = equalTypedArrays(target, source);
+  else if (kind === VIEW)
+    equal = equalTypedArrays(shownBytes(target, kind), shownBytes(source, kind));
+  return equal ? kind : UNEQUAL;
+}
+
+// The members an error keeps out of its enumerable ones: its `name` is
+// inherited and the other three are non-enumerable.
+const ERROR_STATE = ['name', 'message', 'cause', 'errors'];
+
+/**
+ * What an error holds at the four members it keeps out of its enumerable
+ * ones, as one value to compare. A member of those names a host made
+ * enumerable (`error.cause = other`) is compared with the error's members,
+ * once: its place here holds nothing.
+ * @param {any} error
+ * @param {string[]} keys - the error's own enumerable keys
+ * @returns {unknown[]}
+ */
+function errorState(error, keys) {
+  const state = [];
+  for (const name of ERROR_STATE)
+    state.push(keys.includes(name) ? undefined : error[name]);
+  return state;
+}
+
+/**
+ * The bytes a buffer holds, or a DataView shows; none where the host
+ * refuses to read them (a detached buffer).
+ * @param {any} value
+ * @param {number} kind
+ * @returns {Uint8Array}
+ */
+function shownBytes(value, kind) {
+  try {
+    return kind === VIEW
+      ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+      : new Uint8Array(value);
+  }
+  catch {
+    return new Uint8Array(0);
+  }
+}
+
+/**
+ * Whether a Set holds every member of another (by identity): two Sets of
+ * one size then hold the same members.
+ * @param {Set<any>} source @param {Set<any>} target @returns {boolean}
+ */
+function holdsMembersOf(source, target) {
+  for (const value of Set.prototype.values.call(target)) {
+    if (!Set.prototype.has.call(source, value))
       return false;
   }
   return true;
 }
 
 /**
- * Two typed arrays of the same constructor hold the same elements.
+ * Two typed arrays hold the same elements.
  * @param {any} target @param {any} source @returns {boolean}
  */
 function equalTypedArrays(target, source) {
@@ -167,9 +406,11 @@ function equalTypedArrays(target, source) {
 
 /**
  * One pair of containers `equalsDeepWalk` compares member by member:
- * `keys` the own enumerable keys of an object, `entries` the entries of a
- * Map, neither for an array; `at` the next key or index.
- * @typedef {{ target: any, source: any, keys: string[] | null, entries: Iterator<[any, any]> | null, at: number }} DeepPair
+ * `entries` the entries of a Map still to compare, `keys` the own
+ * enumerable keys of an object that is no plain array and `others` those
+ * of the object it is compared with, neither for a plain array; `at` the
+ * next key or index, -1 where an error's four hidden members come first.
+ * @typedef {{ target: any, source: any, keys: string[] | null, others: string[] | null, entries: Iterator<[any, any]> | null, at: number }} DeepPair
  */
 
 /**
@@ -182,28 +423,28 @@ function equalTypedArrays(target, source) {
  */
 function openDeepPair(target, source) {
   if (target === source) return true;
-  if (target == null || source == null) return false;
-  if (isBooleanType(target) || isBooleanType(source)) return false;
-  if (isFn(target))
-    return isFn(source) && target.toString() === source.toString();
-  if (isScalarType(target)) return false;
+  if (typeof target !== 'object' || typeof source !== 'object' || target === null || source === null)
+    return typeof target === 'function' && typeof source === 'function' && target.toString() === source.toString();
   const constructor = Object.getPrototypeOf(target)?.constructor;
   if (constructor !== Object.getPrototypeOf(source)?.constructor) return false;
-  if (constructor === Map)
-    return target.size === source.size && { target, source, keys: null, entries: target.entries(), at: 0 };
-  if (constructor === Array)
-    return target.length === source.length && { target, source, keys: null, entries: null, at: 0 };
-  if (constructor === Set) return equalSets(target, source);
-  if (constructor === RegExp) return target.toString() === source.toString();
-  if (constructor === Date) return Object.is(target.getTime(), source.getTime());
-  if (constructor !== Object && isTypedArray(target)) return equalTypedArrays(target, source);
+  let kind = MEMBERS;
+  if (constructor !== Object) {
+    if (constructor === Array)
+      return target.length === source.length && { target, source, keys: null, others: null, entries: null, at: 0 };
+    kind = equalKind(target, source);
+    if (kind === UNEQUAL) return false;
+    if (kind === TYPED) return true;
+  }
   // an object, or any other class instance: its own enumerable members
   const keys = Object.keys(target);
-  return keys.length === Object.keys(source).length && { target, source, keys, entries: null, at: 0 };
+  const others = Object.keys(source);
+  return keys.length === others.length
+    && { target, source, keys, others, entries: kind === MAP ? Map.prototype.entries.call(target) : null, at: kind === ERROR ? -1 : 0 };
 }
 
 /**
- * `equalsDeep` for a pair nested past `RECURSIVE_COMPARE_DEPTH`: the same
+ * `equalsDeep` for a pair nested past `RECURSIVE_COMPARE_DEPTH`, or for a
+ * whole compare that met more than `DEEP_WALKS` of them: the same
  * depth-first compare, on a stack of its own so the nesting it reaches is
  * not the host's. A pair met again while it is still open above is the
  * compare come back to where it was: it is taken as equal, so only a
@@ -224,24 +465,32 @@ function equalsDeepWalk(target, source) {
     let t;
     let s;
     let more = true;
-    if (pair.keys !== null) {
-      if (pair.at < pair.keys.length) {
-        const key = pair.keys[pair.at++];
-        if (!hasOwn(pair.source, key)) return false;
+    if (pair.entries !== null) {
+      const step = pair.entries.next();
+      if (step.done === true) {
+        // the entries are compared: the Map's own members come next
+        pair.entries = null;
+        continue;
+      }
+      const [key, value] = step.value;
+      if (!Map.prototype.has.call(pair.source, key)) return false;
+      t = value;
+      s = Map.prototype.get.call(pair.source, key);
+    }
+    else if (pair.keys !== null && pair.others !== null) {
+      if (pair.at < 0) {
+        pair.at = 0;
+        t = errorState(pair.target, pair.keys);
+        s = errorState(pair.source, pair.others);
+      }
+      else if (pair.at < pair.keys.length) {
+        const key = pair.keys[pair.at];
+        if (key !== pair.others[pair.at] && !isListed(pair.others, key, pair.source)) return false;
+        pair.at++;
         t = pair.target[key];
         s = pair.source[key];
       }
       else more = false;
-    }
-    else if (pair.entries !== null) {
-      const step = pair.entries.next();
-      if (step.done === true) more = false;
-      else {
-        const [key, value] = step.value;
-        if (pair.source.has(key) === false) return false;
-        t = value;
-        s = pair.source.get(key);
-      }
     }
     else if (pair.at < pair.target.length) {
       t = pair.target[pair.at];
@@ -739,12 +988,15 @@ export function compareJsonScalarLt(a, b, orEqual = false) {
 }
 
 /**
- * Check if all items in an array are unique using deep equality.
+ * Check if all items in an array are unique using deep equality: no two
+ * items are equal by `equalsDeep`, so `isUniqueDeepArray([a, b])` is
+ * `!equalsDeep(a, b)` for any two values, in either order.
  *
  * The primitives are compared first, by `===` (`NaN` unlike itself, `-0`
- * like `0`), and never equal an object or a function; then each pair of
- * those by `equalsDeep`, the earlier item first. Up to 8 items are
- * compared pairwise; past 8 the primitives are deduplicated through a Set.
+ * like `0`, a symbol like itself alone), and never equal an object or a
+ * function, as `equalsDeep` has it; then each pair of those by
+ * `equalsDeep`, the earlier item read first. Up to 8 items are compared
+ * pairwise; past 8 the primitives are deduplicated through a Set.
  * @param {any[]} arr - The array to check
  * @returns {boolean} True if all items are unique
  */

@@ -194,7 +194,7 @@ it does not require Node's `Buffer` global.
 ### 🔑 Keywords for array
 
 - maxItems / minItems
-- uniqueItems
+- uniqueItems | _two items repeat when they are equal by the relation `const` and `enum` compare by, whichever comes first: see [Values JSON cannot carry](#values-json-cannot-carry)_
 - items
   - items | as schema or tuple _deprecated in `draft2020`_
   - items | as schema only _new `draft2020`_
@@ -242,6 +242,23 @@ another keyword beside `type`, or through `$ref`, `allOf`, `anyOf`, `enum`,
 
 - enum
 - const
+
+`const`, `enum`, their `$data` and `data` forms, `uniqueItems: true` and the
+`$data` form of `uniqueItems` answer by one relation, `equalsDeep` of
+[`@jarenjs/core`](../core): an instance other than `undefined` is the
+constant, or is listed, exactly when the relation takes the two as equal, and
+two items repeat exactly when it does, in either order of the two and in both
+modes. (An instance that is `undefined` is outside that sentence: the keywords
+for array, above, say how an element holding it is read.) On JSON values it is the
+equality the specification describes: numbers by value, objects by their
+members whatever their order, arrays by position. What it answers for a value
+no JSON text holds (a symbol, a function, a wrapper object, a `Date`, a `Map`)
+is in the table under [Values JSON cannot carry](#values-json-cannot-carry).
+An instance that holds itself is compared as the value it unfolds to, however
+many members lead back into the cycle. *Upgrade: `const`, `enum` and
+`uniqueItems` did not return for an instance holding a cycle that two of its
+members lead back into (`a.x = a; a.y = a`, a tree whose nodes hold their
+parent).*
 
 ### 🔑 Compound keywords
 
@@ -367,9 +384,10 @@ Jaren supports the `data-ref` proposal from json-everything through the `data` k
 
 The refs compile once at schema compile time through the compiled pointer engine of [`@jarenjs/json`](../json) and resolve allocation-free per validation.
 
-Dynamic `const` and `enum` use the same structural object/array equality as
-their static forms. Dynamic string bounds count in the compiler's
-`lengthUnit` (or `useGrapheme`) as well.
+Dynamic `const` and `enum` compare by the same equality as their static forms,
+and a dynamic `uniqueItems` makes the check `uniqueItems: true` makes: one
+relation decides all of them (the keywords for all types, above). Dynamic
+string bounds count in the compiler's `lengthUnit` (or `useGrapheme`) as well.
 
 #### Relative pointer dialect
 
@@ -1401,13 +1419,18 @@ above say how an element holding it is read.)
 
 | Value | `type` | The keywords |
 |---|---|---|
-| `NaN` | no type: neither `number` nor `integer`. *Upgrade: `type: 'number'` with anything beside it (another keyword, a list of names, `nullable`, a `description`) accepted `NaN`; `{ "type": "number", "maxLength": 5 }` and `{ "type": ["number", "string"] }` refuse it now, as `{ "type": "number" }` did.* | the bounds and `multipleOf` refuse it: no comparison with `NaN` holds |
+| `NaN` | no type: neither `number` nor `integer`. *Upgrade: `type: 'number'` with anything beside it (another keyword, a list of names, `nullable`, a `description`) accepted `NaN`; `{ "type": "number", "maxLength": 5 }` and `{ "type": ["number", "string"] }` refuse it now, as `{ "type": "number" }` did.* | the bounds and `multipleOf` refuse it: no comparison with `NaN` holds. `const` and `enum` never hold it, a list with `NaN` in it included, and `uniqueItems` reads two as two items: `NaN` equals no value. *Upgrade: `{ "enum": [NaN] }`, and an `enum` list a `$data` or `data` reference resolves to, accepted `NaN` where `{ "const": NaN }` refused it; each refuses it now.* |
 | `Infinity`, `-Infinity` | `number`, not `integer` | the bounds compare them; `multipleOf` refuses them |
 | `-0` | `number` and `integer` | read as `0` |
 | a `bigint` | `bigint`; neither `number` nor `integer` | the bounds and `multipleOf` compare it |
 | an Array subclass instance, a Proxy of an array, an array of another realm (an iframe, `node:vm`), an array with an own `constructor` member | `array`, as every value `Array.isArray` takes; not `object` | the array keywords apply; the object keywords, `required` included, do not. *Upgrade: with a keyword beside it, `type` and the keyword groups read the instance's `constructor` member: an Array subclass instance or an array of another realm was an `object` and no `array`, so `{ "type": "array", "maxItems": 5 }` refused `Sub.from([1])`, `{ "items": { "type": "string" } }` and `{ "uniqueItems": true }` skipped it, `{ "additionalProperties": false }` refused it for its indexes, and `{ "properties": { "a": {} }, "required": ["a"] }` refused it in the default mode and accepted it collecting errors; the first accepts it now, the next two read its elements and the last two accept it.* |
 | `{ constructor: Array }`, an object whose prototype is an array (`Object.create([])`) | `object`; not `array` | the object keywords apply and no array keyword does, so its `length` is never read. *Upgrade: with a keyword beside it such an object was an `array` and no `object`: `{ "type": "object", "maxProperties": 5 }` refused `{ constructor: Array }` where `{ "type": "object" }` accepted it, and `{ "required": ["a"], "title": "t" }` accepted it where `{ "required": ["a"] }` refused it; each pair answers as its second schema now. The array keywords walked such an object up to its own `length`, so `{ "maxItems": 1 }` refused `Object.setPrototypeOf({ length: 3 }, [])` and an `items` schema over a `length` of `2 ** 53` did not return; both accept such an object now.* |
 | a `Map`, a `Set`, a `Date`, a `RegExp`, a wrapper object (`new Number(1)`, `new String('a')`), a typed array, `arguments`, a class instance, a null-prototype object | `object`; a wrapper is no `number`, `string` or `boolean` and a typed array no `array` | the object keywords read its own members |
+| a symbol | no type | `const` and `enum` hold it as that symbol alone, and `uniqueItems` reads two symbols as two items. *Upgrade: `{ "const": Symbol('a') }` accepted every symbol where `{ "enum": [Symbol('a')] }` accepted that one alone, and the `$data` form of `uniqueItems` read two symbols as one item, repeated.* |
+| a function | no type | `const`, `enum` and `uniqueItems` take it as equal to a function of the same text (`toString()`) and to no object. *Upgrade: `enum` and the `$data` and `data` forms of `const` and `enum` held a function as itself alone where `const` held every function of its text; an object whose prototype is `Function.prototype` equalled every function as the constant and none as the instance.* |
+| a wrapper object beside a primitive, or beside another (`new String('a')`, `new Number(1)`, `Object(1n)`) | | to `const`, `enum` and `uniqueItems` a wrapper never equals a primitive, as it is an `object` to `type`, and two wrappers of one class are equal exactly when their primitives and their own enumerable members are (two `new Number(NaN)` are not). *Upgrade: `{ "const": new String('ab') }` accepted `'ab'` and `{ "const": 'ab' }` refused `new String('ab')`; two `Number` wrappers, or two `Boolean` wrappers, were equal whatever they wrap; the `$data` form of `uniqueItems` read `[new String('a'), 'a']` as repeated and `['a', new String('a')]` as unique. Each of these is unequal, or unique, now.* |
+| two values of one class that keeps state outside its members: a `Date`, a `RegExp`, a `Map`, a `Set`, a typed array, an `ArrayBuffer`, a `DataView`, an error, an instance of a subclass of one | | `const`, `enum` and `uniqueItems` compare them by that state — the instant, the source and flags, the entries (keys by identity), the members (by identity), the elements, the bytes, an error's `name`, `message`, `cause` and `errors` — and, a typed array excepted, by their own enumerable members; an array that is no plain one (an Array subclass instance, an array of another realm) by its length and its members. *Upgrade: two `ArrayBuffer`s, two `DataView`s, two errors of one class, two instances of one subclass of `Map`, `Set` or `Date`, and two such values of another realm (an iframe, `node:vm`) were equal whatever they hold, as were two `Date`s, `RegExp`s, `Map`s or `Set`s of one state whose own members differ, and two Array subclass instances of two lengths holding no element; `{ "uniqueItems": true }` read `[new Error('a'), new Error('b')]` as repeated and reads it as unique now.* |
+| two objects of one class without such state: a class instance, a null-prototype object, a Proxy | | equal to `const`, `enum` and `uniqueItems` when their prototypes name one constructor and their own enumerable members are equal; a non-enumerable or symbol-keyed member, a private field and what a Proxy wraps are not read, so two that differ only there are equal. *Upgrade: an object equalled one that lists another member and holds the first's non-enumerable, in one order only: `{ "const": { "a": 1 } }` accepted `Object.defineProperty({ b: 2 }, 'a', { value: 1 })` and that object as the constant refused `{ a: 1 }`; both refuse now. A Proxy of a `Map` or a `Date` beside the real one made the check throw a `TypeError`; it answers that the two differ.* |
 | an own non-enumerable member | | present, as an enumerable one is, to `required`, to the names `dependentRequired` and a `dependencies` list require, and as the member that triggers `dependentRequired`, `dependentSchemas` and `dependencies`. `minProperties` and `maxProperties` count the members `Object.keys` lists, and `additionalProperties`, `patternProperties`, `propertyNames` and `unevaluatedProperties` read those members only. `properties` reads it where its schema holds no other object keyword than a `required` list and `unevaluatedProperties`, and reads the listed members only beside `additionalProperties`, `patternProperties`, `propertyNames`, `minProperties`, `maxProperties` or a dependency keyword, in both modes alike. *Upgrade: `required` beside `minProperties` or `maxProperties`, the names `dependentRequired` and a `dependencies` list require, and the trigger of the three dependency keywords read such a member as absent: `{ "required": ["a"], "maxProperties": 5 }` refused `Object.defineProperty({}, 'a', { value: 1 })` and accepts it now, and `{ "dependencies": { "a": ["b"] } }` accepted it and refuses it now. Collecting errors, `{ "properties": { "a": false } }` accepted that object where the default mode refused it; both refuse it now.* |
 | an inherited member | | absent: `required`, the dependency keywords and `properties` read own members only |
 | an instance that changes while it is validated (a getter that deletes another member, or throws) | | read in an unspecified order; the two modes may answer differently |

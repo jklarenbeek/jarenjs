@@ -34,7 +34,7 @@
  */
 
 import {
-  equalsDeep,
+  isUniqueDeepArray,
 } from '@jarenjs/core/object';
 
 import {
@@ -82,15 +82,8 @@ function compileDollarDataUniqueItems(schemaObj, ref) {
     const shouldBeUnique = resolveRef(dataRoot, dataPath);
     if (shouldBeUnique === JSONPOINTER_NOTHING || !shouldBeUnique) return true;
 
-    // Check for duplicates using deep equality
-    for (let i = 0; i < data.length; i++) {
-      for (let j = i + 1; j < data.length; j++) {
-        if (equalsDeep(data[i], data[j])) {
-          return addError(data, dataPath);
-        }
-      }
-    }
-    return true;
+    // the check `uniqueItems: true` makes
+    return isUniqueDeepArray(data) || addError(data, dataPath);
   };
 }
 

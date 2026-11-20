@@ -311,17 +311,6 @@ delete it or fix it.
   holding `undefined` is sent as `null` and so fails `type` (the array
   section of packages/validate/README.md). Wanted: held for the
   maintainer's decision; no release changes either reading until then.
-- [ ] **`equalsDeep` takes values whose state is not in their members as
-  equal.** Two distinct symbols compare equal, so do `new Number(1)` and `new
-  Number(2)`, and two `Boolean` wrappers; `new String('ab')` equals `'ab'`
-  but `'ab'` does not equal `new String('ab')`; an object whose prototype is
-  `Function.prototype` equals any function, not the other way round. `const`
-  and `enum` answer by it, and the `$data` form of `uniqueItems`
-  (packages/validate/src/dollar-data.js), which compares every pair by it,
-  reads `[new String('a'), 'a']` and `[Symbol('a'), Symbol('b')]` as
-  repeated where `uniqueItems: true` reads them as unique. Wanted: one
-  symmetric relation that tells these values apart, which `const`, `enum`
-  and both `uniqueItems` forms then answer by.
 
 ## @jarenjs/view & @jarenjs/app
 

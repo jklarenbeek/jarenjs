@@ -1193,9 +1193,22 @@ it about every error it catches.
 `equalsDeep`, `deepFreeze` and `cloneJson` hold no bound: they answer at any depth.
 `equalsDeep` compares the first 256 levels on the host's stack, as
 `equalsJson` does, and a pair nested deeper on a stack of its own, depth
-first in the same member order; it remembers the pairs open on the way down,
-so a pair met again inside its own compare (two values holding cycles) is
-taken as equal and the answer rests on the members that differ.
+first in the same member order; that walk remembers the pairs open on its way
+down, so a pair met again inside its own compare (two values holding cycles)
+is taken as equal and the answer rests on the members that differ. A walk
+started at a deep pair knows only the pairs open below its start, so a cycle
+that two members lead into would be walked once per way of reaching that
+depth, and those ways double with every level: a compare carries on from at
+most four deep pairs where they are (a deep value holds a few, and what
+stands before them is read once), and past them starts again at its root on
+one walk, which knows every open pair. What the compare reads of an object besides its own
+enumerable members is decided by the object's kind (`slotKind`): the first
+built-in prototype on its chain, or for a value of another realm the class its
+tag names, confirmed by the intrinsic that reads the kind's slot (`getTime`,
+the `size` getter of a `Map`, a wrapper's `valueOf`), so an object that only
+inherits from `Date.prototype` is no Date. The tables behind it are built by
+the first compare that reads a kind: a bundle that compares nothing carries
+none.
 `deepFreeze` keeps one frame per open object and freezes members before the
 object holding them, as the recursive walk did. `cloneJson` copies the first
 256 levels on the host's stack and a container nested deeper on a stack of its

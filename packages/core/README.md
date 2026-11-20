@@ -85,6 +85,61 @@ and `a = [a, 1]` does not equal `b = [b, 2]`. Every other answer is unchanged.
 uncoded `RangeError`, and so did the `uniqueItems`, `const` and `enum` checks of
 `@jarenjs/validate` over such an instance.*
 
+`equalsDeep` (`@jarenjs/core/object`) is one relation, the same in both orders,
+that tells apart values whose state is not in their members, and
+`isUniqueDeepArray` answers by it: `isUniqueDeepArray([a, b])` is
+`!equalsDeep(a, b)` for any two values, in either order.
+
+- A value that is no object equals only itself: a symbol that symbol alone,
+  `NaN` nothing (itself included), `0` also `-0`. A function equals a function
+  of the same text (`toString()`), and no object.
+- An object never equals a value that is none, so a wrapper object
+  (`new String('a')`, `new Number(1)`, `Object(1n)`) is not its primitive.
+- Two objects are equal when their prototypes name one constructor, the state
+  their kind keeps outside its members is equal, and their own enumerable
+  members are, each compared by this relation. That state is a wrapper's
+  primitive (two `new Number(NaN)` are unequal, as `NaN` is); a `Date`'s
+  instant (two invalid Dates are equal); a `RegExp`'s source and flags; a
+  `Map`'s entries, keys by identity and values by this relation; a `Set`'s
+  members, by identity; the bytes of an `ArrayBuffer` or a `SharedArrayBuffer`
+  and the bytes a `DataView` shows; an error's `name`, `message`, `cause` and
+  `errors`; and the length of an array that is no plain one (an instance of an
+  Array subclass, an array of another realm).
+- The kind is read from the value itself: an instance of a subclass
+  (`class Registry extends Map`) and a built-in of another realm (an iframe,
+  `node:vm`) are compared by that state, and an object that only inherits from
+  a built-in's prototype (`Object.create(Date.prototype)`), or a Proxy of a
+  built-in, by its members alone.
+- A plain array is its elements by index (a hole reads as `undefined`) and a
+  typed array its elements: a named member of either is not read.
+
+Not read, so two values that differ only there are equal: a non-enumerable or
+symbol-keyed member, a `RegExp`'s `lastIndex`, and state the host keeps to
+itself — a private field, the outcome of a `Promise`, the entries of a
+`WeakMap`, what a Proxy wraps, what a bound function binds (a function is its
+text). Two `Map`s keyed by two equal objects, or two `Set`s of two equal
+objects, are unequal: a key and a member are compared by identity. No answer
+on JSON values changed, nor any answer on `undefined`. *Upgrade: the relation
+read only its first argument for what it is, so it differed by order —
+`equalsDeep(new String('ab'), 'ab')` and `equalsDeep(new Number(1), 0)` were
+`true` and their reverses `false`, an object whose prototype is
+`Function.prototype` equalled every function and no function equalled it, and
+`{ a: 1 }` equalled an object that lists another member and holds `a`
+non-enumerable, not the other way round — and it took as equal two distinct
+symbols; two wrappers of one class whatever they wrap (`new Number(1)` and
+`new Number(2)`); two `ArrayBuffer`s, two `DataView`s and two errors of one
+class whatever they hold; two instances of one subclass of `Map`, `Set` or
+`Date` whose own members are equal; two `Date`s, `RegExp`s, `Map`s or `Set`s
+of one state whose own members differ; two built-ins of one class of another
+realm; and two instances of an Array subclass of two lengths that hold no
+element. Each pair is unequal now, in both orders. An object that only
+inherits from the prototype of a `Date`, a `RegExp`, a `Map`, a `Set` or a
+typed array, or a Proxy of one, threw a `TypeError` when it was compared with
+another object of that prototype; it is compared by its members and equals no
+real one. Two values holding a cycle that two members lead back into
+(`a.x = a; a.y = a`, a tree whose nodes hold their parent) did not return; they
+are compared as every cycle is.*
+
 `cloneJson` (`@jarenjs/core/object`) copies a deep value on its own stack too,
 with no bound: a value nested past the host stack is copied at any depth, and a
 container reached twice is copied once per reach, as before. A cycle has no
