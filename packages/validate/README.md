@@ -157,7 +157,7 @@ the validator accept the same strings.
 
 ### 🔑 JSON data type
 
-- type
+- type | _`NaN`, an Array subclass instance, `{ constructor: Array }` and the other values listed under [Values JSON cannot carry](#values-json-cannot-carry) are each read one way whatever stands beside `type`_
 - nullable | _(OpenAPI)_
 - required | _as boolean: rejects `undefined` when this schema is invoked; object member presence is declared with the parent's `required` array_
 
@@ -227,7 +227,7 @@ another keyword beside `type`, or through `$ref`, `allOf`, `anyOf`, `enum`,
 ### 🔑 Keywords for object
 
 - maxProperties / minProperties
-- required | _as array!_
+- required | _as array! An own non-enumerable member is present and an inherited one absent, whatever stands beside `required`: see [Values JSON cannot carry](#values-json-cannot-carry)_
 - properties
 - patternProperties
 - additionalProperties
@@ -1258,7 +1258,8 @@ keyword is a `type` word the validator does not know, such as
 `{ "items": { "type": "strin" } }`, used to accept every item and is now
 refused when the schema is compiled, like the same schema in the collecting
 mode.* A one-keyword `required` item schema counts own members only, as
-`required` does everywhere: `{ "items": { "required": ["a"] } }` refuses
+`required` does everywhere ([Values JSON cannot carry](#values-json-cannot-carry)):
+`{ "items": { "required": ["a"] } }` refuses
 `[Object.create({ a: 1 })]` in both modes. *Upgrade: in the default mode it
 counted a member inherited from a custom prototype as present, and only the
 names every object inherits (`toString`, `constructor`, ...) had to be own
@@ -1338,6 +1339,31 @@ A `required` error points at the **owning object**, not at the absent member
 (there is no location for something that is not there); the missing name is in
 `params.missingProperty`, which is what an adapter appends to build a
 Zod-style path.
+
+### Values JSON cannot carry
+
+A JavaScript host can hand the validator values no JSON text holds; the table
+says how each is read. `type` reads a value one way wherever it stands — alone,
+beside another keyword, in a list of names, with `nullable`, for an item, for
+a member, behind `$ref`, inside a combinator — and each keyword reads it as
+its row says, alike when validation stops at the first failure and when
+errors are collected. The array keywords apply to exactly the values
+`type: 'array'` takes and the object keywords to exactly those
+`type: 'object'` takes. (`undefined` is not in the table: the array keywords
+above say how an element holding it is read.)
+
+| Value | `type` | The keywords |
+|---|---|---|
+| `NaN` | no type: neither `number` nor `integer`. *Upgrade: `type: 'number'` with anything beside it (another keyword, a list of names, `nullable`, a `description`) accepted `NaN`; `{ "type": "number", "maxLength": 5 }` and `{ "type": ["number", "string"] }` refuse it now, as `{ "type": "number" }` did.* | the bounds and `multipleOf` refuse it: no comparison with `NaN` holds |
+| `Infinity`, `-Infinity` | `number`, not `integer` | the bounds compare them; `multipleOf` refuses them |
+| `-0` | `number` and `integer` | read as `0` |
+| a `bigint` | `bigint`; neither `number` nor `integer` | the bounds and `multipleOf` compare it |
+| an Array subclass instance, a Proxy of an array, an array of another realm (an iframe, `node:vm`), an array with an own `constructor` member | `array`, as every value `Array.isArray` takes; not `object` | the array keywords apply; the object keywords, `required` included, do not. *Upgrade: with a keyword beside it, `type` and the keyword groups read the instance's `constructor` member: an Array subclass instance or an array of another realm was an `object` and no `array`, so `{ "type": "array", "maxItems": 5 }` refused `Sub.from([1])`, `{ "items": { "type": "string" } }` and `{ "uniqueItems": true }` skipped it, `{ "additionalProperties": false }` refused it for its indexes, and `{ "properties": { "a": {} }, "required": ["a"] }` refused it in the default mode and accepted it collecting errors; the first accepts it now, the next two read its elements and the last two accept it.* |
+| `{ constructor: Array }`, an object whose prototype is an array (`Object.create([])`) | `object`; not `array` | the object keywords apply and no array keyword does, so its `length` is never read. *Upgrade: with a keyword beside it such an object was an `array` and no `object`: `{ "type": "object", "maxProperties": 5 }` refused `{ constructor: Array }` where `{ "type": "object" }` accepted it, and `{ "required": ["a"], "title": "t" }` accepted it where `{ "required": ["a"] }` refused it; each pair answers as its second schema now. The array keywords walked such an object up to its own `length`, so `{ "maxItems": 1 }` refused `Object.setPrototypeOf({ length: 3 }, [])` and an `items` schema over a `length` of `2 ** 53` did not return; both accept such an object now.* |
+| a `Map`, a `Set`, a `Date`, a `RegExp`, a wrapper object (`new Number(1)`, `new String('a')`), a typed array, `arguments`, a class instance, a null-prototype object | `object`; a wrapper is no `number`, `string` or `boolean` and a typed array no `array` | the object keywords read its own members |
+| an own non-enumerable member | | present, as an enumerable one is, to `required`, to the names `dependentRequired` and a `dependencies` list require, and as the member that triggers `dependentRequired`, `dependentSchemas` and `dependencies`. `minProperties` and `maxProperties` count the members `Object.keys` lists, and `additionalProperties`, `patternProperties`, `propertyNames` and `unevaluatedProperties` read those members only. `properties` reads it where its schema holds no other object keyword than a `required` list and `unevaluatedProperties`, and reads the listed members only beside `additionalProperties`, `patternProperties`, `propertyNames`, `minProperties`, `maxProperties` or a dependency keyword, in both modes alike. *Upgrade: `required` beside `minProperties` or `maxProperties`, the names `dependentRequired` and a `dependencies` list require, and the trigger of the three dependency keywords read such a member as absent: `{ "required": ["a"], "maxProperties": 5 }` refused `Object.defineProperty({}, 'a', { value: 1 })` and accepts it now, and `{ "dependencies": { "a": ["b"] } }` accepted it and refuses it now. Collecting errors, `{ "properties": { "a": false } }` accepted that object where the default mode refused it; both refuse it now.* |
+| an inherited member | | absent: `required`, the dependency keywords and `properties` read own members only |
+| an instance that changes while it is validated (a getter that deletes another member, or throws) | | read in an unspecified order; the two modes may answer differently |
 
 ### String lengths count graphemes by default
 

@@ -27,6 +27,7 @@ import {
   schemaTypeCode,
   isSchemaType,
   typeOnlyTest,
+  isObjectInstance,
   undefinedElement,
   otherKind,
   hasSchemaReference,
@@ -530,7 +531,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
       if (schemaObj.options.skipErrors) {
         return function validateRequiredOnly(data, dataPath) {
           // Required only applies to objects, not arrays or primitives
-          if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
+          if (!isObjectInstance(data)) return true;
           for (let i = 0; i < rlen; i++) {
             if (!Object.hasOwn(data, required[i])) {
               return addError(required[i], data, dataPath);
@@ -543,7 +544,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
       // Every absent property is its own fault to report; the fast path must
       // not be the reason a caller only learns about the first one.
       return function validateRequiredOnlyAll(data, dataPath) {
-        if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
+        if (!isObjectInstance(data)) return true;
         let valid = true;
         for (let i = 0; i < rlen; i++) {
           if (!Object.hasOwn(data, required[i]))
@@ -655,7 +656,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
 
   // A leading `type: 'array'` or `type: 'object'` that no group precedes may
   // be tested by the group of that kind: its own instance test is the type's
-  // predicate (isArrayClass, isObjectType), so it reports the type fault
+  // predicate (Array.isArray, isObjectInstance), so it reports the type fault
   // through `typed.error` and marks the type taken, a call and a repeated
   // test fewer than the combining closure.
   const typed = typeCode >= 0 ? { error: typeError, taken: false } : null;

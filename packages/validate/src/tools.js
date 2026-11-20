@@ -14,7 +14,6 @@ import {
   isNumberType,
   isStringType,
   isObjectClass,
-  isObjectType,
   isMapClass,
   isArrayClass,
   isSetClass,
@@ -26,11 +25,6 @@ import {
 } from '@jarenjs/core/string';
 
 import {
-  isArrayish,
-} from '@jarenjs/core/array';
-
-import {
-  isJsonObject,
   equalsDeep,
 } from '@jarenjs/core/object';
 
@@ -194,6 +188,45 @@ export function hasUnevaluatedItemsCoverage(schema) {
   return isArrayClass(items) && isBoolOrObjectClass(schema.additionalItems);
 }
 
+// The validator's own tests of the kinds whose values JSON cannot carry are
+// told apart in more than one way. Every `type` test (a lone name, a name
+// beside another keyword, a list of names, `nullable`, an item, a member)
+// answers through them, and so does the instance test of every array and
+// object keyword group, so `type` and those keywords take the same values
+// whatever sits beside them and in both modes:
+// - a number is a `typeof` 'number' that is not NaN (the infinities and -0
+//   are numbers);
+// - an array is what Array.isArray takes: an Array subclass instance, a
+//   Proxy of an array and an array of another realm are arrays, and an
+//   object is none for holding a `constructor` member that is Array or a
+//   prototype that is an array;
+// - an object is any other non-null `typeof` 'object' value.
+// None of them reads the value's `constructor` member. @jarenjs/core's
+// isNumberType, isObjectType and isArrayClass answer otherwise for those
+// values and are no instance test of `type`, the array keywords or the
+// object keywords; the numeric keywords still read a number by isNumberType
+// (their comparisons refuse NaN), `tuple` takes what `array` takes, and the
+// validator's other kinds (`set`, `map`, `regex`) keep their class tests.
+
+/**
+ * Whether data is a number to the validator: NaN is none.
+ * @param {unknown} data
+ * @returns {boolean}
+ */
+export function isNumberInstance(data) {
+  return typeof data === 'number' && !isNaN(data);
+}
+
+/**
+ * Whether data is an object to the validator: a non-null `typeof` 'object'
+ * value that Array.isArray, the validator's array test, does not take.
+ * @param {unknown} data
+ * @returns {boolean}
+ */
+export function isObjectInstance(data) {
+  return typeof data === 'object' && data !== null && !Array.isArray(data);
+}
+
 // The type names in the order isSchemaType switches on them.
 const SCHEMA_TYPE_NAMES = ['null', 'boolean', 'integer', 'bigint', 'number', 'string', 'object', 'array', 'set', 'map', 'tuple', 'regex'];
 
@@ -221,13 +254,14 @@ export function isSchemaType(code, data) {
     case 1: return isBooleanType(data);
     case 2: return isIntegerType(data);
     case 3: return isBigIntType(data);
-    case 4: return isNumberType(data);
+    case 4: return isNumberInstance(data);
     case 5: return isStringType(data);
-    case 6: return isObjectType(data);
+    case 6: return isObjectInstance(data);
     case 8: return isSetClass(data);
     case 9: return isMapClass(data);
     case 11: return isRegExpType(data);
-    default: return isArrayClass(data);
+    // `array`, and `tuple`, which takes what `array` takes
+    default: return Array.isArray(data);
   }
 }
 
@@ -266,7 +300,7 @@ export function validateUndefinedElement(validate, dataPath, dataRoot, index) {
 
 /**
  * What an object or array keyword group answers for a value its instance
- * test (isObjectType, isArrayClass) refused: true, the group does not apply;
+ * test (isObjectInstance, Array.isArray) refused: true, the group does not apply;
  * or, when the group also tests a leading `type` naming its kind, the type's
  * answer, which an absent value passes (not an array element holding
  * `undefined`, see undefinedElement) and any other fails through
@@ -284,14 +318,16 @@ export function otherKind(typeError, data, dataPath) {
 // schema naming it, so a walk tells them apart by identity; where a fault
 // records nothing, the test is the schema's whole validator. An absent value
 // passes, as the `type` keyword reads it everywhere; an array element
-// holding `undefined` is not absent and fails (see undefinedElement).
+// holding `undefined` is not absent and fails (see undefinedElement). Any
+// other value is read by the tests every `type` path shares (isNumberInstance,
+// Array.isArray, isObjectInstance above).
 /** @param {unknown} data @returns {boolean} */
 export function isTypeOnlyString(data) {
   return data === undefined ? !undefinedElement : typeof data === 'string';
 }
 /** @param {unknown} data @returns {boolean} */
 export function isTypeOnlyNumber(data) {
-  return data === undefined ? !undefinedElement : typeof data === 'number' && !isNaN(data);
+  return data === undefined ? !undefinedElement : isNumberInstance(data);
 }
 /** @param {unknown} data @returns {boolean} */
 export function isTypeOnlyInteger(data) {
@@ -307,7 +343,7 @@ export function isTypeOnlyArray(data) {
 }
 /** @param {unknown} data @returns {boolean} */
 export function isTypeOnlyObject(data) {
-  return data === undefined ? !undefinedElement : typeof data === 'object' && data !== null && !Array.isArray(data);
+  return data === undefined ? !undefinedElement : isObjectInstance(data);
 }
 /** @param {unknown} data @returns {boolean} */
 export function isTypeOnlyNull(data) {
@@ -333,23 +369,25 @@ export function typeOnlyTest(type) {
   }
 }
 
-export function createIsSchemaTypeHandler(type, isStrict = false) {
+/**
+ * The test of a type name, as isSchemaType answers it by code: undefined for
+ * a name the validator does not know.
+ * @param {unknown} type - A `type` keyword value, or one name of its list
+ * @returns {((data: unknown) => boolean) | undefined}
+ */
+export function createIsSchemaTypeHandler(type) {
   switch (type) {
     case 'null': return isNullValue;
     case 'boolean': return isBooleanType;
     case 'integer': return isIntegerType;
     case 'bigint': return isBigIntType;
-    case 'number': return isNumberType;
+    case 'number': return isNumberInstance;
     case 'string': return isStringType;
-    case 'object': return isStrict
-      ? isObjectClass
-      : isObjectType;
-    case 'array': return isStrict
-      ? isArrayish
-      : isArrayClass;
+    case 'object': return isObjectInstance;
+    case 'array': return Array.isArray;
     case 'set': return isSetClass;
     case 'map': return isMapClass;
-    case 'tuple': return isArrayClass;
+    case 'tuple': return Array.isArray;
     case 'regex': return isRegExpType;
     default: break;
   }
@@ -517,9 +555,9 @@ export function createDataRefCompilers() {
       (data, min) => data.length >= min),
     maxItems: constraint('maxItems', Array.isArray, isNumberType,
       (data, max) => data.length <= max),
-    minProperties: constraint('minProperties', isJsonObject, isNumberType,
+    minProperties: constraint('minProperties', isObjectInstance, isNumberType,
       (data, min) => Object.keys(data).length >= min),
-    maxProperties: constraint('maxProperties', isJsonObject, isNumberType,
+    maxProperties: constraint('maxProperties', isObjectInstance, isNumberType,
       (data, max) => Object.keys(data).length <= max),
     enum: constraint('enum', isDefined, Array.isArray,
       (data, values) => values.includes(data)

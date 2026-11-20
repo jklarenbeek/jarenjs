@@ -51,6 +51,7 @@ import {
   createDataRefCompilers,
   dataRefOptions,
   allValidatorsPass,
+  isObjectInstance,
 } from './tools.js';
 import { isDollarDataRef } from './schema-keywords.js';
 
@@ -106,7 +107,7 @@ function compileDollarDataRequired(schemaObj, ref) {
   const resolveRef = compileDataRef(ref, dataRefOptions(schemaObj));
 
   return function validateDollarDataRequired(data, dataPath, dataRoot) {
-    if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
+    if (!isObjectInstance(data)) return true;
 
     const requiredProps = resolveRef(dataRoot, dataPath);
     if (requiredProps === JSONPOINTER_NOTHING || !Array.isArray(requiredProps)) return true;

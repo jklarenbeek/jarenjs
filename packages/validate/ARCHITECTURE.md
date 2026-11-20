@@ -993,6 +993,13 @@ flowchart TD
     H --> I
 ```
 
+The fast paths and the general path share their type tests: `isNumberInstance`,
+`Array.isArray` and `isObjectInstance` (`packages/validate/src/tools.js`) answer
+`type` on every path (alone, beside a keyword, in a list, with `nullable`, for an
+item, for a member) and are the instance test of every array and object keyword
+group, so a value JSON cannot carry is read one way; the member tests
+(`typeOnlyTest`) and the item tests (`array.js`) differ only on `undefined`.
+
 ### 2. Validator Composition Strategies
 
 Based on the number of validators, different composition strategies are used:
@@ -1011,7 +1018,7 @@ every schema's children. In the first-failure mode, a single `type` name
 first among the groups is tested by the combining closure itself (two and
 three groups), or, when it names `object`, `string` or `array` and the group
 of that kind comes next, by that group's own instance test, which is the
-type's predicate (`isObjectType`, `isStringType`, `isArrayClass`): the object
+type's predicate (`isObjectInstance`, `isStringType`, `Array.isArray`): the object
 group, the string keywords (`minLength`, `maxLength`, `pattern`) and a lone
 homogeneous `items` walk report the type fault themselves; a lone
 `items`/`prefixItems` walk, a lone bound or `multipleOf`, and a lone

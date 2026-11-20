@@ -29,6 +29,8 @@ import {
   ARRAY_CHILD_KEYWORDS,
   otherKind,
   validateUndefinedElement,
+  isNumberInstance,
+  isObjectInstance,
 } from './tools.js';
 
 import { readPrefixItems, readsSince } from './schema-keywords.js';
@@ -68,7 +70,7 @@ function createBooleanValidator(schemaObj, jsonSchema, key, validationFn) {
 const compileUniqueItems = (schemaObj, jsonSchema) =>
   createBooleanValidator(schemaObj, jsonSchema, 'uniqueItems', isUniqueDeepArray);
 
-// `uniqueItems` as a schema's only array keyword: the array-class test the
+// `uniqueItems` as a schema's only array keyword: the array test the
 // group's guard makes and the comparison in one closure, where the guard
 // and the comparator were two.
 function compileUniqueItemsAlone(schemaObj, jsonSchema) {
@@ -78,7 +80,7 @@ function compileUniqueItemsAlone(schemaObj, jsonSchema) {
   const addError = schemaObj.createErrorHandler(value, 'uniqueItems');
 
   return function validateUniqueItemsAlone(data, dataPath) {
-    return !isArrayClass(data) || isUniqueDeepArray(data) || addError(data, dataPath);
+    return !Array.isArray(data) || isUniqueDeepArray(data) || addError(data, dataPath);
   };
 }
 //#endregion
@@ -316,7 +318,7 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
       const count = required.length;
       return function validateRequiredOnly(data, _dataPath, _dataRoot) {
         // Required properties only apply to objects, not arrays or other types
-        if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
+        if (!isObjectInstance(data)) return true;
         // An own member, as the full compile reads `required`: an inherited
         // one is not the item's.
         for (let i = 0; i < count; i++) {
@@ -332,12 +334,15 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
 }
 
 // The tests of the type-only item schemas, one per type name, shared by
-// every schema naming it (a tuple tells them apart by identity).
+// every schema naming it (a tuple tells them apart by identity). They read a
+// value as the member tests do (typeOnlyTest in tools.js: the same
+// isNumberInstance, Array.isArray and isObjectInstance), except `undefined`:
+// an element is never absent, so none of these passes it.
 function validateString(data) {
   return typeof data === 'string';
 }
 function validateNumber(data) {
-  return typeof data === 'number' && !isNaN(data);
+  return isNumberInstance(data);
 }
 function validateInteger(data) {
   return typeof data === 'number' && Number.isInteger(data);
@@ -349,7 +354,7 @@ function validateArray(data) {
   return Array.isArray(data);
 }
 function validateObject(data) {
-  return typeof data === 'object' && data !== null && !Array.isArray(data);
+  return isObjectInstance(data);
 }
 function validateNull(data) {
   return data === null;
@@ -438,10 +443,11 @@ export function compileArrayPrimitives(schemaObj, jsonSchema) {
 }
 
 // `alone`: no other array keyword group compiles beside the element walk,
-// which then tests the array class itself, a call per validation fewer
-// than a guarding wrapper. `typed`: a leading `type: 'array'` the walk may
-// test with that class test (compileArraySchema); the homogeneous items
-// walk does, and sets `typed.taken`.
+// which then tests for an array itself (Array.isArray, the test of
+// `type: 'array'`), a call per validation fewer than a guarding wrapper.
+// `typed`: a leading `type: 'array'` the walk may test with that test
+// (compileArraySchema); the homogeneous items walk does, and sets
+// `typed.taken`.
 function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
   // Check for prefixItems (draft 2020-12+) first, then items.
   const prefixItems = readPrefixItems(schemaObj, jsonSchema);
@@ -514,7 +520,7 @@ function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
       // are tracked for unevaluatedItems.
       if (track) {
         return function validateArrayItemsTrue(data, _dataPath, _dataRoot) {
-          if (alone && !isArrayClass(data)) return true;
+          if (alone && !Array.isArray(data)) return true;
           root.evalLog.add(data, -1);
           return true;
         };
@@ -526,13 +532,11 @@ function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
 
     // A tuple of pure positions with a constant past them, where a fault
     // records nothing and no annotation is kept: the positions are tested
-    // by code, and the elements past them by their count alone. An array
-    // whose constructor is Array answers the class test by a read of its
-    // own, which meets only arrays; any other value by isArrayClass.
+    // by code, and the elements past them by their count alone.
     if (codes !== null && !track && root.options.skipErrors && (rest === trueThat || rest === falseThat)) {
       const closed = rest === falseThat;
       return function validatePureTuple(data) {
-        if (alone && !((Array.isArray(data) && data.constructor === Array) || isArrayClass(data))) return true;
+        if (alone && !Array.isArray(data)) return true;
         const len = data.length;
         if (closed && len > count) return false;
         const end = count < len ? count : len;
@@ -556,7 +560,7 @@ function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
       : -1;
     if (restCode >= 0) {
       return function validatePureItems(data, dataPath) {
-        if (alone && !isArrayClass(data)) return otherKind(typeError, data, dataPath);
+        if (alone && !Array.isArray(data)) return otherKind(typeError, data, dataPath);
         const len = data.length;
         let invalid = 0;
         for (let i = 0; i < len; ++i) {
@@ -568,7 +572,7 @@ function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
     }
 
     return function validateArrayItemsOnly(data, dataPath, dataRoot) {
-      if (alone && !isArrayClass(data)) return otherKind(typeError, data, dataPath);
+      if (alone && !Array.isArray(data)) return otherKind(typeError, data, dataPath);
       const len = data.length;
       const arr = data;
 
@@ -596,7 +600,7 @@ function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
     const validator = validateContains;
 
     return function validateArrayContainsOnly(data, dataPath, dataRoot) {
-      if (alone && !isArrayClass(data)) return true;
+      if (alone && !Array.isArray(data)) return true;
       const len = data.length;
       const arr = data;
       // Each element is a CANDIDATE probe: the array only has to contain a
@@ -623,7 +627,7 @@ function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
 
   const stopAtFirstContains = schemaObj.options.skipErrors;
   return function validateArrayChildren(data, dataPath, dataRoot) {
-    if (alone && !isArrayClass(data)) return true;
+    if (alone && !Array.isArray(data)) return true;
     const len = data.length;
     const arr = data;
 
@@ -702,7 +706,7 @@ export function compileArraySchema(schemaObj, jsonSchema, typed = null) {
       && compileMaxItems(schemaObj, jsonSchema) === undefined)
       return compileUniqueItemsAlone(schemaObj, jsonSchema);
     return function validateArraySchemaSingle(data, dataPath, dataRoot) {
-      return isArrayClass(data)
+      return Array.isArray(data)
         ? single(data, dataPath, dataRoot)
         : true;
     };
@@ -713,7 +717,7 @@ export function compileArraySchema(schemaObj, jsonSchema, typed = null) {
     const second = parts[1];
     if (schemaObj.options.skipErrors) {
       return function validateArraySchemaDouble(data, dataPath, dataRoot) {
-        if (isArrayClass(data)) {
+        if (Array.isArray(data)) {
           return first(data, dataPath, dataRoot)
             && second(data, dataPath, dataRoot);
         }
@@ -721,9 +725,9 @@ export function compileArraySchema(schemaObj, jsonSchema, typed = null) {
       };
     }
     // The two parts are independent array keyword groups (length/uniqueness
-    // versus the item walk); the array-class guard stays a precondition.
+    // versus the item walk); the array guard stays a precondition.
     return function validateArraySchemaDoubleAll(data, dataPath, dataRoot) {
-      if (!isArrayClass(data)) return true;
+      if (!Array.isArray(data)) return true;
       const firstOk = first(data, dataPath, dataRoot);
       return second(data, dataPath, dataRoot) && firstOk;
     };
@@ -736,7 +740,7 @@ export function compileArraySchema(schemaObj, jsonSchema, typed = null) {
   const stopAtFirstSchema = schemaObj.options.skipErrors;
 
   return function validateArraySchema(data, dataPath, dataRoot) {
-    if (isArrayClass(data)) {
+    if (Array.isArray(data)) {
       if (stopAtFirstSchema) {
         return validatePrimitives(data, dataPath)
           && hasBooleanItems(data, dataPath, dataRoot)

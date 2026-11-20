@@ -349,18 +349,18 @@ describe('the member and element walks read as the compositions they replace', f
     return { data: target, reads };
   };
 
-  it('a leading type of object or array reads the instance class once', function () {
+  it('a leading type of object or array reads no constructor member of the instance', function () {
     for (const schema of [{ type: 'object', properties: { a: { type: 'string' } } },
       { type: 'object', properties: { a: { type: 'string' } }, additionalProperties: false },
       { type: 'object', properties: { a: { type: 'string' } }, minProperties: 1 }]) {
       const { data, reads } = countedConstructor({ a: 'x' }, Object);
       assert.strictEqual(new JarenValidator().compile(schema)(data), true);
-      assert.strictEqual(reads.count, 1, JSON.stringify(schema));
+      assert.strictEqual(reads.count, 0, JSON.stringify(schema));
     }
     for (const schema of [{ type: 'array', items: { type: 'string' } }, { type: 'array', items: { type: 'string', maxLength: 3 } }]) {
       const { data, reads } = countedConstructor(['x'], Array);
       assert.strictEqual(new JarenValidator().compile(schema)(data), true);
-      assert.strictEqual(reads.count, 1, JSON.stringify(schema));
+      assert.strictEqual(reads.count, 0, JSON.stringify(schema));
     }
   });
 

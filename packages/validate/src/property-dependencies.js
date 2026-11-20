@@ -17,11 +17,11 @@
 
 import {
   isObjectClass,
-  isObjectType,
 } from '@jarenjs/core';
 
 import {
   isBoolOrObjectClass,
+  isObjectInstance,
 } from './tools.js';
 
 import { admitsPropertyDependencies } from './schema-keywords.js';
@@ -73,7 +73,7 @@ export function compilePropertyDependencies(schemaObj, jsonSchema) {
   const count = entries.length;
 
   return function validatePropertyDependencies(data, dataPath, dataRoot, dataKey) {
-    if (!isObjectType(data)) return true;
+    if (!isObjectInstance(data)) return true;
     let valid = true;
     for (let i = 0; i < count; ++i) {
       const entry = entries[i];

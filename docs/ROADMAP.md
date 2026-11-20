@@ -282,52 +282,40 @@ delete it or fix it.
   changes the collected list (an upgrade note).
 - [ ] **A two-position tuple validates at about half of Ajv's speed.** The
   validator benchmark's 'uniqueItems=false with an array of items' rows (a
-  two-position `prefixItems`/`items` tuple of `type: boolean`;
-  `uniqueItems: false` compiles to nothing) take 1.5–2.0× Ajv's time and
-  the '…and additionalItems=false' rows 1.3–1.7×, and two runs of the
-  same code part by up to a third on them. Such a tuple is one closure
-  tested by code with no call per element (`isPurePosition` in
-  packages/validate/src/array.js). What is left is the call into it: every
-  compiled validator enters its schema through one shared function
-  (`validateRoot`, `createValidateFn` in packages/validate/src/index.js),
-  so that call sees every schema's closure, and a schema compiling to
-  nothing still reads 1.1–1.3× Ajv's time; then the array-class test (the
-  `constructor` read that tells an Array subclass apart). Testing the two
-  positions without the loop measured a fifth faster per row in one
-  process but does not stand out of the published rows' spread. Wanted:
-  such a tuple at Ajv's speed, every answer unchanged.
+  two-position `prefixItems`/`items` tuple of `type: boolean`; `uniqueItems:
+  false` compiles to nothing) take 1.5–2.0× Ajv's time and the '…and
+  additionalItems=false' rows 1.3–1.7×, and two runs of the same code part by
+  up to a third on them. Such a tuple is one closure tested by code with no
+  call per element (`isPurePosition` in packages/validate/src/array.js). What
+  is left is the call into it: every compiled validator enters its schema
+  through one shared function (`validateRoot`, `createValidateFn` in
+  packages/validate/src/index.js), so that call sees every schema's closure,
+  and a schema compiling to nothing still reads 1.1–1.3× Ajv's time; then the
+  array test (`Array.isArray`; the instance's `constructor` member is no
+  longer read). Testing the two positions without the loop measured a fifth
+  faster per row in one process but does not stand out of the published rows'
+  spread. Wanted: such a tuple at Ajv's speed, every answer unchanged.
 - [ ] **A typical object schema validates at a third to a sixth of Ajv's
-  speed.** Compiled alone and called warm (best of five rounds of two
-  million calls on one pinned core), `{ type: 'object', properties: {
-  query: { type: 'string' }, limit: { type: 'integer' }, exact: { type:
-  'boolean' } }, required: ['query'], additionalProperties: false }` takes
-  about 53 ns per valid call where Ajv takes 17, the same without
-  `additionalProperties` about 69 ns to 12 and without `required` too
-  about 62 ns to 12. A leading `type` (`object`, `array`, `string`), a
-  type-only member or item and `additionalProperties` no longer cost a
-  closure of their own; what is left is how a closure reads a member: a
-  declared name probed with `Object.hasOwn` and read by a varying key
-  costs about 13 ns where Ajv's generated code reads it by a fixed name in
-  under 2 ns, and the validator generates no code by design. A `required`
-  name is one more such probe, and a name `properties` also declares is
-  probed twice: skipping the second probe reads a member that a getter
-  deleted during validation as absent, which the two modes answer
-  differently today (`{ properties: { a: { type: 'string' }, b: false },
-  required: ['b'] }` on `{ get a() { delete this.b; return 'x'; }, b: 1 }`:
-  true when validation stops at the first failure, false when errors are
-  collected). `additionalProperties` lists the instance's keys
-  (`Object.keys`). The validator benchmark's properties, required and
-  additionalProperties rows take 1.3–1.5× Ajv's time together. Wanted:
-  those costs gone, every answer unchanged, non-JSON values included.
-- [ ] **A lone `type` and a `type` beside another keyword read three non-JSON
-  values differently.** `{ type: 'number' }` refuses `NaN` and `{ type:
-  'number', maxLength: 1e9 }` accepts it; `{ type: 'object' }` refuses an
-  Array subclass instance and accepts `{ constructor: Array }`, and with
-  another keyword the other way round; `{ type: 'array' }` the reverse of
-  `object` (the type-only fast path in schema.js tests `typeof` and
-  `Array.isArray`, `isSchemaType` in tools.js `isNumberType`, `isObjectType`
-  and `isArrayClass`). Wanted: one reading of each value, whatever sits
-  beside `type`.
+  speed.** Compiled alone and called warm (best of five rounds of two million
+  calls on one pinned core), `{ type: 'object', properties: { query: { type:
+  'string' }, limit: { type: 'integer' }, exact: { type: 'boolean' } },
+  required: ['query'], additionalProperties: false }` takes about 53 ns per
+  valid call where Ajv takes 17, the same without `additionalProperties` about
+  69 ns to 12 and without `required` too about 62 ns to 12. A leading `type`
+  (`object`, `array`, `string`), a type-only member or item and
+  `additionalProperties` no longer cost a closure of their own; what is left
+  is how a closure reads a member: a declared name probed with `Object.hasOwn`
+  and read by a varying key costs about 13 ns where Ajv's generated code reads
+  it by a fixed name in under 2 ns, and the validator generates no code by
+  design. A `required` name is one more such probe, and a name `properties`
+  also declares is probed twice: the second probe matters only to an instance
+  that changes while it is validated, which is read in an unspecified order
+  and may answer differently in the two modes (packages/validate/README.md,
+  'Values JSON cannot carry'), so it may go. `additionalProperties` lists the
+  instance's keys (`Object.keys`). The validator benchmark's properties,
+  required and additionalProperties rows take 1.3–1.5× Ajv's time together.
+  Wanted: those costs gone, every answer unchanged, non-JSON values included,
+  an instance that changes while it is validated excepted.
 - [ ] **An object member holding `undefined` is present to `required` and
   passes `type`, and a bare `undefined` passes `type`.** `{ required: ['a']
   }` accepts `{ a: undefined }` and `{ dependentSchemas: { a: { required:
@@ -356,20 +344,6 @@ delete it or fix it.
   repeated where `uniqueItems: true` reads them as unique. Wanted: one
   symmetric relation that tells these values apart, which `const`, `enum`
   and both `uniqueItems` forms then answer by.
-- [ ] **`required` reads three kinds of non-JSON member by the keywords
-  beside it.** An Array subclass instance: `{ properties: { a: {} },
-  required: ['a'] }` refuses it when validation stops at the first failure
-  and accepts it when errors are collected, and `{ required: ['a'] }`
-  accepts it (the `required` closures in packages/validate/src/object.js
-  and schema.js pass any `Array.isArray` value; the properties walk asserts
-  `required` after `isObjectType`, which reads such an instance as an
-  object). `{ constructor: Array }`: the first accepts it (no object
-  keyword applies to it), the second refuses it. A non-enumerable own
-  member: `{ required: ['a'] }` accepts `Object.defineProperty({}, 'a', {
-  value: 1 })` and `{ required: ['a'], maxProperties: 5 }` refuses it (the
-  closures that also count the members, and `dependentRequired`, look a
-  name up in `Object.keys`, the others with `Object.hasOwn`). Wanted: one
-  reading of each, whatever sits beside `required`, in both modes.
 
 ## @jarenjs/view & @jarenjs/app
 

@@ -1,7 +1,6 @@
 //@ts-check
 
 import {
-  isObjectType,
   isArrayClass,
   getObjectType,
 } from '@jarenjs/core';
@@ -27,6 +26,7 @@ import {
   extendsChildLocations,
   OBJECT_CHILD_KEYWORDS,
   otherKind,
+  isObjectInstance,
   isTypeOnlyString,
   isTypeOnlyNumber,
   isTypeOnlyInteger,
@@ -36,9 +36,55 @@ import {
   isTypeOnlyNull,
 } from './tools.js';
 
-import {
-  includesAll,
-} from '@jarenjs/core/array';
+// An own member Object.keys does not list (a non-enumerable one) is present
+// to `required`, to the names `dependentRequired` and a `dependencies` list
+// require, and as the trigger of a dependency keyword, as a listed member
+// is: those readers probe with Object.hasOwn. An inherited member is absent
+// to them. `minProperties` and `maxProperties` count the members Object.keys
+// lists, and the walks over those members (`additionalProperties`,
+// `patternProperties`, `propertyNames`, and `properties` wherever it does not
+// read by a probe, see readsNamedMembers) read the listed members only.
+
+/**
+ * Whether `key` is no own member of data, for a closure that holds
+ * `dataKeys`, the members Object.keys listed, for a count: a listed member
+ * is an own member, so the list answers for it, and a name it does not hold
+ * is absent only when Object.hasOwn says so (an own member Object.keys does
+ * not list is present).
+ * @param {object} data
+ * @param {string[]} dataKeys
+ * @param {string} key
+ * @returns {boolean}
+ */
+function isAbsentMember(data, dataKeys, key) {
+  return dataKeys.indexOf(key) === -1 && !Object.hasOwn(data, key);
+}
+
+/**
+ * Whether every name is an own member of data: what `dependentRequired` and
+ * a `dependencies` list require once their trigger is there.
+ * @param {object} data
+ * @param {string[]} names
+ * @returns {boolean}
+ */
+function hasOwnAll(data, names) {
+  for (let i = 0; i < names.length; ++i) {
+    if (!Object.hasOwn(data, names[i])) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether `key` is an own member of data that the walk over `dataKeys`, the
+ * members Object.keys listed, did not go over.
+ * @param {object} data
+ * @param {string[]} dataKeys
+ * @param {string} key
+ * @returns {boolean}
+ */
+function isUnlistedMember(data, dataKeys, key) {
+  return Object.hasOwn(data, key) && !dataKeys.includes(key);
+}
 
 //#region Primitives
 function compileMinProperties(schemaObj, jsonSchema) {
@@ -73,14 +119,16 @@ function compileRequiredProperties(schemaObj, jsonSchema) {
   // the boolean-answer path may stop at the first.
   const stopAtFirst = schemaObj.root.options.skipErrors;
   return function validateRequiredProperties(data = {}, dataKeys = [], dataPath = '') {
+    // (no listed member: the `minProperties` this stands beside has failed
+    // and reported)
     if (!(dataKeys.length > 0))
       return false;
 
     let valid = true;
     for (let i = 0; i < rlength; ++i) {
       const key = required[i];
-      const idx = dataKeys.indexOf(key);
-      if (idx === -1) {
+      // (a listed member is an own member, see isAbsentMember)
+      if (isAbsentMember(data, dataKeys, key)) {
         valid = addError(key, data, dataPath) && valid;
         if (stopAtFirst) break;
       }
@@ -239,7 +287,7 @@ function compileDependentRequired(schemaObj, jsonSchema) {
   return function validateDependentRequiredItem(data, dataPath, dataRoot, dataKey) {
     if (Object.hasOwn(dependentRequired, dataKey)) {
       const required = dependentRequired[dataKey];
-      return includesAll(Object.keys(data), required)
+      return hasOwnAll(data, required)
         || addError(dataKey, data, dataPath);
     }
     return true;
@@ -320,17 +368,10 @@ function compileDependencies(schemaObj, jsonSchema) {
   // Single required dependency - common case
   if (requiredDeps.length === 1 && schemaDeps.length === 0) {
     const { key, required, addError } = requiredDeps[0];
-    const rlen = required.length;
     return function validateSingleRequiredDep(data, dataPath, dataRoot, dataKey) {
-      if (dataKey === key) {
-        const dataKeys = Object.keys(data);
-        for (let i = 0; i < rlen; i++) {
-          if (!dataKeys.includes(required[i])) {
-            return addError(dataKey, data, dataPath);
-          }
-        }
-      }
-      return true;
+      return dataKey !== key
+        || hasOwnAll(data, required)
+        || addError(dataKey, data, dataPath);
     };
   }
 
@@ -355,11 +396,64 @@ function compileDependencies(schemaObj, jsonSchema) {
     const reqDep = requiredDepMap.get(dataKey);
     if (reqDep != null) {
       const { required, addError } = reqDep;
-      return includesAll(Object.keys(data), required)
+      return hasOwnAll(data, required)
         || addError(dataKey, data, dataPath);
     }
     return true;
   };
+}
+
+/**
+ * The member names that trigger one of a schema's compiled dependency
+ * keywords, each once: every name one of those validators answers for (the
+ * own names of `dependentRequired`, the listed ones of the other two). The
+ * walks hand the keywords each listed member that is one of them, then
+ * probe the names they did not meet for an own member Object.keys does not
+ * list.
+ * @param {object} jsonSchema
+ * @param {Function | null | undefined} depRequired - The compiled `dependentRequired`
+ * @param {Function | null | undefined} depSchemas - The compiled `dependentSchemas`
+ * @param {Function | null | undefined} dependencies - The compiled `dependencies`
+ * @returns {string[]}
+ */
+function dependencyTriggers(jsonSchema, depRequired, depSchemas, dependencies) {
+  const names = new Set();
+  if (depRequired != null) for (const key of Object.getOwnPropertyNames(jsonSchema.dependentRequired)) names.add(key);
+  if (depSchemas != null) for (const key of Object.keys(jsonSchema.dependentSchemas)) names.add(key);
+  if (dependencies != null) for (const key of Object.keys(jsonSchema.dependencies)) names.add(key);
+  return Array.from(names);
+}
+
+/**
+ * Whether a schema's object keywords are `properties` with at most a
+ * `required` list and `additionalProperties`: the shape the member walks of
+ * the first-failure mode take (compilePropertiesWalk).
+ * @param {object} jsonSchema
+ * @returns {boolean}
+ */
+function holdsPropertiesOnly(jsonSchema) {
+  return jsonSchema.patternProperties == null
+    && jsonSchema.propertyNames == null
+    && jsonSchema.dependencies == null
+    && jsonSchema.dependentSchemas == null
+    && jsonSchema.dependentRequired == null
+    && jsonSchema.minProperties == null
+    && jsonSchema.maxProperties == null
+    && (jsonSchema.required == null || isArrayClass(jsonSchema.required))
+    && getObjectType(jsonSchema.properties) != null;
+}
+
+/**
+ * Whether a schema's `properties` reads each member it names by a probe of
+ * its own (Object.hasOwn), in both modes, so that an own member Object.keys
+ * does not list is read too: where the schema holds no other object keyword
+ * than a `required` list. Beside a keyword that walks or counts the listed
+ * members, `properties` reads the listed members only.
+ * @param {object} jsonSchema
+ * @returns {boolean}
+ */
+function readsNamedMembers(jsonSchema) {
+  return jsonSchema.additionalProperties == null && holdsPropertiesOnly(jsonSchema);
 }
 //#endregion
 
@@ -391,7 +485,9 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
   // one; only the boolean-answer path may stop at the first.
   const stopAtFirst = schemaObj.root.options.skipErrors;
 
-  // Pre-bind error handlers outside the returned function
+  // Pre-bind error handlers outside the returned function. Every closure
+  // below is called behind the object group's own instance test
+  // (compileObjectGroup), so none tests the instance again.
   if (hasMin && !hasMax && !hasRequired) {
     const addError = schemaObj.createErrorHandler(min, 'minProperties');
     return function validateMinPropertiesOnly(data, dataPath, dataRoot, dataKeys) {
@@ -424,10 +520,6 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
     const addError = schemaObj.createErrorHandler(required, ['required']);
     // every entry is a member name: another entry is refused before this compiles
     return function validateRequiredHasOwn(data, dataPath, _dataRoot, _dataKeys) {
-      // Required properties only apply to objects, not arrays or other types
-      if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-        return true;
-      }
       let valid = true;
       for (let i = 0; i < rlength; ++i) {
         const key = required[i];
@@ -445,10 +537,6 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
     const rlength = required.length;
     const addReqError = schemaObj.createErrorHandler(required, ['required']);
     return function validateMinAndRequired(data, dataPath, dataRoot, dataKeys) {
-      // Required/minProperties only apply to objects, not arrays or other types
-      if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-        return true;
-      }
       const keys = dataKeys || Object.keys(data);
       const len = keys.length;
       // minProperties and required are independent; a short count says
@@ -458,7 +546,7 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
       let valid = true;
       for (let i = 0; i < rlength; ++i) {
         const key = required[i];
-        if (keys.indexOf(key) === -1) {
+        if (isAbsentMember(data, keys, key)) {
           valid = addReqError(key, data, dataPath) && valid;
           if (stopAtFirst) break;
         }
@@ -472,10 +560,6 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
     const rlength = required.length;
     const addReqError = schemaObj.createErrorHandler(required, ['required']);
     return function validateMaxAndRequired(data, dataPath, dataRoot, dataKeys) {
-      // Required/maxProperties only apply to objects, not arrays or other types
-      if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-        return true;
-      }
       const keys = dataKeys || Object.keys(data);
       const len = keys.length;
       // maxProperties and required are independent (see the min case).
@@ -484,7 +568,7 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
       let valid = true;
       for (let i = 0; i < rlength; ++i) {
         const key = required[i];
-        if (keys.indexOf(key) === -1) {
+        if (isAbsentMember(data, keys, key)) {
           valid = addReqError(key, data, dataPath) && valid;
           if (stopAtFirst) break;
         }
@@ -514,6 +598,15 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
   };
 }
 
+/**
+ * The collecting walk's parts: the validator of one listed member
+ * (`validateMember`), the names that trigger a dependency keyword
+ * (`triggers`) and the validator (`validateTrigger`) of one that is an own
+ * member Object.keys does not list, which only those keywords read.
+ * @param {import('./index.js').ValidationObject} schemaObj
+ * @param {object} jsonSchema
+ * @returns {{ validateMember: Function, triggers: string[], validateTrigger: Function } | undefined}
+ */
 function compileObjectProperty(schemaObj, jsonSchema) {
   const namesValidator = compilePropertyNames(schemaObj, jsonSchema);
   const propertyValidator = compileProperties(schemaObj, jsonSchema);
@@ -540,7 +633,7 @@ function compileObjectProperty(schemaObj, jsonSchema) {
   const validateDepSchemas = depSchemasValidator || trueThat;
   const validateDependency = dependencyValidator || trueThat;
 
-  return function validateObjectProperty(data, dataPath, dataRoot, dataKey) {
+  const validateMember = function validateObjectProperty(data, dataPath, dataRoot, dataKey) {
     const result = new ValidationResult();
     // Build the child dataPath by appending the property key
     const newPath = memberPath(dataPath ?? '', dataKey);
@@ -558,6 +651,18 @@ function compileObjectProperty(schemaObj, jsonSchema) {
         : result;
 
     return result;
+  };
+
+  return {
+    validateMember,
+    triggers: dependencyTriggers(jsonSchema, depRequiredValidator, depSchemasValidator, dependencyValidator),
+    validateTrigger: function validateDependencyTrigger(data, dataPath, dataRoot, dataKey) {
+      const newPath = memberPath(dataPath ?? '', dataKey);
+      return new ValidationResult()
+        .addValid(validateDepRequired(data, newPath, dataRoot, dataKey))
+        .addValid(validateDepSchemas(data, newPath, dataRoot, dataKey, dataPath))
+        .addValid(validateDependency(data, newPath, dataRoot, dataKey, dataPath));
+    },
   };
 }
 
@@ -600,6 +705,29 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
     return undefined;
 
   const validateName = namesValidator || null;
+  // The members that trigger a dependency keyword: a listed member that is
+  // one is handed to those keywords, and one that is an own member
+  // Object.keys does not list triggers them too, after the listed members.
+  // `met` holds a bit for each of the first 31 the listed walk met, which
+  // then cost no probe.
+  const triggers = dependencyTriggers(jsonSchema, depRequiredValidator, depSchemasValidator, dependencyValidator);
+  const triggerCount = triggers.length;
+  const triggerAt = triggerCount === 0 ? null : new Map(triggers.map((name, at) => [name, at]));
+  /**
+   * The dependency keywords an unlisted member triggers, in their order:
+   * false at the first that fails (the listed walk calls them itself).
+   * @param {object} data
+   * @param {string} childPath - The member's location, where one is read
+   * @param {unknown} dataRoot
+   * @param {string} dataKey
+   * @param {string} dataPath - The object's location
+   * @returns {boolean}
+   */
+  const validateTriggered = function validateTriggeredDependencies(data, childPath, dataRoot, dataKey, dataPath) {
+    return (depRequiredValidator === null || depRequiredValidator(data, childPath, dataRoot, dataKey) !== false)
+      && (depSchemasValidator === null || depSchemasValidator(data, childPath, dataRoot, dataKey, dataPath) !== false)
+      && (dependencyValidator === null || dependencyValidator(data, childPath, dataRoot, dataKey, dataPath) !== false);
+  };
 
   // In skipErrors mode a member's location is read only by a location reader
   // (`$data`, `data`, `$query`) at or below the member's schema; skip the
@@ -608,6 +736,7 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
 
   return function validateObjectChildrenFast(data, dataPath, dataRoot, dataKeys) {
     const len = dataKeys.length;
+    let met = 0;
     for (let i = 0; i < len; ++i) {
       const dataKey = dataKeys[i];
       if (validateName != null && validateName(dataKey, dataPath) === false)
@@ -651,15 +780,25 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
         if (track) root.evalLog.add(data, dataKey);
       }
 
-      if (depRequiredValidator != null || depSchemasValidator != null || dependencyValidator != null) {
-        if (childPath === null) childPath = extendPaths ? memberPath(dataPath, dataKey) : dataPath;
-        if (depRequiredValidator != null && depRequiredValidator(data, childPath, dataRoot, dataKey) === false)
-          return false;
-        if (depSchemasValidator != null && depSchemasValidator(data, childPath, dataRoot, dataKey, dataPath) === false)
-          return false;
-        if (dependencyValidator != null && dependencyValidator(data, childPath, dataRoot, dataKey, dataPath) === false)
-          return false;
+      if (triggerAt !== null) {
+        const at = triggerAt.get(dataKey);
+        if (at !== undefined) {
+          if (at < 31) met |= 1 << at;
+          if (childPath === null) childPath = extendPaths ? memberPath(dataPath, dataKey) : dataPath;
+          if (depRequiredValidator !== null && depRequiredValidator(data, childPath, dataRoot, dataKey) === false)
+            return false;
+          if (depSchemasValidator !== null && depSchemasValidator(data, childPath, dataRoot, dataKey, dataPath) === false)
+            return false;
+          if (dependencyValidator !== null && dependencyValidator(data, childPath, dataRoot, dataKey, dataPath) === false)
+            return false;
+        }
       }
+    }
+    for (let at = 0; at < triggerCount; ++at) {
+      const dataKey = triggers[at];
+      if ((at < 31 ? (met & (1 << at)) === 0 && Object.hasOwn(data, dataKey) : isUnlistedMember(data, dataKeys, dataKey))
+        && !validateTriggered(data, extendPaths ? memberPath(dataPath, dataKey) : dataPath, dataRoot, dataKey, dataPath))
+        return false;
     }
     return true;
   };
@@ -673,9 +812,15 @@ export function compileObjectChildren(schemaObj, jsonSchema) {
   if (schemaObj.options.skipErrors)
     return compileObjectChildrenFast(schemaObj, jsonSchema);
 
-  const propertyValidator = compileObjectProperty(schemaObj, jsonSchema);
-  if (propertyValidator == null)
+  // `properties` where it reads each member it names by a probe.
+  if (readsNamedMembers(jsonSchema))
+    return compileNamedMembers(schemaObj, buildPropertyValidators(schemaObj, jsonSchema));
+
+  const compiled = compileObjectProperty(schemaObj, jsonSchema);
+  if (compiled == null)
     return undefined;
+  const { validateMember: propertyValidator, triggers, validateTrigger } = compiled;
+  const triggerCount = triggers.length;
 
   // Inline ValidationResult operations to reduce object allocations
   return function validateObjectChildren(data, dataPath, dataRoot, dataKeys) {
@@ -692,7 +837,74 @@ export function compileObjectChildren(schemaObj, jsonSchema) {
         }
       }
     }
+    // A member that triggers a dependency keyword and is an own member
+    // Object.keys does not list triggers it too, after the listed members.
+    for (let i = 0; i < triggerCount; ++i) {
+      if (isUnlistedMember(data, dataKeys, triggers[i]))
+        totalErrors += validateTrigger(data, dataPath, dataRoot, triggers[i]).errors;
+    }
     return totalErrors === 0;
+  };
+}
+
+/**
+ * The collecting walk of a schema whose `properties` reads each member it
+ * names by a probe (readsNamedMembers), the keyword being the only one of
+ * its object group that reads a member: the listed members in their order,
+ * each named one read by its schema as the general walk reads it, then each
+ * named member the list does not hold, when it is an own member (the
+ * first-failure walk of the shape, compilePropertiesWalk, probes every name
+ * it declares). A name the listed walk met costs no probe.
+ * @param {import('./index.js').ValidationObject} schemaObj
+ * @param {Map<string, Function> | undefined} validators - The validators of the named members
+ * @returns {Function | undefined}
+ */
+function compileNamedMembers(schemaObj, validators) {
+  if (validators == null) return undefined;
+
+  const root = schemaObj.root;
+  const track = root.usesUnevaluated;
+  const logFailed = annotatesFailedMembers(schemaObj);
+  const names = Array.from(validators.keys());
+  const memberValidators = Array.from(validators.values());
+  const count = names.length;
+  const positions = new Map(names.map((name, at) => [name, at]));
+  /**
+   * Whether the member named at position `at` fails its schema; what it
+   * evaluates is logged as the general walk logs it.
+   * @param {object} data
+   * @param {string} dataPath - The object's location
+   * @param {unknown} dataRoot
+   * @param {string} dataKey
+   * @param {number} at
+   * @returns {boolean}
+   */
+  const failsAt = function failsNamedMember(data, dataPath, dataRoot, dataKey, at) {
+    const valid = memberValidators[at](data[dataKey], memberPath(dataPath ?? '', dataKey), dataRoot, dataKey);
+    if (track && (valid === true || logFailed)) root.evalLog.add(data, dataKey);
+    return valid === false;
+  };
+
+  return function validateObjectNamedMembers(data, dataPath, dataRoot, dataKeys) {
+    let errors = 0;
+    // the names met among the listed members: a bit each, or a byte each
+    // where a schema names more than 31
+    let met = 0;
+    const wide = count > 31 ? new Uint8Array(count) : null;
+    const len = dataKeys.length;
+    for (let i = 0; i < len; ++i) {
+      const dataKey = dataKeys[i];
+      const at = positions.get(dataKey);
+      if (at === undefined) continue;
+      if (wide === null) met |= 1 << at;
+      else wide[at] = 1;
+      if (failsAt(data, dataPath, dataRoot, dataKey, at)) errors++;
+    }
+    for (let at = 0; at < count; ++at) {
+      if (wide === null ? (met & (1 << at)) !== 0 : wide[at] === 1) continue;
+      if (Object.hasOwn(data, names[at]) && failsAt(data, dataPath, dataRoot, names[at], at)) errors++;
+    }
+    return errors === 0;
   };
 }
 
@@ -781,15 +993,11 @@ function compilePropertiesWalk(schemaObj, jsonSchema, propsMap, closed, typeErro
     // it is read. A key at the schema's next position is matched without
     // the map.
     return function validateObjectClosedProperties(data, dataPath, dataRoot) {
-      if (!isObjectType(data)) return otherKind(typeError, data, dataPath);
+      if (!isObjectInstance(data)) return otherKind(typeError, data, dataPath);
       const dataKeys = Object.keys(data);
-      // as the required keyword's own guard does, an array isObjectType
-      // admits (a subclass instance, an own `constructor` member) passes
-      if (requiredCount > 0 && !Array.isArray(data)) {
-        for (let i = 0; i < requiredCount; ++i) {
-          if (!Object.hasOwn(data, requiredKeys[i]))
-            return false;
-        }
+      for (let i = 0; i < requiredCount; ++i) {
+        if (!Object.hasOwn(data, requiredKeys[i]))
+          return false;
       }
       let next = 0;
       for (let i = 0; i < dataKeys.length; ++i) {
@@ -821,7 +1029,7 @@ function compilePropertiesWalk(schemaObj, jsonSchema, propsMap, closed, typeErro
   const extendPaths = extendsChildLocations(schemaObj, jsonSchema, OBJECT_CHILD_KEYWORDS);
   if (extendPaths || track) {
     return function validateObjectPropertiesOnlyTracked(data, dataPath, dataRoot) {
-      if (!isObjectType(data)) return otherKind(typeError, data, dataPath);
+      if (!isObjectInstance(data)) return otherKind(typeError, data, dataPath);
       for (let i = 0; i < requiredCount; ++i) {
         if (!Object.hasOwn(data, requiredKeys[i]))
           return false;
@@ -841,7 +1049,7 @@ function compilePropertiesWalk(schemaObj, jsonSchema, propsMap, closed, typeErro
   }
 
   return function validateObjectPropertiesOnly(data, dataPath, dataRoot) {
-    if (!isObjectType(data)) return otherKind(typeError, data, dataPath);
+    if (!isObjectInstance(data)) return otherKind(typeError, data, dataPath);
     for (let i = 0; i < requiredCount; ++i) {
       if (!Object.hasOwn(data, requiredKeys[i]))
         return false;
@@ -872,15 +1080,7 @@ function compileObjectGroup(schemaObj, jsonSchema, typeError) {
   // the general path does, with fewer calls.
   const closed = jsonSchema.additionalProperties != null;
   if (schemaObj.options.skipErrors
-    && jsonSchema.patternProperties == null
-    && jsonSchema.propertyNames == null
-    && jsonSchema.dependencies == null
-    && jsonSchema.dependentSchemas == null
-    && jsonSchema.dependentRequired == null
-    && jsonSchema.minProperties == null
-    && jsonSchema.maxProperties == null
-    && (jsonSchema.required == null || isArrayClass(jsonSchema.required))
-    && getObjectType(jsonSchema.properties) != null
+    && holdsPropertiesOnly(jsonSchema)
     && (!closed || (!schemaObj.root.usesUnevaluated
       && !extendsChildLocations(schemaObj, jsonSchema, OBJECT_CHILD_KEYWORDS)))) {
     const propsMap = buildPropertyValidators(schemaObj, jsonSchema);
@@ -904,7 +1104,7 @@ function compileObjectGroup(schemaObj, jsonSchema, typeError) {
   // per-validation Object.keys allocation.
   if (objectChildren == null) {
     return function validateObjectPrimitivesSchema(data, dataPath, dataRoot) {
-      if (isObjectType(data)) {
+      if (isObjectInstance(data)) {
         return validatePrimitives(data, dataPath, dataRoot, undefined);
       }
       return otherKind(typeError, data, dataPath);
@@ -913,7 +1113,7 @@ function compileObjectGroup(schemaObj, jsonSchema, typeError) {
 
   if (schemaObj.options.skipErrors) {
     return function validateObjectSchema(data, dataPath, dataRoot) {
-      if (isObjectType(data)) {
+      if (isObjectInstance(data)) {
         const dataKeys = Object.keys(data);
         return validatePrimitives(data, dataPath, dataRoot, dataKeys)
           && validateChildren(data, dataPath, dataRoot, dataKeys);
@@ -928,7 +1128,7 @@ function compileObjectGroup(schemaObj, jsonSchema, typeError) {
   // the absent property and hide every fault in the properties that ARE
   // present, which is the difference between one issue and a usable list.
   return function validateObjectSchemaAll(data, dataPath, dataRoot) {
-    if (isObjectType(data)) {
+    if (isObjectInstance(data)) {
       const dataKeys = Object.keys(data);
       const primitives = validatePrimitives(data, dataPath, dataRoot, dataKeys);
       return validateChildren(data, dataPath, dataRoot, dataKeys) && primitives;

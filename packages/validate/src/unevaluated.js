@@ -1,12 +1,8 @@
 //@ts-check
 
 import {
-  isObjectType,
-  isArrayClass,
-} from '@jarenjs/core';
-
-import {
   getBoolOrObjectClass,
+  isObjectInstance,
   hasUnevaluatedPropertiesCoverage,
   hasUnevaluatedItemsCoverage,
   memberPath,
@@ -48,7 +44,7 @@ function compileUnevaluatedProperties(schemaObj, jsonSchema) {
   // annotation names the members it evaluated.
   if (uneval === true && root.recorder === null) {
     return function validateUnevaluatedPropertiesTrue(data, _dataPath, _dataRoot, _mark) {
-      if (!isObjectType(data)) return true;
+      if (!isObjectInstance(data)) return true;
       const log = root.evalLog;
       const keys = Object.keys(data);
       for (let i = 0; i < keys.length; ++i) {
@@ -60,7 +56,7 @@ function compileUnevaluatedProperties(schemaObj, jsonSchema) {
 
   if (uneval === false) {
     return function validateUnevaluatedPropertiesFalse(data, dataPath, dataRoot, mark) {
-      if (!isObjectType(data)) return true;
+      if (!isObjectInstance(data)) return true;
       const log = root.evalLog;
       const keys = Object.keys(data);
       // Many members against a long log: one pass instead of a scan per member.
@@ -77,7 +73,7 @@ function compileUnevaluatedProperties(schemaObj, jsonSchema) {
 
   const validator = schemaObj.createValidator(uneval, 'unevaluatedProperties');
   return function validateUnevaluatedProperties(data, dataPath, dataRoot, mark) {
-    if (!isObjectType(data)) return true;
+    if (!isObjectInstance(data)) return true;
     const log = root.evalLog;
     const keys = Object.keys(data);
     const index = log.index(data, mark, keys.length);
@@ -125,7 +121,7 @@ function compileUnevaluatedItems(schemaObj, jsonSchema) {
   // Recording output units, `true` applies as a subschema below.
   if (uneval === true && root.recorder === null) {
     return function validateUnevaluatedItemsTrue(data, _dataPath, _dataRoot, _mark) {
-      if (!isArrayClass(data)) return true;
+      if (!Array.isArray(data)) return true;
       root.evalLog.add(data, -1);
       return true;
     };
@@ -133,7 +129,7 @@ function compileUnevaluatedItems(schemaObj, jsonSchema) {
 
   if (uneval === false) {
     return function validateUnevaluatedItemsFalse(data, dataPath, dataRoot, mark) {
-      if (!isArrayClass(data)) return true;
+      if (!Array.isArray(data)) return true;
       const log = root.evalLog;
       const index = log.index(data, mark, data.length);
       if (index !== null && index.has(-1)) return true;
@@ -147,7 +143,7 @@ function compileUnevaluatedItems(schemaObj, jsonSchema) {
 
   const validator = schemaObj.createValidator(uneval, 'unevaluatedItems');
   return function validateUnevaluatedItems(data, dataPath, dataRoot, mark) {
-    if (!isArrayClass(data)) return true;
+    if (!Array.isArray(data)) return true;
     const log = root.evalLog;
     const index = log.index(data, mark, data.length);
     if (index !== null && index.has(-1)) return true;
