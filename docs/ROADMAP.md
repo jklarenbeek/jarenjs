@@ -118,20 +118,6 @@ delete it or fix it.
   are compared as the URL standard spells them, where RFC 3986 §6.2.2.2 makes
   them equivalent. A coded refusal, not a wrong answer; reading them alike is
   one rule for every URI part, in all four tools.
-- [ ] **An empty map beside an array branch reads back as an empty array.** A
-  strict profile carries a map as an array of `{ key, value }` entries, so
-  where one union holds a map and an array, an empty map and an empty array
-  are both written `[]`, and `fromProfile` reads `[]` as the branch that
-  stands first: under `{ anyOf: [{ type: 'array', items: { type: 'string' }
-  }, { type: 'object', additionalProperties: { type: 'string' } }] }`,
-  `fromProfile(toProfile({}))` is `[]`. So a model cannot write the empty
-  map of the query grammar (`{}` reads back as the empty array constructor)
-  or an element with no attributes in the full app grammar (`["ul", {},
-  "$.tags[*]"]` reads back `["ul", [], "$.tags[*]"]`; the app authoring
-  profile is not affected). Boxing the entries beside an array branch, as
-  JSON text is boxed beside a string, would tell the two apart at the price
-  of a longer spelling for every map of those grammars; that choice is the
-  open work.
 - [ ] **Per-call cost of annotation tracking for `unevaluated*`** — a check
   over many members or items no longer scans the evaluation log once per
   member: a long stretch is gathered in one pass, so the check grows with the
@@ -144,13 +130,6 @@ delete it or fix it.
   bundle than the validator's budget and measured no faster than the log on
   suite-size instances; a smaller encoding of it, or gating that pays for
   itself, is the open work.
-- [ ] **Deriving a strict profile compiles once per place.**
-  `deriveStrictProfile` decides each place by compiling a `{ $ref }` to it
-  against the held document. A compile reads what it reaches, so a place costs
-  what it references and the root of the document around it; a place that
-  references most of the document still costs a compile of most of it, once
-  per such place. One compile of the document, read at each place, is the open
-  work.
 - [ ] **A dynamic reference keeps instance locations on** — once a `$data`,
   `data` or `$query` reader exists anywhere in the compilation, a `$ref` is
   resolved during the compile-time scan and only a target that reaches a

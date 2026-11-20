@@ -6,12 +6,17 @@
 // original accepts what that branch reads. A `null` in an answer, at a member
 // the original does not require, is the profile's spelling of an absent
 // member: a model under a strict profile has no other way to leave one out.
+// Where entries sit beside an array, the empty map is written `{}`.
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { JarenValidator } from '@jarenjs/validate';
 import { deriveStrictProfile } from '@jarenjs/validate/strict-profile';
 import { compileJsonQuery } from '@jarenjs/json/query';
+import { transformJson } from '@jarenjs/json/jslt';
 import query from '@jarenjs/json/schemas/jaren-query.schema.json' with { type: 'json' };
+import jslt from '@jarenjs/json/schemas/jaren-jslt.schema.json' with { type: 'json' };
+import app from '@jarenjs/app/schemas/jaren-app.schema.json' with { type: 'json' };
 
 const D20 = 'https://json-schema.org/draft/2020-12/schema';
 /** @param {any} schema */
@@ -150,16 +155,173 @@ describe('fromProfile: an answer two branches read differently', () => {
     assert.equal(original(schema)(strict.fromProfile({ value: { c: 'x' } })), false);
   });
 
-  it('reads an empty entries array beside an array branch as the first of the two', () => {
+  it('reads an empty entries array beside an array branch as the empty array, in either order', () => {
     const list = { type: 'array', items: text };
     const bag = { type: 'object', additionalProperties: text };
     assert.deepEqual(deriveStrictProfile({ anyOf: [list, bag] }).fromProfile({ value: [] }), []);
-    assert.deepEqual(deriveStrictProfile({ anyOf: [bag, list] }).fromProfile({ value: [] }), {});
-    // so an empty map beside an array that stands first does not come back
-    const strict = deriveStrictProfile({ anyOf: [list, bag] });
+    assert.deepEqual(deriveStrictProfile({ anyOf: [bag, list] }).fromProfile({ value: [] }), []);
+  });
+});
+
+describe('an empty map beside an array branch is written {}, and [] is the empty array', () => {
+  const list = { type: 'array', items: text };
+  const bag = { type: 'object', additionalProperties: text };
+  /** The closed object with no members, as the derivation spells one. */
+  const EMPTY = { type: 'object', properties: {}, additionalProperties: false, required: [] };
+  /** How many closed objects with no members a profile holds. @param {unknown} profile */
+  const empties = (profile) => JSON.stringify(profile).split(JSON.stringify(EMPTY)).length - 1;
+  /** @param {any} schema @param {unknown[]} instances */
+  const roundTrips = (schema, instances) => {
+    const strict = deriveStrictProfile(schema);
+    const profile = profiled(strict.schema);
+    const check = original(schema);
+    for (const instance of instances) {
+      const filled = strict.toProfile(instance);
+      assert.equal(profile(filled), true, `the profile accepts toProfile(${JSON.stringify(instance)})`);
+      assert.deepEqual(strict.fromProfile(filled), instance);
+      assert.equal(check(strict.fromProfile(filled)), true);
+    }
+    return strict;
+  };
+
+  it('gives the union one closed object with no members, after its branches, in either order', () => {
+    for (const branches of [[list, bag], [bag, list]]) {
+      const strict = roundTrips({ anyOf: branches }, [{}, [], { a: 'x', b: 'y' }, ['x']]);
+      assert.deepEqual(strict.schema.properties.value.anyOf.at(-1), EMPTY);
+      assert.equal(strict.schema.properties.value.anyOf.length, 3);
+      assert.deepEqual(strict.toProfile({}), { value: {} });
+      assert.deepEqual(strict.toProfile([]), { value: [] });
+      assert.deepEqual(strict.fromProfile({ value: {} }), {});
+      assert.deepEqual(strict.fromProfile({ value: [] }), []);
+      // a map with members keeps its entries
+      assert.deepEqual(strict.toProfile({ a: 'x' }), { value: [{ key: 'a', value: 'x' }] });
+    }
+  });
+
+  it('leaves a union with no array branch, a map with nothing beside it and a nullable map as they were', () => {
+    // two maps, or a map beside a value carried as JSON text, share no spelling with an array
+    const pattern = { type: 'object', patternProperties: { '^x': text }, additionalProperties: false };
+    for (const schema of [{ anyOf: [bag, text] }, bag, { type: 'object', properties: { m: bag } }, { anyOf: [bag, closed('k', text)] },
+      { anyOf: [bag, pattern] }, { anyOf: [bag, true] }, { anyOf: [bag, { type: 'array', prefixItems: [text] }] }]) {
+      const strict = deriveStrictProfile(schema);
+      assert.equal(empties(strict.schema), 0, JSON.stringify(schema));
+    }
+    // there the spelling [] is the map's alone
+    const strict = deriveStrictProfile({ anyOf: [bag, text] });
     assert.deepEqual(strict.toProfile({}), { value: [] });
-    assert.deepEqual(strict.fromProfile(strict.toProfile({})), []);
-    assert.deepEqual(strict.fromProfile(strict.toProfile({ a: 'x' })), { a: 'x' });
+    assert.deepEqual(strict.fromProfile({ value: [] }), {});
+    assert.deepEqual(deriveStrictProfile({ type: 'object', properties: { m: bag } }).fromProfile({ m: [] }), { m: {} });
+  });
+
+  it('adds nothing where the map cannot be empty: [] is the array, and the map is never empty', () => {
+    const strict = roundTrips({ anyOf: [{ ...bag, minProperties: 1 }, list] }, [[], { a: 'x' }]);
+    assert.equal(empties(strict.schema), 0);
+    assert.deepEqual(strict.fromProfile({ value: [] }), []);
+  });
+
+  it('adds no second one where the union already holds a closed object with no members', () => {
+    const strict = roundTrips({ anyOf: [list, bag, { type: 'object', additionalProperties: false }] }, [{}, [], { a: 'x' }]);
+    assert.equal(strict.schema.properties.value.anyOf.length, 3);
+    assert.deepEqual(strict.toProfile({}), { value: {} });
+  });
+
+  it('is not taken for another branch: an object of members the profile requires refuses {}', () => {
+    // the original's open object admits {}; its profile requires the member, so only the closed empty object reads {}
+    const loose = { type: 'object', properties: { a: text } };
+    const strict = roundTrips({ anyOf: [list, loose, bag] }, [{}, [], { a: 'x' }]);
+    assert.deepEqual(strict.toProfile({}), { value: {} });
+    assert.deepEqual(strict.toProfile({ a: 'x' }), { value: { a: 'x' } });
+    // nor for a value carried as boxed JSON text
+    const boxed = roundTrips({ anyOf: [list, bag, text, true] }, [{}, [], { a: 'x' }, 'x', 5]);
+    assert.deepEqual(boxed.toProfile({}), { value: {} });
+    assert.deepEqual(boxed.fromProfile({ value: { json: '{}' } }), {});
+  });
+
+  it('pairs the union that holds the array, not the definition the map sits in, which keeps [] where nothing beside it is an array', () => {
+    const schema = {
+      $defs: { object: { anyOf: [bag, closed('k', { type: 'number' })] } },
+      type: 'object',
+      properties: { either: { anyOf: [list, { $ref: '#/$defs/object' }] }, only: { $ref: '#/$defs/object' } },
+      required: ['either', 'only'],
+    };
+    const strict = roundTrips(schema, [{ either: {}, only: {} }, { either: [], only: { a: 'x' } }, { either: { k: 1 }, only: { k: 2 } }]);
+    assert.equal(empties(strict.schema), 1);
+    assert.deepEqual(strict.schema.properties.either.anyOf.at(-1), EMPTY);
+    assert.equal(empties(strict.schema.$defs), 0);
+    assert.deepEqual(strict.toProfile({ either: {}, only: {} }), { either: {}, only: [] });
+    assert.deepEqual(strict.fromProfile({ either: [], only: [] }), { either: [], only: {} });
+  });
+
+  it('counts a const of an array as an array, and reads [] as the map where nothing else reads it', () => {
+    const strict = roundTrips({ anyOf: [bag, { const: [] }] }, [{}, [], { a: 'x' }]);
+    assert.equal(empties(strict.schema), 1);
+    // an array no branch but the map's entries can be: [] is then the map's reading alone
+    const only = roundTrips({ anyOf: [bag, { const: ['x'] }] }, [{}, ['x'], { a: 'x' }]);
+    assert.deepEqual(only.fromProfile({ value: [] }), {});
+    // and an enum that lists an array
+    assert.equal(empties(roundTrips({ anyOf: [bag, { enum: [[], 'x'] }] }, [{}, [], 'x', { a: 'x' }]).schema), 1);
+  });
+
+  it('never writes a value every branch refuses as the added empty object, which would drop its members', () => {
+    for (const branches of [[list, bag], [bag, list]]) {
+      const strict = deriveStrictProfile({ anyOf: branches });
+      assert.deepEqual(strict.toProfile({ a: 5 }), { value: { a: 5 } });
+      assert.deepEqual(strict.fromProfile(strict.toProfile({ a: 5 })), { a: 5 });
+      assert.equal(original({ anyOf: branches })(strict.fromProfile(strict.toProfile({ a: 5 }))), false);
+    }
+    // nor one a union above the paired one holds
+    const above = deriveStrictProfile({ $defs: { inner: { anyOf: [list, bag] } }, anyOf: [{ $ref: '#/$defs/inner' }, { type: 'number' }] });
+    assert.deepEqual(above.toProfile({ a: 5 }), { value: { a: 5 } });
+  });
+
+  it('gives the lowest union holding both the one branch, and a union above it, which reaches that branch, none', () => {
+    const schema = { $defs: { inner: { anyOf: [list, bag] } }, anyOf: [{ $ref: '#/$defs/inner' }, { type: 'array', items: { type: 'number' } }] };
+    const strict = roundTrips(schema, [{}, [], ['x'], [1], { a: 'x' }]);
+    assert.equal(empties(strict.schema), 1);
+    assert.deepEqual(strict.schema.$defs.inner.anyOf.at(-1), EMPTY);
+  });
+
+  it('is the branch the README states', () => {
+    const readme = fs.readFileSync(new URL('../../packages/validate/README.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    const spelled = JSON.stringify(EMPTY).replace(/([,:])/g, '$1 ').replace(/^\{/, '{ ').replace(/\}$/, ' }');
+    assert.ok(readme.includes(`the closed object with no members, \`${spelled}\``), spelled);
+  });
+
+  it('gives the query grammar\'s empty map back, and the engine answers it as written', () => {
+    const strict = deriveStrictProfile(query);
+    const profile = profiled(strict.schema);
+    const data = { tags: ['a', 'b'] };
+    for (const written of [{}, [], { $map: [] }, ['$.tags[*]', {}], { a: {}, b: [] }]) {
+      assert.equal(original(query)(written), true);
+      const filled = strict.toProfile(written);
+      assert.equal(profile(filled), true);
+      const back = strict.fromProfile(filled);
+      assert.deepEqual(back, written);
+      assert.deepEqual(compileJsonQuery(/** @type {any} */ (back))(data), compileJsonQuery(/** @type {any} */ (written))(data));
+    }
+    assert.deepEqual(strict.toProfile({}), { value: {} });
+    assert.deepEqual(strict.fromProfile({ value: {} }), {});
+    assert.deepEqual(strict.fromProfile({ value: [] }), []);
+  });
+
+  it('gives the app grammar\'s element with no attributes back, and the engine renders it as written', () => {
+    const references = [jslt, query];
+    const strict = deriveStrictProfile(app, { references });
+    const profile = profiled(strict.schema);
+    const validator = new JarenValidator();
+    for (const reference of references) validator.addSchema(reference);
+    const check = validator.compile(app);
+    const data = { tags: ['a', 'b'] };
+    for (const body of [['ul', {}, '$.tags[*]'], ['ul', { class: 'x' }, '$.tags[*]'], ['ul', [], '$.tags[*]']]) {
+      const written = { $app: '0.1', state: data, view: [{ match: '$', body }] };
+      assert.equal(check(written), true);
+      const filled = strict.toProfile(written);
+      assert.equal(profile(filled), true);
+      const back = /** @type {any} */ (strict.fromProfile(filled));
+      assert.deepEqual(back, written);
+      assert.deepEqual(transformJson(back.view, data), transformJson(written.view, data));
+    }
+    assert.deepEqual(transformJson([{ match: '$', body: ['ul', {}, '$.tags[*]'] }], data), ['ul', {}, 'a', 'b']);
   });
 });
 

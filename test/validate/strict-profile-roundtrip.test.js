@@ -2,10 +2,10 @@
 // The round trip of a strict profile over the suite's own grammars. For every
 // committed document a grammar's original accepts, the profile accepts
 // `toProfile(document)` and `fromProfile(toProfile(document))` is the
-// document — but for two spellings a profile cannot tell apart: an empty map
-// beside an array branch of one union (both are written `[]`), and an explicit
-// `null` at a member the original leaves optional (a strict answer's `null`
-// there means the member is left out). The JTLT segment is read alike in every
+// document — but for an explicit `null` at a member the original leaves
+// optional (a strict answer's `null` there means the member is left out). An
+// empty map beside an array branch of one union comes back a map (it is
+// written `{}`, the empty array `[]`). The JTLT segment is read alike in every
 // order of its branches.
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
@@ -120,18 +120,18 @@ describe('the suite\'s grammars and authoring profiles, over their committed doc
 
   /** Each grammar, the documents offered to it, and the one difference its profile's shape leaves. @type {[string, [string, any][], string[]][]} */
   const suite = [
-    ['packages/json/schemas/jaren-query.schema.json', queries, ['an empty map read as an empty array']],
+    ['packages/json/schemas/jaren-query.schema.json', queries, []],
     ['packages/json/schemas/jaren-query.authoring.schema.json', queries, []],
     ['packages/json/schemas/jaren-jslt.schema.json', stylesheets, []],
     ['packages/json/schemas/jaren-jslt.authoring.schema.json', stylesheets, []],
     ['packages/json/schemas/jaren-jtlt.schema.json', segmented, []],
     ['packages/json/schemas/jaren-jtlt.draft-07.schema.json', segmented, []],
     ['packages/app/schemas/jaren-app.authoring.schema.json', documented, []],
-    ['packages/app/schemas/jaren-app.schema.json', documented, ['an empty map read as an empty array']],
+    ['packages/app/schemas/jaren-app.schema.json', documented, []],
     ['packages/flow/schemas/jaren-fsm.authoring.schema.json', documented, ['a null member left out']],
     ['packages/flow/schemas/jaren-fsm.schema.json', documented, ['a null member left out']],
     ['packages/flow/schemas/jaren-dag.authoring.schema.json', documented, []],
-    ['packages/flow/schemas/jaren-dag.schema.json', documented, ['an empty map read as an empty array']],
+    ['packages/flow/schemas/jaren-dag.schema.json', documented, []],
     ['packages/flow/schemas/jaren-statechart.authoring.schema.json', documented, []],
     ['packages/flow/schemas/jaren-statechart.schema.json', documented, []],
     ['packages/flow/schemas/jaren-workflow.authoring.schema.json', documented, []],

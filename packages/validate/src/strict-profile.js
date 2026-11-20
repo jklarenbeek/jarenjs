@@ -28,7 +28,10 @@
  * - a value of any shape (`{}`, a free-form object, a tuple, an `enum` or
  *   `const` of objects or arrays) is carried as
  *   JSON text, a map (`patternProperties`, a schema-valued
- *   `additionalProperties`) as an array of `{ key, value }` entries, and an
+ *   `additionalProperties`) as an array of `{ key, value }` entries — where
+ *   entries stand beside an array in one union, the union also gains the
+ *   closed object with no members, so the empty map is `{}` and `[]` the
+ *   empty array — and an
  *   object beside `allOf`/`anyOf`/`oneOf` whose branches only add, require
  *   or narrow members is distributed into each branch;
  * - a root that is not one closed object is wrapped as the one member `value`.
@@ -245,14 +248,15 @@ function strictNote(keyword, value) {
  *   original schema to the profile's shape: an absent member is filled with
  *   `null`, a member the profile closed out is dropped, a value at a union is
  *   written in the branch it belongs to (the first whose original schema
- *   accepts it), and a non-object root is wrapped as `{ value }` (for
- *   few-shot examples and tests)
+ *   accepts it; an empty map beside an array as `{}`), and a non-object
+ *   root is wrapped as `{ value }` (for few-shot examples and tests)
  * @property {(answer: unknown) => unknown} fromProfile - Map an answer in the
  *   profile's shape back to the original's: a `null` at a member the original
  *   does not require is removed (a strict answer cannot leave a member out,
  *   so its `null` there means absent), unless the original refuses the answer
  *   without the member and accepts it with the `null`; a member the original
- *   requires keeps its `null`. JSON text is parsed, entries become an object,
+ *   requires keeps its `null`. JSON text is parsed, entries become an object
+ *   (beside an array, `[]` is the empty array and `{}` the empty map),
  *   an answer two union branches read differently is read by the first whose
  *   original accepts its reading, and a wrapped root is unwrapped. Validate
  *   the result with the original schema; an answer the profile does not
@@ -982,7 +986,87 @@ export function deriveStrictProfile(schema, options = {}) {
   };
   const boxes = new WeakSet();
   box(profile);
-  return createMaps(profile, { placeholders, nullables, texts, maps, boxes, origins }, wrap, accepts, `${rootBase}#`);
+  // an entries array beside an array would write the empty map and the empty
+  // array alike, `[]`: there the empty map is the closed object with no
+  // members, `{}`, and `[]` is the array's
+  const paired = new WeakSet();
+  /** The closed objects with no members the pairing added: they carry `{}` alone. */
+  const added = new WeakSet();
+  /** The unions already settled (or being settled, on a loop of references). */
+  const settled = new WeakSet();
+  /** Entries → whether the original admits the empty map where they stand. @type {Map<object, boolean>} */
+  const emptiable = new Map();
+  /** Whether a branch may read `[]` as an empty map: it reaches entries whose original admits `{}`. @param {any} node @param {Set<object>} seen @returns {boolean} */
+  const loose = (node, seen) => {
+    node = local(node);
+    if (!isJsonObject(node) || seen.has(node)) return false;
+    seen.add(node);
+    if (maps.has(node)) {
+      if (!emptiable.has(node)) emptiable.set(node, (origins.get(node) ?? []).every((place) => accepts(place, {})));
+      return /** @type {boolean} */ (emptiable.get(node));
+    }
+    return Array.isArray(node.anyOf) && node.anyOf.some((/** @type {unknown} */ branch) => loose(branch, seen));
+  };
+  /** Whether a branch may be an array other than entries. @param {any} node @param {Set<object>} seen @returns {boolean} */
+  const listing = (node, seen) => {
+    node = local(node);
+    if (!isJsonObject(node) || seen.has(node) || maps.has(node)) return false;
+    seen.add(node);
+    if (Array.isArray(node.anyOf)) return node.anyOf.some((/** @type {unknown} */ branch) => listing(branch, seen));
+    if (Object.hasOwn(node, 'const')) return Array.isArray(node.const);
+    if (Array.isArray(node.enum)) return node.enum.some((/** @type {unknown} */ value) => Array.isArray(value));
+    return [node.type].flat().includes('array');
+  };
+  /** Whether a branch reaches a closed object with no members, which reads `{}` as itself. @param {any} node @param {Set<object>} seen @returns {boolean} */
+  const holdsEmpty = (node, seen) => {
+    node = local(node);
+    if (!isJsonObject(node) || seen.has(node)) return false;
+    seen.add(node);
+    if (Array.isArray(node.anyOf)) return node.anyOf.some((/** @type {unknown} */ branch) => holdsEmpty(branch, seen));
+    return [node.type].flat().includes('object') && isJsonObject(node.properties) && Object.keys(node.properties).length === 0
+      && node.additionalProperties === false;
+  };
+  /**
+   * Pair one union, after the unions its branches reach: the lowest union holding both gains the closed object
+   * with no members, and a union above it, which reaches that object already, gains none.
+   * @param {any} node
+   */
+  const settle = (node) => {
+    if (settled.has(node)) return;
+    settled.add(node);
+    /** @type {(n: unknown, seen: Set<object>) => void} */
+    const below = (n, seen) => {
+      n = local(n);
+      if (!isJsonObject(n) || seen.has(n) || !Array.isArray(n.anyOf)) return;
+      seen.add(n);
+      if (n !== node) settle(n);
+      else for (const branch of n.anyOf) below(branch, seen);
+    };
+    below(node, new Set());
+    const branches = node.anyOf;
+    const collides = branches.some((/** @type {unknown} */ one, /** @type {number} */ i) => branches.some((/** @type {unknown} */ other,
+      /** @type {number} */ j) => j !== i && listing(other, new Set())) && loose(one, new Set()));
+    if (!collides) return;
+    paired.add(node);
+    if (!branches.some((/** @type {unknown} */ branch) => holdsEmpty(branch, new Set()))) {
+      const empty = { type: 'object', properties: {}, additionalProperties: false, required: [] };
+      added.add(empty);
+      node.anyOf = [...branches, empty];
+    }
+  };
+  /** @type {(node: unknown) => void} */
+  const pair = (node) => {
+    if (!isJsonObject(node)) return;
+    if (Array.isArray(node.anyOf)) settle(node);
+    for (const key of Object.keys(node)) mapPosition(key, node[key], '#', (child) => { pair(child); return child; });
+  };
+  pair(profile);
+  return createMaps(profile, { placeholders, nullables, texts, maps, boxes, origins, paired, added }, wrap, accepts, `${rootBase}#`);
+}
+
+/** Whether a value is an object with no members. @param {unknown} value */
+function isEmptyObject(value) {
+  return isJsonObject(value) && Object.keys(value).length === 0;
 }
 
 /**
@@ -1013,15 +1097,17 @@ function widenNull(profiled) {
  * The two instance maps over a finished profile.
  * @param {Record<string, any>} profile
  * @param {{ placeholders: WeakMap<object, Set<string>>, nullables: WeakMap<object, Set<string>>, texts: WeakSet<object>,
- *   maps: WeakSet<object>, boxes: WeakSet<object>, origins: WeakMap<object, string[]> }} marks - the members whose null
- *   stands for absence, the optional members whose null the original admits, the JSON-text carriers, the entries
- *   maps, the boxed carriers, the places of the original each profile node stands for
+ *   maps: WeakSet<object>, boxes: WeakSet<object>, origins: WeakMap<object, string[]>, paired: WeakSet<object>,
+ *   added: WeakSet<object> }} marks - the members whose null stands for absence, the optional members whose null the
+ *   original admits, the JSON-text carriers, the entries maps, the boxed carriers, the places of the original each
+ *   profile node stands for, the unions where entries sit beside an array (there the empty map is written `{}` and `[]`
+ *   is the array's), and the closed objects with no members added there
  * @param {boolean} wrapped
  * @param {(place: string, value: unknown) => boolean} accepts - The original's own answer at one of its places
  * @param {string} root - The place of the original's root
  * @returns {StrictProfile}
  */
-function createMaps(profile, { placeholders, nullables, texts, maps, boxes, origins }, wrapped, accepts, root) {
+function createMaps(profile, { placeholders, nullables, texts, maps, boxes, origins, paired, added }, wrapped, accepts, root) {
   /** The original's own answer for a whole instance. @param {unknown} value */
   const judge = (value) => accepts(root, value);
   /** @type {Map<object, string>|undefined} */
@@ -1100,6 +1186,9 @@ function createMaps(profile, { placeholders, nullables, texts, maps, boxes, orig
       }
       if (readings.length === 0 && failure !== undefined) throw failure;
       if (readings.length === 0) return value;
+      // beside an array the empty map is written `{}`: `[]` there is the empty array, never the map
+      if (paired.has(node) && Array.isArray(value) && value.length === 0 && readings.some(([reading]) => !isEmptyObject(reading)))
+        readings.splice(0, readings.length, ...readings.filter(([reading]) => !isEmptyObject(reading)));
       if (readings.every(([reading]) => equalsJson(reading, readings[0][0]))) return readings[0][0];
       // two branches accept the answer and read it differently: it is the reading of the first branch whose
       // original accepts what that branch reads. Where none does, the answer stays as written, and the
@@ -1163,6 +1252,8 @@ function createMaps(profile, { placeholders, nullables, texts, maps, boxes, orig
     if (!isJsonObject(node)) return value;
     if (boxes.has(node)) return value === null && Array.isArray(node.type) ? null : { json: JSON.stringify(value) };
     if (texts.has(node)) return value === null && Array.isArray(node.type) ? null : JSON.stringify(value);
+    // beside an array the empty map is the closed object with no members, which reads `{}` as itself
+    if (paired.has(node) && isEmptyObject(value)) return {};
     if (Array.isArray(node.anyOf)) {
       // the branch the value belongs to: the first whose original schema accepts it. Filling a closed branch
       // drops the members it does not declare and writes null for the ones it does, so a filled value the
@@ -1170,7 +1261,9 @@ function createMaps(profile, { placeholders, nullables, texts, maps, boxes, orig
       const own = value === undefined ? undefined : node.anyOf.find((/** @type {object} */ branch) => belongs(value, branch));
       if (own !== undefined) return fill(value, own);
       // a value the original refuses in every branch: the first branch its filled value fits, else as written
+      // (never the added empty object, which would fit any object by dropping its members)
       for (const branch of node.anyOf) {
+        if (added.has(branch)) continue;
         const filled = fill(value, branch);
         if (matches(filled, branch)) return filled;
       }

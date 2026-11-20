@@ -1009,6 +1009,21 @@ and uses the compile pipeline twice, as a client:
   profile (registered under a private identifier, read as 2020-12) once and
   follows the branches the answer matches; where their readings differ, it
   is the first whose original accepts its own reading.
+- **The empty map beside an array is paired once, at the lowest union.** A
+  last walk over the finished profile settles each `anyOf` after the unions
+  its branches reach through references and nested unions: one whose
+  branches hold entries (whose original, compiled at their place, accepts
+  `{}`) in one branch and an array in another is marked (`paired`), and
+  gains the closed object with no members unless a branch already reaches
+  one, so a union above a paired one gains none. At a paired union
+  `toProfile` writes an empty object as `{}` and `fromProfile` drops the
+  empty map's reading of `[]` while another reading is left. Every other
+  union, and so every profile without the collision, is left byte for byte.
+- **A derivation's cost is its places.** Each compile of the original
+  (`{ $ref: place }`, cached per place) reads only what the place references,
+  so a derivation costs one compile per place it asks; the two maps add the
+  places they ask on first use and keep them. It is a build-time or start-up
+  step whose result a host keeps.
 - **A profile's size is one more walk, and a graph.** `strictProfileSize`
   counts over the same `mapPosition` walk — properties, definitions, `enum`
   values, the characters of names — and, on the way, summarizes the root and

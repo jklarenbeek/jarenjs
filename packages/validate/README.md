@@ -2694,8 +2694,19 @@ What the derivation does, node by node:
   array of closed `{ key, value }` objects (the name patterns restated on
   `key`: which names take a pattern's value schema, and which names a
   pattern declared `false` lets no member carry); `fromProfile` builds the
-  object back. *Upgrade: a name a `false` pattern refuses was restated as
-  taking that pattern's value schema.*
+  object back. Where entries stand beside an array in one union — read
+  through its references and nested unions — the empty map and the empty
+  array would both be `[]`, so that union also gains the closed object with
+  no members, `{ "type": "object", "properties": {}, "additionalProperties":
+  false, "required": [] }`: the empty map is written `{}`, its own JSON, and
+  `[]` is the empty array. The lowest union holding both gains it; one that
+  already reaches such an object, and a map the original never lets be empty
+  there, gain none, and every other profile is unchanged. *Upgrade: a name a
+  `false` pattern refuses was restated as taking that pattern's value
+  schema; beside an array an empty map was written `[]` and read back as
+  whichever of the two stands first, so the query grammar's empty map `{}`
+  and an element with no attributes (`["ul", {}, "$.tags[*]"]`) came back as
+  empty arrays.*
 - **An object beside `allOf`, `anyOf` or `oneOf` is distributed** when its
   branches only add, require or narrow members: each `allOf` branch is
   folded into the object, and the object is copied into each `anyOf` branch
@@ -2707,6 +2718,18 @@ What the derivation does, node by node:
   branch declares leaves it, and a branch that requires one accepts nothing.
 - **A root that is not one closed object is wrapped** as the one member
   `value` (strict modes take an object at the root); `fromProfile` unwraps it.
+
+**What a derivation costs.** Where the derivation needs the original's own
+answer — whether an optional member's schema accepts `null`, which values of
+a narrowed `enum` a member keeps, whether a map beside an array may be empty
+— it compiles the original once at that place, and once at the root, and
+each compile reads only what that place references. So a derivation costs a
+compile per place it asks, each costing what the place references. The two
+maps compile the same way on first use (`toProfile` at the union branches it
+asks, `fromProfile` the profile and the branches whose readings differ) and
+keep those compiles for every later value. A derivation is a build-time or
+start-up step: derive the profile once and keep what it returns — the schema
+to send, and the maps to read each answer with.
 
 **What a `null` in a strict answer means.** A strict profile requires every
 member, so a model has no way to leave one out: at a member the original
@@ -2737,9 +2760,8 @@ value fits, else as it is). `fromProfile` reads an answer through every
 branch the profile accepts it in; where two read it differently, it is the
 reading of the first branch whose original accepts what that branch reads,
 and where none does the answer stays as written, for the original to
-refuse. One spelling is shared and cannot be told apart: beside an array
-branch of the same union an empty map is written `[]`, as an empty array
-is, and reads back as the one that stands first. *Upgrade: `toProfile` took
+refuse. Where entries stand beside an array, `{}` is the empty map and `[]`
+the empty array, whichever branch stands first. *Upgrade: `toProfile` took
 the first branch whose filled value the profile accepted, so a value of one
 closed branch could be written as another whose members admit `null`
 (`{ "b": "x" }` as `{ "a": null }`); and an answer two branches read
