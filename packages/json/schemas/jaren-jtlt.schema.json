@@ -113,48 +113,24 @@
           "$ref": "#/$defs/segmentList"
         },
         {
+          "$ref": "#/$defs/querySegment"
+        },
+        {
           "$ref": "#/$defs/rawSegment"
         },
         {
           "$ref": "#/$defs/jsonSegment"
-        },
-        {
-          "allOf": [
-            {
-              "$ref": "#/$defs/queryDocument"
-            },
-            {
-              "type": "object",
-              "not": {
-                "propertyNames": {
-                  "pattern": "^[^$]"
-                }
-              }
-            }
-          ]
         }
       ]
     },
-    "rawSegment": {
-      "type": "object",
-      "properties": {
-        "$raw": {
-          "$ref": "#/$defs/queryDocument"
-        }
-      },
-      "required": [
-        "$raw"
-      ],
-      "additionalProperties": false
-    },
-    "queryDocument": {
-      "description": "A query document is either the version envelope or a bare expression (a bare RFC 9535 JSONPath string is the degenerate query).",
+    "querySegment": {
+      "description": "A query object as a segment: the version envelope or an operator phrase, which are the query documents that are objects holding a $-prefixed key. A map constructor holds none and is no segment (TL0004).",
       "oneOf": [
         {
           "$ref": "#/$defs/versionEnvelope"
         },
         {
-          "$ref": "#/$defs/expression"
+          "$ref": "#/$defs/operatorPhrase"
         }
       ]
     },
@@ -1250,6 +1226,103 @@
         "$apply"
       ],
       "additionalProperties": false
+    },
+    "operatorPhrase": {
+      "description": "An object expression whose keys are $-prefixed: every alternative of objectExpression but the map constructor.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/constPhrase"
+        },
+        {
+          "$ref": "#/$defs/mapPhrase"
+        },
+        {
+          "$ref": "#/$defs/callPhrase"
+        },
+        {
+          "$ref": "#/$defs/flworPhrase"
+        },
+        {
+          "$ref": "#/$defs/somePhrase"
+        },
+        {
+          "$ref": "#/$defs/everyPhrase"
+        },
+        {
+          "$ref": "#/$defs/unaryOperatorPhrase"
+        },
+        {
+          "$ref": "#/$defs/binaryOperatorPhrase"
+        },
+        {
+          "$ref": "#/$defs/variadicOperatorPhrase"
+        },
+        {
+          "$ref": "#/$defs/nonEmptyVariadicOperatorPhrase"
+        },
+        {
+          "$ref": "#/$defs/conditionalArityOperatorPhrase"
+        },
+        {
+          "$ref": "#/$defs/stringJoinPhrase"
+        },
+        {
+          "$ref": "#/$defs/roundingPhrase"
+        },
+        {
+          "$ref": "#/$defs/geohashPhrase"
+        },
+        {
+          "$ref": "#/$defs/instantPhrase"
+        },
+        {
+          "$ref": "#/$defs/ternaryOperatorPhrase"
+        },
+        {
+          "$ref": "#/$defs/replacePhrase"
+        },
+        {
+          "$ref": "#/$defs/schemaOperatorPhrase"
+        },
+        {
+          "$ref": "#/$defs/seriesSpecPhrase"
+        },
+        {
+          "$ref": "#/$defs/asOfPhrase"
+        },
+        {
+          "$ref": "#/$defs/timeBucketPhrase"
+        },
+        {
+          "$ref": "#/$defs/errorPhrase"
+        },
+        {
+          "$ref": "#/$defs/applyPhrase"
+        }
+      ]
+    },
+    "rawSegment": {
+      "type": "object",
+      "properties": {
+        "$raw": {
+          "$ref": "#/$defs/queryDocument"
+        }
+      },
+      "required": [
+        "$raw"
+      ],
+      "additionalProperties": false
+    },
+    "queryDocument": {
+      "description": "A query document is either the version envelope or a bare expression (a bare RFC 9535 JSONPath string is the degenerate query).",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/versionEnvelope"
+        },
+        {
+          "$ref": "#/$defs/expression"
+        }
+      ]
     },
     "jsonSegment": {
       "type": "object",

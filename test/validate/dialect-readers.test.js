@@ -126,8 +126,12 @@ describe('deriveStrictProfile reads a dialect through the validator it is handed
       // the null the profile placed is removed: the original refuses it and lets m be absent
       assert.deepEqual(profile.fromProfile({ m: null }), {}, uri);
       assert.equal(validator.compile(schema)(profile.fromProfile({ m: null })), true, uri);
-      // by name, draft-07: the $ref alone, which accepts null, so the null is kept
-      assert.deepEqual(deriveStrictProfile(schema).fromProfile({ m: null }), { m: null }, uri);
+      // by name, draft-07: the $ref alone, which accepts any value, so m is carried as JSON text; a null
+      // written as that text is the value null, and a bare null is m left out, as at any optional member
+      const byName = deriveStrictProfile(schema);
+      assert.deepEqual(byName.schema.properties.m, { anyOf: [{ $ref: '#/$defs/any' }, { type: 'null' }] }, uri);
+      assert.deepEqual(byName.fromProfile({ m: 'null' }), { m: null }, uri);
+      assert.deepEqual(byName.fromProfile({ m: null }), {}, uri);
     }
   });
 

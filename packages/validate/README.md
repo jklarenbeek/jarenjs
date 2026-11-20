@@ -2354,7 +2354,10 @@ What the derivation does, node by node:
 - **A map is carried as entries.** An object whose members come from
   `patternProperties` or a schema-valued `additionalProperties` becomes an
   array of closed `{ key, value }` objects (the name patterns restated on
-  `key`); `fromProfile` builds the object back.
+  `key`: which names take a pattern's value schema, and which names a
+  pattern declared `false` lets no member carry); `fromProfile` builds the
+  object back. *Upgrade: a name a `false` pattern refuses was restated as
+  taking that pattern's value schema.*
 - **An object beside `allOf`, `anyOf` or `oneOf` is distributed** when its
   branches only add, require or narrow members: each `allOf` branch is
   folded into the object, and the object is copied into each `anyOf` branch
@@ -2367,18 +2370,42 @@ What the derivation does, node by node:
 - **A root that is not one closed object is wrapped** as the one member
   `value` (strict modes take an object at the root); `fromProfile` unwraps it.
 
-**How a placeholder `null` is told from a real one.** When the profile is
-derived, the original's own validator is asked whether each optional
-member's schema accepts `null`. Only a member it refuses `null` for is
-widened, and only that member's `null` is removed by `fromProfile`. A member
-typed `['string', 'null']`, a `$ref` to a nullable definition, an `anyOf`
-with a `null` branch or an `enum` that lists `null` keeps its `null` —
-unless the original refuses the answer with it and accepts the member
-absent (a constraint on presence, such as `not: { required: [...] }`), in
-which case those nulls are removed. An answer read through two union
-branches that disagree about it is returned as written.
-`toProfile` is the forward map (absent members filled with `null`, members
-the profile closed out dropped), for few-shot examples and tests.
+**What a `null` in a strict answer means.** A strict profile requires every
+member, so a model has no way to leave one out: at a member the original
+does not require, a `null` is the profile's spelling of the member left out,
+and `fromProfile` removes it — whether the member's own schema refuses
+`null` (the profile widened it: when the profile is derived, the original's
+validator is asked whether each optional member's schema accepts `null`) or
+admits it (`['string', 'null']`, a `$ref` to a nullable definition, an
+`anyOf` with a `null` branch, an `enum` that lists `null`). A `null` stays
+in one case: the original refuses the answer without the member and accepts
+it with the `null` — something else requires the member to be present, as
+`dependentRequired` or `minProperties` can — and then no more nulls stay
+than the original needs. A member the original requires keeps its `null`.
+So an explicit `null` at an optional member does not travel through a
+strict answer: to carry one, require the member, which leaves `null` its
+one spelling. *Upgrade: a `null` at an optional member whose schema admits
+`null` was kept unless the original refused the answer with it, so an
+answer that left a clause out read back with the clause `null` — a FLWOR's
+unused `$where` then let no item pass, and its `$orderby` was refused
+`JQ2005`.*
+
+**Which branch of a union a value is.** `toProfile` is the forward map, for
+few-shot examples and tests: absent members filled with `null`, members the
+profile closed out dropped, and at a union the value written in the branch
+it belongs to, the first whose original schema accepts it (a value the
+original refuses in every branch is written in the first branch its filled
+value fits, else as it is). `fromProfile` reads an answer through every
+branch the profile accepts it in; where two read it differently, it is the
+reading of the first branch whose original accepts what that branch reads,
+and where none does the answer stays as written, for the original to
+refuse. One spelling is shared and cannot be told apart: beside an array
+branch of the same union an empty map is written `[]`, as an empty array
+is, and reads back as the one that stands first. *Upgrade: `toProfile` took
+the first branch whose filled value the profile accepted, so a value of one
+closed branch could be written as another whose members admit `null`
+(`{ "b": "x" }` as `{ "a": null }`); and an answer two branches read
+differently was returned as written, its entries and JSON text unread.*
 
 **The original stays the authority.** Everything the profile drops is a
 relaxation, so validate what `fromProfile` returns with the original
@@ -2409,6 +2436,34 @@ refused `JK0108`, where a profile no answer satisfies was derived; a
 reference to a boolean schema was refused `JK0104`; a malformed `$id` threw
 an uncoded `TypeError`; and annotations were restated as enforced.*
 
+**What has no strict form, and how to restate it.** The strict subset has no
+conjunction of two schemas, no condition, and no object that is closed and
+open at once, so these refusals are its own: the author restates the schema.
+Each example is refused with the code at the place shown, and each
+restatement derives; every restatement but the map's accepts the same
+instances as its example.
+
+| The schema has | Refused | For example | Restated |
+|---|---|---|---|
+| two schemas for one member, where neither is an `enum` or `const` nor only narrows | `JK0103` at `#/allOf/0/properties/a` | `{ "type": "object", "properties": { "a": { "type": "string" } }, "allOf": [{ "properties": { "a": { "type": "string", "minLength": 1 } } }] }` | the member written once, `{ "type": "object", "properties": { "a": { "type": "string", "minLength": 1 } } }`, or the branch left with value keywords only, `{ "type": "object", "properties": { "a": { "type": "string" } }, "allOf": [{ "properties": { "a": { "minLength": 1 } } }] }` |
+| a map beside declared members | `JK0102` at `#` | `{ "type": "object", "properties": { "id": { "type": "string" } }, "additionalProperties": { "type": "number" } }` | the map in a member of its own (another shape, which the host maps back), `{ "type": "object", "properties": { "id": { "type": "string" }, "scores": { "type": "object", "additionalProperties": { "type": "number" } } } }` |
+| a branch that is a `$ref`, beside an object type | `JK0103` at `#/allOf/0/%24ref` | `{ "type": "object", "properties": { "a": { "type": "string" } }, "allOf": [{ "$ref": "#/$defs/more" }], "$defs": { "more": { "properties": { "b": { "type": "string" } } } } }` | the referenced members written in the branch, `{ "type": "object", "properties": { "a": { "type": "string" } }, "allOf": [{ "properties": { "b": { "type": "string" } } }] }` |
+| a union nested in a branch, beside an object type | `JK0103` at `#/anyOf/0/anyOf` | `{ "type": "object", "properties": { "a": { "type": "string" } }, "anyOf": [{ "anyOf": [{ "properties": { "b": { "type": "string" } }, "required": ["b"] }, { "properties": { "c": { "type": "string" } }, "required": ["c"] }] }] }` | the inner branches as the outer ones, `{ "type": "object", "properties": { "a": { "type": "string" } }, "anyOf": [{ "properties": { "b": { "type": "string" } }, "required": ["b"] }, { "properties": { "c": { "type": "string" } }, "required": ["c"] }] }` |
+| `if`/`then`/`else` beside an object type | `JK0103` at `#/if` | `{ "type": "object", "properties": { "kind": { "enum": ["a", "b"] }, "size": { "type": "number" } }, "required": ["kind"], "if": { "properties": { "kind": { "const": "a" } } }, "then": { "required": ["size"] } }` | one branch per case, told apart by the member the condition reads, `{ "type": "object", "properties": { "kind": { "enum": ["a", "b"] }, "size": { "type": "number" } }, "required": ["kind"], "anyOf": [{ "properties": { "kind": { "const": "a" } }, "required": ["size"] }, { "properties": { "kind": { "const": "b" } } }] }` |
+| `if`/`then`/`else` in a branch beside an object type | `JK0103` at `#/allOf/0/if` | `{ "type": "object", "properties": { "kind": { "enum": ["a", "b"] }, "size": { "type": "number" } }, "required": ["kind"], "allOf": [{ "if": { "properties": { "kind": { "const": "a" } } }, "then": { "required": ["size"] } }] }` | the same branches, `{ "type": "object", "properties": { "kind": { "enum": ["a", "b"] }, "size": { "type": "number" } }, "required": ["kind"], "anyOf": [{ "properties": { "kind": { "const": "a" } }, "required": ["size"] }, { "properties": { "kind": { "const": "b" } } }] }` |
+| an `allOf` of several branches on a node with no type | `JK0103` at `#/allOf` | `{ "allOf": [{ "type": "string" }, { "minLength": 1 }] }` | the conjunction written out, `{ "type": "string", "minLength": 1 }` |
+
+Where the branches of such an `allOf` are themselves unions or references,
+writing it out means naming the forms that satisfy every branch. The JTLT
+grammar does so for the segment that is a query object: "a query document"
+and "an object holding a `$`-prefixed key" are one reference to the union of
+the forms that are both, read from the query grammar's own alternatives.
+Every grammar and authoring profile of the suite derives. Of its other
+schemas, those that put an `if` in a branch do not, and are refused `JK0103`
+there: `calendar/rrule` and `calendar/temporal` of `@jarenjs/core`,
+`jaren-emit-model` of `@jarenjs/emit`, `jaren-josl-ical` of `@jarenjs/josl`
+and `chart-definition` of `@jarenjs/charts`.
+
 **Which strict modes it targets.** The subset is the one OpenAI's
 Structured Outputs and strict function calling accept (every member
 required, `null` unions for optional ones, `additionalProperties: false`,
@@ -2416,10 +2471,67 @@ an object root, no `allOf`, `oneOf`, `not` or `if`) with the value keywords
 narrowed to what Anthropic's structured outputs and strict tool use also
 accept (no numeric bounds, lengths or array sizes; these are relaxed into
 descriptions as that provider's own SDKs do). Two limits stay with the
-host: Anthropic's strict mode refuses recursive schemas and `enum` values
-that are not scalars, and OpenAI's caps size (5,000 object properties,
-10 levels of nesting, 1,000 `enum` values), none of which the derivation
-checks.
+host, and the derivation checks neither: Anthropic's strict mode refuses
+recursive schemas and `enum` values that are not scalars, and both providers
+cap a schema's size.
+
+**A profile's size, against a provider's caps.** `strictProfileSize`
+measures a profile — what `deriveStrictProfile` returns, or any schema of the
+strict subset — in the numbers those caps are worded in. The caps differ per
+provider and change, so none is built in: the host compares the numbers with
+the caps of the provider it sends the profile to.
+
+```js
+import { deriveStrictProfile, strictProfileSize } from '@jarenjs/validate/strict-profile';
+
+const strict = deriveStrictProfile({
+  type: 'object',
+  required: ['ops'],
+  properties: { ops: { type: 'array', items: { $ref: '#/$defs/op' } } },
+  $defs: {
+    op: {
+      type: 'object',
+      required: ['op', 'path'],
+      properties: {
+        op: { enum: ['add', 'replace', 'remove'] },
+        path: { type: 'string', pattern: '^/' },
+        value: { type: 'string' },
+      },
+    },
+  },
+});
+console.log(JSON.stringify(strictProfileSize(strict)));
+// {"characters":442,"properties":4,"optionalProperties":0,"unionProperties":1,"definitions":1,"recursiveSchemas":0,"depth":2,"enumValues":3,"largestEnum":3,"largestEnumCharacters":16,"nameCharacters":32}
+```
+
+| Number | What it counts | The kind of cap it answers |
+|---|---|---|
+| `properties` | every member an object declares under `properties`, over the whole document | object properties in all |
+| `optionalProperties` | of those, the members their object does not list in `required` | optional parameters; a derived profile has none, since it requires every member |
+| `unionProperties` | of those, the members whose schema, read through the definition it references, holds `anyOf` or a list of types | parameters with union types; a derived profile writes each member the original left optional as one |
+| `depth` | the levels of object nesting on the deepest path from the root: each object entered counts one, arrays and unions none | levels of nesting |
+| `enumValues` | the values of every `enum` together | enum values in all |
+| `largestEnum`, `largestEnumCharacters` | the values of the one `enum` that lists the most, and the characters of the one whose values are longest together | the size of a single enum |
+| `nameCharacters` | the characters of every property name, definition name, `enum` value and `const` value | the total string length of names and listed values |
+| `definitions` | the members of every `$defs` and `definitions` | definitions |
+| `recursiveSchemas` | each definition, and the root, that a reference inside it leads back to | a provider that refuses recursive schemas takes a profile only where this is `0` |
+| `characters` | the characters of the profile's JSON text, written without whitespace | the size of the schema as text |
+
+For `depth`, a reference is followed into its definition and a path enters
+no definition twice, so a loop of references is walked once: a tree whose
+items name the root measures the root alone. A loop of more than 512
+definitions, or one whose paths take more than 100,000 entries to walk, is
+counted end to end — every definition of the loop once — which no path
+exceeds, so the number never understates. A reference that names no
+definition of the document adds no level. Characters are Unicode code
+points, and a listed value that is not a string counts as its JSON text. A
+limit on the grammar a provider compiles from a schema has no one number:
+`unionProperties`, `optionalProperties` and `characters` are the nearest
+signals. At the time of writing, OpenAI's documentation words its caps as
+object properties in all, levels of nesting, enum values and the total
+string length of names and values, and Anthropic's as optional parameters
+and parameters with union types beside limits on the compiled grammar; read
+the figures there.
 
 ## Error messages & i18n
 

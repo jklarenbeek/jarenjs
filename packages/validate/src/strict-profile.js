@@ -16,8 +16,8 @@
  *   with its type widened to also admit `null`. A member whose original
  *   schema already admits `null` is left as it is: the original's own
  *   validator answers `null` against the member's schema when the profile
- *   is derived, and only a member it refuses `null` for is widened and
- *   recorded as a placeholder;
+ *   is derived, and only a member it refuses `null` for is widened. Either
+ *   way a `null` an answer writes there stands for the member left out;
  * - every keyword the profile does not carry is restated in the node's
  *   `description`, where the model still reads it ({@link relaxSchema}'s
  *   rule), and `oneOf` becomes `anyOf`; an annotation the original never
@@ -36,12 +36,18 @@
  * Everything the profile drops is a relaxation, so the ORIGINAL schema
  * stays the authority: validate what `fromProfile` returns with it. The
  * two tightenings are closing and requiring; requiring is undone by
- * `fromProfile` (a placeholder `null` becomes an absent member again) and
- * closing narrows only which undeclared members a model can write.
+ * `fromProfile` (a `null` at a member the original leaves optional becomes
+ * an absent member again) and closing narrows only which undeclared members
+ * a model can write.
  * Where closing or bundling would make a profile that answers wrong — a map
  * beside declared members, a member contributed by `if`/`then`, two schemas
  * for one member — the schema is refused with a coded `SchemaCompileError`
  * naming the place, never a silently wrong profile.
+ *
+ * Providers also cap a strict schema's size, each in its own numbers, and
+ * the caps change: the derivation builds none in. {@link strictProfileSize}
+ * measures a profile in the numbers such caps are worded in, for a host to
+ * compare.
  */
 
 import { equalsJson, isJsonObject, setObjectMember } from '@jarenjs/core/object';
@@ -237,15 +243,20 @@ function strictNote(keyword, value) {
  *   references bundled under `$defs`
  * @property {(value: unknown) => unknown} toProfile - Map an instance of the
  *   original schema to the profile's shape: an absent member is filled with
- *   `null`, a member the profile closed out is dropped, and a non-object
- *   root is wrapped as `{ value }` (for few-shot examples and tests)
+ *   `null`, a member the profile closed out is dropped, a value at a union is
+ *   written in the branch it belongs to (the first whose original schema
+ *   accepts it), and a non-object root is wrapped as `{ value }` (for
+ *   few-shot examples and tests)
  * @property {(answer: unknown) => unknown} fromProfile - Map an answer in the
- *   profile's shape back to the original's: a `null` placed for a member the
- *   original lets be absent, and whose schema refuses `null`, is removed (as
- *   is a kept `null` the original refuses where it accepts the member absent),
- *   JSON text is parsed, entries become an object, and a wrapped root is
- *   unwrapped. Validate the result with the original schema; an answer the
- *   profile does not accept is returned as far as it reads. Throws
+ *   profile's shape back to the original's: a `null` at a member the original
+ *   does not require is removed (a strict answer cannot leave a member out,
+ *   so its `null` there means absent), unless the original refuses the answer
+ *   without the member and accepts it with the `null`; a member the original
+ *   requires keeps its `null`. JSON text is parsed, entries become an object,
+ *   an answer two union branches read differently is read by the first whose
+ *   original accepts its reading, and a wrapped root is unwrapped. Validate
+ *   the result with the original schema; an answer the profile does not
+ *   accept is returned as far as it reads. Throws
  *   `SchemaRuntimeError` `JK2002` for text that is not JSON and `JK2003` for
  *   entries that name one key twice, each with the `dataPath`
  */
@@ -444,6 +455,13 @@ export function deriveStrictProfile(schema, options = {}) {
 
   /** Profile object nodes → the members whose `null` stands for absence. */
   const placeholders = new WeakMap();
+  /**
+   * Profile nodes → the places of the original each stands for: the place it
+   * was derived from, or, for a member several places declare, all of them.
+   * `toProfile` asks the original there which union branch a value belongs to.
+   * @type {WeakMap<object, string[]>}
+   */
+  const origins = new WeakMap();
   /** Profile nodes that carry a value as JSON text, and maps carried as `{ key, value }` entries. */
   const texts = new WeakSet();
   const maps = new WeakSet();
@@ -489,7 +507,7 @@ export function deriveStrictProfile(schema, options = {}) {
     const rest = Object.hasOwn(node, 'additionalProperties') ? node.additionalProperties : true;
     if (rest !== false) values.push([rest, encodeJsonPointerPath(at, 'additionalProperties')]);
     const distinct = values.filter(([schema], i) => values.findIndex(([other]) => equalsJson(other, schema)) === i);
-    const value = distinct.some(([schema]) => schema === true) ? strict(true, base, at)
+    const value = distinct.some(([schema]) => schema === true) ? carrier(true, null)
       : distinct.length === 1 ? strict(distinct[0][0], base, distinct[0][1])
         : { anyOf: distinct.map(([schema, there]) => strict(schema, base, there)) };
     /** @type {Record<string, unknown>} */
@@ -499,8 +517,14 @@ export function deriveStrictProfile(schema, options = {}) {
       if (key === 'title' || key === 'description') setObjectMember(out, key, node[key]);
       else if (!isIdentity(node, key) && !unenforced(key) && !['type', 'properties', 'patternProperties', 'additionalProperties'].includes(key)) notes.push(strictNote(key, node[key]));
     }
+    // a pattern whose schema is false gives a name no value: no member may carry it
+    const refused = patterns.filter((pattern) => node.patternProperties[pattern] === false);
+    const valued = patterns.filter((pattern) => node.patternProperties[pattern] !== false);
+    const spelled = (/** @type {string[]} */ list) => list.map((pattern) => JSON.stringify(pattern)).join(' or ');
+    const barred = refused.length === 0 ? '' : `; no name matches ${spelled(refused)}`;
     const keyNote = patterns.length === 0 ? '(strict profile: a member name)'
-      : `(strict profile: a member name; a name matching ${patterns.map((pattern) => JSON.stringify(pattern)).join(' or ')} takes that pattern's value schema${rest === false ? ', and every name matches one' : ''}; the original schema enforces it)`;
+      : valued.length === 0 ? `(strict profile: a member name; no name matches ${spelled(refused)}; the original schema enforces it)`
+        : `(strict profile: a member name; a name matching ${spelled(valued)} takes that pattern's value schema${rest === false ? ', and every name matches one' : ''}${barred}; the original schema enforces it)`;
     out.items = { type: 'object', properties: { key: { type: 'string', description: keyNote }, value }, required: ['key', 'value'], additionalProperties: false };
     appendNotes(out, notes);
     maps.add(out);
@@ -620,7 +644,12 @@ export function deriveStrictProfile(schema, options = {}) {
     const branches = [];
     for (let i = 0; i < node[key].length; i++) {
       const record = { members: new Map(all.members), required: new Set(all.required), notes: [...all.notes] };
-      if (fold(record, node[key][i], encodeJsonPointerPath(at, key, i)) && outside(record) === undefined) branches.push(close(record));
+      const there = encodeJsonPointerPath(at, key, i);
+      if (!fold(record, node[key][i], there) || outside(record) !== undefined) continue;
+      const branch = close(record);
+      // the object copied into a branch stands for that branch of the original
+      origins.set(branch, [located.get(node[key][i]) ?? there]);
+      branches.push(branch);
     }
     if (branches.length === 0) throw refusal('JK0108', `every ${key} branch accepts no value; remove the object`, encodeJsonPointerPath(at, key));
     return { anyOf: branches };
@@ -663,11 +692,23 @@ export function deriveStrictProfile(schema, options = {}) {
   };
 
   /**
+   * The profile of one schema, recorded with the place of the original it stands for.
    * @param {unknown} node @param {string} base @param {string} at
    * @param {Map<string, string[]>} [places] - For a synthetic object: the original places of each member
    * @returns {any}
    */
   const strict = (node, base, at, places) => {
+    const out = shaped(node, base, at, places);
+    if (isJsonObject(out) && !origins.has(out)) origins.set(out, [located.get(/** @type {object} */ (node)) ?? at]);
+    return out;
+  };
+
+  /**
+   * @param {unknown} node @param {string} base @param {string} at
+   * @param {Map<string, string[]>} [places] - For a synthetic object: the original places of each member
+   * @returns {any}
+   */
+  const shaped = (node, base, at, places) => {
     if (node === true) return carrier(true, null);
     if (!isJsonObject(node)) throw refusal('JK0108', 'a schema that accepts no value has no strict form; remove it', at);
     // a node read where the index first met it carries that resource's base,
@@ -784,9 +825,19 @@ export function deriveStrictProfile(schema, options = {}) {
       kept.anyOf = kept.allOf;
       delete kept.allOf;
     }
-    /** @type {(child: unknown, there: string) => unknown} */
     const closed = encodeJsonPointerPath(at, 'additionalProperties');
-    const child = (value, there) => (value === false && there === closed ? false : strict(value, base, there));
+    // a member of a synthetic object stands for every place that declares it
+    const declared = encodeJsonPointerPath(at, 'properties');
+    const standing = places === undefined ? undefined
+      : new Map([...places].map(([name, list]) => [encodeJsonPointerPath(declared, name), list]));
+    /** @type {(child: unknown, there: string) => unknown} */
+    const child = (value, there) => {
+      if (value === false && there === closed) return false;
+      const made = strict(value, base, there);
+      const list = standing?.get(there);
+      if (list !== undefined && isJsonObject(made)) origins.set(made, list);
+      return made;
+    };
     const out = relaxNode(kept, at, relaxed, strictNote, child);
 
     if (target !== undefined) out.$ref = bundle(target);
@@ -922,6 +973,8 @@ export function deriveStrictProfile(schema, options = {}) {
         const boxed = { type: nullable ? ['object', 'null'] : 'object', properties: { json: { type: 'string', description: target.description } },
           required: ['json'], additionalProperties: false };
         boxes.add(boxed);
+        const stood = origins.get(branch);
+        if (stood !== undefined) origins.set(boxed, stood);
         return boxed;
       });
     }
@@ -929,7 +982,7 @@ export function deriveStrictProfile(schema, options = {}) {
   };
   const boxes = new WeakSet();
   box(profile);
-  return createMaps(profile, { placeholders, nullables, texts, maps, boxes }, wrap, (value) => accepts(`${rootBase}#`, value));
+  return createMaps(profile, { placeholders, nullables, texts, maps, boxes, origins }, wrap, accepts, `${rootBase}#`);
 }
 
 /**
@@ -960,13 +1013,17 @@ function widenNull(profiled) {
  * The two instance maps over a finished profile.
  * @param {Record<string, any>} profile
  * @param {{ placeholders: WeakMap<object, Set<string>>, nullables: WeakMap<object, Set<string>>, texts: WeakSet<object>,
- *   maps: WeakSet<object>, boxes: WeakSet<object> }} marks - the members whose null stands for absence, the optional
- *   members whose null the original admits, the JSON-text carriers, the entries maps, the boxed carriers
+ *   maps: WeakSet<object>, boxes: WeakSet<object>, origins: WeakMap<object, string[]> }} marks - the members whose null
+ *   stands for absence, the optional members whose null the original admits, the JSON-text carriers, the entries
+ *   maps, the boxed carriers, the places of the original each profile node stands for
  * @param {boolean} wrapped
- * @param {(value: unknown) => boolean} judge - The original's own answer
+ * @param {(place: string, value: unknown) => boolean} accepts - The original's own answer at one of its places
+ * @param {string} root - The place of the original's root
  * @returns {StrictProfile}
  */
-function createMaps(profile, { placeholders, nullables, texts, maps, boxes }, wrapped, judge) {
+function createMaps(profile, { placeholders, nullables, texts, maps, boxes, origins }, wrapped, accepts, root) {
+  /** The original's own answer for a whole instance. @param {unknown} value */
+  const judge = (value) => accepts(root, value);
   /** @type {Map<object, string>|undefined} */
   let pointers;
   /** @type {JarenValidator|undefined} */
@@ -1003,6 +1060,16 @@ function createMaps(profile, { placeholders, nullables, texts, maps, boxes }, wr
     return node;
   };
 
+  /**
+   * Whether a value belongs to a union branch: the original accepts it at every place the branch stands for. A
+   * branch that stands for no place (the `null` an optional member is widened with) is asked of the profile.
+   * @param {unknown} value @param {object} branch
+   */
+  const belongs = (value, branch) => {
+    const places = origins.get(branch);
+    return places === undefined ? matches(value, branch) : places.every((place) => accepts(place, value));
+  };
+
   /** @param {string} path @param {string} key */
   const below = (path, key) => `${path}/${key.replace(/~/g, '~0').replace(/\//g, '~1')}`;
 
@@ -1023,18 +1090,22 @@ function createMaps(profile, { placeholders, nullables, texts, maps, boxes }, wr
       }
     }
     if (Array.isArray(node.anyOf)) {
-      /** @type {unknown[]} */
-      const results = [];
+      /** What each branch that accepts the answer reads it as. @type {[unknown, object][]} */
+      const readings = [];
       let failure;
       for (const branch of node.anyOf) {
         if (!matches(value, branch)) continue;
-        try { results.push(restore(value, branch, path)); }
+        try { readings.push([restore(value, branch, path), branch]); }
         catch (error) { failure ??= error; }
       }
-      if (results.length === 0 && failure !== undefined) throw failure;
-      // where two branches accept the answer and disagree about it, the
-      // answer stays as written: the original's validator decides
-      return results.length > 0 && results.every((result) => equalsJson(result, results[0])) ? results[0] : value;
+      if (readings.length === 0 && failure !== undefined) throw failure;
+      if (readings.length === 0) return value;
+      if (readings.every(([reading]) => equalsJson(reading, readings[0][0]))) return readings[0][0];
+      // two branches accept the answer and read it differently: it is the reading of the first branch whose
+      // original accepts what that branch reads. Where none does, the answer stays as written, and the
+      // original's validator decides
+      const own = readings.find(([reading, branch]) => belongs(reading, branch));
+      return own === undefined ? value : own[0];
     }
     if (Array.isArray(value)) {
       const items = isJsonObject(node.items) ? value.map((item, i) => restore(item, node.items, below(path, String(i)))) : value;
@@ -1046,14 +1117,31 @@ function createMaps(profile, { placeholders, nullables, texts, maps, boxes }, wr
     /** @type {Record<string, unknown>} */
     const out = {};
     for (const key of Object.keys(value)) {
+      const at = below(path, key);
       if (!Object.hasOwn(node.properties, key)) setObjectMember(out, key, value[key]);
-      else if (value[key] !== null || !absent?.has(key)) setObjectMember(out, key, restore(value[key], node.properties[key], below(path, key)));
-      if (value[key] === null && either?.has(key)) ambiguous.push([out, key]);
+      else if (value[key] !== null) setObjectMember(out, key, restore(value[key], node.properties[key], at));
+      // a null the original refuses at an optional member stands for an absent member
+      else if (absent?.has(key)) continue;
+      // so does a null the original admits there, unless the answer needs it; a required member keeps its null
+      else if (either?.has(key) && !kept(at)) continue;
+      else setObjectMember(out, key, restore(null, node.properties[key], at));
     }
     return out;
   };
-  /** Nulls kept for optional members whose schema admits null: absent or null, the model could mean either. @type {[Record<string, unknown>, string][]} */
-  let ambiguous = [];
+  /**
+   * The nulls an answer writes at optional members whose schema admits null, by their place in the answer: the ones
+   * met, and the ones this reading keeps. A model under a strict profile cannot leave a member out, so its null there
+   * means absent; one stays only where the original refuses the answer without the member and accepts it with the null.
+   * @type {Set<string>}
+   */
+  let met = new Set();
+  /** @type {Set<string>} */
+  let staying = new Set();
+  /** @param {string} at */
+  const kept = (at) => {
+    met.add(at);
+    return staying.has(at);
+  };
 
   /** Entries back to the object they carry; an entry that is not one is left for the original to refuse. @param {unknown[]} items @param {string} path */
   const fromEntries = (items, path) => {
@@ -1076,6 +1164,12 @@ function createMaps(profile, { placeholders, nullables, texts, maps, boxes }, wr
     if (boxes.has(node)) return value === null && Array.isArray(node.type) ? null : { json: JSON.stringify(value) };
     if (texts.has(node)) return value === null && Array.isArray(node.type) ? null : JSON.stringify(value);
     if (Array.isArray(node.anyOf)) {
+      // the branch the value belongs to: the first whose original schema accepts it. Filling a closed branch
+      // drops the members it does not declare and writes null for the ones it does, so a filled value the
+      // profile accepts says nothing about whose value it was
+      const own = value === undefined ? undefined : node.anyOf.find((/** @type {object} */ branch) => belongs(value, branch));
+      if (own !== undefined) return fill(value, own);
+      // a value the original refuses in every branch: the first branch its filled value fits, else as written
       for (const branch of node.anyOf) {
         const filled = fill(value, branch);
         if (matches(filled, branch)) return filled;
@@ -1097,15 +1191,253 @@ function createMaps(profile, { placeholders, nullables, texts, maps, boxes }, wr
     schema: profile,
     toProfile: (value) => fill(wrapped ? { value } : value, profile),
     fromProfile: (answer) => {
-      ambiguous = [];
-      const restored = restore(answer, profile, '');
-      const unwrap = (/** @type {unknown} */ value) => (wrapped && isJsonObject(value) && Object.hasOwn(value, 'value') ? value.value : value);
-      // where the original refuses a kept null and accepts the member absent
-      // (a constraint on presence, like `not: { required }`), absent it is
-      if (ambiguous.length === 0 || judge(unwrap(restored))) return unwrap(restored);
-      const kept = structuredClone(unwrap(restored));
-      for (const [out, key] of ambiguous) delete out[key];
-      return judge(unwrap(restored)) ? unwrap(restored) : kept;
+      /** The answer read with the given nulls kept. @param {Set<string>} nulls */
+      const read = (nulls) => {
+        staying = nulls;
+        const restored = restore(answer, profile, '');
+        return wrapped && isJsonObject(restored) && Object.hasOwn(restored, 'value') ? restored.value : restored;
+      };
+      met = new Set();
+      // absent is the rule: every null at a member the original leaves optional is removed
+      const without = read(new Set());
+      if (met.size === 0 || judge(without)) return without;
+      // where the original refuses that and accepts the answer with those nulls (a member something else
+      // requires to be present), the nulls it needs stay, and no other
+      const needed = new Set(met);
+      if (!judge(read(needed))) return without;
+      for (const at of [...needed]) {
+        needed.delete(at);
+        if (!judge(read(needed))) needed.add(at);
+      }
+      return read(needed);
     },
   };
+}
+
+/** The definitions one loop of references may hold and still be walked path by path. */
+const LOOP_MEMBERS = 512;
+/** The entries one loop is walked for; past it the loop is measured end to end. */
+const LOOP_ENTRIES = 100_000;
+
+/**
+ * The number of Unicode code points in a string.
+ * @param {string} text
+ */
+function codePoints(text) {
+  let count = text.length;
+  for (let i = 1; i < text.length; i++) {
+    // a surrogate pair is one code point
+    if ((text.charCodeAt(i) & 0xFC00) === 0xDC00 && (text.charCodeAt(i - 1) & 0xFC00) === 0xD800) count--;
+  }
+  return count;
+}
+
+/**
+ * @typedef {object} StrictProfileSize
+ * @property {number} characters - Characters of the schema's JSON text, written without whitespace
+ * @property {number} properties - Object properties in all: every member an object declares under `properties`
+ * @property {number} optionalProperties - Of those, the members their object does not list in `required`
+ *   (none in a derived profile, which requires every member)
+ * @property {number} unionProperties - Of those, the members whose schema, read through the definition it
+ *   references, holds `anyOf` or a list of types (a derived profile writes an optional member as one)
+ * @property {number} definitions - Definitions: the members of every `$defs` and `definitions`
+ * @property {number} recursiveSchemas - Schemas on a loop of references: each definition, and the root, that a
+ *   reference inside it leads back to
+ * @property {number} depth - Levels of object nesting on the deepest path from the root: each object entered
+ *   counts one, a reference is followed into its definition, and a path enters no definition twice, so a loop
+ *   of references is walked once
+ * @property {number} enumValues - Enum values in all, over every `enum`
+ * @property {number} largestEnum - Values of the one `enum` that lists the most
+ * @property {number} largestEnumCharacters - Characters of the values of the one `enum` whose values are
+ *   longest together
+ * @property {number} nameCharacters - Characters of every property name, definition name, `enum` value and
+ *   `const` value together
+ */
+
+/**
+ * Measure a strict profile, or any schema of the strict subset, in the numbers providers cap a
+ * structured-output schema by. The caps differ per provider and change, so none is built in: compare the
+ * numbers with the caps of the provider the schema is sent to. Characters are Unicode code points; a value
+ * that is not a string counts as its JSON text. A reference that names no definition of the document adds
+ * no level. A loop of more than 512 definitions, or one whose paths take more than 100,000 entries to walk,
+ * is not walked path by path: its `depth` counts every definition of the loop once, end to end, which no
+ * path exceeds.
+ * @param {StrictProfile|object|boolean} profile - What `deriveStrictProfile` returns, or a schema
+ * @returns {StrictProfileSize}
+ * @throws {SchemaCompileError} `JK0107` for an argument that is neither
+ */
+export function strictProfileSize(profile) {
+  const given = /** @type {any} */ (profile);
+  const schema = isJsonObject(given) && typeof given.fromProfile === 'function' ? given.schema : given;
+  if (!isSchemaValue(schema)) throw new SchemaCompileError('JK0107', 'strictProfileSize takes a strict profile or a schema');
+  /** @type {StrictProfileSize} */
+  const size = { characters: codePoints(JSON.stringify(schema)), properties: 0, optionalProperties: 0, unionProperties: 0, definitions: 0,
+    recursiveSchemas: 0, depth: 0, enumValues: 0, largestEnum: 0, largestEnumCharacters: 0, nameCharacters: 0 };
+  /** @param {unknown} value */
+  const written = (value) => codePoints(typeof value === 'string' ? value : JSON.stringify(value));
+  /** A reference into the document as the walk spells a place: the pointer, its escapes for a URI read. @param {string} ref */
+  const placeNamed = (ref) => {
+    try { return ref.startsWith('#') ? decodeURIComponent(ref) : ref; }
+    catch { return ref; }
+  };
+  /**
+   * The root and each definition, by place: the object levels its own text reaches, and each reference in
+   * it with the levels entered where it stands.
+   * @type {Map<string, { node: unknown, own: number, edges: [string, number][] }>}
+   */
+  const bodies = new Map();
+  /** @param {string} at @param {unknown} node */
+  const bodyAt = (at, node) => {
+    const body = { node, own: 0, edges: /** @type {[string, number][]} */ ([]) };
+    bodies.set(placeNamed(at), body);
+    return body;
+  };
+  /** The schema of every declared member. @type {unknown[]} */
+  const members = [];
+
+  // one walk over every schema position: the counts, and the levels and references of each body
+  /** @param {unknown} node @param {string} at @param {{ own: number, edges: [string, number][] }} body @param {number} level */
+  const visit = (node, at, body, level) => {
+    if (!isJsonObject(node)) return;
+    const here = level + (isJsonObject(node.properties) || [node.type].flat().includes('object') ? 1 : 0);
+    if (here > body.own) body.own = here;
+    if (typeof node.$ref === 'string') body.edges.push([placeNamed(node.$ref), here]);
+    if (Array.isArray(node.enum)) {
+      const characters = node.enum.reduce((/** @type {number} */ sum, /** @type {unknown} */ value) => sum + written(value), 0);
+      size.enumValues += node.enum.length;
+      size.nameCharacters += characters;
+      size.largestEnum = Math.max(size.largestEnum, node.enum.length);
+      size.largestEnumCharacters = Math.max(size.largestEnumCharacters, characters);
+    }
+    if (Object.hasOwn(node, 'const')) size.nameCharacters += written(node.const);
+    for (const key of Object.keys(node)) {
+      const value = node[key];
+      const names = isJsonObject(value) ? Object.keys(value) : [];
+      const defining = key === '$defs' || key === 'definitions';
+      if (defining || key === 'properties') {
+        for (const name of names) size.nameCharacters += codePoints(name);
+        if (defining) size.definitions += names.length;
+        else {
+          const required = new Set(Array.isArray(node.required) ? node.required : []);
+          size.properties += names.length;
+          for (const name of names) {
+            if (!required.has(name)) size.optionalProperties++;
+            members.push(value[name]);
+          }
+        }
+      }
+      // a definition is a body of its own, reached by reference
+      mapPosition(key, value, at, (child, there) => visit(child, there, defining ? bodyAt(there, child) : body, defining ? 0 : here));
+    }
+  };
+  visit(schema, '#', bodyAt('#', schema), 0);
+
+  for (let member of members) {
+    const seen = new Set();
+    while (isJsonObject(member) && typeof member.$ref === 'string' && !seen.has(member)) {
+      seen.add(member);
+      member = bodies.get(placeNamed(member.$ref))?.node;
+    }
+    if (isJsonObject(member) && (Array.isArray(member.anyOf) || Array.isArray(member.type))) size.unionProperties++;
+  }
+
+  // the loops of references: strongly connected bodies, the ones nothing in them leaves first
+  /** @type {Map<string, number>} */
+  const seenAt = new Map();
+  /** @type {Map<string, number>} */
+  const lowest = new Map();
+  /** @type {string[]} */
+  const open = [];
+  const isOpen = new Set();
+  /** @type {string[][]} */
+  const loops = [];
+  for (const start of bodies.keys()) {
+    if (seenAt.has(start)) continue;
+    /** @type {{ at: string, next: number }[]} */
+    const work = [{ at: start, next: 0 }];
+    while (work.length > 0) {
+      const frame = /** @type {{ at: string, next: number }} */ (work.at(-1));
+      const { at } = frame;
+      if (!seenAt.has(at)) {
+        seenAt.set(at, seenAt.size);
+        lowest.set(at, seenAt.size - 1);
+        open.push(at);
+        isOpen.add(at);
+      }
+      const { edges } = /** @type {{ edges: [string, number][] }} */ (bodies.get(at));
+      let deeper = false;
+      while (!deeper && frame.next < edges.length) {
+        const to = edges[frame.next++][0];
+        if (!bodies.has(to)) continue;
+        if (!seenAt.has(to)) {
+          work.push({ at: to, next: 0 });
+          deeper = true;
+        }
+        else if (isOpen.has(to)) lowest.set(at, Math.min(/** @type {number} */ (lowest.get(at)), /** @type {number} */ (seenAt.get(to))));
+      }
+      if (deeper) continue;
+      work.pop();
+      const above = work.at(-1);
+      if (above !== undefined) lowest.set(above.at, Math.min(/** @type {number} */ (lowest.get(above.at)), /** @type {number} */ (lowest.get(at))));
+      if (lowest.get(at) !== seenAt.get(at)) continue;
+      const loop = [];
+      let member;
+      do {
+        member = /** @type {string} */ (open.pop());
+        isOpen.delete(member);
+        loop.push(member);
+      } while (member !== at);
+      loops.push(loop);
+    }
+  }
+
+  /** The loop each body is on. @type {Map<string, string[]>} */
+  const loopOf = new Map();
+  for (const loop of loops) for (const at of loop) loopOf.set(at, loop);
+  /** Where a path enters a loop: the root, and each body a reference from outside its loop names. */
+  const starts = new Set(['#']);
+  for (const [at, { edges }] of bodies) {
+    for (const [to] of edges) if (bodies.has(to) && loopOf.get(to) !== loopOf.get(at)) starts.add(to);
+  }
+  /** The deepest nesting from each start. @type {Map<string, number>} */
+  const deepest = new Map();
+  for (const loop of loops) {
+    const recursive = loop.length > 1 || /** @type {{ edges: [string, number][] }} */ (bodies.get(loop[0])).edges.some(([to]) => to === loop[0]);
+    const inside = new Set(recursive ? loop : []);
+    if (recursive) size.recursiveSchemas += loop.length;
+    let entries = LOOP_ENTRIES;
+    const onPath = new Set();
+    /** The deepest path from a body that enters no body of its loop twice. @param {string} at @returns {number} */
+    const walk = (at) => {
+      const { own, edges } = /** @type {{ own: number, edges: [string, number][] }} */ (bodies.get(at));
+      let most = own;
+      entries--;
+      onPath.add(at);
+      for (const [to, level] of edges) {
+        if (entries < 0) break;
+        if (!bodies.has(to) || onPath.has(to)) continue;
+        most = Math.max(most, level + (inside.has(to) ? walk(to) : /** @type {number} */ (deepest.get(to))));
+      }
+      onPath.delete(at);
+      return most;
+    };
+    const entered = loop.filter((at) => starts.has(at));
+    /** @type {[string, number][]} */
+    const walked = loop.length > LOOP_MEMBERS ? [] : entered.map((at) => [at, walk(at)]);
+    if (loop.length <= LOOP_MEMBERS && entries >= 0) {
+      for (const [at, most] of walked) deepest.set(at, most);
+      continue;
+    }
+    // every body of the loop once, end to end, then the deepest body the loop leaves for
+    let laid = 0;
+    let beyond = 0;
+    for (const at of loop) {
+      const { own, edges } = /** @type {{ own: number, edges: [string, number][] }} */ (bodies.get(at));
+      laid += own;
+      for (const [to] of edges) if (!inside.has(to) && deepest.has(to)) beyond = Math.max(beyond, /** @type {number} */ (deepest.get(to)));
+    }
+    for (const at of entered) deepest.set(at, laid + beyond);
+  }
+  size.depth = /** @type {number} */ (deepest.get('#'));
+  return size;
 }

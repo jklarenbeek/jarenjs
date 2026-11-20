@@ -162,11 +162,12 @@ describe('deriveStrictProfile: a placeholder null and a null the original admits
     });
   });
 
-  it('removes the null of a widened member and keeps every null the original admits', () => {
+  it('reads a null at every member the original leaves optional as absent, and keeps the null of a member it requires', () => {
     const answer = { plain: null, nullable: null, viaRef: null, viaUnion: null, viaEnum: null, constant: null, refusesNull: null, required: null };
     assert.equal(profiled(strict.schema)(answer), true);
     const restored = strict.fromProfile(answer);
-    assert.deepEqual(restored, { nullable: null, viaRef: null, viaUnion: null, viaEnum: null, required: null });
+    // whether the member's schema refuses null (plain, constant, refusesNull) or admits it (the four others)
+    assert.deepEqual(restored, { required: null });
     assert.equal(original(schema)(restored), true);
   });
 
@@ -175,12 +176,10 @@ describe('deriveStrictProfile: a placeholder null and a null the original admits
     const filled = strict.toProfile(instance);
     assert.deepEqual(filled, { plain: 'p', nullable: null, viaRef: null, viaUnion: null, viaEnum: null, constant: 'k', refusesNull: null, required: 'r' });
     assert.equal(profiled(strict.schema)(filled), true);
-    const back = strict.fromProfile(filled);
-    assert.deepEqual(back, { plain: 'p', nullable: null, viaRef: null, viaUnion: null, viaEnum: null, constant: 'k', required: 'r' });
-    assert.equal(original(schema)(back), true);
+    assert.deepEqual(strict.fromProfile(filled), instance, 'the instance, with no member it left out');
   });
 
-  it('reads a union by the branch the answer matches, and keeps a null two matching branches disagree about', () => {
+  it('reads a union by the branch the answer matches, and a null every matching branch leaves optional as absent', () => {
     const union = { type: 'object', required: ['shape'], properties: { shape: { anyOf: [
       { type: 'object', required: ['r'], properties: { r: { type: 'number' }, label: { type: 'string' } } },
       { type: 'object', required: ['w'], properties: { w: { type: 'number' }, label: { type: 'string' } } },
@@ -188,7 +187,7 @@ describe('deriveStrictProfile: a placeholder null and a null the original admits
     ] } } };
     const strict = deriveStrictProfile(union);
     assert.deepEqual(strict.fromProfile({ shape: { r: 1, label: null } }), { shape: { r: 1 } });
-    assert.deepEqual(strict.fromProfile({ shape: { w: 1, label: null } }), { shape: { w: 1, label: null } });
+    assert.deepEqual(strict.fromProfile({ shape: { w: 1, label: null } }), { shape: { w: 1 } });
     assert.deepEqual(strict.fromProfile({ shape: { w: 1, label: 'x' } }), { shape: { w: 1, label: 'x' } });
     assert.deepEqual(strict.toProfile({ shape: { r: 2 } }), { shape: { r: 2, label: null } });
   });
@@ -245,7 +244,7 @@ describe('deriveStrictProfile: references are bundled into one document', () => 
       x: { type: 'object', properties: { a: { $ref: '#/$defs/n' }, b: { type: ['string', 'null'] } }, required: ['a', 'b'], additionalProperties: false },
       n: { type: ['integer', 'null'] },
     });
-    assert.deepEqual(strict.fromProfile({ e: { a: null, b: null } }), { e: { a: null } });
+    assert.deepEqual(strict.fromProfile({ e: { a: null, b: null } }), { e: {} }, 'neither member is required');
   });
 
   it('names a place inside a reference by its $id', () => {
@@ -291,7 +290,7 @@ describe('deriveStrictProfile: a value of any shape is carried as JSON text', ()
     assert.equal(profiled(strict.schema)(answer), true, 'a string is what the profile asks for');
     assert.throws(() => strict.fromProfile(answer), (error) => error instanceof SchemaRuntimeError && error.code === 'JK2002' && error.dataPath === '/metadata');
     const decoded = strict.fromProfile({ ...answer, metadata: '[1]' });
-    assert.deepEqual(decoded, { id: 'a', metadata: [1], anything: null });
+    assert.deepEqual(decoded, { id: 'a', metadata: [1] });
     assert.equal(original(schema)(decoded), false, 'the original refuses an array where it declared an object');
   });
 
@@ -316,11 +315,11 @@ describe('deriveStrictProfile: a value of any shape is carried as JSON text', ()
     assert.deepEqual(strict.fromProfile(strict.toProfile({ a: 1 })), { a: 1 });
   });
 
-  it('widens a carrier whose original admits null, keeping the null', () => {
+  it('widens a carrier whose original admits null, and reads its null as the member left out', () => {
     const schema = { type: 'object', required: ['n'], properties: { n: { type: 'integer' }, extra: { anyOf: [{ $ref: '#/$defs/any' }, { type: 'number' }] } }, $defs: { any: {} } };
     const strict = deriveStrictProfile(schema);
     assert.equal(profiled(strict.schema)(strict.toProfile({ n: 1 })), true);
-    assert.deepEqual(strict.fromProfile(strict.toProfile({ n: 1 })), { n: 1, extra: null });
+    assert.deepEqual(strict.fromProfile(strict.toProfile({ n: 1 })), { n: 1 });
   });
 });
 
@@ -367,10 +366,9 @@ describe('deriveStrictProfile: an object beside allOf or anyOf is distributed in
     const strict = deriveStrictProfile(schema);
     assert.deepEqual(strict.schema, { type: 'object', additionalProperties: false, description: '(strict profile: the not keyword is relaxed here; the original schema enforces it)',
       properties: { from: { type: 'string' }, event: { type: ['string', 'null'] }, after: { type: ['number', 'null'] } }, required: ['from', 'event', 'after'] });
-    // event admits null, so its null is kept, unless the original then
-    // refuses the answer and accepts the member absent
+    // neither event nor after is required: a null at either is the member left out
     assert.deepEqual(strict.fromProfile({ from: 'a', event: null, after: 1 }), { from: 'a', after: 1 });
-    assert.deepEqual(strict.fromProfile({ from: 'a', event: null, after: null }), { from: 'a', event: null });
+    assert.deepEqual(strict.fromProfile({ from: 'a', event: null, after: null }), { from: 'a' });
   });
 
   it('distributes the object into each anyOf branch of required alternatives', () => {
@@ -557,9 +555,10 @@ const grammars = new Map(grammarFiles.map((file) => [file, JSON.parse(fs.readFil
 const othersOf = (/** @type {any} */ schema) => [...grammars.values()].filter((other) => other.$id !== schema.$id);
 
 describe('the suite\'s grammars and authoring profiles', () => {
-  it('derive, except the JTLT grammar, whose segment puts a multi-branch allOf beside no type', () => {
+  it('derive, every one', () => {
     const answers = Object.fromEntries([...grammars].map(([file, schema]) => [file, refusal(() => deriveStrictProfile(schema, { references: othersOf(schema) }))[0]]));
-    assert.deepEqual(answers, Object.fromEntries(grammarFiles.map((file) => [file, file.includes('jaren-jtlt.schema') ? 'JK0103' : 'no throw'])));
+    assert.deepEqual(answers, Object.fromEntries(grammarFiles.map((file) => [file, 'no throw'])));
+    for (const name of ['jaren-query', 'jaren-jslt', 'jaren-jtlt']) assert.ok(grammarFiles.includes(`packages/json/schemas/${name}.schema.json`), name);
   });
 
   // documents each original accepts, read through its profile both ways
@@ -590,6 +589,162 @@ describe('the suite\'s grammars and authoring profiles', () => {
       }
     });
   }
+});
+
+describe('the JTLT grammar and its draft-07 twin', () => {
+  const read = (/** @type {string} */ file) => JSON.parse(fs.readFileSync(new URL(file, D20_ROOT), 'utf8'));
+  // real templates: the contract's TypeScript projection and the format document's Appendix A
+  const appendix = fs.readFileSync(new URL('packages/json/docs/JTLT-FORMAT.md', D20_ROOT), 'utf8').split('## Appendix A.')[1].split('## Appendix B.')[0];
+  const published = [read('packages/contract/src/project/typescript.jtlt.json'),
+    ...[...appendix.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) => JSON.parse(match[1])).filter((doc) => Array.isArray(doc) || doc.$jtlt)];
+  // one template per segment form: text, an escaped dollar, a path, nested lists, the two segment-only
+  // phrases, both $apply forms, an operator, a quoted value, a computed map, a call, a quantifier
+  const forms = ['a', '$$x', '$.n', ['b', ['c']], [], { $raw: '$.m' }, { $raw: null }, { $json: '$.n' }, { $apply: '$.n' }, { $apply: ['$.n', 'mode'] },
+    { $add: ['$.n', 1] }, { $upper: { $lower: '$.a' } }, { $if: [true, 'a', 'b'] }, { $const: { a: [1, { b: null }] } }, { $const: null }, { $map: [['k', 1]] },
+    { $call: ['f', 1] }, { $some: { x: '$.a[*]' }, $satisfies: true }, { '$string-join': ['$.a[*]', ', '] }]
+    .map((segment) => [{ match: '$', body: [segment] }]);
+
+  for (const file of ['packages/json/schemas/jaren-jtlt.schema.json', 'packages/json/schemas/jaren-jtlt.draft-07.schema.json']) {
+    const schema = read(file);
+    const name = file.split('/').at(-1);
+
+    it(`${name}: a template comes back from toProfile and fromProfile as it was written`, () => {
+      const strict = deriveStrictProfile(schema);
+      const check = original(schema);
+      const profile = profiled(strict.schema);
+      assert.equal(published.length, 9, 'the contract template and the eight of Appendix A');
+      for (const template of [...published, ...forms]) {
+        const text = JSON.stringify(template).slice(0, 120);
+        assert.equal(check(template), true, `the original accepts ${text}`);
+        const filled = strict.toProfile(template);
+        assert.equal(profile(filled), true, `the profile accepts toProfile(${text})`);
+        // the same document, not only one the original accepts: a segment read through another
+        // branch of the union is still a valid template
+        assert.deepEqual(strict.fromProfile(filled), template);
+      }
+    });
+
+    it(`${name}: an answer written in the profile's shape reads back as the template it means`, () => {
+      const strict = deriveStrictProfile(schema);
+      const check = original(schema);
+      const profile = profiled(strict.schema);
+      // every member present, an absent one as null, a free value as JSON text, a map as entries
+      const answers = [
+        [{ value: [{ match: '$', mode: null, priority: null, body: ['Title: ', { $apply: '$.title' }, { $raw: '$.markup' }, { $json: '$.n' }, { $const: '{"a":[1,null]}' }, ['a', ['b']], '$$x'] }] },
+          [{ match: '$', body: ['Title: ', { $apply: '$.title' }, { $raw: '$.markup' }, { $json: '$.n' }, { $const: { a: [1, null] } }, ['a', ['b']], '$$x'] }]],
+        [{ value: { $jtlt: '0.1', output: null, rules: [{ match: '$.items[*]', mode: 'row', priority: 2, body: [{ $apply: ['$.cells[*]', 'cell'] }, [{ key: '$upper', value: '$.name' }], { $call: '["f",1]' }] }] } },
+          { $jtlt: '0.1', rules: [{ match: '$.items[*]', mode: 'row', priority: 2, body: [{ $apply: ['$.cells[*]', 'cell'] }, { $upper: '$.name' }, { $call: ['f', 1] }] }] }],
+        [{ value: { $jtlt: '0.1', output: 'text', rules: [{ match: null, mode: null, priority: null, body: [{ $some: [{ key: 'x', value: '$.a[*]' }], $satisfies: true }, { $map: [['k', 1]] }] }] } },
+          { $jtlt: '0.1', output: 'text', rules: [{ body: [{ $some: { x: '$.a[*]' }, $satisfies: true }, { $map: [['k', 1]] }] }] }],
+      ];
+      for (const [answer, template] of answers) {
+        assert.equal(profile(answer), true, `the profile accepts ${JSON.stringify(answer).slice(0, 120)}`);
+        assert.deepEqual(strict.fromProfile(answer), template);
+        assert.equal(check(template), true);
+      }
+    });
+  }
+});
+
+describe('the refusals the README states, and their restatements', () => {
+  const readme = fs.readFileSync(new URL('packages/validate/README.md', D20_ROOT), 'utf8');
+  const passage = readme.slice(readme.indexOf('**What has no strict form, and how to restate it.**'), readme.indexOf('**Which strict modes it targets.**'));
+  /** @param {string} cell */
+  const schemasIn = (cell) => [...cell.matchAll(/`(\{.*?\})`/g)].map((match) => JSON.parse(match[1]));
+  /** The table's rows: what is refused and where, the example, and the schemas it is restated as. */
+  const rows = passage.split('\n').filter((line) => line.startsWith('| ') && !line.startsWith('| The schema has')).map((line) => {
+    const [label, refused, example, restated] = line.split('|').slice(1, -1).map((cell) => cell.trim());
+    const [, code, place] = /** @type {RegExpMatchArray} */ (refused.match(/^`(JK\d{4})` at `([^`]+)`$/));
+    return { label, code, place, example: schemasIn(example)[0], restated: schemasIn(restated) };
+  });
+  /** Instances over the members the examples name: scalars, and every choice of up to three members and their values. */
+  const probes = (() => {
+    /** @type {Record<string, unknown[]>} */
+    const members = { a: ['', 'x', 1], b: ['y', 2], c: ['z'], id: ['i', 3], scores: [{ n: 1 }, { n: 'x' }], n: [1, 'x'], kind: ['a', 'b', 'c'], size: [1, 'big'] };
+    const names = Object.keys(members);
+    /** @type {unknown[]} */
+    const out = ['', 'x', 1, null, [], {}];
+    /** @param {string[]} picked @param {number} at @param {Record<string, unknown>} value */
+    const build = (picked, at, value) => {
+      if (at === picked.length) { out.push(value); return; }
+      for (const member of members[picked[at]]) build(picked, at + 1, { ...value, [picked[at]]: member });
+    };
+    for (let mask = 1; mask < 1 << names.length; mask++) {
+      const picked = names.filter((_, i) => mask & (1 << i));
+      if (picked.length <= 3) build(picked, 0, {});
+    }
+    return out;
+  })();
+
+  it('refuses each example with the code, at the place, the table gives', () => {
+    assert.deepEqual(rows.map(({ code, place }) => [code, place]), [['JK0103', '#/allOf/0/properties/a'], ['JK0102', '#'], ['JK0103', '#/allOf/0/%24ref'],
+      ['JK0103', '#/anyOf/0/anyOf'], ['JK0103', '#/if'], ['JK0103', '#/allOf/0/if'], ['JK0103', '#/allOf']]);
+    for (const row of rows) assert.deepEqual(refusal(() => deriveStrictProfile(row.example)), [row.code, row.place], row.label);
+  });
+
+  it('derives each restatement, which accepts the instances its example accepts, but for the map moved into a member', () => {
+    assert.deepEqual(rows.map((row) => row.restated.length), [2, 1, 1, 1, 1, 1, 1]);
+    for (const row of rows) {
+      const before = original(row.example);
+      assert.ok(probes.some((probe) => before(probe) === true) && probes.some((probe) => before(probe) !== true), `the probes reach both answers: ${row.label}`);
+      for (const restated of row.restated) {
+        assert.equal(refusal(() => deriveStrictProfile(restated))[0], 'no throw', row.label);
+        const after = original(restated);
+        const differing = probes.filter((probe) => before(probe) !== after(probe));
+        if (row.code === 'JK0102') assert.ok(differing.length > 0, 'a map in a member of its own is another shape');
+        else assert.deepEqual(differing, [], row.label);
+      }
+    }
+  });
+
+  it('names the suite\'s schemas that do not derive: each puts an if in a branch', () => {
+    /** Every schema file a public workspace ships. @type {string[]} */
+    const files = [];
+    /** @param {string} dir */
+    const collect = (dir) => {
+      for (const entry of fs.readdirSync(new URL(dir, D20_ROOT), { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+        if (entry.isDirectory()) collect(`${dir}${entry.name}/`);
+        else if (entry.name.endsWith('.json')) files.push(`${dir}${entry.name}`);
+      }
+    };
+    for (const group of ['packages/', 'components/']) {
+      for (const workspace of fs.readdirSync(new URL(group, D20_ROOT)).sort()) {
+        if (fs.existsSync(new URL(`${group}${workspace}/schemas/`, D20_ROOT))) collect(`${group}${workspace}/schemas/`);
+      }
+    }
+    const documents = new Map(files.map((file) => [file, JSON.parse(fs.readFileSync(new URL(file, D20_ROOT), 'utf8'))]));
+    const byId = new Map([...documents.values()].map((document) => [document.$id, document]));
+    /** The documents a schema's references name, and theirs. @param {any} schema */
+    const referenced = (schema) => {
+      const found = new Map();
+      const queue = [schema];
+      while (queue.length > 0) {
+        const document = queue.pop();
+        for (const match of JSON.stringify(document).matchAll(/"\$ref":"([^"#]+)(?:#[^"]*)?"/g)) {
+          const target = URL.canParse(match[1], document.$id) ? byId.get(new URL(match[1], document.$id).href) : undefined;
+          if (target !== undefined && target !== schema && !found.has(target.$id)) { found.set(target.$id, target); queue.push(target); }
+        }
+      }
+      return [...found.values()];
+    };
+    /** @type {Record<string, string>} */
+    const refused = {};
+    for (const [file, schema] of documents) {
+      const [code, place] = refusal(() => deriveStrictProfile(schema, { references: referenced(schema) }));
+      if (code === 'no throw') continue;
+      refused[file] = code;
+      assert.match(place, /\/(allOf|anyOf|oneOf)\/\d+\/if$/, `${file}: ${code} at ${place}`);
+    }
+    assert.deepEqual(refused, {
+      'packages/core/schemas/calendar/rrule.schema.json': 'JK0103',
+      'packages/core/schemas/calendar/temporal.schema.json': 'JK0103',
+      'packages/emit/schemas/jaren-emit-model.schema.json': 'JK0103',
+      'packages/josl/schemas/jaren-josl-ical.schema.json': 'JK0103',
+      'components/charts/schemas/chart-definition.schema.json': 'JK0103',
+    });
+    assert.ok(files.length >= 62 && grammarFiles.every((file) => files.includes(file)), 'the grammars and authoring profiles are among the files');
+    for (const name of ['calendar/rrule', 'calendar/temporal', 'jaren-emit-model', 'jaren-josl-ical', 'chart-definition']) assert.ok(passage.includes(`\`${name}\``), `the README names ${name}`);
+  });
 });
 
 describe('the README example', () => {

@@ -34,7 +34,7 @@ The validator embraces these architectural principles:
 | `packages/validate/src/validator-state.js` | What each validator holds, for the subpath modules (`load.js`), and the meta-schemas a validator given as `dialects` holds, for the readers of a schema (`heldDialects`) |
 | `packages/validate/src/normalize.js` | Schema-driven normalization (`@jarenjs/validate/normalize`): `compileNormalizer`, which checks each default with the validator, and the readings it shares with `@jarenjs/emit` |
 | `packages/validate/src/references.js` | The reading of a document's references (`@jarenjs/validate/references`): the resource index, same-document references and plain names, without the validator or `@jarenjs/json`'s query compiler, so a reader that needs only these loads only these; `normalize.js` re-exports them |
-| `packages/validate/src/strict-profile.js` | Strict structured-output profiles (`@jarenjs/validate/strict-profile`): `relaxSchema`, `deriveStrictProfile` and its two instance maps |
+| `packages/validate/src/strict-profile.js` | Strict structured-output profiles (`@jarenjs/validate/strict-profile`): `relaxSchema`, `deriveStrictProfile` and its two instance maps, `strictProfileSize` |
 | `packages/validate/src/array.js` | Array validation logic |
 | `packages/validate/src/object.js` | Object validation logic |
 | `packages/validate/src/string.js` | String validation logic |
@@ -834,10 +834,10 @@ always built):
 
 ### Strict Structured-Output Profiles (strict-profile.js)
 
-`relaxSchema` and `deriveStrictProfile` live in `strict-profile.js`, the
-`@jarenjs/validate/strict-profile` subpath; the core never imports it. It
-works on schema documents, not on compiled validators, and uses the compile
-pipeline twice, as a client:
+`relaxSchema`, `deriveStrictProfile` and `strictProfileSize` live in
+`strict-profile.js`, the `@jarenjs/validate/strict-profile` subpath; the core
+never imports it. It works on schema documents, not on compiled validators,
+and uses the compile pipeline twice, as a client:
 
 - **One walk over schema positions.** Both functions map a node's keywords
   through `mapPosition`, which descends only where a keyword holds a schema
@@ -870,12 +870,42 @@ pipeline twice, as a client:
   original place they stand for, so the `null` question (and the `enum`
   narrowing of a discriminating branch) is asked of each place.
 - **The original's validator also judges the whole answer.** `fromProfile`
-  keeps a `null` for an optional member whose schema admits it, unless the
-  original refuses the answer with those nulls and accepts it without them.
-- **The profile's validator picks a union branch.** `fromProfile` and
-  `toProfile` walk an instance beside the profile; at an `anyOf` they compile
-  each branch's place in the profile (registered under a private identifier,
-  read as 2020-12) once, and follow the branches the value matches.
+  reads a `null` at a member the original leaves optional as the member left
+  out, whether its schema refuses `null` or admits it. Only where the
+  original refuses the answer read so, and accepts it with the nulls its
+  schemas admit, is the answer read again: with all of them, then without
+  each in turn, keeping the ones whose loss the original refuses. The nulls
+  are named by their place in the answer, so a reading is rebuilt, never
+  patched, and its members keep the answer's order. That path costs one
+  reading and one judgement per such null; the common path, one of each.
+- **The original picks a value's union branch; the profile's validator finds
+  an answer's.** Every profile node remembers the place of the original it
+  stands for (`origins`): the place it was derived from, every place that
+  declares a member several declare, the original's branch for an object
+  copied into a branch. At an `anyOf`, `toProfile` asks the original at
+  those places — compiled as `{ $ref: place }` on first use, as the `null`
+  question is — and writes the value in the first branch that accepts it;
+  filling a closed branch drops and nulls members, so the filled value says
+  nothing of whose it was. `fromProfile` compiles each branch's place in the
+  profile (registered under a private identifier, read as 2020-12) once and
+  follows the branches the answer matches; where their readings differ, it
+  is the first whose original accepts its own reading.
+- **A profile's size is one more walk, and a graph.** `strictProfileSize`
+  counts over the same `mapPosition` walk — properties, definitions, `enum`
+  values, the characters of names — and, on the way, summarizes the root and
+  each definition as a body: the object levels its own text reaches and each
+  reference in it with the levels entered where it stands. The bodies form
+  the reference graph; its strongly connected components (Tarjan's, on an
+  explicit stack, so a long chain of definitions recurses through nothing)
+  are the loops of references, and they come out with the ones nothing leaves
+  first. A body on no loop is the deepest of its own levels and its
+  references' targets, already measured; a loop is walked path by path from
+  each body a reference outside it names, entering no body twice — the
+  longest simple path, which has no cheaper exact answer — within two fixed
+  bounds (the loop's members, the entries walked). Past either, the loop is
+  measured as every body once, end to end: an upper bound of any path, so the
+  number is never too low and the measure always returns. No provider's cap
+  is built in.
 
 ### Loading Referenced Schemas (load.js)
 
@@ -1422,7 +1452,7 @@ For broader context on how this package fits into the JarenJS ecosystem:
 | `index.js` | Public API | `JarenValidator`, `ValidationOptions`, `ValidatorOptions` |
 | `messages.js` | Error conversion & i18n | `ValidationError`, `convertInternalErrors`, `messagesEn`, `compileMessageTemplate`, `compileMessageCatalog`, `renderErrorMessage`, `localizeErrors`, `compileErrorMessageSpec` |
 | `output.js` | Standard output formats (`@jarenjs/validate/output`) | `flagOutput`, `basicOutput`, `detailedOutput`, `verboseOutput`, `listOutput`, `hierarchicalOutput` |
-| `strict-profile.js` | Strict structured-output profiles (`@jarenjs/validate/strict-profile`) | `relaxSchema`, `deriveStrictProfile` |
+| `strict-profile.js` | Strict structured-output profiles (`@jarenjs/validate/strict-profile`) | `relaxSchema`, `deriveStrictProfile`, `strictProfileSize` |
 | `schema.js` | Schema compilation | `compileSchemaObject` |
 | `keyword-values.js` | Keyword value admission | `admitKeywordValues`, `KEYWORD_SHAPES` |
 | `traverse.js` | Schema traversal | `TraverseOptions`, `storeSchemaIdsInMap`, `resolveRefSchemaDeep` |

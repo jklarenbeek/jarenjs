@@ -113,48 +113,24 @@
           "$ref": "#/definitions/segmentList"
         },
         {
+          "$ref": "#/definitions/querySegment"
+        },
+        {
           "$ref": "#/definitions/rawSegment"
         },
         {
           "$ref": "#/definitions/jsonSegment"
-        },
-        {
-          "allOf": [
-            {
-              "$ref": "#/definitions/queryDocument"
-            },
-            {
-              "type": "object",
-              "not": {
-                "propertyNames": {
-                  "pattern": "^[^$]"
-                }
-              }
-            }
-          ]
         }
       ]
     },
-    "rawSegment": {
-      "type": "object",
-      "properties": {
-        "$raw": {
-          "$ref": "#/definitions/queryDocument"
-        }
-      },
-      "required": [
-        "$raw"
-      ],
-      "additionalProperties": false
-    },
-    "queryDocument": {
-      "description": "A query document is either the version envelope or a bare expression (a bare RFC 9535 JSONPath string is the degenerate query).",
+    "querySegment": {
+      "description": "A query object as a segment: the version envelope or an operator phrase, which are the query documents that are objects holding a $-prefixed key. A map constructor holds none and is no segment (TL0004).",
       "oneOf": [
         {
           "$ref": "#/definitions/versionEnvelope"
         },
         {
-          "$ref": "#/definitions/expression"
+          "$ref": "#/definitions/operatorPhrase"
         }
       ]
     },
@@ -1250,6 +1226,103 @@
         "$apply"
       ],
       "additionalProperties": false
+    },
+    "operatorPhrase": {
+      "description": "An object expression whose keys are $-prefixed: every alternative of objectExpression but the map constructor.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/constPhrase"
+        },
+        {
+          "$ref": "#/definitions/mapPhrase"
+        },
+        {
+          "$ref": "#/definitions/callPhrase"
+        },
+        {
+          "$ref": "#/definitions/flworPhrase"
+        },
+        {
+          "$ref": "#/definitions/somePhrase"
+        },
+        {
+          "$ref": "#/definitions/everyPhrase"
+        },
+        {
+          "$ref": "#/definitions/unaryOperatorPhrase"
+        },
+        {
+          "$ref": "#/definitions/binaryOperatorPhrase"
+        },
+        {
+          "$ref": "#/definitions/variadicOperatorPhrase"
+        },
+        {
+          "$ref": "#/definitions/nonEmptyVariadicOperatorPhrase"
+        },
+        {
+          "$ref": "#/definitions/conditionalArityOperatorPhrase"
+        },
+        {
+          "$ref": "#/definitions/stringJoinPhrase"
+        },
+        {
+          "$ref": "#/definitions/roundingPhrase"
+        },
+        {
+          "$ref": "#/definitions/geohashPhrase"
+        },
+        {
+          "$ref": "#/definitions/instantPhrase"
+        },
+        {
+          "$ref": "#/definitions/ternaryOperatorPhrase"
+        },
+        {
+          "$ref": "#/definitions/replacePhrase"
+        },
+        {
+          "$ref": "#/definitions/schemaOperatorPhrase"
+        },
+        {
+          "$ref": "#/definitions/seriesSpecPhrase"
+        },
+        {
+          "$ref": "#/definitions/asOfPhrase"
+        },
+        {
+          "$ref": "#/definitions/timeBucketPhrase"
+        },
+        {
+          "$ref": "#/definitions/errorPhrase"
+        },
+        {
+          "$ref": "#/definitions/applyPhrase"
+        }
+      ]
+    },
+    "rawSegment": {
+      "type": "object",
+      "properties": {
+        "$raw": {
+          "$ref": "#/definitions/queryDocument"
+        }
+      },
+      "required": [
+        "$raw"
+      ],
+      "additionalProperties": false
+    },
+    "queryDocument": {
+      "description": "A query document is either the version envelope or a bare expression (a bare RFC 9535 JSONPath string is the degenerate query).",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/versionEnvelope"
+        },
+        {
+          "$ref": "#/definitions/expression"
+        }
+      ]
     },
     "jsonSegment": {
       "type": "object",

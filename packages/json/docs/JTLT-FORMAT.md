@@ -659,6 +659,19 @@ query-object segments. Mixed query/literal objects are refused by the inherited
 query grammar and compiler. Segment-only `$raw`/`$json` forms remain illegal
 inside ordinary query expressions.
 
+A query-object segment is stated as a union of forms, read from the query
+grammar's own object alternatives: an operator phrase — every object expression
+but the map constructor, so a phrase the query grammar gains is a segment here —
+or the query version envelope, which the grammar admits wherever it admits a
+query document and the compiler refuses in a segment (TL0005: the envelope is
+recognized only at the top of a query document). Stated so, the grammar has a
+strict structured-output profile (`deriveStrictProfile` of
+`@jarenjs/validate/strict-profile`). An object with no `$`-prefixed key is no
+segment (§3.1), and the grammar refuses it as the compiler does (TL0004), in
+both drafts. *Upgrade: the grammar accepted one such object, a map constructor
+holding the empty member name (`{ "": 1 }`), which the compiler always refused
+TL0004; no template that compiled is refused.*
+
 Structural validation is not compilation. Format annotations need not be
 asserted: a host can supply custom path functions that a standalone RFC 9535
 format checker cannot know. The compiler resolves path and external syntax,

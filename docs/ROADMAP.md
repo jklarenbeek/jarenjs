@@ -128,17 +128,20 @@ delete it or fix it.
   are compared as the URL standard spells them, where RFC 3986 §6.2.2.2 makes
   them equivalent. A coded refusal, not a wrong answer; reading them alike is
   one rule for every URI part, in all four tools.
-- [ ] **Strict profiles of the JTLT grammar and of two schemas for one
-  member.** `deriveStrictProfile` (`@jarenjs/validate/strict-profile`) carries
-  a value of any shape as JSON text, a map as `{ key, value }` entries, and an
-  object beside `allOf`/`anyOf`/`oneOf` distributed into its branches; every
-  suite grammar and authoring profile derives except JTLT, whose segment puts
-  an untyped `allOf` of several branches beside no type (`JK0103`). Still
-  refused, coded: two schemas for one member where neither is an
-  `enum`/`const` nor only narrows (no conjunction in the strict subset), a map
-  beside declared properties, a branch that is a `$ref` or a nested union
-  beside an object type, and `if`/`then`/`else`. Profile size against provider
-  caps (nesting depth, total name length) is not checked.
+- [ ] **An empty map beside an array branch reads back as an empty array.** A
+  strict profile carries a map as an array of `{ key, value }` entries, so
+  where one union holds a map and an array, an empty map and an empty array
+  are both written `[]`, and `fromProfile` reads `[]` as the branch that
+  stands first: under `{ anyOf: [{ type: 'array', items: { type: 'string' }
+  }, { type: 'object', additionalProperties: { type: 'string' } }] }`,
+  `fromProfile(toProfile({}))` is `[]`. So a model cannot write the empty
+  map of the query grammar (`{}` reads back as the empty array constructor)
+  or an element with no attributes in the full app grammar (`["ul", {},
+  "$.tags[*]"]` reads back `["ul", [], "$.tags[*]"]`; the app authoring
+  profile is not affected). Boxing the entries beside an array branch, as
+  JSON text is boxed beside a string, would tell the two apart at the price
+  of a longer spelling for every map of those grammars; that choice is the
+  open work.
 - [ ] **Per-call cost of annotation tracking for `unevaluated*`** — a check
   over many members or items no longer scans the evaluation log once per
   member: a long stretch is gathered in one pass, so the check grows with the
