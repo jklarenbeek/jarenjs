@@ -239,6 +239,21 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
   // If it does, we need to use the dynamic scope; otherwise, treat like normal $ref
   // (both spelled as the URI spells the fragment: `#a b` is `#a%20b`)
   const hasDynamicAnchor = isObjectClass(initialTargetSchema) && getDynamicAnchorName(initialTargetSchema) === anchorName;
+  const scope = root.dynamicScope;
+  // The initial target entered where no scope names the anchor yet: it is
+  // the outermost of its name for the call. Apart from the reference's own
+  // frame, which every level of a recursion holds; the scope is restored
+  // by assignment (`ValidationRoot#dynamicScope`).
+  const underOwnAnchor = function validateUnderOwnAnchor(validate, data, dataPath, dataRoot) {
+    const entered = scope.top;
+    try {
+      root.pushDynamicAnchorValidator(anchorName, validate);
+      return validate(data, dataPath, dataRoot);
+    }
+    finally {
+      scope.top = entered;
+    }
+  };
 
   return boundReference(schemaObj.path, schemaObj.options.maxReferenceDepth, root.referenceWeight(initialTargetUri, initialTargetSchema), function validateDynamicRef(data, dataPath, dataRoot) {
     if (hasDynamicAnchor) {
@@ -259,17 +274,9 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
         // Not compiled yet - create it using the initial target schema we found at compile time
         targetObj = root.createObject(initialTargetUri, initialTargetSchema, baseUri);
       }
-      if (targetObj) {
-        const targetValidator = targetObj.validate;
-        // Register this schema's dynamic anchor for the duration of the validation
-        // This allows nested $dynamicRef to find this anchor
-        root.pushDynamicAnchorValidator(anchorName, targetValidator);
-        try {
-          return targetValidator(data, dataPath, dataRoot);
-        } finally {
-          root.popDynamicAnchorValidator(anchorName);
-        }
-      }
+      // Register this schema's dynamic anchor for the duration of the validation
+      // This allows nested $dynamicRef to find this anchor
+      if (targetObj) return underOwnAnchor(targetObj.validate, data, dataPath, dataRoot);
     }
 
     // Either no $dynamicAnchor on initial target, or no dynamic scope available

@@ -158,7 +158,15 @@ serialized`, `… cannot be a cache identity` from `semanticKey`), the code the 
 value table of `@jarenjs/json/canonical` registers. `isPastLongestString(error)`
 tells the host's refusal of such a text from any other `RangeError` (a call
 stack exhausted), and `textTooLong(verb)` builds the refusal, so a writer
-outside this package refuses alike. The bound is the host's own,
+outside this package refuses alike. `isStackExhausted(error)` tells the other
+one: whether a thrown value is this host's own refusal of a call its stack
+cannot hold, read once from the host by recursing until it refuses (V8 and
+JavaScriptCore throw a `RangeError`, SpiderMonkey an `InternalError`, each
+with a text of its own), never another error of that class nor a `CodedError`.
+A recursion that catches it where the stack has unwound can raise a coded
+refusal in its place, as the validator does (`JK2001`); while the stack is
+still full a call throws again, so the frames below only restore what they
+changed by assignment and rethrow. The bound is the host's own,
 so every text the host can hold is written as before, and an ordinary value pays
 nothing for it. *Upgrade: two separately built shared values took time
 exponential in their levels to compare, and keying or serializing a heavily

@@ -355,7 +355,7 @@ query's own grammar; a `JK` code over it would send every reader to `cause`.
 | `JK0106` | `SchemaCompileError` | `deriveStrictProfile`: a member that `required`, or a `dependentRequired` (draft-07 `dependencies` list) firing on a declared member, requires is not declared under `properties` (or is declared `false`), so a closed object could never hold it |
 | `JK0107` | `SchemaCompileError` | `deriveStrictProfile` or `relaxSchema` was given an argument it does not take |
 | `JK0108` | `SchemaCompileError` | `deriveStrictProfile`: a schema that accepts no value (`false` or a `$ref` to it, an `anyOf` branch `false`, `items: false`, an object whose own `additionalProperties: false` refuses a member a branch requires) has no strict form |
-| `JK2001` | `SchemaRuntimeError` | Validation nests schema references deeper than `maxReferenceDepth` (default 256) levels: refused where the bound is crossed; a normalizer call holds its own `maxReferenceDepth` alike |
+| `JK2001` | `SchemaRuntimeError` | Validation nests schema references deeper than `maxReferenceDepth` (default 256) levels: refused where the bound is crossed; or deeper than the host's call stack holds, refused in place of the host's own error; a normalizer call holds its own `maxReferenceDepth` alike |
 | `JK2002` | `SchemaRuntimeError` | A strict profile's `fromProfile`: a member carried as JSON text is a string that is not JSON text: refused naming its `dataPath` in the answer |
 | `JK2003` | `SchemaRuntimeError` | A strict profile's `fromProfile`: a map carried as `{ key, value }` entries names one key twice: refused naming the second entry's `dataPath` |
 
@@ -426,6 +426,24 @@ the references while each weighs one:
 JK2001: validation nests more than 256 schema references at http://depth.test/items#/items (an instance nested this deep, or a loop of references that never reads it)
 JK2001: validation nests schema references more than 256 levels deep at http://depth.test/k2#/items/items (an instance nested this deep, or a loop of references that never reads it)
 ```
+
+A reference into a schema already built weighs one however many levels it
+nests, so a loop closed through one is bounded by its turns: two definitions
+referencing each other through 10 members each answer to 5,109 levels where
+the host's call stack holds them. Where the stack gives out before the count
+(such a loop, a raised `maxReferenceDepth`, a small stack), the validation
+is refused with the same code in place of the host's own error, which is the
+refusal's `cause`. The message names the outermost reference the nesting was
+entered at, and the depth it is raised at differs from host to host:
+
+```text
+JK2001: validation nests schema references deeper than this host's call stack holds, entered at http://depth.test/two# (nest the instance less deeply, or give the process a larger stack)
+```
+
+The count of open references, the dynamic scope and every other validator
+and normalizer of the process answer afterwards as they did before the call.
+*Upgrade: such a validation escaped as the host's uncoded `RangeError`; code
+that caught a `RangeError` around a validation catches `JK2001`.*
 
 A normalizer (`compileNormalizer`) holds the same bound, its own
 `maxReferenceDepth` (default 256), refusing a call with `normalization nests

@@ -1183,7 +1183,12 @@ the host's refusal of a join, so the writers pay nothing and no text the host
 can hold is refused: one `try` around the walk turns the host's `RangeError`
 into the coded refusal, and `isPastLongestString` tells it from another
 `RangeError` (a call stack exhausted) by the message the host gives a string
-past its longest, read once from the host.
+past its longest, read once from the host. `isStackExhausted`, re-exported by
+`object.js` beside it, reads the other refusal the same way: the class and
+the message of what the host throws for a recursion without end, provoked
+once on first need, so no engine's text is spelled in the source. It answers
+`false` for a `CodedError` before it provokes anything, so a caller may ask
+it about every error it catches.
 
 `equalsDeep`, `deepFreeze` and `cloneJson` hold no bound: they answer at any depth.
 `equalsDeep` compares the first 256 levels on the host's stack, as

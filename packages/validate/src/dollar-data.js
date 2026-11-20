@@ -45,7 +45,7 @@ import {
 import {
   compileDataRef,
   JSONPOINTER_NOTHING,
-} from '@jarenjs/json';
+} from '@jarenjs/json/pointer';
 
 import {
   createDataRefCompilers,

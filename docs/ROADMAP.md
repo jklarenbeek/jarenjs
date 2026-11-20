@@ -226,17 +226,6 @@ delete it or fix it.
   3,000 in a fresh process), where the validator compiles the schema (it
   resolves a reference on first use) and refuses a validation nesting them
   past its reference bound (`JK2001`).
-- [ ] **A loop of references closed through a schema already built counts one
-  per turn.** The reference bound weighs a reference by the levels between it
-  and its target only where the target encloses it (is still being compiled);
-  a loop whose closing reference calls a target the compile already built —
-  two definitions referencing each other through members, `{ $ref:
-  '#/$defs/a', $defs: { a: <10 levels of properties.x> { $ref: '#/$defs/b' },
-  b: <10 levels> { $ref: '#/$defs/a' } } }`, or through `items` deeper than
-  the compile builds the second inside the first — counts one per turn
-  whatever the levels between, so a 100,000-deep instance throws an uncoded
-  `RangeError` on the default stack. The normalizer counts such a loop by its
-  levels.
 - [ ] **A form field reads a bigint as a number where the validator's bigint
   keywords judge it.** A field whose `type` names `bigint`, or that declares
   none (a number field by its bounds), reads a bigint as the number it
@@ -258,21 +247,16 @@ delete it or fix it.
   `multipleOf` but not from `exclusiveMinimum` or `exclusiveMaximum`, so
   `{ exclusiveMinimum: 5 }` builds an `unknown` field (a `json` control) and
   layer 1 takes `5`, which the validator refuses.
-- [ ] **A `$ref` target below a keyword no draft defines reads the compile's
-  vocabularies.** Under a held dialect without the validation vocabulary,
-  with `urn:doc` holding `{ $schema: dialect, components: { schemas: { p: {
-  type: 'string' } } } }`, `compile({ $ref: 'urn:doc#/components/schemas/p' })`
-  refuses `1`, where a `$defs` member of the same document is reached and
-  accepts it. The walk records the dialect of the places it enters only;
-  reading the nearest `$schema` on the way, as such a target's draft is now
-  read, is the open work.
-- [ ] **The validator's own modules load `@jarenjs/json`'s index.**
-  `tools.js`, `dollar-data.js` and `content.js` import `compileDataRef`,
-  `JSONPOINTER_NOTHING` and `isValidJSON` from `@jarenjs/json`, whose index
-  re-exports the query compiler (with core's geo, series, dates and math),
-  so `@jarenjs/validate/output` and `@jarenjs/validate/load`, which load no
-  validator, load the query compiler under Node. Wanted: those imports from
-  `@jarenjs/json/pointer` and `@jarenjs/json/basic`, which hold them.
+- [ ] **A `$ref` target below a keyword no draft defines is not refused where
+  its dialect requires a vocabulary the validator does not implement.** Under
+  a held dialect whose `$vocabulary` requires (`true`) a vocabulary this
+  package does not implement, with `urn:doc` holding `{ $schema: dialect,
+  components: { schemas: { p: { type: 'string' } } }, $defs: { q: { type:
+  'string' } } }`, `compile({ $ref: 'urn:doc#/$defs/q' })` is refused
+  `JK0016` and `compile({ $ref: 'urn:doc#/components/schemas/p' })` answers,
+  under the compile's vocabularies. Every other dialect on the way to such a
+  target is read. Refusing it refuses schemas that answer today (a minor,
+  with an upgrade note).
 - [ ] **A root `$id` with a plain-name fragment is built three times.** Under
   draft-07, `{ $id: 'https://x.test/n.json#root', properties: { a: { type:
   'string' } } }` is built under `…#root`, `…#root#` and `…#`: the alternate

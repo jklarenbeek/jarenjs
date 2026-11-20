@@ -6,7 +6,9 @@
  * (`./geo/`) at most `GEOJSON_WALK_DEPTH_CEILING`, and a walk that reaches
  * its bound tells a cycle from a deep value here, so each refuses both
  * alike. `stableStringify` and `semanticKey` refuse a text longer than the
- * host's longest string here too.
+ * host's longest string here too, and `isStackExhausted` tells the host's
+ * refusal of a call its stack cannot hold, for a caller that turns it into
+ * a coded refusal of its own.
  * Internal to the package: not an entry of its `exports`.
  */
 
@@ -69,6 +71,53 @@ export function isPastLongestString(error) {
     }
   }
   return error.message === longestStringMessage;
+}
+
+// What this host throws for a call its stack cannot hold, its constructor
+// and its message, read from the host on first need; null when it throws
+// nothing an `Error`.
+/** @type {{ constructor: Function, message: string } | null | undefined} */
+let stackRefusal;
+
+/**
+ * Recurse until the host refuses the call (the sum keeps the call out of
+ * tail position, where a host may reuse the frame).
+ * @returns {number}
+ */
+function exhaustStack() {
+  return 1 + exhaustStack();
+}
+
+/**
+ * Whether a thrown value is this host's own refusal of a call its stack
+ * cannot hold, never another error of the same class (a string past the
+ * host's longest, a `CodedError`). The refusal is the host's own, read
+ * once by recursing until the host refuses: V8 and JavaScriptCore throw a
+ * `RangeError`, SpiderMonkey an `InternalError`, each with a text of its
+ * own, so neither is spelled here. A caller that catches the refusal where
+ * the stack has unwound can raise a coded one in its place; while the
+ * stack is still full a call throws again, this one included.
+ * @param {unknown} error
+ * @returns {boolean}
+ * @example
+ * const descend = () => 1 + descend();
+ * try { descend(); } catch (error) { isStackExhausted(error); } // true
+ * isStackExhausted(new RangeError('Invalid array length')); // false
+ */
+export function isStackExhausted(error) {
+  if (!(error instanceof Error) || error instanceof CodedError)
+    return false;
+  if (stackRefusal === undefined) {
+    stackRefusal = null;
+    try {
+      exhaustStack();
+    }
+    catch (thrown) {
+      if (thrown instanceof Error)
+        stackRefusal = { constructor: thrown.constructor, message: thrown.message };
+    }
+  }
+  return stackRefusal !== null && error.constructor === stackRefusal.constructor && error.message === stackRefusal.message;
 }
 
 // What a walk on its own stack throws on reaching the bound: the caller

@@ -17,16 +17,18 @@ import {
 } from './tools.js';
 
 // Where resolved references keep their answers (ValidationRoot#callReference),
-// a branch walk is open while the branches of a `oneOf` or `anyOf` run.
+// a branch walk is open while the branches of a `oneOf` or `anyOf` run. The
+// count is lowered by assignment (ValidationRoot#branchWalks).
 function walkingBranches(root, validate) {
   if (!root.keepsReferenceAnswers) return validate;
+  const walks = root.branchWalks;
   return function validateWalkingBranches(data, dataPath, dataRoot, dataKey) {
-    root.walkBranches(1);
+    walks.open++;
     try {
       return validate(data, dataPath, dataRoot, dataKey);
     }
     finally {
-      root.walkBranches(-1);
+      walks.open--;
     }
   };
 }

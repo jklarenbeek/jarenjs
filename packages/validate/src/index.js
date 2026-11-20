@@ -53,7 +53,7 @@ import { equalsJson, mergeMap } from '@jarenjs/core/object';
 import { isStringWhiteSpace } from '@jarenjs/core/string';
 import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep, appliesRefSiblings } from './dynamic-ref.js';
 import { isRecursiveQueryCompileError } from './query-keyword.js';
-import { enterReference, leaveReference, referenceDepthNow, assertDepthOption, assertOutputFormat, schemaTooDeep, unimplementedVocabulary, REFERENCE_DEPTH_CEILING, SCHEMA_DEPTH_CEILING } from './errors.js';
+import { openReferences, referencesTooDeep, referenceUnwound, assertDepthOption, assertOutputFormat, schemaTooDeep, unimplementedVocabulary, REFERENCE_DEPTH_CEILING, SCHEMA_DEPTH_CEILING } from './errors.js';
 import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft, dialectVocabulary, caselessUri, heldUriKey, heldDialect, identifierKeyword, identifierText, dialectDraft } from './schema-keywords.js';
 import { VALIDATOR_STATE } from './validator-state.js';
 import { encodeJsonPointerPath } from './origin.js';
@@ -346,13 +346,14 @@ function placeDraft(places, schemas, path, schema) {
  * the way to it in its document, itself included, that a walk recorded or
  * that declares a `$schema` of its own, as the normalizer's index places it
  * (`resolveSchemaReference`): a draft-07 document's `#/components/schemas/a`
- * is read as draft-07.
+ * is read as draft-07, and under the vocabularies draft-07 switches on.
  * @param {import('./traverse.js').SchemaPlaces} places - What the walks read
  * @param {Map<string, any>} schemas - The compilation's schemas by URI
  * @param {string} path - The object's location
- * @returns {{ draft: number|null, foreign: boolean }} The draft it is read
- *   under (null for none), and whether its `$schema` names no draft this
- *   package knows ({@link readsForeign})
+ * @returns {{ draft: number|null, foreign: boolean, dialectUri: string|undefined }}
+ *   The draft it is read under (null for none), whether its `$schema` names
+ *   no draft this package knows ({@link readsForeign}), and that `$schema`
+ *   URI, whose vocabularies it is read under (undefined for none)
  */
 function unwalkedReading(places, schemas, path) {
   const pointer = path.indexOf('#/');
@@ -360,17 +361,21 @@ function unwalkedReading(places, schemas, path) {
   const parts = pointer === -1 ? [] : decodeJsonPointerPath(path.slice(pointer + 1));
   let draft = null;
   let foreign = false;
+  /** @type {string|undefined} */
+  let dialectUri;
   for (let i = 0; ; i++) {
     if (places.drafts.has(node)) {
       draft = placeDraftOf(places, node, schemas) ?? null;
       foreign = readsForeign(places, node, schemas);
+      dialectUri = places.dialectUris.get(node);
     }
     else if (isObjectClass(node) && isStringType(node.$schema)) {
       const named = dialectDraft(node.$schema, schemas);
       draft = named ?? 7;
       foreign = named === null;
+      dialectUri = node.$schema;
     }
-    if (i === parts.length) return { draft, foreign };
+    if (i === parts.length) return { draft, foreign, dialectUri };
     node = node?.[parts[i]];
   }
 }
@@ -545,8 +550,8 @@ export class ValidationRoot {
   #errors = null;
   /** @type {ValidationObject|null} The root schema's ValidationObject */
   #firstSchema = null;
-  /** @type {Map<string, Function[]>} Map of anchor names to stacks of validator functions */
-  #dynamicAnchors = null;
+  /** @type {DynamicScope} The dynamic scope of the validation running: the anchors of the resources it entered, outermost first */
+  #dynamicScope = { names: [], validators: [], top: 0 };
   /** @type {string|null} Anchor name to register for the root schema on each validation, or null when not needed */
   #rootAnchorName = null;
   /** @type {function|null} Cached compiled validator of the root schema */
@@ -567,8 +572,8 @@ export class ValidationRoot {
   #usesUnevaluated = false;
   /** @type {boolean} Whether a collecting walk keeps what a resolved reference answered while branches are tried ({@link ValidationRoot#callReference}) */
   #keepsReferenceAnswers = false;
-  /** @type {number} The `oneOf`/`anyOf` branch walks open on the call stack */
-  #branchWalks = 0;
+  /** @type {{ open: number }} The `oneOf`/`anyOf` branch walks open on the call stack */
+  #branchWalks = { open: 0 };
   /** @type {Map<Function, Map<string, {data: unknown, depth: number, valid: boolean, errors: InternalValidationError[]}>>|null} What resolved references answered in this validation, by target and location */
   #keptAnswers = null;
   /** @type {EvalLog} Log of evaluated properties/items for unevaluated* support */
@@ -810,7 +815,6 @@ export class ValidationRoot {
 
     this.#objects = new Map();
     this.#errors = [];
-    this.#dynamicAnchors = new Map();
 
     // Detect $data references and unevaluated* keywords once, so fast paths
     // can skip path building / annotation logging when nothing consumes them.
@@ -869,8 +873,13 @@ export class ValidationRoot {
    * The options a schema object is compiled under: the compilation's, with
    * the vocabularies of the dialect governing its place — the nearest
    * `$schema` on the way to it in its own document, so a document compiled
-   * directly and through a `$ref` reads alike. A place under no `$schema`
-   * reads the compilation's, as it reads the compilation's draft. An
+   * directly and through a `$ref` reads alike, and so does a place no walk
+   * recorded (below a keyword no draft defines), which reads the nearest
+   * one on the way to it as it reads its draft ({@link unwalkedReading}). A
+   * place under no `$schema` reads the compilation's, as it reads the
+   * compilation's draft. A dialect that requires a vocabulary this package
+   * does not implement refuses the places a walk recorded (`JK0016`); a
+   * place no walk recorded reads the compilation's options under it. An
    * internal collaborator of the compiler.
    * @param {string} path - The schema's location
    * @param {any} schema - The schema, or a copy of it
@@ -880,13 +889,17 @@ export class ValidationRoot {
     const places = this.#places;
     const read = this.#vocabularies;
     if (read === undefined || places === undefined || !isObjectClass(schema)) return this.#options;
-    const uri = places.dialectUris.get(placeOf(places.drafts, this.#schemas, path, schema));
+    const place = placeOf(places.drafts, this.#schemas, path, schema);
+    const walked = places.drafts.has(place);
+    const uri = walked ? places.dialectUris.get(place) : unwalkedReading(places, this.#schemas, path).dialectUri;
     if (uri === undefined) return this.#options;
     let options = this.#dialectOptions.get(uri);
     if (options === undefined) {
       const { validation, formatAssertion, contentValidation, unimplemented } = read(uri);
-      if (unimplemented !== undefined)
+      if (unimplemented !== undefined) {
+        if (!walked) return this.#options;
         throw unimplementedVocabulary(uri, unimplemented, compiledLocation(isStringType(schema.$schema) ? keywordLocation(path, '$schema') : path, /** @type {string} */ (this.#rootOrigin)));
+      }
       const own = this.#options;
       options = own;
       if (validation !== own.vocabValidation || formatAssertion !== own.formatAssertion || contentValidation !== own.contentValidation) {
@@ -1256,12 +1269,13 @@ export class ValidationRoot {
   get keepsReferenceAnswers() { return this.#keepsReferenceAnswers; }
 
   /**
-   * Open (`1`) or close (`-1`) a `oneOf`/`anyOf` branch walk.
-   * @param {number} step
+   * The count of `oneOf`/`anyOf` branch walks open on the call stack. A
+   * walk raises `open` and lowers it by assignment however it ends: while
+   * the host's stack is full a call throws again, and would leave the walk
+   * open for every later validation.
+   * @returns {{ open: number }}
    */
-  walkBranches(step) {
-    this.#branchWalks += step;
-  }
+  get branchWalks() { return this.#branchWalks; }
 
   /**
    * Call what a resolved reference enters. While a branch walk is open in a
@@ -1276,10 +1290,10 @@ export class ValidationRoot {
    * @returns {unknown} What the target answers
    */
   callReference(validate, data, dataPath, dataRoot) {
-    if (this.#branchWalks === 0) return validate(data, dataPath, dataRoot);
+    if (this.#branchWalks.open === 0) return validate(data, dataPath, dataRoot);
     // Whether a reference refuses depends on the levels open, so an entry
     // made with as many open answers for this one.
-    const depth = referenceDepthNow();
+    const depth = openReferences.depth;
     let byPath = this.#keptAnswers?.get(validate);
     const kept = byPath?.get(dataPath);
     if (kept !== undefined && kept.data === data && kept.depth === depth) {
@@ -1350,11 +1364,10 @@ export class ValidationRoot {
     if (!this.#options.skipErrors) {
       this.#errors = [];
     }
-    // Push/pop pairs are balanced (try/finally), so the anchors map is
-    // normally empty here already; clear defensively without reallocating.
-    if (this.#dynamicAnchors.size !== 0) {
-      this.#dynamicAnchors.clear();
-    }
+    // Every frame that enters a dynamic scope restores the scope it found,
+    // so it is empty here already; emptied defensively.
+    const scope = this.#dynamicScope;
+    scope.top = 0;
     // Clear evaluation annotations from the previous validation
     if (this.#usesUnevaluated) {
       this.#evalLog.reset();
@@ -1364,23 +1377,19 @@ export class ValidationRoot {
     const anchorName = this.#rootAnchorName;
     const rootAnchors = this.#rootDynamicAnchors;
     if (anchorName !== null || rootAnchors.length !== 0) {
-      if (anchorName !== null)
-        this.pushDynamicAnchorValidator(anchorName, rootValidator);
-      for (let i = 0; i < rootAnchors.length; ++i) {
-        const anchor = rootAnchors[i];
-        if (anchor.validator === null)
-          anchor.validator = this.getOrCreateValidator(anchor.schema, this.#rootOrigin, this.#rootOrigin);
-        this.pushDynamicAnchorValidator(anchor.name, anchor.validator);
-      }
       try {
+        if (anchorName !== null)
+          this.pushDynamicAnchorValidator(anchorName, rootValidator);
+        for (let i = 0; i < rootAnchors.length; ++i) {
+          const anchor = rootAnchors[i];
+          if (anchor.validator === null)
+            anchor.validator = this.getOrCreateValidator(anchor.schema, this.#rootOrigin, this.#rootOrigin);
+          this.pushDynamicAnchorValidator(anchor.name, anchor.validator);
+        }
         // call compiled validator with dataRoot as third argument
         return rootValidator(data, '', data);
       } finally {
-        for (let i = rootAnchors.length - 1; i >= 0; --i) {
-          this.popDynamicAnchorValidator(rootAnchors[i].name);
-        }
-        if (anchorName !== null)
-          this.popDynamicAnchorValidator(anchorName);
+        scope.top = 0;
       }
     }
 
@@ -1428,9 +1437,10 @@ export class ValidationRoot {
    * @returns {Function|null} The validator function or null if not set
    */
   getDynamicAnchorValidator(anchorName) {
-    const stack = this.#dynamicAnchors.get(anchorName);
-    if (!stack || stack.length === 0) return null;
-    return stack[0];
+    const { names, validators, top } = this.#dynamicScope;
+    for (let i = 0; i < top; i++)
+      if (names[i] === anchorName) return validators[i];
+    return null;
   }
 
   /**
@@ -1446,29 +1456,29 @@ export class ValidationRoot {
   }
 
   /**
-   * Push a validator onto the stack for a dynamic anchor.
-   * Called when entering a schema with $recursiveAnchor or $dynamicAnchor.
+   * The dynamic scope of the validation running. A frame that enters a
+   * resource reads `top`, pushes the resource's anchors
+   * ({@link pushDynamicAnchorValidator}) and restores `top` by assignment
+   * however its call ends: while the host's stack is full a call throws
+   * again, and an anchor left in the scope would answer the dynamic
+   * references of every later validation.
+   * @returns {DynamicScope}
+   */
+  get dynamicScope() { return this.#dynamicScope; }
+
+  /**
+   * Push a validator onto the dynamic scope for a dynamic anchor.
+   * Called when entering a schema with $recursiveAnchor or $dynamicAnchor;
+   * the caller restores the scope's `top` ({@link dynamicScope}).
    * @param {string} anchorName - The anchor name
    * @param {Function} validator - The validator function
    */
   pushDynamicAnchorValidator(anchorName, validator) {
-    const stack = this.#dynamicAnchors.get(anchorName);
-    if (stack === undefined)
-      this.#dynamicAnchors.set(anchorName, [validator]);
-    else
-      stack.push(validator);
-  }
-
-  /**
-   * Pop a validator from the stack for a dynamic anchor.
-   * Called when exiting a schema with $recursiveAnchor or $dynamicAnchor.
-   * @param {string} anchorName - The anchor name
-   */
-  popDynamicAnchorValidator(anchorName) {
-    const stack = this.#dynamicAnchors.get(anchorName);
-    if (stack && stack.length > 0) {
-      stack.pop();
-    }
+    const scope = this.#dynamicScope;
+    const top = scope.top;
+    scope.names[top] = anchorName;
+    scope.validators[top] = validator;
+    scope.top = top + 1;
   }
 
   /**
@@ -1503,6 +1513,18 @@ export class ValidationRoot {
  * compilation: every subschema applied enters it, carrying the evaluation
  * path segment an applicator marked as `pending`.
  * @typedef {import('./output.js').UnitRecorder} UnitRecorder
+ */
+
+/**
+ * The dynamic scope of one compilation's validation: the validators the
+ * `$dynamicAnchor`s and `$recursiveAnchor`s (named `''`) of the resources
+ * entered name, in the order they were entered. The first `top` entries
+ * are in scope; a dynamic reference reads the first of its name, the
+ * outermost.
+ * @typedef {object} DynamicScope
+ * @property {string[]} names - The anchor names
+ * @property {Function[]} validators - The validator each names
+ * @property {number} top - How many entries are in scope
  */
 
 /** The evaluation step of a `$ref` (see `markStep`). */
@@ -1571,6 +1593,9 @@ export class ValidationObject {
       return compileSchemaObject(self, schema);
 
     const root = self.#root;
+    // The dynamic scope, restored by assignment by every frame that enters
+    // a resource (`ValidationRoot#dynamicScope`).
+    const scope = root.dynamicScope;
 
     // In draft 2019-09+, $ref can have sibling keywords that are applied together.
     // In draft 7 and earlier, $ref overrides siblings.
@@ -1646,53 +1671,43 @@ export class ValidationObject {
           // unevaluated* keywords must see annotations produced by the $ref
           // target, so the wrapper goes around the combined validator.
           return wrapUnevaluated(self, schema, function validateRefWithDynamicAnchorAndSiblings(data, dataPath, dataRoot) {
-            // Register the entered resource's dynamic anchors first
-            for (let i = 0; i < enterAnchors.length; i++) {
-              const anchor = enterAnchors[i];
-              if (anchor.validator == null)
-                anchor.validator = root.getOrCreateValidator(anchor.schema, path, anchor.base || baseUri);
-              root.pushDynamicAnchorValidator(anchor.name, anchor.validator);
-            }
-            // Then register target's dynamic anchor if any
-            if (hasRecAnchor || dynAnchorName) {
-              root.pushDynamicAnchorValidator(anchorName, refValidator);
-            }
+            const entered = scope.top;
             try {
+              // Register the entered resource's dynamic anchors first
+              for (let i = 0; i < enterAnchors.length; i++) {
+                const anchor = enterAnchors[i];
+                if (anchor.validator == null)
+                  anchor.validator = root.getOrCreateValidator(anchor.schema, path, anchor.base || baseUri);
+                root.pushDynamicAnchorValidator(anchor.name, anchor.validator);
+              }
+              // Then register target's dynamic anchor if any
+              if (hasRecAnchor || dynAnchorName) {
+                root.pushDynamicAnchorValidator(anchorName, refValidator);
+              }
               return combineRefAndSiblings(callRef, siblingValidator, self.options.skipErrors,
               data, dataPath, dataRoot);
             } finally {
-              // Pop in reverse order
-              if (hasRecAnchor || dynAnchorName) {
-                root.popDynamicAnchorValidator(anchorName);
-              }
-              for (let i = enterAnchors.length - 1; i >= 0; i--) {
-                root.popDynamicAnchorValidator(enterAnchors[i].name);
-              }
+              scope.top = entered;
             }
           });
         } else {
           return function validateRefWithDynamicAnchor(data, dataPath, dataRoot) {
-            // Register the entered resource's dynamic anchors first
-            for (let i = 0; i < enterAnchors.length; i++) {
-              const anchor = enterAnchors[i];
-              if (anchor.validator == null)
-                anchor.validator = root.getOrCreateValidator(anchor.schema, path, anchor.base || baseUri);
-              root.pushDynamicAnchorValidator(anchor.name, anchor.validator);
-            }
-            // Then register target's dynamic anchor if any
-            if (hasRecAnchor || dynAnchorName) {
-              root.pushDynamicAnchorValidator(anchorName, refValidator);
-            }
+            const entered = scope.top;
             try {
+              // Register the entered resource's dynamic anchors first
+              for (let i = 0; i < enterAnchors.length; i++) {
+                const anchor = enterAnchors[i];
+                if (anchor.validator == null)
+                  anchor.validator = root.getOrCreateValidator(anchor.schema, path, anchor.base || baseUri);
+                root.pushDynamicAnchorValidator(anchor.name, anchor.validator);
+              }
+              // Then register target's dynamic anchor if any
+              if (hasRecAnchor || dynAnchorName) {
+                root.pushDynamicAnchorValidator(anchorName, refValidator);
+              }
               return callRef(data, dataPath, dataRoot);
             } finally {
-              // Pop in reverse order
-              if (hasRecAnchor || dynAnchorName) {
-                root.popDynamicAnchorValidator(anchorName);
-              }
-              for (let i = enterAnchors.length - 1; i >= 0; i--) {
-                root.popDynamicAnchorValidator(enterAnchors[i].name);
-              }
+              scope.top = entered;
             }
           };
         }
@@ -1775,27 +1790,23 @@ export class ValidationObject {
       }
       const { refValidator, callRef, enterAnchors, hasRecAnchor, dynAnchorName } = resolvedState;
 
-      for (let i = 0; i < enterAnchors.length; i++) {
-        const anchor = enterAnchors[i];
-        if (anchor.validator == null)
-          anchor.validator = rootRef.getOrCreateValidator(anchor.schema, path, anchor.base || baseUri);
-        rootRef.pushDynamicAnchorValidator(anchor.name, anchor.validator);
-      }
-
+      const entered = scope.top;
       try {
+        for (let i = 0; i < enterAnchors.length; i++) {
+          const anchor = enterAnchors[i];
+          if (anchor.validator == null)
+            anchor.validator = rootRef.getOrCreateValidator(anchor.schema, path, anchor.base || baseUri);
+          rootRef.pushDynamicAnchorValidator(anchor.name, anchor.validator);
+        }
+
         if (hasRecAnchor || dynAnchorName) {
-          const anchorName = dynAnchorName || '';
-          rootRef.pushDynamicAnchorValidator(anchorName, refValidator);
-          try {
-            // If there are sibling validators (draft 2019-09+), combine them with the ref validator
-            if (boundSiblingValidator) {
-              return combineRefAndSiblings(callRef, boundSiblingValidator,
-                self.options.skipErrors, data, dataPath, dataRoot);
-            }
-            return callRef(data, dataPath, dataRoot);
-          } finally {
-            rootRef.popDynamicAnchorValidator(anchorName);
+          rootRef.pushDynamicAnchorValidator(dynAnchorName || '', refValidator);
+          // If there are sibling validators (draft 2019-09+), combine them with the ref validator
+          if (boundSiblingValidator) {
+            return combineRefAndSiblings(callRef, boundSiblingValidator,
+              self.options.skipErrors, data, dataPath, dataRoot);
           }
+          return callRef(data, dataPath, dataRoot);
         }
 
         // If there are sibling validators (draft 2019-09+), combine them with the ref validator
@@ -1812,27 +1823,50 @@ export class ValidationObject {
         }
         return callRef(data, dataPath, dataRoot);
       } finally {
-        // Pop anchors in reverse order
-        for (let i = enterAnchors.length - 1; i >= 0; i--) {
-          rootRef.popDynamicAnchorValidator(enterAnchors[i].name);
-        }
+        scope.top = entered;
       }
     };
 
     // The reference counts toward the depth bound itself (as boundReference
-    // would around it), a call per validation fewer.
+    // would around it, and by its rules: the count lowered by assignment,
+    // the host's stack refusal coded by the outermost counted reference,
+    // which alone holds a handler), a call per validation fewer. The count
+    // is read through this closure: an import binding read per access is
+    // slower.
     const ceiling = root.options.maxReferenceDepth;
     const weight = root.referenceWeight(ref);
     const keepsAnswers = root.keepsReferenceAnswers;
+    const open = openReferences;
+    const outermost = function resolveOutermostReference(data, dataPath, dataRoot) {
+      if (open.depth + weight > ceiling) throw referencesTooDeep(path, ceiling, weight);
+      open.depth += weight;
+      open.count++;
+      try {
+        if (direct !== null)
+          return keepsAnswers ? rootRef.callReference(direct, data, dataPath, dataRoot) : direct(data, dataPath, dataRoot);
+        return resolveAndCall(data, dataPath, dataRoot);
+      }
+      catch (error) {
+        throw referenceUnwound(error, path);
+      }
+      finally {
+        open.depth -= weight;
+        open.count--;
+      }
+    };
     return wrapUnevaluated(self, schema, function resolveSchemaCompiler(data, dataPath, dataRoot) {
-      enterReference(path, ceiling, weight);
+      if (open.count === 0) return outermost(data, dataPath, dataRoot);
+      if (open.depth + weight > ceiling) throw referencesTooDeep(path, ceiling, weight);
+      open.depth += weight;
+      open.count++;
       try {
         if (direct !== null)
           return keepsAnswers ? rootRef.callReference(direct, data, dataPath, dataRoot) : direct(data, dataPath, dataRoot);
         return resolveAndCall(data, dataPath, dataRoot);
       }
       finally {
-        leaveReference(weight);
+        open.depth -= weight;
+        open.count--;
       }
     });
 
@@ -1913,20 +1947,21 @@ export class ValidationObject {
       if (anchors.length > 0) {
         const resourceBase = this.#effectiveBaseUri;
         const inner = (data, dataPath, dataRoot, dataKey) => this.#validator(data, dataPath, dataRoot, dataKey);
+        const scope = root.dynamicScope;
         this.#resourceValidator = (data, dataPath, dataRoot, dataKey) => {
-          for (let i = 0; i < anchors.length; i++) {
-            const anchor = anchors[i];
-            anchor.validator ??= anchor.schema === schema
-              ? inner
-              : root.getOrCreateValidator(anchor.schema, path, resourceBase);
-            root.pushDynamicAnchorValidator(anchor.name, anchor.validator);
-          }
+          const entered = scope.top;
           try {
+            for (let i = 0; i < anchors.length; i++) {
+              const anchor = anchors[i];
+              anchor.validator ??= anchor.schema === schema
+                ? inner
+                : root.getOrCreateValidator(anchor.schema, path, resourceBase);
+              root.pushDynamicAnchorValidator(anchor.name, anchor.validator);
+            }
             return inner(data, dataPath, dataRoot, dataKey);
           }
           finally {
-            for (let i = anchors.length - 1; i >= 0; i--)
-              root.popDynamicAnchorValidator(anchors[i].name);
+            scope.top = entered;
           }
         };
       }

@@ -9,13 +9,15 @@ import {
 import { compareCodePoints, hashContent } from './string.js';
 import { CodedError } from './errors.js';
 import {
-  JSON_WALK_DEPTH_CEILING, WALK_CEILING, isPastLongestString, locateCycle, locateCycleIn, textTooLong, walkRefusal,
+  JSON_WALK_DEPTH_CEILING, WALK_CEILING, isPastLongestString, isStackExhausted, locateCycle, locateCycleIn, textTooLong, walkRefusal,
   walkTooDeep,
 } from './walk.js';
 
 // the refusal of a text past the host's longest string, for every writer
-// of a JSON text to raise alike (`JO2009`)
-export { locateCycle, isPastLongestString, textTooLong };
+// of a JSON text to raise alike (`JO2009`), and the test for the host's
+// refusal of a call its stack cannot hold, for a recursion to turn into a
+// coded refusal of its own
+export { locateCycle, isPastLongestString, isStackExhausted, textTooLong };
 
 const hasOwn = Object.hasOwn;
 

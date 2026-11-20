@@ -41,12 +41,16 @@
  * runs: a validation that nests schema references deeper than
  * `maxReferenceDepth` (default {@link REFERENCE_DEPTH_CEILING}) levels is
  * refused where the bound is crossed (`JK2001`), before the host's call
- * stack can overflow; the normalizer of `@jarenjs/validate/normalize` holds
- * the same bound. Every refusal is thrown, never folded into a `false`
- * answer: under `not` a folded failure would read as success.
+ * stack can overflow, and one whose references the host's call stack gives
+ * out under first (a loop that counts one per turn of many levels, a raised
+ * bound, a small stack) is refused `JK2001` too, in place of the host's own
+ * error; the normalizer of `@jarenjs/validate/normalize` holds the same
+ * bound. Every refusal is thrown, never folded into a `false` answer:
+ * under `not` a folded failure would read as success.
  */
 
 import { CodedError } from '@jarenjs/core/errors';
+import { isStackExhausted } from '@jarenjs/core/object';
 
 /**
  * The validator's diagnosis codes, one line each (the normative table is
@@ -132,9 +136,10 @@ export class SchemaRuntimeError extends CodedError {
    * @param {string} code - Stable diagnosis code
    * @param {string} reason - What is wrong
    * @param {{ dataPath?: string }} [location] - Where in the instance
+   * @param {{ cause?: unknown }} [options] - `cause`: the error behind the refusal
    */
-  constructor(code, reason, location = undefined) {
-    super('SchemaRuntimeError', code, reason, location);
+  constructor(code, reason, location = undefined, options = undefined) {
+    super('SchemaRuntimeError', code, reason, location, options);
   }
 }
 
@@ -234,10 +239,17 @@ export function describeKind(value) {
   return typeof value === 'string' ? `'${value}'` : typeof value;
 }
 
-// The levels of schema the references entered on the call stack span, and
-// how many references they are.
-let referenceDepth = 0;
-let referenceCount = 0;
+/**
+ * The references open on the call stack: the levels of schema they span
+ * and how many they are. One object for every validator and normalizer of
+ * the process (it measures the one call stack). A counted reference raises
+ * both on entering and lowers them by assignment, in a `finally`, however
+ * its call ends ({@link boundReference}): while the host's stack is full a
+ * call throws again, so a restore that calls would leave the count raised
+ * for the rest of the process.
+ * @type {{ depth: number, count: number }}
+ */
+export const openReferences = { depth: 0, count: 0 };
 
 /**
  * Wrap the validator a schema reference calls so that entering it counts
@@ -250,6 +262,13 @@ let referenceCount = 0;
  * count is shared by every validator and normalizer (it measures the one
  * call stack); each reference compares it with its own compilation's
  * ceiling.
+ *
+ * The host's stack can give out before the count does (a loop closed
+ * through a schema already built counts one per turn, however many levels
+ * a turn nests). The outermost counted reference on the stack, the one
+ * entered with no other counted, catches the host's error where the stack
+ * has unwound and throws `JK2001` in its place ({@link referenceUnwound});
+ * the references below it catch nothing and call nothing on the way out.
  * @template {(data: any, dataPath: any, dataRoot: any, dataKey?: any) => any} F
  * @param {string} location - The schema location of the reference, named
  *   by the refusal
@@ -262,49 +281,74 @@ let referenceCount = 0;
  * @returns {F}
  */
 export function boundReference(location, ceiling, weight, validate, subject = 'validation') {
+  // read through this closure: an exported binding read per access is slower
+  const open = openReferences;
+  // The reference entered with no other counted: the outermost on the
+  // stack, and the one frame with a handler. A `catch` costs a frame stack,
+  // so the references below it hold none and the host's stack holds an
+  // instance as deep as it did.
+  const outermost = function validateOutermostReference(data, dataPath, dataRoot, dataKey) {
+    if (open.depth + weight > ceiling) throw referencesTooDeep(location, ceiling, weight, subject);
+    open.depth += weight;
+    open.count++;
+    try {
+      return validate(data, dataPath, dataRoot, dataKey);
+    }
+    catch (error) {
+      throw referenceUnwound(error, location, subject);
+    }
+    finally {
+      open.depth -= weight;
+      open.count--;
+    }
+  };
   return /** @type {F} */ (function validateBoundReference(data, dataPath, dataRoot, dataKey) {
-    enterReference(location, ceiling, weight, subject);
+    if (open.count === 0) return outermost(data, dataPath, dataRoot, dataKey);
+    if (open.depth + weight > ceiling) throw referencesTooDeep(location, ceiling, weight, subject);
+    open.depth += weight;
+    open.count++;
     try {
       return validate(data, dataPath, dataRoot, dataKey);
     }
     finally {
-      leaveReference(weight);
+      open.depth -= weight;
+      open.count--;
     }
   });
 }
 
 /**
- * Count entering a schema reference toward the reference depth bound, as
- * {@link boundReference} does around what it wraps; the caller restores the
- * count with {@link leaveReference} however the call ends.
+ * The refusal of a reference that would carry the count of
+ * {@link openReferences} past its compilation's ceiling.
  * @param {string} location - The schema location of the reference
  * @param {number} ceiling - The compilation's `maxReferenceDepth`
  * @param {number} weight - The levels of schema the reference spans
  * @param {string} [subject] - What nests the references
- * @throws {SchemaRuntimeError} `JK2001` when the count would pass `ceiling`
+ * @returns {SchemaRuntimeError} `JK2001`
  */
-export function enterReference(location, ceiling, weight, subject = 'validation') {
-  if (referenceDepth + weight > ceiling) {
-    // every reference on the way spanning one level, the levels are the references
-    throw new SchemaRuntimeError('JK2001', `${subject} nests ${referenceDepth === referenceCount && weight === 1
-      ? `more than ${ceiling} schema references`
-      : `schema references more than ${ceiling} levels deep`} at ${location} `
-      + '(an instance nested this deep, or a loop of references that never reads it)');
-  }
-  referenceDepth += weight;
-  referenceCount++;
+export function referencesTooDeep(location, ceiling, weight, subject = 'validation') {
+  // every reference on the way spanning one level, the levels are the references
+  return new SchemaRuntimeError('JK2001', `${subject} nests ${openReferences.depth === openReferences.count && weight === 1
+    ? `more than ${ceiling} schema references`
+    : `schema references more than ${ceiling} levels deep`} at ${location} `
+    + '(an instance nested this deep, or a loop of references that never reads it)');
 }
 
 /**
- * Restore the count {@link enterReference} raised.
- * @param {number} weight - The weight it was entered with
+ * What the outermost counted reference on the call stack throws for an
+ * error that unwound to it: the host's refusal of a call its stack cannot
+ * hold becomes `JK2001`, the host's error its `cause`; any other error is
+ * thrown as it is. Called only where the stack has unwound: the references
+ * below hold no handler, and the count is lowered when the call returns or
+ * throws.
+ * @param {unknown} error - What the reference caught
+ * @param {string} location - The schema location of that reference, where
+ *   the nesting the stack gave out under was entered
+ * @param {string} [subject] - What nests the references
+ * @returns {unknown} `JK2001`, or `error`
  */
-export function leaveReference(weight) {
-  referenceDepth -= weight;
-  referenceCount--;
-}
-
-/** @returns {number} The levels of schema the references open on the call stack span */
-export function referenceDepthNow() {
-  return referenceDepth;
+export function referenceUnwound(error, location, subject = 'validation') {
+  if (!isStackExhausted(error)) return error;
+  return new SchemaRuntimeError('JK2001', `${subject} nests schema references deeper than this host's call stack holds, entered at ${location} `
+    + '(nest the instance less deeply, or give the process a larger stack)', undefined, { cause: error });
 }

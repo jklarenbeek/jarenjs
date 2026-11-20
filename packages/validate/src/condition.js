@@ -91,8 +91,10 @@ export function compileConditionSchema(schemaObj, jsonSchema) {
     };
   }
   
-  // If then or else has dynamic anchors, wrap validation to register them
+  // If then or else has dynamic anchors, wrap validation to register them;
+  // the scope is restored by assignment (`ValidationRoot#dynamicScope`)
   const track = root.usesUnevaluated;
+  const scope = root.dynamicScope;
   return function validateConditionWithDynamicAnchors(data, dataPath, dataRoot, dataKey) {
     const mark = track ? root.evalLog.mark() : 0;
     const conditionErrors = root.errorMark();
@@ -101,12 +103,12 @@ export function compileConditionSchema(schemaObj, jsonSchema) {
     if (taken) {
       // Validate then branch with dynamic anchor registration
       if (thenHasAnchor && tmpThen) {
-        const anchorName = thenDynAnchorName || '';
-        root.pushDynamicAnchorValidator(anchorName, tmpThen);
+        const entered = scope.top;
         try {
+          root.pushDynamicAnchorValidator(thenDynAnchorName || '', tmpThen);
           return validateThen(data, dataPath, dataRoot, dataKey);
         } finally {
-          root.popDynamicAnchorValidator(anchorName);
+          scope.top = entered;
         }
       }
       return validateThen(data, dataPath, dataRoot, dataKey);
@@ -115,12 +117,12 @@ export function compileConditionSchema(schemaObj, jsonSchema) {
       if (track) root.evalLog.rollback(mark);
       // Validate else branch with dynamic anchor registration
       if (elseHasAnchor && tmpElse) {
-        const anchorName = elseDynAnchorName || '';
-        root.pushDynamicAnchorValidator(anchorName, tmpElse);
+        const entered = scope.top;
         try {
+          root.pushDynamicAnchorValidator(elseDynAnchorName || '', tmpElse);
           return validateElse(data, dataPath, dataRoot, dataKey);
         } finally {
-          root.popDynamicAnchorValidator(anchorName);
+          scope.top = entered;
         }
       }
       return validateElse(data, dataPath, dataRoot, dataKey);

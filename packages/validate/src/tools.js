@@ -1,6 +1,10 @@
 //@ts-check
 
-import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
+import {
+  JSONPOINTER_NOTHING,
+  compileDataRef,
+  encodeJSONPointerSegment,
+} from '@jarenjs/json/pointer';
 
 import {
   isBigIntType,
@@ -29,11 +33,6 @@ import {
   isJsonObject,
   equalsDeep,
 } from '@jarenjs/core/object';
-
-import {
-  JSONPOINTER_NOTHING,
-  compileDataRef,
-} from '@jarenjs/json';
 
 import {
   NUMERIC_CONSTRAINTS, STRING_CONSTRAINTS,

@@ -7,7 +7,8 @@ import { JarenValidator } from '@jarenjs/validate';
 // each closure between the entry and the check that answers is a call that
 // sees every schema's children. The element walk of a lone `items` or
 // `prefixItems`, a tuple position, and a reference resolved on first use run
-// without a closure of their own around them, as a lone `uniqueItems` does; a
+// without a closure of their own around them (the outermost reference of a
+// validation excepted, which enters one), as a lone `uniqueItems` does; a
 // leading `type` of `object`, `string` or `array` is tested by the member
 // walk, the string keywords or the element walk of that kind, and
 // `properties` with `additionalProperties` is one walk; a tuple whose
@@ -105,7 +106,13 @@ describe('closures between the entry and the check', function () {
       $ref: '#/$defs/node',
       $defs: { node: { properties: { next: { $ref: '#/$defs/node' }, name: { format: 'probe' } } } },
     };
-    assert.strictEqual(framesToCheck(schema, { next: { name: 'x' } }), 5);
+    // The outermost reference of a validation runs in one frame of its own,
+    // the one frame that holds a handler (for a call stack that gives out
+    // under the references below it); every reference below it runs in
+    // none, so a level deeper is its reference and its member walk.
+    assert.strictEqual(framesToCheck(schema, { name: 'x' }), 4);
+    assert.strictEqual(framesToCheck(schema, { next: { name: 'x' } }), 6);
+    assert.strictEqual(framesToCheck(schema, { next: { next: { name: 'x' } } }), 8);
   });
 });
 
