@@ -136,7 +136,24 @@ object. A fragment-only root `$id` is resolved the same way; a root draft-04
 `id` is kept. `compile` reads a root `$id` with a fragment (`#root`, `…/r.json#root`)
 as naming the document too: `#traverseSchema` also registers the document
 under the URI before the fragment, where no other schema the validator holds
-has it, so its pointers resolve as under a key. A
+has it, so its pointers resolve as under a key; `#traverseSchema` then
+compiles it under that URI (`…/r.json#`), and `#precompileRefs` builds a plain
+name of a document held under the same URI once, under the URI, naming the
+name by that object (`aliasObject`). An identifier holding a fragment has no
+second spelling: only a document's URI is held with and without its empty
+fragment (`storeSchemaIdsInMap`). `addSchema` holds a document whose root
+`$id` holds a plain name and that is not held under the URI before it
+(`#underOwnName`) as a copy whose same-document references are spelled below
+the name (`#` as `…#root`, `#/definitions/s` as `…#root/definitions/s`,
+`underOwnName` in traverse.js), and records the copy in `places.rooted`;
+`pointerStart` reads where the pointer of such an id begins, so `placeAt`,
+`pointerBase`, `unwalkedReading` and `resolveRefSchemaShallow` read it from
+that document whatever is held under its URI. Only the references the copy
+rewrote (`places.ownRefs`, per object and keyword) read such an id: any other
+`$ref` or `$dynamicRef` spelling one (`…#root/definitions/s`, a plain name
+nothing declares) is refused `JK0009` where it is compiled or followed as a
+hop (`spellsHeldPlace`, `ValidationRoot#refuseHeldPlace`); a `$recursiveRef:
+"#"` there names the document by its name (`heldNameOf`). A
 draft-07 `$ref` beside an `$id` resolves against the base the walk recorded
 for it (`keptRefBase`), not the base the object happens to be built under: a
 held document's root is built from another document's compile.
@@ -463,8 +480,7 @@ same reading names, so it answers as the same subschema under `$defs`. A
 dialect whose meta-schema (of 2019-09 on) requires a
 vocabulary this package does not implement is refused there, the root's
 place included, `JK0016` (`unimplementedVocabulary`, errors.js); a place no
-walk recorded is not refused under such a dialect and reads the
-compilation's options.
+walk recorded is refused under such a dialect as a recorded one is.
 `addMetaSchema` passes none: a meta-schema compiles under the validator's
 options everywhere. The readers handed a validator as `dialects` read the
 same switches through `withoutUnreadVocabularies` (normalize.js): the
@@ -752,7 +768,6 @@ classDiagram
 
     class JsonPointer {
         +string id
-        +string search
         +string leftUri
         +string fragment
     }
@@ -760,6 +775,12 @@ classDiagram
     TraverseOptions --|> JsonPointerOptions
     JsonPointerOptions --> JsonPointer : creates via createJsonPointer()
 ```
+
+`leftUri` is the document's key: its URI as the URL standard spells it, the
+query included (`a.json?v=1` and `a.json?v=2` are two documents), with an
+empty fragment. A pointer fragment a URI cannot decode (`#/a%b`, a `%` that
+starts no escape) is no URI reference and is refused where it is parsed
+(`JK0010`).
 
 ---
 

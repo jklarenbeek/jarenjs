@@ -175,15 +175,6 @@ delete it or fix it.
   references most of the document still costs a compile of most of it, once
   per such place. One compile of the document, read at each place, is the open
   work.
-- [ ] **A held document without a key whose root `$id` is only a fragment
-  refuses its pointers.** `addSchema({ $id: '#root', definitions: { s: { type:
-  'string' } }, properties: { a: { $ref: '#/definitions/s' } } })` then
-  `compile({ $ref: 'https://github.com/jklarenbeek/jarenjs#root' })` is
-  refused JK0009 (`…jarenjs#/definitions/s`, at
-  `…jarenjs#/properties/a/%24ref`), where `compile` of the document answers.
-  Registering the document under the origin in the validator would make a
-  later compile of a document without `$id` refused JK0012 (it answers today),
-  so it was left.
 - [ ] **A dynamic reference keeps instance locations on** — once a `$data`,
   `data` or `$query` reader exists anywhere in the compilation, a `$ref` is
   resolved during the compile-time scan and only a target that reaches a
@@ -228,27 +219,6 @@ delete it or fix it.
   3,000 in a fresh process), where the validator compiles the schema (it
   resolves a reference on first use) and refuses a validation nesting them
   past its reference bound (`JK2001`).
-- [ ] **A `$ref` target below a keyword no draft defines is not refused where
-  its dialect requires a vocabulary the validator does not implement.** Under
-  a held dialect whose `$vocabulary` requires (`true`) a vocabulary this
-  package does not implement, with `urn:doc` holding `{ $schema: dialect,
-  components: { schemas: { p: { type: 'string' } } }, $defs: { q: { type:
-  'string' } } }`, `compile({ $ref: 'urn:doc#/$defs/q' })` is refused
-  `JK0016` and `compile({ $ref: 'urn:doc#/components/schemas/p' })` answers,
-  under the compile's vocabularies. Every other dialect on the way to such a
-  target is read. Refusing it refuses schemas that answer today (a minor,
-  with an upgrade note).
-- [ ] **A root `$id` with a plain-name fragment is built three times.** Under
-  draft-07, `{ $id: 'https://x.test/n.json#root', properties: { a: { type:
-  'string' } } }` is built under `…#root`, `…#root#` and `…#`: the alternate
-  spelling of a registered identifier appends `#` to one that already holds a
-  fragment. Two answers read it: `$ref: 'https://x.test/n.json#root#'` (a
-  second `#`, no URI reference) compiles and resolves to that root instead of
-  being refused, its errors located at `https://x.test/n.json#root#/properties/a`,
-  and an error below the root itself is located at
-  `https://x.test/n.json#root/properties/a`, a plain name followed by a
-  pointer. Refusing the doubled `#` refuses an input that answers today (a
-  minor).
 - [ ] **A broken document's collected errors grow with the branches tried to
   the power of the nesting.** A failing `oneOf` or `anyOf` keeps every
   branch's errors, and each branch that descends repeats the errors of the

@@ -153,8 +153,10 @@ function compileRecursiveRef(schemaObj, jsonSchema) {
   const baseUri = schemaObj.baseUri || schemaObj.path;
   
   // Resolve the reference to find the initial target URI
-  // For "#", this resolves against the baseUri
-  const { id: initialTargetUri } = createJsonPointer(ref, baseUri);
+  // For "#", this resolves against the baseUri; in a document held under a
+  // plain name alone (`…#root`), whose URI before the name is not its own,
+  // it names that document by its name
+  const initialTargetUri = root.heldNameOf(baseUri) ?? createJsonPointer(ref, baseUri).id;
   root.refuseContested(initialTargetUri, schemaObj.path, jsonSchema);
   
   // Look up the initial target schema by its URI
@@ -215,6 +217,7 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
   // `compileValidator` does
   const baseUri = schemaObj.baseUri || schemaObj.path;
   const { id: initialTargetUri, fragment: anchorName } = createJsonPointer(ref, baseUri, undefined, '$dynamicRef', compiledLocation(keywordLocation(schemaObj.path, '$dynamicRef'), root.origin));
+  root.refuseHeldPlace(initialTargetUri, jsonSchema, '$dynamicRef', keywordLocation(schemaObj.path, '$dynamicRef'));
   // What the reference resolves through when it reads its initial target.
   const holder = { $ref: initialTargetUri };
   root.refuseContested(initialTargetUri, schemaObj.path, holder);

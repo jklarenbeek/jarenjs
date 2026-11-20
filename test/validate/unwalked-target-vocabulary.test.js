@@ -9,7 +9,10 @@
  * vocabularies: under a dialect without the validation vocabulary its
  * `type` asserted, under a root without that vocabulary a 2020-12
  * document's `type` asserted nothing, and a draft-07 document's content
- * keywords annotated under a 2020-12 root.
+ * keywords annotated under a 2020-12 root. Where that dialect requires a
+ * vocabulary the validator does not implement, the target is refused
+ * `JK0016` as its `$defs` member is: it answered under the compilation's
+ * vocabularies.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -156,11 +159,82 @@ describe('what read right before reads as before', () => {
     const itself = holding().compile({ ...offDocument(), $ref: '#/components/schemas/p' });
     assert.deepEqual([itself(1), itself('a')], [true, true]);
   });
+});
 
-  it('a target whose dialect requires a vocabulary the validator does not implement still answers under the compilation\'s (its $defs member is refused JK0016)', () => {
-    const document = { $schema: UNITS, $id: 'urn:units', components: { schemas: { p: { type: 'string' } } }, $defs: { q: { type: 'string' } } };
-    assert.deepEqual(answers(document, 'urn:units#/components/schemas/p', [1, 'a']), [false, true]);
-    assert.deepEqual(answers(document, 'urn:units#/components/schemas/p', [1, 'a'], { from: OFF }), [true, true]);
-    assert.throws(() => answers(document, 'urn:units#/$defs/q', [1]), { name: 'SchemaCompileError', code: 'JK0016' });
+describe('a target whose dialect requires a vocabulary the validator does not implement', () => {
+  /** A document of that dialect, with one subschema below a keyword no draft defines and one under `$defs`. */
+  const unitsDocument = () => ({ $schema: UNITS, $id: 'urn:units',
+    components: { schemas: { p: { type: 'string' }, o: { properties: { m: { type: 'string' } } }, own: { $schema: D20, type: 'string' }, r: { $ref: '#/components/schemas/p' } } },
+    'x-a': { 'x-b': { 'x-c': { type: 'string' } } },
+    $defs: { q: { type: 'string' }, own: { $schema: D20, type: 'string' }, r: { $ref: '#/components/schemas/p' } } });
+  /**
+   * The refusal of a reference into a held document, and when it comes: `compile`, or the first call.
+   * @param {object} document @param {string} ref @param {Parameters<typeof answers>[3]} [how]
+   */
+  const refusal = (document, ref, how) => {
+    let moment = 'compile';
+    const validator = how?.inline ? new JarenValidator(how.options && new ValidatorOptions(how.options)) : holding(how?.options);
+    try {
+      const validate = validator.addSchema(structuredClone(document)).compile({ ...(how?.from ? { $schema: how.from } : {}), $ref: ref }, how?.inline ? [offDialect(), unitsDialect()] : undefined);
+      moment = 'call';
+      validate(1);
+      return 'answers';
+    }
+    catch (error) { return `${/** @type {any} */ (error).code} at ${moment}, ${/** @type {any} */ (error).docPath}`; }
+  };
+
+  it('is refused JK0016 by the first call, naming its place, as its $defs member is (it answered under the compilation\'s vocabularies)', () => {
+    for (const how of [undefined, { options: { collectErrors: true } }, { from: D20 }, { from: D07 }, { from: OFF }, { inline: true }]) {
+      assert.equal(refusal(unitsDocument(), 'urn:units#/components/schemas/p', how), 'JK0016 at call, urn:units#/components/schemas/p', JSON.stringify(how));
+      assert.equal(refusal(unitsDocument(), 'urn:units#/$defs/q', how), 'JK0016 at call, urn:units#/$defs/q', JSON.stringify(how));
+    }
+    assert.throws(() => answers(unitsDocument(), 'urn:units#/components/schemas/p', [1]), (error) => {
+      const e = /** @type {any} */ (error);
+      assert.equal(e.name, 'SchemaCompileError');
+      assert.match(e.message, /the meta-schema 'https:\/\/v\.test\/needs-units' requires the vocabulary 'https:\/\/v\.test\/vocab\/units'/);
+      return true;
+    });
+  });
+
+  it('is refused at every such place: a subschema below it, three unknown keywords deep, at the end of a chain of references', () => {
+    assert.equal(refusal(unitsDocument(), 'urn:units#/components/schemas/o'), 'JK0016 at call, urn:units#/components/schemas/o');
+    assert.equal(refusal(unitsDocument(), 'urn:units#/components/schemas/o/properties/m'), 'JK0016 at call, urn:units#/components/schemas/o/properties/m');
+    assert.equal(refusal(unitsDocument(), 'urn:units#/x-a/x-b/x-c'), 'JK0016 at call, urn:units#/x-a/x-b/x-c');
+    // a chain of bare references ends at the target, and is refused there, below the keyword and under $defs
+    assert.equal(refusal(unitsDocument(), 'urn:units#/components/schemas/r'), 'JK0016 at call, urn:units#/components/schemas/p');
+    assert.equal(refusal(unitsDocument(), 'urn:units#/$defs/r'), 'JK0016 at call, urn:units#/components/schemas/p');
+  });
+
+  it('names the $schema of a target that declares the dialect itself, in a document that declares none', () => {
+    const document = { $id: 'urn:plain', components: { schemas: { u: { $schema: UNITS, type: 'string' }, deep: { properties: { m: { $schema: UNITS, type: 'string' } } } } },
+      $defs: { u: { $schema: UNITS, type: 'string' } } };
+    assert.equal(refusal(document, 'urn:plain#/components/schemas/u'), 'JK0016 at call, urn:plain#/components/schemas/u/%24schema');
+    assert.equal(refusal(document, 'urn:plain#/$defs/u'), 'JK0016 at call, urn:plain#/$defs/u/%24schema');
+    assert.equal(refusal(document, 'urn:plain#/components/schemas/deep'), 'JK0016 at call, urn:plain#/components/schemas/deep/properties/m/%24schema');
+  });
+
+  it('refuses the document compiled itself when it compiles, whatever it references', () => {
+    assert.throws(() => holding().compile({ ...unitsDocument(), $ref: '#/components/schemas/p' }), { name: 'SchemaCompileError', code: 'JK0016', docPath: '#/%24schema' });
+  });
+
+  it('answers as before wherever the dialect on the way is one the validator implements', () => {
+    // a target declaring a dialect of its own, inside a document of the refused one: below the keyword and under $defs
+    assert.deepEqual(answers(unitsDocument(), 'urn:units#/components/schemas/own', [1, 'a']), [false, true]);
+    assert.deepEqual(answers(unitsDocument(), 'urn:units#/$defs/own', [1, 'a']), [false, true]);
+    // the vocabulary declared false: a validator that does not implement it goes on without it
+    const optional = { ...unitsDialect(), $id: 'https://v.test/optional-units', $vocabulary: { ...unitsDialect().$vocabulary, 'https://v.test/vocab/units': false } };
+    // a meta-schema of a draft without $vocabulary: the member is no keyword there
+    const older = { ...unitsDialect(), $schema: D07, $id: 'https://v.test/older-units' };
+    for (const dialect of [optional, older]) {
+      const validator = new JarenValidator().addMetaSchema(structuredClone(dialect))
+        .addSchema({ $schema: dialect.$id, $id: 'urn:other', components: { schemas: { p: { type: 'string' } } }, $defs: { q: { type: 'string' } } });
+      for (const ref of ['urn:other#/components/schemas/p', 'urn:other#/$defs/q']) {
+        const validate = validator.compile({ $ref: ref });
+        assert.deepEqual([validate(1), validate('a')], [false, true], `${dialect.$id} ${ref}`);
+      }
+    }
+    // a compile that reaches no place of the document answers, whatever the document declares
+    const unrelated = holding().addSchema(unitsDocument()).compile({ type: 'string' });
+    assert.deepEqual([unrelated(1), unrelated('a')], [false, true]);
   });
 });

@@ -150,11 +150,16 @@ describe('a held document whose root `$id` is only a fragment refuses no other c
     }
   });
 
-  it('still refuses the compile that reads its pointer, now at the reference', () => {
-    assert.deepEqual(outcome(() => new JarenValidator().addSchema(document()).compile({ $ref: `${ORIGIN}#root` })), [
+  it('answers the compile that reads its pointer, as the document compiled directly (it was refused JK0009 at the reference)', () => {
+    // the pointer names a place of the held document, whatever the compile holds under the origin
+    assert.deepEqual(answers(new JarenValidator().addSchema(document()).compile({ $ref: `${ORIGIN}#root` }), [{ a: 'x' }, { a: 1 }]), [true, false]);
+    assert.deepEqual(answers(new JarenValidator().compile(document()), [{ a: 'x' }, { a: 1 }]), [true, false]);
+    // a reference of the held document that nothing resolves is still refused at its place, below the document's name
+    const dangling = { $id: '#root', properties: { a: { $ref: '#/definitions/none' } } };
+    assert.deepEqual(outcome(() => new JarenValidator().addSchema(dangling).compile({ $ref: `${ORIGIN}#root` })), [
       'SchemaCompileError', 'JK0009',
-      `JK0009: Can not resolve schema for '${ORIGIN}#/definitions/s': '/definitions' is not a schema in '${ORIGIN}#'; fix the pointer at ${ORIGIN}#/properties/a/%24ref`,
-      `${ORIGIN}#/properties/a/%24ref`]);
+      `JK0009: Can not resolve schema for '${ORIGIN}#root/definitions/none': '/definitions' is not a schema in '${ORIGIN}#root'; fix the pointer at ${ORIGIN}#root/properties/a/%24ref`,
+      `${ORIGIN}#root/properties/a/%24ref`]);
   });
 });
 

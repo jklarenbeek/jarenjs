@@ -45,7 +45,19 @@ function decodeJsonPointerKey(key) {
   // `~` must pass through instead of throwing like the strict parser does.
   // The percent-decode is this site's own: these keys arrive from a URI
   // fragment, which the plain reference-token decode knows nothing about.
-  return decodeJSONPointerSegment(key.includes('%') ? decodeURIComponent(key) : key);
+  // A `%` that starts no escape is read as written: a reference spelling
+  // one is refused where it is parsed (`JK0010`), so only a key `addSchema`
+  // was handed can hold one, and reading the held keys must not throw.
+  let text = key;
+  if (key.includes('%')) {
+    try {
+      text = decodeURIComponent(key);
+    }
+    catch (_e) {
+      // as written
+    }
+  }
+  return decodeJSONPointerSegment(text);
 }
 
 /**
@@ -92,9 +104,8 @@ class JsonPointerOptions {
 }
 
 class JsonPointer {
-  constructor(id, search, leftUri, fragment) {
+  constructor(id, leftUri, fragment) {
     this.id = id;
-    this.search = search;
     this.leftUri = leftUri;
     this.fragment = fragment;
   }
@@ -147,16 +158,17 @@ export function createJsonPointer(refUri, baseUri, opts = new JsonPointerOptions
     byRef = byBase.get(baseUri);
     if (byRef === undefined) byBase.set(baseUri, byRef = new Map());
     const known = byRef.get(refUri);
-    if (known !== undefined) return new JsonPointer(known.id, known.search, known.leftUri, known.fragment);
+    if (known !== undefined) return new JsonPointer(known.id, known.leftUri, known.fragment);
   }
   try {
     const pointer = parseJsonPointer(refUri, baseUri, opts);
-    if (byRef !== undefined) byRef.set(refUri, new JsonPointer(pointer.id, pointer.search, pointer.leftUri, pointer.fragment));
+    if (byRef !== undefined) byRef.set(refUri, new JsonPointer(pointer.id, pointer.leftUri, pointer.fragment));
     return pointer;
   }
   catch (e) {
-    // `URL` refuses what is no URI with a `TypeError`; nothing else here throws one.
-    if (!(e instanceof TypeError)) throw e;
+    // `URL` refuses what is no URI with a `TypeError`, and a pointer whose `%` starts no
+    // escape is refused with a `URIError`; nothing else here throws either.
+    if (!(e instanceof TypeError || e instanceof URIError)) throw e;
     const repairBase = 'correct the origin or the $id that names it';
     if (!isStringType(refUri) || isStringWhiteSpace(refUri))
       throw new SchemaCompileError('JK0010', `the base '${baseUri}' is not a valid URI; ${repairBase}`, undefined, { cause: e });
@@ -201,7 +213,6 @@ function parseJsonPointer(refUri, baseUri, opts) {
         const [, fragment] = atFragment(href);
         return new JsonPointer(
           effectiveBase + refUri,
-          undefined,
           effectiveBase + '#',
           fragment || null
         );
@@ -213,7 +224,6 @@ function parseJsonPointer(refUri, baseUri, opts) {
           : baseUri + '/' + refBase + '#' + refFragment;
         return new JsonPointer(
           resolvedId,
-          undefined,
           baseUri + '#',
           refFragment
         );
@@ -222,7 +232,7 @@ function parseJsonPointer(refUri, baseUri, opts) {
         const resolvedId = baseUri.endsWith('/')
           ? baseUri + refUri
           : baseUri + '/' + refUri;
-        return new JsonPointer(resolvedId + '#', undefined, resolvedId + '#', null);
+        return new JsonPointer(resolvedId + '#', resolvedId + '#', null);
       }
     } else {
       // Re-throw the original error if we can't handle it
@@ -231,10 +241,11 @@ function parseJsonPointer(refUri, baseUri, opts) {
   }
 
   // the URL standard lowers the scheme, and the host of a web scheme; every
-  // other host is lowered here, so each URI is held and looked up by one spelling
+  // other host is lowered here, so each URI is held and looked up by one spelling.
+  // The query is part of that spelling: `a.json?v=1` and `a.json?v=2` are two
+  // documents, and neither is `a.json`.
   const href = url.href;
-  const [uri, fragment] = atFragment(href.startsWith('https:') || href.startsWith('http:') ? href : caselessUri(href));
-  const [leftUri, search] = uri.split('?');
+  const [leftUri, fragment] = atFragment(href.startsWith('https:') || href.startsWith('http:') ? href : caselessUri(href));
 
   if (!isStringWhiteSpace(fragment)) {
     // a json pointer, which a URI fragment percent-encodes: a fragment that
@@ -242,18 +253,22 @@ function parseJsonPointer(refUri, baseUri, opts) {
     // `%2F`s separate tokens as its `/`s do; every other escape is decoded
     // once, with the token that holds it.
     const pointer = fragment.includes('%') ? fragment.replace(/%2f/gi, '/') : fragment;
-    if (pointer.startsWith('/'))
-      return new JsonPointer(`${leftUri}#${pointer}`, search, `${leftUri}#`, pointer);
+    if (pointer.startsWith('/')) {
+      // a `%` that starts no escape (`#/a%b`) makes it no URI reference: every
+      // read of the pointer decodes its tokens, and that one cannot be decoded
+      if (pointer.includes('%')) decodeURIComponent(pointer);
+      return new JsonPointer(`${leftUri}#${pointer}`, `${leftUri}#`, pointer);
+    }
     // or a plain name (an `$anchor`, a `$dynamicAnchor`, a draft-07 `$id:
     // '#name'`), keyed as the URI spells it: an anchor and a reference to
     // it are spelled alike, whatever characters the name holds.
     if (opts.anchorsAllowed == true) {
       return opts.anchorsGlobal == true
-        ? new JsonPointer(`#${fragment}`, search, `${leftUri}#`, fragment)
-        : new JsonPointer(`${leftUri}#${fragment}`, search, `${leftUri}#`, fragment);
+        ? new JsonPointer(`#${fragment}`, `${leftUri}#`, fragment)
+        : new JsonPointer(`${leftUri}#${fragment}`, `${leftUri}#`, fragment);
     }
   }
-  return new JsonPointer(`${leftUri}#`, search, `${leftUri}#`, null);
+  return new JsonPointer(`${leftUri}#`, `${leftUri}#`, null);
 }
 
 /**
@@ -315,6 +330,13 @@ function atFragment(uri) {
  * @property {WeakMap<object, string>} idBases - For an identified schema
  *   object, the base its identifier was read against: a compile that builds
  *   the object as a reference target reads it against the same
+ * @property {WeakSet<object>} [rooted] - The documents held under a plain
+ *   name alone (`…#root`, where no schema is held for them under the URI
+ *   before the fragment): each is the document of its own places, which are
+ *   named below that name (`…#root/definitions/s`, {@link underOwnName})
+ * @property {WeakMap<object, Set<string>>} [ownRefs] - Per schema object of
+ *   such a document, the reference keywords spelled below its name: the only
+ *   references that read a place so named ({@link spellsHeldPlace})
  * @property {HeldKept} [kept] - What is kept of the schemas the validator
  *   holds, dropped by the next registration
  */
@@ -584,9 +606,11 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
         continue;
       idBases?.set(obj, obj === schema && idName === '$id' ? given : base);
 
-      // CHECK: Also store under alternate ID (with/without # suffix) for absolute URIs only
-      if (!id.startsWith('#')) {
-        const altId = id.endsWith('#') ? id.slice(0, -1) : id + '#';
+      // A document's URI is held with and without its empty fragment. An
+      // identifier that holds a fragment (`…/s.json#name`) has no second
+      // spelling: a `#` after it would name nothing a URI reference spells.
+      if (id.indexOf('#') === id.length - 1) {
+        const altId = id.slice(0, -1);
         if (!schemas.has(altId)) {
           schemas.set(altId, obj);
         }
@@ -683,7 +707,9 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       if (reference === undefined || target !== undefined) {
         // the place names a registered document's reference, below the id its place is walked
         // under; a compile's own are located by `sites`
-        asked = [referenceAt === undefined || refs instanceof Map ? '' : (rootUri.includes('#/') ? rootUri : `${withoutFragment(rootUri)}#`) + referenceAt.slice(1)];
+        // (a place walked when named, and a document held under a plain name alone, are named by that id)
+        asked = [referenceAt === undefined || refs instanceof Map ? ''
+          : (rootUri.indexOf('/', rootUri.indexOf('#')) !== -1 || places?.rooted?.has(schema) ? rootUri : `${withoutFragment(rootUri)}#`) + referenceAt.slice(1)];
         try {
           for (const keyword of REFERENCE_KEYWORDS) {
             if (!isStringType(obj[keyword])) continue;
@@ -786,6 +812,124 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
   }
 
   return rootUri;
+}
+
+/**
+ * A document held under a plain name alone — its root `$id` holds a
+ * fragment (`#root`, `…/r.json#root`), and the URI before the fragment is
+ * not its own in the validator: a compile's document, another held schema
+ * or none has it — with every reference to itself spelled below that name:
+ * `#` as `…#root`, `#/definitions/s` as `…#root/definitions/s`. Read
+ * against the URI before the fragment, such a reference names a place of
+ * whichever document holds that URI.
+ *
+ * The references rewritten are the `$ref` and the `$dynamicRef` of the
+ * schema objects of the document's own resource, where a registration walk
+ * reads schema objects ({@link storeSchemaIdsInMap}). A reference to a plain
+ * name is left, the name being the document's own registration, and so is
+ * everything in an embedded resource (a subschema whose identifier names
+ * another URI: its `#` is that resource); the `$ref` beside such an
+ * identifier is the document's where the nearest `$schema` declares no
+ * draft from 2019-09 on. Only the objects on the way to a rewritten
+ * reference are copied.
+ * @param {object} document - The document, its root `$id` resolved
+ * @param {string} name - The key the document is held under (`…#root`)
+ * @param {JsonPointerOptions} opts
+ * @param {{ get(key: string): unknown }} held - The schemas the validator
+ *   holds: a `$schema` naming one is read by that meta-schema's own
+ * @param {WeakMap<object, object>} originals - Where to record, per copy, the object it was made of
+ * @param {WeakMap<object, Set<string>>} own - Where to record, per copy, the reference keywords spelled below the name
+ * @returns {object} The copy, or `document` where it holds no such reference
+ */
+export function underOwnName(document, name, opts, held, originals, own) {
+  /**
+   * A value of the document: a schema object (kind 0), a list of them (1), a map of them (2) or a map of such maps (3).
+   * @typedef {{ value: any, kind: number, draft: number|null, parents: [Frame, string|number][], copy: any }} Frame
+   */
+  /** @type {Map<object, Frame>} */
+  const frames = new Map();
+  /** @type {Frame[]} */
+  const open = [];
+  /** @type {[Frame, string, string][]} The references to rewrite: the schema object, the keyword, the new text */
+  const rewritten = [];
+  const enter = (/** @type {any} */ value, /** @type {number} */ kind, /** @type {number|null} */ draft, /** @type {Frame} */ parent = undefined, /** @type {string|number} */ key = undefined) => {
+    let frame = frames.get(value);
+    if (frame === undefined) {
+      frames.set(value, frame = { value, kind, draft, parents: [], copy: undefined });
+      open.push(frame);
+    }
+    if (parent !== undefined) frame.parents.push([parent, key]);
+  };
+  enter(document, 0, null);
+  const { leftUri: resource } = createJsonPointer(name, undefined, opts);
+  while (open.length > 0) {
+    const frame = /** @type {Frame} */ (open.pop());
+    const { value, kind } = frame;
+    if (kind !== 0) {
+      for (const [key, item] of Array.isArray(value) ? value.entries() : Object.entries(value))
+        if (isObjectClass(item) && !Array.isArray(item)) enter(item, kind === 3 ? 2 : 0, frame.draft, frame, key);
+      continue;
+    }
+    const declared = isStringType(value.$schema) ? dialectDraft(value.$schema, held) : undefined;
+    const draft = declared === undefined ? frame.draft : declared;
+    // a subschema whose identifier names another URI starts a resource of its own
+    let embedded = false;
+    const keyword = frame.parents.length > 0 ? identifierKeyword(value, draft) : undefined;
+    if (keyword !== undefined && !isStringWhiteSpace(value[keyword])) {
+      try {
+        const text = identifierText(value[keyword]);
+        embedded = text !== undefined && createJsonPointer(text, name, opts).leftUri !== resource;
+      }
+      catch (_e) {
+        embedded = true; // no URI reference: the walk refuses it and reads nothing below
+      }
+    }
+    for (const reference of embedded ? draft === null || draft < 2019 ? ['$ref'] : [] : ['$ref', '$dynamicRef']) {
+      if (!hasSchemaReference(value, reference)) continue;
+      const text = schemaReference(value, /** @type {'$ref'} */ (reference));
+      // a same-document reference, as the URL parse reads one (the controls and spaces before it are no part of it)
+      if (!/^[\0- ]*#/.test(text)) continue;
+      try {
+        const { fragment } = createJsonPointer(text, name, opts);
+        if (fragment === null) rewritten.push([frame, reference, name]);
+        else if (fragment[0] === '/') rewritten.push([frame, reference, name + fragment]);
+      }
+      catch (_e) {
+        // no URI reference: refused by the compile that reads it
+      }
+    }
+    if (embedded) continue;
+    for (const [key, child] of Object.entries(value)) {
+      if (child === null || typeof child !== 'object') continue;
+      if (TRAVERSE_SCHEMA_OBJECTS.includes(key)) enter(child, Array.isArray(child) ? 1 : 0, draft, frame, key);
+      else if (Array.isArray(child)) continue;
+      else if (TRAVERSE_SCHEMA_MAPS.includes(key)) enter(child, 2, draft, frame, key);
+      else if (TRAVERSE_SCHEMA_MAP_MAPS.includes(key)) enter(child, 3, draft, frame, key);
+    }
+  }
+  /** Copy a value once; the copy of a copy is recorded as made of the first object. @param {Frame} frame @returns {boolean} Whether this call copied it */
+  const copy = (frame) => {
+    if (frame.copy !== undefined) return false;
+    frame.copy = Array.isArray(frame.value) ? frame.value.slice() : { ...frame.value };
+    originals.set(frame.copy, originals.get(frame.value) ?? frame.value);
+    return true;
+  };
+  /** @type {Frame[]} */
+  const linking = [];
+  for (const [frame, keyword, text] of rewritten) {
+    if (copy(frame)) linking.push(frame);
+    frame.copy[keyword] = text;
+    own.set(frame.copy, (own.get(frame.copy) ?? new Set()).add(keyword));
+  }
+  // every value on the way to a copy is copied too, and holds the copy
+  while (linking.length > 0) {
+    const frame = /** @type {Frame} */ (linking.pop());
+    for (const [parent, key] of frame.parents) {
+      if (copy(parent)) linking.push(parent);
+      parent.copy[key] = frame.copy;
+    }
+  }
+  return /** @type {Frame} */ (frames.get(document)).copy ?? document;
 }
 
 const UNHELD = 'no schema the validator holds has that URI; register it with addSchema, load it with compileAsync, or fix the reference';
@@ -934,10 +1078,19 @@ export function locatedRefusal(error, place) {
  *   through names two registered places
  */
 export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new JsonPointerOptions(), places = undefined, tentative = false) {
-  const { id: base, leftUri, fragment } = createJsonPointer(refUri, baseUri, opts);
+  const { id: base, leftUri: document, fragment: spelt } = createJsonPointer(refUri, baseUri, opts);
   const id = base;
-  // a URI only a reference names (a `null` placeholder) holds no schema
-  if (schemas.get(leftUri) == null) {
+  // A document held under a plain name alone is the document of that name
+  // and of every place below it (`…#root/definitions/s`): the pointer is
+  // read from it, whatever is held under the URI before the fragment.
+  const rooted = places?.rooted;
+  const start = rooted === undefined || spelt == null || spelt[0] === '/' ? -1 : pointerStart(schemas, base, rooted);
+  const leftUri = start === -1 ? document : base.slice(0, start);
+  const fragment = start === -1 ? spelt : base.slice(start) || null;
+  // a URI only a reference names (a `null` placeholder) holds no schema; a
+  // plain name the map holds resolves whoever holds the URI before it (the
+  // name of a document held under plain names alone, or of a place in one)
+  if (schemas.get(leftUri) == null && (fragment == null || fragment[0] === '/' || schemas.get(base) == null)) {
     if (tentative) return undefined;
     throw unresolvedReference(id);
   }
@@ -1046,32 +1199,95 @@ const REFERENCE_KEYWORDS = /** @type {const} */ (['$ref', '$dynamicRef', '$recur
  * document walked by its JSON Pointer, or its own entry where it has none.
  * @param {Map<string, any>} schemas
  * @param {string} id - A resolved reference, or a key of the map
+ * @param {WeakSet<object>} [rooted] - The documents held under a plain name
+ *   alone ({@link pointerStart})
  * @returns {any}
  */
-export function placeAt(schemas, id) {
-  const pointer = id.indexOf('#/');
-  if (pointer === -1) return schemas.get(id);
-  let node = schemas.get(id.slice(0, pointer + 1));
-  for (const part of decodeJsonPointerPath(id.slice(pointer + 1))) node = node?.[part];
+export function placeAt(schemas, id, rooted) {
+  const start = pointerStart(schemas, id, rooted);
+  if (start === -1 || start === id.length) return schemas.get(id);
+  let node = schemas.get(id.slice(0, start));
+  for (const part of decodeJsonPointerPath(id.slice(start))) node = node?.[part];
   return node;
+}
+
+/**
+ * Where the JSON Pointer of a schema id starts: after the `#` of its
+ * document (`…/s.json#/a`), or after the plain name of a document held
+ * under that name alone (`…#root/a`, {@link SchemaPlaces} `rooted`); the
+ * id's length where the id is such a name, and -1 where it holds no pointer.
+ * @param {Map<string, any>} schemas
+ * @param {string} id - A resolved reference, or a key of the map
+ * @param {WeakSet<object>} [rooted] - The documents held under a plain name alone
+ * @returns {number}
+ */
+export function pointerStart(schemas, id, rooted) {
+  const hash = id.indexOf('#');
+  if (hash === -1) return -1;
+  if (id[hash + 1] === '/') return hash + 1;
+  if (rooted === undefined) return -1;
+  // (a name may hold a `/` itself: the longest key of the map decides nothing, the first rooted one does)
+  for (let slash = id.indexOf('/', hash); ; slash = id.indexOf('/', slash + 1)) {
+    const key = slash === -1 ? id : id.slice(0, slash);
+    if (rooted.has(schemas.get(key))) return key.length;
+    if (slash === -1) return -1;
+  }
+}
+
+/**
+ * Whether a reference names a place below the name of a document held under
+ * a plain name alone (`…#root/definitions/s`) from anywhere but that
+ * document's own references, which alone are spelled so ({@link
+ * underOwnName}): read as a URI, such a fragment is one plain name that
+ * nothing declares, so the reference is refused as one to such a name.
+ * @param {Map<string, any>} schemas
+ * @param {string} id - The reference, resolved
+ * @param {SchemaPlaces|undefined} places - What the walks read
+ * @param {object} holder - The schema object holding the reference
+ * @param {string} keyword - Its keyword
+ * @returns {boolean}
+ */
+export function spellsHeldPlace(schemas, id, places, holder, keyword) {
+  const rooted = places?.rooted;
+  if (rooted === undefined) return false;
+  const start = pointerStart(schemas, id, rooted);
+  return start !== -1 && start < id.length && id[start - 1] !== '#' && places?.ownRefs?.get(holder)?.has(keyword) !== true;
+}
+
+/**
+ * The name of the document held under a plain name alone ({@link
+ * pointerStart}) that a base lies in (`…#root`, for `…#root` or
+ * `…#root/properties/n`), or undefined: the document a `$recursiveRef: "#"`
+ * there names, which the URI before the name does not hold.
+ * @param {Map<string, any>} schemas
+ * @param {string} base
+ * @param {WeakSet<object>} [rooted]
+ * @returns {string|undefined}
+ */
+export function heldNameOf(schemas, base, rooted) {
+  const start = rooted === undefined ? -1 : pointerStart(schemas, base, rooted);
+  return start === -1 || base[start - 1] === '#' ? undefined : base.slice(0, start);
 }
 
 /**
  * The base the place a pointer id names is built against at its key's turn:
  * its document's, or the one the nearest identifier above the place sets,
- * each read against the base its walk read it against.
+ * each read against the base its walk read it against. The pointer's tokens
+ * are decoded as every pointer read decodes them ({@link decodeJsonPointerPath}):
+ * a member whose name holds `/`, `~` or a character a URI fragment escapes
+ * is followed as any other, and so is one named `""`.
  * @param {Map<string, any>} schemas
  * @param {string} id - A key holding a JSON Pointer fragment
  * @param {SchemaPlaces} places - What the walks read
  * @returns {string}
  */
 export function pointerBase(schemas, id, places) {
-  const hash = id.indexOf('#/');
-  let base = id.slice(0, hash);
-  let node = schemas.get(`${base}#`);
-  for (const part of id.slice(hash + 2).split('/')) {
+  const start = pointerStart(schemas, id, places.rooted);
+  let base = documentBase(id, start);
+  // (the document: under its plain name, or under its URI with the empty fragment)
+  let node = schemas.get(start !== -1 && id[start - 1] !== '#' ? base : `${base}#`);
+  for (const part of decodeJsonPointerPath(id.slice(Math.max(start, 0)))) {
     if (!node) break;
-    if (!part) continue;
     const identifier = identifierOf(node, declaredDraftOf(node, places));
     if (identifier) {
       const { id: resolved } = createJsonPointer(identifier, places.idBases.get(node) ?? base, undefined, node.$id ? '$id' : 'id');
@@ -1081,6 +1297,18 @@ export function pointerBase(schemas, id, places) {
     node = node[part] || node.$defs?.[part] || node.definitions?.[part];
   }
   return base;
+}
+
+/**
+ * The base a place directly in the document of a pointer id is built
+ * against: the document's URI without its empty fragment, or the plain name
+ * a document is held under alone.
+ * @param {string} id - A key holding a JSON Pointer
+ * @param {number} start - Where its pointer starts ({@link pointerStart})
+ * @returns {string}
+ */
+function documentBase(id, start) {
+  return id.slice(0, id[start - 1] === '#' ? start - 1 : start);
 }
 
 /**
@@ -1199,7 +1427,7 @@ export function reachedKeys(roots, own, places, held, opts) {
   const read = (id) => {
     let place = at.get(id);
     // only a place the held schemas have is kept: a compile's own targets are as many as its compiles
-    if (place == null && (place = placeAt(held, id)) != null) at.set(id, place);
+    if (place == null && (place = placeAt(held, id, places.rooted)) != null) at.set(id, place);
     // a place no key names is read once too; what is no schema object reaches nothing
     let next = below.get(below.has(place) ? place : id);
     if (next !== undefined) return next;
@@ -1214,7 +1442,7 @@ export function reachedKeys(roots, own, places, held, opts) {
       const fresh = new WeakMap();
       const identified = new Map();
       try {
-        if (pointerBase(held, id, places) === id.slice(0, id.indexOf('#/'))) {
+        if (pointerBase(held, id, places) === documentBase(id, pointerStart(held, id, places.rooted))) {
           storeSchemaIdsInMap(new Map(), id, place, opts, undefined, undefined, null, undefined, held, undefined, fresh, identified);
           if (!identified.size) {
             below.set(id, next = reachBelow([place], true, fresh, names, up, by, owner, true));
@@ -1233,7 +1461,7 @@ export function reachedKeys(roots, own, places, held, opts) {
   };
   if (first) {
     for (const [key, value] of held) {
-      const place = placeAt(held, key);
+      const place = placeAt(held, key, places.rooted);
       at.set(key, place);
       if (place !== null && typeof place === 'object') names.set(place, [...names.get(place) ?? [], key]);
       const identifier = identifierOf(value, declaredDraftOf(value, places));
@@ -1464,6 +1692,14 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
       if (item !== refschema && !isReferenceHop(item, opts))
         return { id: base, schema: item };
       const ref = schemaReference(item, '$ref');
+      // a hop of a chain spelling a place below a held document's name from outside it names nothing
+      if (item !== refschema && places?.rooted !== undefined) {
+        const { id: spelt } = createJsonPointer(ref, base, opts);
+        if (spellsHeldPlace(schemas, spelt, places, item, '$ref')) {
+          if (tentative) return undefined;
+          throw locatedRefusal(unresolvedReference(spelt), keywordLocation(base, '$ref'));
+        }
+      }
       const hop = resolveRefSchemaShallow(schemas, ref, base, opts, places, tentative);
       if (hop === undefined) return undefined;
       const { id, schema } = hop;
@@ -1510,6 +1746,8 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
  *   walk could not resolve ({@link SchemaPlaces})
  * @property {{ get(key: string): unknown }} [held] - the compilation's
  *   schemas by URI, which may resolve it
+ * @property {WeakSet<object>} [rooted] - the documents held under a plain
+ *   name alone ({@link SchemaPlaces})
  */
 
 /**
@@ -1675,7 +1913,7 @@ export function assertRootReadsInstance(schemas, rootId, root, reading, opts = n
   const visited = new Map();
   const ids = [];
   // what the walks read, for the identifiers a pointer passes on its way
-  const read = /** @type {SchemaPlaces} */ (/** @type {unknown} */ ({ drafts: reading.drafts, foreign: reading.foreign, contested: new Map() }));
+  const read = /** @type {SchemaPlaces} */ (/** @type {unknown} */ ({ drafts: reading.drafts, foreign: reading.foreign, contested: new Map(), rooted: reading.rooted }));
   let schema = root;
   let base = rootId;
   let at = rootId;
