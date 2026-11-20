@@ -392,7 +392,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 251,600 (measured 251544): an unknown operator's hint falling back to the suite's nearest-name rule over the operators the key extends or abbreviates (normalize 133).
 // Raised to 254,100 (measured 254002): `$date-format`'s zone operand, written on a zone provider's wall clock, with its refusals as catalog messages, and the builder's verbatim zone operand (operators 1673, messages 607, normalize 97, expression 66, civil 16).
 // Raised to 259,600 (measured 259579): the zone provider carried into a chain through from()'s runtime and zoneProvider options (runtime 1369, provider 951, option-variants 113, series 29, query index 23), $instant and $wall in the query language with their catalog messages and the calendar seam's brand (messages 803, operators 568, normalize 285, calendar-seam 52), unit factors held as exact definitions (convert registry 828, convert 473) and the captured expression's instantOf and wallClock (expression 107), net of the zone module's 52 saved.
-if (chainBytes > 259600)
+// Raised to 259,800 (measured 259715): a message value holding a bigint wrapper object rendered as its digits, and an unserialisable value rendered by the fallback text instead of throwing (message 136).
+if (chainBytes > 259800)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -858,7 +859,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,149,400 (measured 1149355): `$date-format`'s zone operand and its refusals as catalog messages (operators 1681, messages 607, normalize 97, expression 66, civil 16).
 // Raised to 1,151,400 (measured 1151307): handle records built on first read and a model prepared once accepted by the open (open 1158, store 820).
 // Raised to 1,168,800 (measured 1168749): calendar members on collections and entities the store refuses, keys and compares alike on SQLite and PostgreSQL, behind their seams, with an entity load or page answered with operators (ddl 2067, plan 1990, introspect 1480, model 1462, store 1447, entity 911, query 788, temporal-seam 81 and 685 across dialect, errors, emit, tracker, udf, residual, derive, invariants and sqlite), the zone provider carried through the client (provider 989, runtime 459, open 210, handle 91), $instant and $wall with their messages (messages 803, operators 573, normalize 286, calendar-seam 52), unit factors held exactly (convert 1396), a worker's schedule tick (jobs 1072) and a swap over a unique calendar member ordered in replay (replication 230, logical-rows 54).
-if (clientBytes > 1168800)
+// Raised to 1,182,300 (measured 1182166): the validator's one reading per value — a compile that reads only the held schemas it reaches, walking a place no registration read when a reference names it (traverse ~3,000, index ~350), held documents named one way with the URL query in the key (index, traverse ~2,580), every compile refusal's place one pointer spelling (~2,000), the coded host-stack refusal with the reference count restored after a throw (walk 288, errors 342), NaN no number and arrays by Array.isArray with one required reader (object ~1,400, tools 83, unevaluated 33), one symmetric deep equality for const, enum and uniqueItems (object ~1,900), one location rule for failures (~515), and a message value holding a bigint wrapper rendered (message 136).
+if (clientBytes > 1182300)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
