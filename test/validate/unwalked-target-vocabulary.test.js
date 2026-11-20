@@ -186,7 +186,7 @@ describe('a target whose dialect requires a vocabulary the validator does not im
   it('is refused JK0016 by the first call, naming its place, as its $defs member is (it answered under the compilation\'s vocabularies)', () => {
     for (const how of [undefined, { options: { collectErrors: true } }, { from: D20 }, { from: D07 }, { from: OFF }, { inline: true }]) {
       assert.equal(refusal(unitsDocument(), 'urn:units#/components/schemas/p', how), 'JK0016 at call, urn:units#/components/schemas/p', JSON.stringify(how));
-      assert.equal(refusal(unitsDocument(), 'urn:units#/$defs/q', how), 'JK0016 at call, urn:units#/$defs/q', JSON.stringify(how));
+      assert.equal(refusal(unitsDocument(), 'urn:units#/$defs/q', how), 'JK0016 at call, urn:units#/%24defs/q', JSON.stringify(how));
     }
     assert.throws(() => answers(unitsDocument(), 'urn:units#/components/schemas/p', [1]), (error) => {
       const e = /** @type {any} */ (error);
@@ -205,11 +205,36 @@ describe('a target whose dialect requires a vocabulary the validator does not im
     assert.equal(refusal(unitsDocument(), 'urn:units#/$defs/r'), 'JK0016 at call, urn:units#/components/schemas/p');
   });
 
+  it('refuses a subschema below such a target that declares an $id of its own, as the same subschema without it (it answered)', () => {
+    /** @param {object} a - The subschema at `n/properties/a` @param {object} [n] - What else `n` declares */
+    const document = (a, n = {}) => ({ $id: 'urn:emb', components: { schemas: { n: { ...n, properties: { a } } } } });
+    const ref = 'urn:emb#/components/schemas/n';
+    const place = 'urn:emb#/components/schemas/n/properties/a/%24schema';
+    for (const n of [{}, { $id: 'https://v.test/n' }]) {
+      assert.equal(refusal(document({ $schema: UNITS, $id: 'https://v.test/inner', type: 'string' }, n), ref), `JK0016 at call, ${place}`, JSON.stringify(n));
+      assert.equal(refusal(document({ $schema: UNITS, type: 'string' }, n), ref), `JK0016 at call, ${place}`, JSON.stringify(n));
+      // in the document a compile is handed, too
+      assert.throws(() => holding().compile({ $id: 'urn:emb', properties: { z: { $ref: '#/components/schemas/n' } }, components: { schemas: { n: { ...n,
+        properties: { a: { $schema: UNITS, $id: 'https://v.test/inner', type: 'string' } } } } } })({ z: { a: 'x' } }),
+      { code: 'JK0016', docPath: '#/components/schemas/n/properties/a/%24schema' });
+    }
+    // what answered right still answers: an implemented dialect there, or none, reads as before
+    for (const a of [{ $schema: D20, $id: 'https://v.test/inner', type: 'string' }, { $id: 'https://v.test/inner', type: 'string' }]) {
+      const validate = holding().addSchema(document(a, { $id: 'https://v.test/n' })).compile({ $ref: ref });
+      assert.deepEqual([validate({ a: 's' }), validate({ a: 1 })], [true, false], JSON.stringify(a));
+    }
+    // under a dialect without the validation vocabulary its type is no assertion, as without the $id
+    for (const a of [{ $schema: OFF, $id: 'https://v.test/inner', type: 'string' }, { $schema: OFF, type: 'string' }]) {
+      const validate = holding().addSchema(document(a, { $id: 'https://v.test/n' })).compile({ $ref: ref });
+      assert.deepEqual([validate({ a: 's' }), validate({ a: 1 })], [true, true], JSON.stringify(a));
+    }
+  });
+
   it('names the $schema of a target that declares the dialect itself, in a document that declares none', () => {
     const document = { $id: 'urn:plain', components: { schemas: { u: { $schema: UNITS, type: 'string' }, deep: { properties: { m: { $schema: UNITS, type: 'string' } } } } },
       $defs: { u: { $schema: UNITS, type: 'string' } } };
     assert.equal(refusal(document, 'urn:plain#/components/schemas/u'), 'JK0016 at call, urn:plain#/components/schemas/u/%24schema');
-    assert.equal(refusal(document, 'urn:plain#/$defs/u'), 'JK0016 at call, urn:plain#/$defs/u/%24schema');
+    assert.equal(refusal(document, 'urn:plain#/$defs/u'), 'JK0016 at call, urn:plain#/%24defs/u/%24schema');
     assert.equal(refusal(document, 'urn:plain#/components/schemas/deep'), 'JK0016 at call, urn:plain#/components/schemas/deep/properties/m/%24schema');
   });
 

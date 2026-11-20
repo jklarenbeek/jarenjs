@@ -103,15 +103,6 @@ delete it or fix it.
 
 ## @jarenjs/validate
 
-- [ ] **A compile refusal names an embedded resource's place two ways.** The
-  walks name a place by its pointer into the document
-  (`#/%24defs/n/properties/a/%24id`), while a `$query`, `$recursiveRef` or
-  `$dynamicRef` refusal and a reference resolved on first use name a place
-  inside an embedded resource (a subschema with its own `$id`) by that
-  resource's URI (`https://x.test/n#/properties/a/%24query`), and spell
-  `$defs` unencoded (`https://held.test/root.json#/$defs/a/%24ref`). One
-  spelling needs the compiler to carry each object's document pointer; it
-  changes `docPath` (an upgrade note).
 - [ ] **A percent-encoded unreserved character is not the character in a
   reference.** `$ref: '#%41'` does not reach `$anchor: 'A'`, nor
   `http://x.test/%61.json` an `$id` of `http://x.test/a.json` (JK0009): URIs

@@ -44,13 +44,13 @@ describe('a root that comes back to itself before reading the instance', () => {
   it('names the schema locations on the loop', () => {
     const compile = (/** @type {any} */ schema) => new JarenValidator().compile(schema);
     assert.throws(() => compile({ $id: 'http://loop.test/a', allOf: [{ $ref: '#' }] }), {
-      message: 'JK0001: $ref cycle: http://loop.test/a# -> http://loop.test/a#/allOf/0 -> http://loop.test/a# never reads the instance',
+      message: 'JK0001: $ref cycle: http://loop.test/a# -> http://loop.test/a#/allOf/0 -> http://loop.test/a# never reads the instance at #/allOf/0/%24ref',
     });
     assert.throws(() => compile({
       $id: 'http://loop.test/r', $defs: { a: { allOf: [{ $ref: '#/$defs/b' }] }, b: { anyOf: [{ $ref: '#/$defs/a' }] } }, $ref: '#/$defs/a',
     }), {
       message: 'JK0001: $ref cycle: http://loop.test/r#/$defs/a -> http://loop.test/r#/$defs/a/allOf/0 -> http://loop.test/r#/$defs/b'
-        + ' -> http://loop.test/r#/$defs/b/anyOf/0 -> http://loop.test/r#/$defs/a never reads the instance',
+        + ' -> http://loop.test/r#/$defs/b/anyOf/0 -> http://loop.test/r#/$defs/a never reads the instance at #/%24defs/b/anyOf/0/%24ref',
     });
   });
 
@@ -155,7 +155,7 @@ describe('a root that comes back to itself before reading the instance', () => {
 
   it('names a $dynamicRef on the loop', () => {
     assert.throws(() => new JarenValidator().compile({ $id: 'http://loop.test/d', $dynamicAnchor: 'n', allOf: [{ $dynamicRef: '#n' }] }), {
-      message: 'JK0001: $ref cycle: http://loop.test/d# -> http://loop.test/d#/allOf/0 -> http://loop.test/d# never reads the instance',
+      message: 'JK0001: $ref cycle: http://loop.test/d# -> http://loop.test/d#/allOf/0 -> http://loop.test/d# never reads the instance at #/allOf/0/%24dynamicRef',
     });
   });
 

@@ -7,7 +7,7 @@ import { resolveRefSchemaDeep, TraverseOptions } from '../../packages/validate/s
 describe('a schema that references itself', () => {
   /** @param {any} schema @param {any} [options] */
   const compile = (schema, options) => new JarenValidator(options).compile(schema);
-  const message = /^JK0001: \$ref cycle: \S+# refers to itself and never reads the instance$/;
+  const message = /^JK0001: \$ref cycle: \S+# refers to itself and never reads the instance at #\/%24ref$/;
 
   it('is refused when the schema is compiled, not when it validates', () => {
     for (const options of [undefined, { collectErrors: true }, { draftVersion: 2020 }, { draftVersion: 7 }]) {
@@ -18,12 +18,12 @@ describe('a schema that references itself', () => {
   it('is refused with siblings and where it is nested', () => {
     assert.throws(() => compile({ $ref: '#', type: 'object' }, { draftVersion: 2020 }), { message });
     assert.throws(() => compile({ properties: { a: { $ref: '#/properties/a' } } }), {
-      message: /^JK0001: \$ref cycle: \S+#\/properties\/a refers to itself and never reads the instance$/,
+      message: /^JK0001: \$ref cycle: \S+#\/properties\/a refers to itself and never reads the instance at #\/properties\/a\/%24ref$/,
     });
   });
 
   it('is refused when the loop reaches its target through other references', () => {
-    const loop = /^JK0001: \$ref cycle: \S+#\/\$defs\/a refers to itself and never reads the instance$/;
+    const loop = /^JK0001: \$ref cycle: \S+#\/\$defs\/a refers to itself and never reads the instance at #\/%24defs\/a\/%24ref$/;
     for (const options of [undefined, { collectErrors: true }, { draftVersion: 2020 }, { draftVersion: 7 }]) {
       assert.throws(() => compile({ $defs: { a: { $ref: '#/$defs/a' } }, $ref: '#/$defs/a' }, options), { name: 'SchemaCompileError', code: 'JK0001', message: loop });
     }
@@ -32,7 +32,7 @@ describe('a schema that references itself', () => {
   it('names every hop of a ring', () => {
     const ring = { $defs: { a: { $ref: '#/$defs/b' }, b: { $ref: '#/$defs/a' } }, $ref: '#/$defs/a' };
     assert.throws(() => compile(ring), {
-      message: /^JK0001: \$ref cycle: \S+#\/\$defs\/a -> \S+#\/\$defs\/b -> \S+#\/\$defs\/a never reads the instance$/,
+      message: /^JK0001: \$ref cycle: \S+#\/\$defs\/a -> \S+#\/\$defs\/b -> \S+#\/\$defs\/a never reads the instance at #\/%24defs\/b\/%24ref$/,
     });
     const three = { $defs: { a: { $ref: '#/$defs/b' }, b: { $ref: '#/$defs/c' }, c: { $ref: '#/$defs/a' } }, $ref: '#/$defs/a' };
     assert.throws(() => compile(three), { message: /\/\$defs\/a -> \S+\/\$defs\/b -> \S+\/\$defs\/c -> \S+\/\$defs\/a never/ });
@@ -46,10 +46,10 @@ describe('a schema that references itself', () => {
   });
 
   it('is refused in a definition no reference reaches, as a self-reference there is', () => {
-    const message = /^JK0001: \$ref cycle: \S+#\/\$defs\/a -> \S+#\/\$defs\/b -> \S+#\/\$defs\/a never reads the instance$/;
+    const message = /^JK0001: \$ref cycle: \S+#\/\$defs\/a -> \S+#\/\$defs\/b -> \S+#\/\$defs\/a never reads the instance at #\/%24defs\/b\/%24ref$/;
     assert.throws(() => compile({ type: 'string', $defs: { a: { $ref: '#/$defs/b' }, b: { $ref: '#/$defs/a' } } }), { message });
     assert.throws(() => compile({ type: 'string', $defs: { a: { $ref: '#/$defs/a' } } }), {
-      message: /^JK0001: \$ref cycle: \S+#\/\$defs\/a refers to itself and never reads the instance$/,
+      message: /^JK0001: \$ref cycle: \S+#\/\$defs\/a refers to itself and never reads the instance at #\/%24defs\/a\/%24ref$/,
     });
   });
 
@@ -98,14 +98,14 @@ describe('the loop check over a long chain of references', () => {
 });
 
 describe('a ring of references handed to addSchema', () => {
-  const ring = /^JK0001: \$ref cycle: \S+ -> \S+ -> \S+ never reads the instance$/;
+  const ring = /^JK0001: \$ref cycle: \S+ -> \S+ -> \S+ never reads the instance at http:\/\/ring\.test\/d#\/%24ref$/;
 
   it('is refused where it is added, and leaves the validator usable', () => {
     const v = new JarenValidator();
     v.addSchema({ $id: 'http://ring.test/ok', type: 'number' });
     v.addSchema({ $id: 'http://ring.test/a', $ref: 'http://ring.test/ok' });
     assert.throws(() => v.addSchema({ $id: 'http://ring.test/s', $ref: 'http://ring.test/s' }), {
-      message: /^JK0001: \$ref cycle: \S+ refers to itself and never reads the instance$/,
+      message: /^JK0001: \$ref cycle: \S+ refers to itself and never reads the instance at http:\/\/ring\.test\/s#\/%24ref$/,
     });
     const through = v.compile({ $ref: 'http://ring.test/a' });
     assert.equal(through(1), true);

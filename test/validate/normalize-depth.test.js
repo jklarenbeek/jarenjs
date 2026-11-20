@@ -43,7 +43,7 @@ describe('the normalizer refuses a schema nested past the validator\'s depth bou
   it('compiles 128 nested subschemas and refuses the next one with JK0017 where the validator does', () => {
     for (const keyword of ['properties', 'items', 'allOf']) {
       for (const options of [{}, ALL]) assert.equal(typeof compileNormalizer(chain(keyword, 127), options), 'function');
-      const docPath = `${ORIGIN}#${STEP(keyword).repeat(128)}`;
+      const docPath = `#${STEP(keyword).repeat(128)}`;
       assert.throws(() => compileNormalizer(chain(keyword, 128)), {
         name: 'SchemaCompileError', code: 'JK0017', docPath,
         message: 'JK0017: the schema nests subschemas more than 128 levels deep, deeper than a small host call stack compiles '
@@ -212,8 +212,10 @@ describe('the normalizer refuses a loop every call runs into', () => {
       assert.throws(() => compileNormalizer(structuredClone(schema)), { name: 'SchemaCompileError', code: 'JK0001', message });
       assert.throws(() => unfilledDefaults(structuredClone(schema), { useDefaults: true }), { code: 'JK0001' });
     }
+    // located, as the validator locates it, at the reference that closes the loop (it had no place)
     assert.throws(() => compileNormalizer({ $id: 'http://loop.test/a', allOf: [{ $ref: '#' }] }), {
-      message: 'JK0001: $ref cycle: http://loop.test/a# -> http://loop.test/a#/allOf/0 -> http://loop.test/a# never reads the instance',
+      message: 'JK0001: $ref cycle: http://loop.test/a# -> http://loop.test/a#/allOf/0 -> http://loop.test/a# never reads the instance at #/allOf/0/%24ref',
+      docPath: '#/allOf/0/%24ref',
     });
     for (const schema of [
       { type: 'string', $ref: '#/$defs/x', $defs: { x: { allOf: [{ $ref: '#' }] } } },
@@ -224,7 +226,8 @@ describe('the normalizer refuses a loop every call runs into', () => {
     }
     assert.throws(() => compileNormalizer({ $id: 'http://loop.test/r', $defs: { a: { allOf: [{ $ref: '#/$defs/b' }] }, b: { allOf: [{ $ref: '#/$defs/a' }] } }, $ref: '#/$defs/a' }), {
       message: 'JK0001: $ref cycle: http://loop.test/r#/%24defs/a -> http://loop.test/r#/%24defs/a/allOf/0 -> http://loop.test/r#/%24defs/b'
-        + ' -> http://loop.test/r#/%24defs/b/allOf/0 -> http://loop.test/r#/%24defs/a never reads the instance',
+        + ' -> http://loop.test/r#/%24defs/b/allOf/0 -> http://loop.test/r#/%24defs/a never reads the instance at #/%24defs/b/allOf/0/%24ref',
+      docPath: '#/%24defs/b/allOf/0/%24ref',
     });
   });
 

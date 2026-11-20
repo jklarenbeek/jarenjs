@@ -48,7 +48,7 @@ describe('a blank $ref names the current resource', () => {
     ['an item reference', (ref) => ({ $schema: D20, type: 'array', maxItems: 3, items: { $ref: ref } }), [[1], [[]], [[[1]]], [[1, 2, 3, 4]]], [false, true, false, false]],
     ['through a pointer chain', (ref) => ({ $schema: D20, type: 'object', $defs: { h: { $ref: ref } }, properties: { p: { $ref: '#/$defs/h' } } }), [{ p: 1 }, { p: {} }], [false, true]],
     ['a root reference to itself: a loop', (ref) => ({ $schema: D20, $ref: ref }), [1],
-      'JK0001: JK0001: $ref cycle: https://github.com/jklarenbeek/jarenjs# refers to itself and never reads the instance'],
+      'JK0001: JK0001: $ref cycle: https://github.com/jklarenbeek/jarenjs# refers to itself and never reads the instance at #/%24ref'],
     ['2020-12 $dynamicRef', (ref) => ({ $schema: D20, type: 'object', properties: { p: { $dynamicRef: ref } } }), [{ p: 1 }, { p: {} }], [false, true]],
   ]);
 
@@ -87,7 +87,7 @@ describe('a blank $ref names the current resource', () => {
 
   it('a ring through "#" is still refused by addSchema', () => {
     assert.throws(() => new JarenValidator().addSchema({ $id: 'https://x.test/a.json', $ref: '#' }), {
-      code: 'JK0001', message: 'JK0001: $ref cycle: https://x.test/a.json# refers to itself and never reads the instance',
+      code: 'JK0001', message: 'JK0001: $ref cycle: https://x.test/a.json# refers to itself and never reads the instance at https://x.test/a.json#/%24ref',
     });
   });
 });

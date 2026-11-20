@@ -84,7 +84,9 @@ const HELD = () => ({ $id: 'https://held.test/root.json', $defs: { a: { $id: 'su
 const A = 'https://held.test/sub/a.json';
 const residual = (schema) => new JarenValidator().addSchema(HELD())
   .addSchema({ type: 'number' }, 'https://held.test/sub/name.json').compile(schema);
-const CALL_REFUSAL = ['JK0008', `JK0008: Can not resolve schema for 'https://held.test/name.json#': ${IGNORED_ID} at ${A}#/%24ref`];
+/** The held `$ref`, at its place in its document (`$defs/a` is an embedded resource of root.json) */
+const A_REF = 'https://held.test/root.json#/%24defs/a/%24ref';
+const CALL_REFUSAL = ['JK0008', `JK0008: Can not resolve schema for 'https://held.test/name.json#': ${IGNORED_ID} at ${A_REF}`];
 const answers = (validate, data) => data.map((d) => {
   try { return validate(d); }
   catch (error) { return [error instanceof SchemaCompileError ? error.code : 'uncoded', error.message]; }
@@ -121,14 +123,14 @@ describe('a reference resolved on first use that resolves to nothing is refused 
       .addSchema({ definitions: {} }, 'https://held.test/name.json')
       .compile({ $ref: A });
     assert.deepEqual(answers(validate, [5]), [['JK0008',
-      `JK0008: Can not resolve schema for 'https://held.test/name.json#/definitions/x': ${IGNORED_ID} at ${A}#/%24ref`]]);
+      `JK0008: Can not resolve schema for 'https://held.test/name.json#/definitions/x': ${IGNORED_ID} at ${A_REF}`]]);
   });
 
   it('an $id that names the base it sits under changes nothing, and the refusal says JK0009', () => {
     const validate = new JarenValidator()
       .addSchema({ $id: 'https://held.test/root.json', $defs: { a: { $id: 'https://held.test/root.json', $ref: 'name.json' } } })
       .compile({ $ref: 'https://held.test/root.json#/$defs/a' });
-    assert.deepEqual(answers(validate, ['x']), [['JK0009', `JK0009: Can not resolve schema for 'https://held.test/name.json#': ${UNHELD} at https://held.test/root.json#/$defs/a/%24ref`]]);
+    assert.deepEqual(answers(validate, ['x']), [['JK0009', `JK0009: Can not resolve schema for 'https://held.test/name.json#': ${UNHELD} at ${A_REF}`]]);
   });
 
   it('a target that resolves but does not compile reports its own error', () => {

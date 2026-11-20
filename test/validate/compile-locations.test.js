@@ -2,9 +2,10 @@
 /**
  * @file Where a schema compile refusal says the refused place is: a place in
  * the document the compile was handed by its pointer into it (`#/…`), with
- * or without a root `$id`, whichever step refuses it; a place in another
- * document the validator holds, and one a call reaches inside an embedded
- * resource, by that resource's absolute URI.
+ * or without a root `$id`, whichever step refuses it, inside an embedded
+ * resource too; a place in another document the validator holds by that
+ * document's URI and the pointer. The grid over every refusal, reach and
+ * draft is compile-place-grid.test.js.
  */
 
 import { describe, it } from 'node:test';
@@ -65,12 +66,12 @@ describe('a compile refusal locates a place of the compiled document by its poin
     assert.deepEqual(refusal({ $schema: D19, $id: 'https://x.test/order', properties: { p: { $recursiveRef: '' } } }, { p: 1 }),
       { code: 'JK0011', docPath: '#/properties/p/%24recursiveRef', located: true });
     assert.deepEqual(refusal({ $id: 'https://x.test/order', $defs: { n: { properties: { a: { $query: { $bogus: 1 } } } } }, properties: { z: { $ref: '#/$defs/n' } } }, { z: { a: 1 } }),
-      { code: 'JQ0002', docPath: '#/$defs/n/properties/a/%24query', located: true });
+      { code: 'JQ0002', docPath: '#/%24defs/n/properties/a/%24query', located: true });
   });
 
-  it('locates a place in an embedded resource or another held document by its URI', () => {
+  it('locates a place in an embedded resource by its pointer in the document (was the resource\'s URI), and one in another held document by that document\'s URI', () => {
     assert.deepEqual(refusal({ $defs: { n: { $id: 'https://x.test/n', properties: { a: { $query: { $bogus: 1 } } } } }, properties: { z: { $ref: 'https://x.test/n' } } }, { z: { a: 1 } }),
-      { code: 'JQ0002', docPath: 'https://x.test/n#/properties/a/%24query', located: true });
+      { code: 'JQ0002', docPath: '#/%24defs/n/properties/a/%24query', located: true });
     const holding = new JarenValidator().addSchema({ $id: 'https://x.test/other', properties: { a: { $query: { $bogus: 1 } } } });
     assert.deepEqual(refusal({ $ref: 'https://x.test/other' }, { a: 1 }, holding),
       { code: 'JQ0002', docPath: 'https://x.test/other#/properties/a/%24query', located: true });

@@ -5,7 +5,6 @@ import {
 
 import { describeValue, SchemaCompileError } from './errors.js';
 import { isDollarDataRef } from './schema-keywords.js';
-import { compiledLocation, keywordLocation } from './traverse.js';
 
 /** @typedef {import('./index.js').FormatCompiler} FormatCompiler */
 
@@ -93,7 +92,7 @@ export function compileFormatBasic(schemaObj, jsonSchema) {
       + 'so this schema would accept every value for that keyword. Register one '
       + '(addFormats(dateTimeFormats) etc. from @jarenjs/formats, or addFormat(name, compiler) '
       + "for your own), or pass { unknownFormats: 'ignore' } to accept it as an annotation",
-    compiledLocation(keywordLocation(schemaObj.path, 'format'), schemaObj.root.origin));
+    schemaObj.locationOf('format'));
   }
 
   // A format COMPILER is called once per schema location and returns the

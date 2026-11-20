@@ -65,9 +65,9 @@ describe('JK0012: an identifier declared twice', () => {
       "JK0012: $id declares 'https://a.test/x.json#', which names another schema the validator holds; give one of them another name at #/%24id");
   });
 
-  it('the schemas a compile is given', () => {
+  it('the schemas a compile is given (the second, a document of its own, named by its $id: it was a place of the compiled one)', () => {
     assert.equal(refusal(() => new JarenValidator().compile({ $ref: 'https://a.test/x.json' }, [{ $id: 'https://a.test/x.json' }, { $id: 'https://a.test/x.json' }])),
-      "JK0012: $id declares 'https://a.test/x.json#', which names another schema the validator holds; give one of them another name at #/%24id");
+      "JK0012: $id declares 'https://a.test/x.json#', which names another schema the validator holds; give one of them another name at https://a.test/x.json#/%24id");
     assert.equal(refusal(() => new JarenValidator().compile({ type: 'string' }, [{ type: 'number' }, { type: 'boolean' }])),
       `JK0012: the document has no $id, and the URI it is read under, '${ORIGIN}#', names another schema the validator holds; give it an $id of its own`);
   });
@@ -123,40 +123,42 @@ describe('JK0012: a registered identifier two places declare', () => {
   const within = (id, document, first, second) => `JK0012: '${id}' names two schemas (in '${document}', at '${first}' and at '${second}'), and this compile reads it, which would answer by the one registered first; give one of them another name`;
   const across = (id, one, two) => `JK0012: '${id}' names two schemas (one registered under '${one}', one under '${two}'), and this compile reads it, which would answer by the one registered first; give one of them another name`;
   const X = within('https://d.test/x.json#', 'https://d.test/r.json', '#/%24defs/a/%24id', '#/%24defs/b/%24id');
+  /** The refusal, located at the reference that reads the identifier. @param {string} message @param {string} place */
+  const at = (message, place) => `${message} at ${place}`;
 
   it('a compile that reads it by its URI is refused (was the first place\'s answer: \'s\' true, 1 false)', () => {
-    assert.equal(refusal(() => held(R()).compile({ $ref: 'https://d.test/x.json' })), X);
+    assert.equal(refusal(() => held(R()).compile({ $ref: 'https://d.test/x.json' })), at(X, '#/%24ref'));
   });
 
   it('a chain of references that passes it is refused when it compiles', () => {
     const validator = held(R(), { $id: 'https://d.test/y.json', $ref: 'x.json' });
-    assert.equal(refusal(() => validator.compile({ $ref: 'https://d.test/y.json' })), X);
+    assert.equal(refusal(() => validator.compile({ $ref: 'https://d.test/y.json' })), at(X, 'https://d.test/y.json#/%24ref'));
   });
 
   it('an item reference to it is refused (the item fast path)', () => {
-    assert.equal(refusal(() => held(R()).compile({ items: { $ref: 'https://d.test/x.json' } })), X);
+    assert.equal(refusal(() => held(R()).compile({ items: { $ref: 'https://d.test/x.json' } })), at(X, '#/items/%24ref'));
   });
 
   it('a registered document\'s item reference to it is refused by the call that reaches it (was [1] false, by the first place)', () => {
     const validate = held(R(), { $id: 'https://d.test/it.json', items: { $ref: 'https://d.test/x.json' } }).compile({ $ref: 'https://d.test/it.json' });
-    assert.deepEqual([['s'], [1]].map((instance) => refusal(() => validate(instance))), [X, X]);
+    assert.deepEqual([['s'], [1]].map((instance) => refusal(() => validate(instance))), [at(X, 'https://d.test/it.json#/items/%24ref'), at(X, 'https://d.test/it.json#/items/%24ref')]);
   });
 
   it('a chain of references that passes an anchor two places declare is refused when it compiles', () => {
     const validator = held({ $id: 'https://d.test/an.json', $defs: { a: { $anchor: 'n', type: 'string' }, b: { $anchor: 'n', type: 'number' } } },
       { $id: 'https://d.test/z.json', $ref: 'an.json#n' });
     assert.equal(refusal(() => validator.compile({ $ref: 'https://d.test/z.json' })),
-      within('https://d.test/an.json#n', 'https://d.test/an.json', '#/%24defs/a/%24anchor', '#/%24defs/b/%24anchor'));
+      at(within('https://d.test/an.json#n', 'https://d.test/an.json', '#/%24defs/a/%24anchor', '#/%24defs/b/%24anchor'), 'https://d.test/z.json#/%24ref'));
   });
 
   it('a pointer read through it is refused', () => {
-    assert.equal(refusal(() => held(R()).compile({ $ref: 'https://d.test/x.json#/type' })), X);
+    assert.equal(refusal(() => held(R()).compile({ $ref: 'https://d.test/x.json#/type' })), at(X, '#/%24ref'));
   });
 
   it('a registered document whose own $ref reads it is refused by the call that reaches it (was { p: 1 } false, by the first place)', () => {
     const validate = held({ $id: 'https://d.test/p.json', $defs: { a: { $id: 'x.json', type: 'string' }, b: { $id: 'x.json', type: 'number' } }, properties: { p: { $ref: 'x.json' } } })
       .compile({ $ref: 'https://d.test/p.json' });
-    const message = within('https://d.test/x.json#', 'https://d.test/p.json', '#/%24defs/a/%24id', '#/%24defs/b/%24id');
+    const message = at(within('https://d.test/x.json#', 'https://d.test/p.json', '#/%24defs/a/%24id', '#/%24defs/b/%24id'), 'https://d.test/p.json#/properties/p/%24ref');
     assert.deepEqual([{ p: 's' }, { p: 1 }].map((instance) => refusal(() => validate(instance))), [message, message]);
   });
 
@@ -165,7 +167,7 @@ describe('JK0012: a registered identifier two places declare', () => {
       a: { $id: 'x.json', $defs: { n: { type: 'string' } } },
       b: { $id: 'x.json', $defs: { n: { type: 'number' } }, properties: { k: { $ref: '#/$defs/n' } } } } })
       .compile({ $ref: 'https://d.test/r.json#/$defs/b' });
-    const message = within('https://d.test/x.json#', 'https://d.test/r.json', '#/%24defs/a/%24id', '#/%24defs/b/%24id');
+    const message = at(within('https://d.test/x.json#', 'https://d.test/r.json', '#/%24defs/a/%24id', '#/%24defs/b/%24id'), 'https://d.test/r.json#/%24defs/b/properties/k/%24ref');
     assert.deepEqual([{ k: 1 }, { k: 's' }].map((instance) => refusal(() => validate(instance))), [message, message]);
   });
 
@@ -175,7 +177,7 @@ describe('JK0012: a registered identifier two places declare', () => {
       b: { $id: 'x.json', type: 'object', properties: { k: { $recursiveRef: '#' } } } } })
       .compile({ $ref: 'https://d.test/q.json#/$defs/b' });
     assert.equal(refusal(() => validate({ k: {} })),
-      within('https://d.test/x.json#', 'https://d.test/q.json', '#/%24defs/a/%24id', '#/%24defs/b/%24id'));
+      at(within('https://d.test/x.json#', 'https://d.test/q.json', '#/%24defs/a/%24id', '#/%24defs/b/%24id'), 'https://d.test/q.json#/%24defs/b/properties/k/%24recursiveRef'));
   });
 
   it('a $recursiveRef read against it under a dynamic scope is refused by the call that reaches it (was the first place\'s $recursiveAnchor deciding)', () => {
@@ -184,26 +186,26 @@ describe('JK0012: a registered identifier two places declare', () => {
       b: { $id: 'x.json', type: 'object', properties: { k: { $recursiveRef: '#' } } } } })
       .compile({ $schema: 'https://json-schema.org/draft/2019-09/schema', $recursiveAnchor: true, type: 'object', properties: { r: { $ref: 'https://d.test/q.json#/$defs/b' } } });
     assert.equal(refusal(() => validate({ r: { k: {} } })),
-      within('https://d.test/x.json#', 'https://d.test/q.json', '#/%24defs/a/%24id', '#/%24defs/b/%24id'));
+      at(within('https://d.test/x.json#', 'https://d.test/q.json', '#/%24defs/a/%24id', '#/%24defs/b/%24id'), 'https://d.test/q.json#/%24defs/b/properties/k/%24recursiveRef'));
   });
 
   it('an anchor the document root and a nested place declare is refused (was the root\'s answer)', () => {
     const validator = held({ $id: 'https://d.test/ra.json', $anchor: 'n', type: 'string', $defs: { b: { $anchor: 'n', type: 'number' } } });
     assert.equal(refusal(() => validator.compile({ $ref: 'https://d.test/ra.json#n' })),
-      within('https://d.test/ra.json#n', 'https://d.test/ra.json', '#/%24anchor', '#/%24defs/b/%24anchor'));
+      at(within('https://d.test/ra.json#n', 'https://d.test/ra.json', '#/%24anchor', '#/%24defs/b/%24anchor'), '#/%24ref'));
   });
 
   it('a $dynamicRef to a $dynamicAnchor two places declare is refused (was the first place\'s answer)', () => {
     const validator = held({ $schema: D20, $id: 'https://d.test/y.json', $defs: { a: { $dynamicAnchor: 'q', type: 'string' }, b: { $dynamicAnchor: 'q', type: 'number' } } });
     assert.equal(refusal(() => validator.compile({ $schema: D20, $dynamicRef: 'https://d.test/y.json#q' })),
-      within('https://d.test/y.json#q', 'https://d.test/y.json', '#/%24defs/a/%24dynamicAnchor', '#/%24defs/b/%24dynamicAnchor'));
+      at(within('https://d.test/y.json#q', 'https://d.test/y.json', '#/%24defs/a/%24dynamicAnchor', '#/%24defs/b/%24dynamicAnchor'), '#/%24dynamicRef'));
   });
 
   it('two registered documents that declare one nested $id: a compile that reads it is refused (was the first registered\'s answer)', () => {
     const validator = held({ $id: 'https://d.test/one.json', $defs: { a: { $id: 'x.json', type: 'string' } } },
       { $id: 'https://d.test/two.json', $defs: { a: { $id: 'x.json', type: 'number' } } });
     assert.equal(refusal(() => validator.compile({ $ref: 'https://d.test/x.json' })),
-      across('https://d.test/x.json#', 'https://d.test/one.json', 'https://d.test/two.json'));
+      at(across('https://d.test/x.json#', 'https://d.test/one.json', 'https://d.test/two.json'), '#/%24ref'));
     // each document answers by its own place
     assert.deepEqual(answers(validator.compile({ $ref: 'https://d.test/one.json#/$defs/a' }), ['s', 1]), [true, false]);
     assert.deepEqual(answers(validator.compile({ $ref: 'https://d.test/two.json#/$defs/a' }), ['s', 1]), [false, true]);
@@ -213,7 +215,7 @@ describe('JK0012: a registered identifier two places declare', () => {
     const validator = held({ $id: 'https://d.test/v.json', $defs: { a: { $id: 'x.json', type: 'string' } } },
       { $id: 'https://d.test/v.json', $defs: { a: { $id: 'x.json', type: 'number' } } });
     assert.equal(refusal(() => validator.compile({ $ref: 'https://d.test/x.json' })),
-      across('https://d.test/x.json#', 'https://d.test/v.json', 'https://d.test/v.json'));
+      at(across('https://d.test/x.json#', 'https://d.test/v.json', 'https://d.test/v.json'), '#/%24ref'));
     assert.deepEqual(answers(validator.compile({ $ref: 'https://d.test/v.json#/$defs/a' }), ['s', 1]), [false, true]);
   });
 
@@ -221,7 +223,7 @@ describe('JK0012: a registered identifier two places declare', () => {
     const validator = held({ $id: 'https://d.test/m2.json', $defs: {
       a: { $id: 'x.json', properties: { title: { type: 'string' } } }, b: { $id: 'x.json', properties: { title: { type: 'number' } } } } });
     assert.equal(refusal(() => validator.compile({ $ref: 'https://d.test/x.json' })),
-      within('https://d.test/x.json#', 'https://d.test/m2.json', '#/%24defs/a/%24id', '#/%24defs/b/%24id'));
+      at(within('https://d.test/x.json#', 'https://d.test/m2.json', '#/%24defs/a/%24id', '#/%24defs/b/%24id'), '#/%24ref'));
   });
 
   it('places that differ in a default, a format or an annotation beside an assertion are two schemas: refused', () => {
@@ -231,7 +233,7 @@ describe('JK0012: a registered identifier two places declare', () => {
       [{ type: 'string', title: 't' }, { type: 'number', title: 't' }]]) {
       const validator = held({ $id: 'https://d.test/d2.json', $defs: { a: { $id: 'x.json', ...a }, b: { $id: 'x.json', ...b } } });
       assert.equal(refusal(() => validator.compile({ $ref: 'https://d.test/x.json' })),
-        within('https://d.test/x.json#', 'https://d.test/d2.json', '#/%24defs/a/%24id', '#/%24defs/b/%24id'));
+        at(within('https://d.test/x.json#', 'https://d.test/d2.json', '#/%24defs/a/%24id', '#/%24defs/b/%24id'), '#/%24ref'));
     }
   });
 
@@ -239,7 +241,7 @@ describe('JK0012: a registered identifier two places declare', () => {
     const one = (draft, name) => ({ $schema: draft, $id: `https://d.test/${name}.json`, $defs: { a: { $id: 'x.json', prefixItems: [{ type: 'string' }] } } });
     const validator = held(one('http://json-schema.org/draft-07/schema#', 'o7'), one(D20, 'o20'));
     assert.equal(refusal(() => validator.compile({ $ref: 'https://d.test/x.json' })),
-      across('https://d.test/x.json#', 'https://d.test/o7.json', 'https://d.test/o20.json'));
+      at(across('https://d.test/x.json#', 'https://d.test/o7.json', 'https://d.test/o20.json'), '#/%24ref'));
   });
 
   it('a document compileAsync loads is refused when its compile reads it (was the first place\'s answer)', async () => {
@@ -249,7 +251,7 @@ describe('JK0012: a registered identifier two places declare', () => {
         asked.push(uri);
         return { $schema: D20, $id: 'https://l.test/d.json', $defs: { a: { $id: 'y.json', type: 'string' }, b: { $id: 'y.json', type: 'number' } }, $ref: 'y.json' };
       },
-    }), { code: 'JK0012', message: within('https://l.test/y.json#', 'https://l.test/d.json', '#/%24defs/a/%24id', '#/%24defs/b/%24id') });
+    }), { code: 'JK0012', message: at(within('https://l.test/y.json#', 'https://l.test/d.json', '#/%24defs/a/%24id', '#/%24defs/b/%24id'), 'https://l.test/d.json#/%24ref') });
     assert.deepEqual(asked, ['https://l.test/d.json']);
   });
 
@@ -258,7 +260,7 @@ describe('JK0012: a registered identifier two places declare', () => {
   { $id: 'https://d.test/m.json', properties: { q: { $ref: 'https://d.test/x.json#/properties/k' } } });
 
   it('a registered document holding a reference through it is refused by the call that reaches it (was the first place\'s answer)', () => {
-    const message = within('https://d.test/x.json#', 'https://d.test/r.json', '#/%24defs/a/%24id', '#/%24defs/b/%24id');
+    const message = at(within('https://d.test/x.json#', 'https://d.test/r.json', '#/%24defs/a/%24id', '#/%24defs/b/%24id'), 'https://d.test/m.json#/properties/q/%24ref');
     const validate = throughIt().compile({ $ref: 'https://d.test/m.json' });
     assert.deepEqual([{ q: 's' }, { q: 1 }].map((instance) => refusal(() => validate(instance))), [message, message]);
   });

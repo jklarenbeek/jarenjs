@@ -749,21 +749,39 @@ Semantics and composition:
   compiler's own error is its `cause`. *Upgrade: both threw a plain `Error`
   with no `code` (`invalid '$query' document at …: JQ0002: …`, the code only
   on `cause`, and `'$query' cannot bind external 'x'` with none at all).*
-  A compile refusal names a place of the schema it compiles by its pointer
-  into that schema (`#/…`), whichever step refuses it and whether or not the
-  schema has an `$id`; a place in another document the validator holds by
-  that document's URI (`https://x.test/other#/properties/a/%24query`). One
-  spelling differs: inside an embedded resource (a subschema with an `$id` of
-  its own), a `$query`, `$recursiveRef` or `$dynamicRef` refusal, and a
-  reference resolved on first use, name the place by that resource's URI
-  (`https://x.test/n#/properties/a/%24query`). A reference that resolves
-  to nothing (`JK0008`, `JK0009`) is located at its `$ref`. *Upgrade: a
-  `$query`, `$recursiveRef` or `$dynamicRef` refusal named a place of the
-  compiled schema by the schema's absolute URI —
-  `https://x.test/order#/properties/total/%24query/%24ge/1` under that `$id`,
-  the validator's default base `https://github.com/jklarenbeek/jarenjs#/…`
-  without one — and `JK0008`/`JK0009` had no `docPath`; their messages now end
-  with ` at <docPath>`.*
+  A compile refusal names its place one way, as `docPath`: a JSON Pointer
+  into the document the place lies in, every token escaped, as a URI
+  fragment — alone (`#/…`) for a place of the schema it compiles, whichever
+  step refuses it and whether or not the schema has an `$id`; after that
+  document's URI for a place in another document the validator holds, or in
+  a schema handed as `compile`'s second argument
+  (`https://x.test/other#/properties/a/%24query`). An embedded resource (a
+  subschema with an `$id` of its own) is a place of its document: inside
+  `$defs: { n: { $id: 'https://x.test/n', … } }` a refused `$query` is at
+  `#/%24defs/n/properties/a/%24query`, never at `https://x.test/n#/…`. A
+  refusal the first call that reaches a place throws names the place the
+  same refusal names when `compile()` throws it. A reference that resolves to
+  nothing (`JK0008`, `JK0009`), one read through an identifier two places
+  declare (`JK0012`) and a loop of references (`JK0001`, at the reference
+  that closes it) are located at the reference; the message ends with
+  ` at <docPath>`. *Upgrade: inside an embedded resource a `$query`,
+  `$recursiveRef`, `$dynamicRef`, keyword-value (`JK0013`, `JK0014`),
+  `format` (`JK0015`), vocabulary (`JK0016`) or depth (`JK0017`) refusal, and
+  a reference resolved on first use, named the place by that resource's URI
+  (`https://x.test/n#/properties/a/%24query`, now
+  `#/%24defs/n/properties/a/%24query`); below a pointer `$ref` resolved on
+  first use the pointer's tokens stood as the reference wrote them
+  (`#/$defs/n/…`, now `#/%24defs/n/…`; in a held document
+  `https://held.test/root.json#/$defs/a/%24ref`, now `…#/%24defs/a/%24ref`);
+  `JK0017` named a place of the compiled schema by its absolute URI
+  (`https://github.com/jklarenbeek/jarenjs#/properties/a/…`, now
+  `#/properties/a/…`); and `JK0001`, a `$dynamicRef`'s or `$recursiveRef`'s
+  `JK0009`, a contested identifier's `JK0012`, a held subschema's malformed
+  `$id` and a second-argument schema's unresolved reference had no
+  `docPath`. A reader that compares a `docPath` compares the new spelling;
+  the messages change with it. Before that, a `$query`, `$recursiveRef` or
+  `$dynamicRef` refusal named a place of the compiled schema by the schema's
+  absolute URI, and `JK0008`/`JK0009` had no `docPath`.*
 - Schema literals inside the query (`$valid`/`$assert`/`$as`,
   QUERY-FORMAT §8.11) compile against the **same validator instance**, so
   their `$ref`s resolve to your `addSchema` registrations. The bridge
@@ -1073,7 +1091,9 @@ to itself (`{ "$ref": "#" }`, with or without siblings,
 `{ "properties": { "a": { "$ref": "#/properties/a" } } }`, or a `$defs` entry that refers to
 itself) fails with `JK0001: $ref cycle: <id> refers to itself and never reads the instance`;
 a ring of definitions fails naming every hop, `JK0001: $ref cycle: <a> -> <b> -> <a> never
-reads the instance`, whether or not anything refers to the ring. A ring of top-level
+reads the instance`, whether or not anything refers to the ring. Its `docPath` is the
+`$ref` that closes the loop (`#/properties/a/%24ref`; `#/%24defs/b/%24ref` for a ring
+`a` -> `b` -> `a` entered at `a`), and the message ends with it. A ring of top-level
 registrations is refused by `addSchema`, where the second member is added; a ring inside
 a registered document is refused when something compiled reaches it, and does not affect
 other compiles. In a document that declares no draft, a ring only one reading makes (an
@@ -1384,7 +1404,7 @@ abandoned validation; neither is left behind now.*
 One compile nests subschemas at most 128 levels deep, whatever keyword holds each level
 (`properties`, `items`, `allOf`, `not`, a reference compiled in place); one level more
 throws a `SchemaCompileError` whose `code` is `JK0017`, naming the first subschema past
-the bound, where a host stack half the default size still compiles and validates every
+the bound (`#/properties/a/…` in the schema compiled), where a host stack half the default size still compiles and validates every
 level. A reference resolved on first use builds its target when a call first reaches it,
 so that call is the one refused. The `maxSchemaDepth` option moves the bound (`new
 JarenValidator({ maxSchemaDepth: 1000 })`); a value that is not a positive safe integer
@@ -2230,7 +2250,8 @@ uncoded `RangeError`.*
 The normalizer holds the validator's bounds, with its codes and its options. A subschema
 it compiles more than `maxSchemaDepth` (default 128) levels below the document's root or
 a reference's target is refused when it compiles (`SchemaCompileError` `JK0017`, naming
-the first subschema past the bound), while a deep subschema it never compiles (under
+the first subschema past the bound by its pointer into the document, as the validator's
+`docPath` names it: `#/properties/a/…`), while a deep subschema it never compiles (under
 `$defs`, or under a keyword it does not walk) is not. A call nests the references that
 close a loop at most `maxReferenceDepth` (default 256) levels deep, each weighing the
 levels of schema it nests per turn, as the validator weighs them: one level more throws
@@ -2244,7 +2265,10 @@ can overflow it again, at a depth that differs from host to host. The checks of 
 default run under the same bounds. A loop every call runs into
 before it reads anything below the value — references and `allOf` branches coming back
 to an object they started from, such as `{ allOf: [{ $ref: '#' }] }` — is refused when
-it compiles (`JK0001`), naming the places on the loop as the validator names them. The
+it compiles (`JK0001`), naming the places on the loop as the validator names them, and,
+as its `docPath`, the reference that closes the loop (`#/allOf/0/%24ref`). *Upgrade: the
+normalizer's `JK0017` named that subschema by its resource's absolute URI
+(`https://github.com/jklarenbeek/jarenjs#/properties/a/…`), and its `JK0001` had no `docPath`.* The
 normalizer applies every `allOf` branch to every value, so it also refuses such a loop
 where the validator reads another keyword first and compiles (`{ type: 'string', allOf:
 [{ $ref: '#' }] }`); a loop it reaches only through a member or an item is refused

@@ -52,7 +52,7 @@ describe('a required vocabulary the validator does not implement', () => {
     const referenced = held.compile({ $schema: D20, $ref: 'https://v.test/held.json' });
     assert.equal(refusal(() => referenced('x')), 'JK0016 https://v.test/held.json#/%24schema');
     assert.equal(refusal(() => holding({ [UNKNOWN]: true }).compile({ $schema: D20, properties: { r: { $schema: META, $id: 'https://v.test/r.json', type: 'string' } } })),
-      'JK0016 https://v.test/r.json#/%24schema');
+      'JK0016 #/properties/r/%24schema');
   });
 
   it('answers as before for every shape that answered right', () => {

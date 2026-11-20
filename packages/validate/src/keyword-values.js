@@ -49,7 +49,6 @@ import { admitsDynamicReference } from './dynamic-ref.js';
 import { DOLLAR_KEYWORD_ORDER } from './dollar-data.js';
 import { createIsSchemaTypeHandler, isBoolOrObjectClass } from './tools.js';
 import { createSchemaPatternTester } from './string.js';
-import { compiledLocation, keywordLocation } from './traverse.js';
 
 /**
  * A wrong value found in a keyword: the member names or item indexes that
@@ -297,6 +296,6 @@ export function admitKeywordValues(schemaObj, jsonSchema, keys) {
     const [at, wrong, error] = found;
     throw new SchemaCompileError(error === undefined ? 'JK0013' : 'JK0014',
       `'${keyword}' takes ${says(rule[0])}, got ${describeValue(wrong)}${error === undefined ? '; a value of another shape is no constraint the validator reads' : `, which does not compile (${error.message})`}`,
-      compiledLocation(keywordLocation(schemaObj.path, keyword, ...at), schemaObj.root.origin), error && { cause: error });
+      schemaObj.locationOf(keyword, ...at), error && { cause: error });
   }
 }

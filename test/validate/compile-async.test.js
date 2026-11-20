@@ -211,7 +211,7 @@ describe('compileAsync loads each document once', () => {
   it('and refuses a cycle of bare references as a synchronous registration does (JK0001)', async () => {
     const docs = { 'https://x.test/a.json': { $ref: 'b.json' }, 'https://x.test/b.json': { $ref: 'a.json' } };
     const error = await refusal(compileAsync(new JarenValidator(), { $ref: 'https://x.test/a.json' }, served(docs)));
-    assert.equal(error.message, 'JK0001: $ref cycle: https://x.test/a.json# -> https://x.test/b.json# -> https://x.test/a.json# never reads the instance');
+    assert.equal(error.message, 'JK0001: $ref cycle: https://x.test/a.json# -> https://x.test/b.json# -> https://x.test/a.json# never reads the instance at https://x.test/b.json#/%24ref');
     const sync = new JarenValidator().addSchema(docs['https://x.test/a.json'], 'https://x.test/a.json#');
     assert.throws(() => sync.addSchema(docs['https://x.test/b.json'], 'https://x.test/b.json#'), { message: error.message });
   });

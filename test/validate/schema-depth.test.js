@@ -89,7 +89,7 @@ describe('a compile nests subschemas at most maxSchemaDepth levels', () => {
     catch (error) {
       thrown = error;
     }
-    assert.equal(thrown?.docPath, `https://depth.test/s#${'/properties/a'.repeat(128)}`);
+    assert.equal(thrown?.docPath, `#${'/properties/a'.repeat(128)}`);
     assert.equal(thrown?.message, `JK0017: ${REASON} at ${thrown?.docPath}`);
   });
 

@@ -161,9 +161,9 @@ describe('a draft-04 id where no known draft is declared identifies its schema',
           },
         });
         assert.deepEqual(verdicts(passing, [1, 's']), [true, false], `pointer ${keyword} ${draft}`);
-        // a refusal below it is located in the resource it names
+        // a refusal below it is located at its place in the document (the resource it names is no place)
         assert.throws(() => new JarenValidator().compile(declaring(draft, { properties: { y: { [keyword]: 'http://example.com/a.json', minLength: -1 } } })),
-          { code: 'JK0013', docPath: 'http://example.com/a.json#/minLength' }, `located ${keyword} ${draft}`);
+          { code: 'JK0013', docPath: '#/properties/y/minLength' }, `located ${keyword} ${draft}`);
       }
   });
 

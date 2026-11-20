@@ -41,6 +41,8 @@ import {
   identifierOf,
   declaredDraftOf,
   keptRefBase,
+  documentPlace,
+  compiledPlacesOf,
 } from './traverse.js';
 
 import {
@@ -63,7 +65,7 @@ import { isRecursiveQueryCompileError } from './query-keyword.js';
 import { openReferences, referencesTooDeep, referenceUnwound, assertDepthOption, assertOutputFormat, schemaTooDeep, unimplementedVocabulary, REFERENCE_DEPTH_CEILING, SCHEMA_DEPTH_CEILING } from './errors.js';
 import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft, dialectVocabulary, caselessUri, heldUriKey, heldDialect, identifierKeyword, identifierText, dialectDraft } from './schema-keywords.js';
 import { VALIDATOR_STATE } from './validator-state.js';
-import { encodeJsonPointerPath } from './origin.js';
+import { encodeJsonPointerPath, withoutFragment } from './origin.js';
 
 export {
   registerFormatCompilers
@@ -497,9 +499,15 @@ export class ValidationRoot {
    * @param {number|null} [parentDeclaredDraft] - The draft inherited from the
    *   parent schema object; omitted for a reference target, which reads the
    *   draft its own place declares
+   * @param {ValidationObject|null} [up] - The object it is a subschema of,
+   *   where it is built as one: its place is below that object's
+   * @param {Array<string|number|undefined>} [step] - The keyword, then the
+   *   index or name inside it, then the name inside that, below `up`
+   * @param {string} [reference] - The reference it is built as the target
+   *   of, which names its place where no walk recorded one
    * @returns {ValidationObject} The created ValidationObject
    */
-  static #createObject(self, path, schema, baseUri, parentDeclaredDraft = undefined) {
+  static #createObject(self, path, schema, baseUri, parentDeclaredDraft = undefined, up = null, step = undefined, reference = undefined) {
     const objects = self.#objects;
     if (objects.has(path)) {
       const p = objects.get(path);
@@ -515,12 +523,12 @@ export class ValidationRoot {
     // compile refuses to nest past the bound rather than exhaust it.
     const ceiling = self.#options.maxSchemaDepth ?? SCHEMA_DEPTH_CEILING;
     if (building.size >= ceiling)
-      throw schemaTooDeep(ceiling, path);
+      throw schemaTooDeep(ceiling, compiledLocation(up === null ? self.documentPlace(path, schema, reference) : placeBelow(up.place, /** @type {any[]} */ (step)), /** @type {string} */ (self.#rootOrigin)));
     building.set(path, schema);
     let obj;
     try {
       obj = new ValidationObject(self, path, schema, baseUri,
-        parentDeclaredDraft === undefined ? placeDraft(self.#places, self.#schemas, path, schema) : parentDeclaredDraft);
+        parentDeclaredDraft === undefined ? placeDraft(self.#places, self.#schemas, path, schema) : parentDeclaredDraft, up, step, reference);
     }
     finally {
       building.delete(path);
@@ -901,20 +909,25 @@ export class ValidationRoot {
    * recorded as one it recorded. An internal collaborator of the compiler.
    * @param {string} path - The schema's location
    * @param {any} schema - The schema, or a copy of it
+   * @param {string|{ place: string }} [lies] - Where it lies in its document, as
+   *   a refusal names it, or the object that knows it ({@link ValidationObject#place})
    * @returns {ValidationOptions}
    */
-  optionsAt(path, schema) {
+  optionsAt(path, schema, lies = path) {
     const places = this.#places;
     const read = this.#vocabularies;
     if (read === undefined || places === undefined || !isObjectClass(schema)) return this.#options;
     const place = placeOf(places, this.#schemas, path, schema);
-    const uri = places.drafts.has(place) ? places.dialectUris.get(place) : unwalkedReading(places, this.#schemas, path).dialectUri;
+    const uri = places.drafts.has(place) ? places.dialectUris.get(place) : unwalkedReading(places, this.#schemas, this.#unwalkedPath(path, schema, place, lies)).dialectUri;
     if (uri === undefined) return this.#options;
     let options = this.#dialectOptions.get(uri);
     if (options === undefined) {
       const { validation, formatAssertion, contentValidation, unimplemented } = read(uri);
       if (unimplemented !== undefined)
-        throw unimplementedVocabulary(uri, unimplemented, compiledLocation(isStringType(schema.$schema) ? keywordLocation(path, '$schema') : path, /** @type {string} */ (this.#rootOrigin)));
+      {
+        const at = typeof lies === 'string' ? lies : lies.place;
+        throw unimplementedVocabulary(uri, unimplemented, compiledLocation(isStringType(schema.$schema) ? keywordLocation(at, '$schema') : at, /** @type {string} */ (this.#rootOrigin)));
+      }
       const own = this.#options;
       options = own;
       if (validation !== own.vocabValidation || formatAssertion !== own.formatAssertion || contentValidation !== own.contentValidation) {
@@ -1003,10 +1016,43 @@ export class ValidationRoot {
    * @param {string} baseUri - The base URI for resolving relative refs
    * @param {number|null} [parentDeclaredDraft] - Omitted for a reference
    *   target, which reads the draft its own place declares
+   * @param {ValidationObject|null} [up] - The object it is a subschema of
+   * @param {Array<string|number|undefined>} [step] - Where below `up` it lies
    * @returns {ValidationObject} The created ValidationObject
    */
-  createObject(path, schema, baseUri, parentDeclaredDraft = undefined) {
-    return ValidationRoot.#createObject(this, path, schema, baseUri, parentDeclaredDraft);
+  createObject(path, schema, baseUri, parentDeclaredDraft = undefined, up = null, step = undefined) {
+    return ValidationRoot.#createObject(this, path, schema, baseUri, parentDeclaredDraft, up, step);
+  }
+
+  /**
+   * Where the schema built under a key lies in its document, as a compile
+   * refusal names a place ({@link documentPlace}): an absolute spelling, a
+   * place of the compiled document as `#/…`. An internal collaborator of the
+   * compiler.
+   * @param {string} key - The key it is built under
+   * @param {unknown} schema - The schema
+   * @param {string} [reference] - A reference naming it, read after the key
+   * @returns {string}
+   */
+  documentPlace(key, schema, reference = undefined) {
+    return documentPlace(this.#schemas, key, this.#places, schema, reference);
+  }
+
+  /**
+   * The location an object no walk recorded is read from ({@link unwalkedReading}):
+   * its own, or, where that names nothing (an object below a keyword no draft
+   * defines that declares an `$id` of its own, built under it), the pointer to
+   * it in its document, from which the `$schema`s on the way to it are read.
+   * @param {string} path - The schema's location
+   * @param {any} schema
+   * @param {any} place - What the location names ({@link placeOf})
+   * @param {string|{ place: string }} [lies] - Where it lies, or the object that knows it
+   * @returns {string}
+   */
+  #unwalkedPath(path, schema, place, lies = undefined) {
+    if (place !== undefined || !isObjectClass(schema)) return path;
+    const at = lies === undefined || lies === path ? documentPlace(this.#schemas, path, this.#places, schema) : typeof lies === 'string' ? lies : lies.place;
+    return at.startsWith('#') ? `${withoutFragment(/** @type {string} */ (this.#rootOrigin))}${at}` : at;
   }
 
   /**
@@ -1015,13 +1061,14 @@ export class ValidationRoot {
    * is declared. An internal collaborator of the compiler.
    * @param {string} path - The schema's location
    * @param {any} schema - The schema, or a copy of it
+   * @param {{ place: string }} [lies] - The object that knows where it lies in its document ({@link ValidationObject#place})
    * @returns {boolean}
    */
-  inForeignDialect(path, schema) {
+  inForeignDialect(path, schema, lies = undefined) {
     const places = this.#places;
     if (places === undefined) return false;
     const place = placeOf(places, this.#schemas, path, schema);
-    return places.drafts.has(place) ? readsForeign(places, place, this.#schemas) : unwalkedReading(places, this.#schemas, path).foreign;
+    return places.drafts.has(place) ? readsForeign(places, place, this.#schemas) : unwalkedReading(places, this.#schemas, this.#unwalkedPath(path, schema, place, lies)).foreign;
   }
 
   /**
@@ -1133,7 +1180,7 @@ export class ValidationRoot {
     // built under that identifier may be the other place's.
     if (places?.contested.has(id)) {
       if (tentative && this.#building.has(ref)) return null;
-      return ValidationRoot.#createObject(this, ref, root, id);
+      return ValidationRoot.#createObject(this, ref, root, id, undefined, null, undefined, ref);
     }
 
     // Check if final ID is already compiled
@@ -1142,7 +1189,7 @@ export class ValidationRoot {
     if (tentative && this.#building.has(id)) return null;
 
     // Create and cache the validation object
-    return ValidationRoot.#createObject(this, id, root);
+    return ValidationRoot.#createObject(this, id, root, undefined, undefined, null, undefined, ref);
   }
 
   /**
@@ -1154,14 +1201,20 @@ export class ValidationRoot {
    * @param {string} ref - The reference, resolved
    * @param {string} [location] - Where the schema object holding it sits
    * @param {object} [holder] - The schema object holding it
+   * @param {() => string} [at] - What names the reference's place, for the refusal
    */
-  refuseContested(ref, location = undefined, holder = undefined) {
+  refuseContested(ref, location = undefined, holder = undefined, at = undefined) {
     const key = ref.slice(0, ref.indexOf('#') + 1) || `${ref}#`;
     if (holder !== undefined && location !== undefined && this.#readsOwnPlace(key, location)) {
       this.#ownReads.set(holder, key);
       return;
     }
-    refuseContestedReference(this.#places, ref);
+    try {
+      refuseContestedReference(this.#places, ref);
+    }
+    catch (e) {
+      throw at === undefined ? e : locatedRefusal(e, at());
+    }
   }
 
   /**
@@ -1256,11 +1309,11 @@ export class ValidationRoot {
    * @param {string} ref - The reference, resolved
    * @param {object} holder - The schema object holding it
    * @param {string} keyword - Its keyword
-   * @param {string} location - The reference's place
+   * @param {string|(() => string)} location - The reference's place, or what names it
    */
   refuseHeldPlace(ref, holder, keyword, location) {
     if (spellsHeldPlace(this.#schemas, ref, this.#places, holder, keyword))
-      throw locatedRefusal(unresolvedReference(ref), compiledLocation(location, /** @type {string} */ (this.#rootOrigin)));
+      throw locatedRefusal(unresolvedReference(ref), compiledLocation(typeof location === 'function' ? location() : location, /** @type {string} */ (this.#rootOrigin)));
   }
 
   /**
@@ -1280,15 +1333,16 @@ export class ValidationRoot {
    * surface as a flattened empty schema or as a call-stack overflow.
    * @param {string} path - The base the reference resolves against
    * @param {object} schema - The schema containing the $ref
+   * @param {() => string} [at] - What names the `$ref`'s place, where a refusal locates it
    */
-  assertNoRefLoop(path, schema) {
+  assertNoRefLoop(path, schema, at = undefined) {
     try {
       resolveRefSchemaDeep(this.#schemas, path, schema, this.#traverse, this.#loopFree, this.#placesFor(schema), this.#options.draftVersion);
     }
     catch (e) {
       // A target that is not loaded is reported where it is used; one read
       // through a contested identifier is refused here, at compile time.
-      if (isRefCycleError(e) || isContestedRefusal(e)) throw e;
+      if (isRefCycleError(e) || isContestedRefusal(e)) throw at === undefined ? e : locatedRefusal(e, at());
     }
   }
 
@@ -1579,6 +1633,19 @@ const REF_STEP = Object.freeze(['$ref']);
 const LOOP_READINGS = Object.freeze([null, 7]);
 
 /**
+ * The place of a subschema below the place of the schema object holding
+ * it, as a compile refusal names a place: each token escaped.
+ * @param {string} place - The holder's place
+ * @param {Array<string|number|undefined>} step - The keyword, then the index or name inside it, then the name inside that
+ * @returns {string}
+ */
+function placeBelow(place, [key, index, member]) {
+  if (index == null) return encodeJsonPointerPath(place, /** @type {string} */ (key));
+  const at = encodeJsonPointerPath(place, /** @type {string} */ (key), String(index));
+  return member == null ? at : encodeJsonPointerPath(at, String(member));
+}
+
+/**
  * Whether a document holds a blank `$ref` anywhere in it (a value that
  * merely looks like a schema object counts too).
  * @param {unknown} document
@@ -1659,13 +1726,15 @@ export class ValidationObject {
     const refBase = appliesRefSiblings(draftVersion)
       ? (self.baseUri || baseUri || path)
       : (root.keptRefBase(schema, draftVersion) || baseUri || path);
-    const { id: ref } = createJsonPointer(schemaReference(schema, '$ref'), refBase, root.traverse, '$ref', keywordLocation(path, '$ref'));
-    root.refuseHeldPlace(ref, schema, '$ref', keywordLocation(path, '$ref'));
+    /** Where the `$ref` lies, as a refusal names it */
+    const refAt = () => self.locationOf('$ref');
+    const { id: ref } = createJsonPointer(schemaReference(schema, '$ref'), refBase, root.traverse, '$ref', refAt);
+    root.refuseHeldPlace(ref, schema, '$ref', refAt);
     // A schema that references itself decides nothing: validating it re-enters
     // the same validator on the same instance until the stack runs out.
     if (ref === path)
-      throw new RefCycleError([path, path]);
-    root.refuseContested(ref, path, schema);
+      throw new RefCycleError([path, path], refAt());
+    root.refuseContested(ref, path, schema, refAt);
     // Only check for sibling validators in draft 2019-09+
     const siblingValidator = appliesRefSiblings(draftVersion) ? compileSchemaObject(self, schema) : null;
 
@@ -1778,7 +1847,7 @@ export class ValidationObject {
     const boundRefBase = refBase;
     const boundSchema = schema;
     const boundSiblingValidator = siblingValidator;
-    root.assertNoRefLoop(refBase, schema);
+    root.assertNoRefLoop(refBase, schema, refAt);
     const boundSourceAnchors = sourceDynamicAnchors;
 
     // Memoized state of the first resolution - the target never changes.
@@ -1802,7 +1871,7 @@ export class ValidationObject {
           // have named another target, says why.
           throw locatedRefusal(e?.code === 'JK0009' && createJsonPointer(schemaReference(boundSchema, '$ref'), self.baseUri || boundRefBase, rootRef.traverse).id !== boundRef
             ? unresolvedReference(boundRef, true)
-            : e, compiledLocation(keywordLocation(path, '$ref'), rootRef.origin));
+            : e, refAt());
         }
         const resolvedSchema = obj.schema;
 
@@ -1932,6 +2001,14 @@ export class ValidationObject {
   #declaredDraft = null;
   /** @type {ValidationOptions} The options this object compiles under: its root's, with the vocabularies of the dialect governing its place */
   #options;
+  /** @type {ValidationObject|null} The object this one is a subschema of, where it was built as one */
+  #up = null;
+  /** @type {Array<string|number|undefined>|undefined} Where below `#up` it lies */
+  #step = undefined;
+  /** @type {string|undefined} The reference it was built as the target of, which names its place where no walk recorded one */
+  #reference = undefined;
+  /** @type {string|null} Where it lies in its document, once asked ({@link ValidationObject#place}) */
+  #place = null;
 
   /**
    * Creates a new ValidationObject.
@@ -1940,10 +2017,16 @@ export class ValidationObject {
    * @param {any} schema - The schema object to compile
    * @param {string} baseUri - The base URI for resolving $ref
    * @param {number|null} [parentDeclaredDraft] - The declared draft inherited from the parent schema object
+   * @param {ValidationObject|null} [up] - The object it is a subschema of, where it is built as one
+   * @param {Array<string|number|undefined>} [step] - Where below `up` it lies: the keyword, the index or name inside it, the name inside that
+   * @param {string} [reference] - The reference it is built as the target of
    */
-  constructor(root, path, schema, baseUri, parentDeclaredDraft = null) {
+  constructor(root, path, schema, baseUri, parentDeclaredDraft = null, up = null, step = undefined, reference = undefined) {
     this.#root = root;
     this.#path = path;
+    this.#up = up;
+    this.#step = step;
+    this.#reference = reference;
     this.#members = [];
     this.#schema = schema;
     this.#validator = null;
@@ -1958,19 +2041,19 @@ export class ValidationObject {
     // The effective base is what children should use for resolving relative $refs.
     // If this schema has an $id, it becomes the new base for children.
     // (`$id`, or the draft-04 `id` where no known draft is declared)
-    const identifier = identifierOf(schema, root.inForeignDialect(path, schema) ? null : this.#declaredDraft);
+    const identifier = identifierOf(schema, root.inForeignDialect(path, schema, this) ? null : this.#declaredDraft);
     if (identifier !== undefined) {
       // This schema has its own $id - resolve it against the parent's baseUri
       // to get the absolute base for children
       const keyword = schema.$id ? '$id' : 'id';
-      const { id: resolvedId } = createJsonPointer(identifier, baseUri, undefined, keyword, keywordLocation(path, keyword));
+      const { id: resolvedId } = createJsonPointer(identifier, baseUri, undefined, keyword, () => this.locationOf(keyword));
       this.#effectiveBaseUri = resolvedId.endsWith('#') ? resolvedId.slice(0, -1) : resolvedId;
     } else {
       // No $id - inherit parent's base
       this.#effectiveBaseUri = baseUri;
     }
 
-    this.#options = root.optionsAt(path, schema);
+    this.#options = root.optionsAt(path, schema, this);
     this.#validator = ValidationObject.compileValidator(this, path, schema, baseUri);
     // Recording output units, applying this subschema is one.
     const recorder = root.recorder;
@@ -2015,6 +2098,33 @@ export class ValidationObject {
     return this.#path;
   }
 
+  /**
+   * Where the schema object lies in its document, as a compile refusal names
+   * a place: the JSON Pointer to it, every token escaped, after the name of
+   * a document the validator holds, or alone after `#` in the compiled
+   * document. An embedded resource is a place of its document (its `$id`
+   * names no place), and a reference target is named where it lies.
+   * @returns {string}
+   */
+  get place() {
+    if (this.#place === null) {
+      const up = this.#up;
+      this.#place = up === null ? this.#root.documentPlace(this.#path, this.#schema, this.#reference) : placeBelow(up.place, /** @type {any[]} */ (this.#step));
+    }
+    return this.#place;
+  }
+
+  /**
+   * Where a keyword of the schema object lies, or a member or item inside
+   * its value, as a compile refusal names it (`docPath`).
+   * @param {string} keyword
+   * @param {...(string|number)} members - The member names and item indexes inside the value
+   * @returns {string}
+   */
+  locationOf(keyword, ...members) {
+    return compiledLocation(keywordLocation(this.place, keyword, ...members), this.#root.origin);
+  }
+
   /** @returns {string} The effective base URI for resolving relative $refs */
   get baseUri() {
     return this.#effectiveBaseUri;
@@ -2056,7 +2166,7 @@ export class ValidationObject {
    *   `$schema` that names no draft this package knows
    */
   get dynamicReferenceDraft() {
-    return this.#declaredDraft !== null && this.#root.inForeignDialect(this.#path, this.#schema) ? null : this.#declaredDraft;
+    return this.#declaredDraft !== null && this.#root.inForeignDialect(this.#path, this.#schema, this) ? null : this.#declaredDraft;
   }
 
 /**
@@ -2128,8 +2238,11 @@ export class ValidationObject {
 
     // If schema has $id, resolve it against basePath to get the new base URI
     // Otherwise, use the current path
+    const step = [key, index, member];
+    const keyword = schema.$id ? '$id' : 'id';
     const id = hasId
-      ? createJsonPointer(identifier, basePath || this.#path, undefined, schema.$id ? '$id' : 'id').id
+      ? createJsonPointer(identifier, basePath || this.#path, undefined, keyword,
+        () => compiledLocation(keywordLocation(placeBelow(this.place, step), keyword), root.origin)).id
       : this.#path;
 
     // If schema has $id, use the resolved ID as the path (it defines the schema's location)
@@ -2154,10 +2267,10 @@ export class ValidationObject {
     const built = root.unresolvedObject(path);
     const child = built !== null
       ? built
-      : root.createObject(path, schema, basePath, this.#declaredDraft);
+      : root.createObject(path, schema, basePath, this.#declaredDraft, this, step);
     this.#members.push(child);
 
-    return markStep(root.recorder, [key, index, member], child.validate);
+    return markStep(root.recorder, step, child.validate);
   }
 }
 
@@ -2344,7 +2457,7 @@ export class JarenValidator {
   /** @type {TraverseOptions} The traversal options, carrying the `propertyDependencies` switch of the validation options */
   #traverse = new TraverseOptions();
   /** @type {import('./traverse.js').SchemaPlaces} What the walks read at each registered schema's place */
-  #places = { drafts: new WeakMap(), refBases: new WeakMap(), keptRefs: new Set(), unread: new Map(), undecidedBases: new WeakMap(), lateTargets: new Set(), foreign: new WeakSet(), dialects: new WeakMap(), dialectUris: new WeakMap(), contested: new Map(), refs: new WeakMap(), idBases: new WeakMap(), rooted: undefined, ownRefs: undefined, kept: undefined };
+  #places = { drafts: new WeakMap(), refBases: new WeakMap(), keptRefs: new Set(), unread: new Map(), undecidedBases: new WeakMap(), lateTargets: new Set(), foreign: new WeakSet(), dialects: new WeakMap(), dialectUris: new WeakMap(), contested: new Map(), refs: new WeakMap(), idBases: new WeakMap(), locations: new WeakMap(), rooted: undefined, ownRefs: undefined, kept: undefined };
   /** @type {Map<string, string>} The key of the document each registered identifier came from */
   #registeredIn = new Map();
   /** @type {WeakSet<object>} The documents `addSchema` registered under a key of their own */
@@ -2440,12 +2553,15 @@ export class JarenValidator {
   static #traverseSchema(schema, schemas = undefined, fromMap = undefined, opts = new TraverseOptions(), places = undefined, namesDocument = false, records = places) {
     // initialize schema map for all ids and refs
     const schemaMap = new Map(fromMap);
-    /** The first `$ref` of the document naming each target, where a refusal to resolve it is located. */
+    /** The first `$ref` of the documents naming each target, where a refusal to resolve it is located. */
     const sites = new Map();
     // What the references of a compile's documents ask for is recorded apart
     // from what the registered documents' do, which is kept per held set,
     // and only where the validator holds schemas the compile may not reach.
     const refs = fromMap ? fromMap.size ? new Map() : undefined : records?.refs;
+    // The places of a compile's documents are its own: the compiled one's are
+    // spelled `#/…`; a meta-schema's are the validator's.
+    const located = fromMap ? compiledPlacesOf(schemaMap) : records?.locations;
     // The schema's document is read under the draft `compile` reads it
     // under: the one it declares, draft-07 when it declares none.
     const origin = storeSchemaIdsInMap(
@@ -2460,7 +2576,8 @@ export class JarenValidator {
       undefined,
       sites,
       refs,
-      records?.idBases);
+      records?.idBases,
+      located && { map: located, as: fromMap ? '#' : undefined });
     // A root `$id` with a fragment (`#root`, `…/s.json#root`) names the
     // document too: its pointers resolve against the URI before the
     // fragment, as `addSchema(document, key)` holds it under the key. The URI
@@ -2490,9 +2607,10 @@ export class JarenValidator {
         undefined,
         undefined,
         undefined,
-        undefined,
+        sites,
         refs,
-        records?.idBases));
+        records?.idBases,
+        located && { map: located }));
     }
 
     // What this compile reaches of the schemas the validator holds: its own
@@ -2693,7 +2811,8 @@ export class JarenValidator {
         loop = undefined;
         break;
       }
-      if (loop !== undefined) throw loop;
+      // (located at the `$ref` of the registration that enters the loop)
+      if (loop !== undefined) throw locatedRefusal(loop, keywordLocation(documentPlace(this.#schemas, key, this.#places, entry), '$ref'));
     }
   }
 
@@ -2738,7 +2857,7 @@ export class JarenValidator {
         if (twice === undefined || this.#samePlace(twice.id, twice.first, twice.second)) return;
         const names = `in '${documentName(baseUri)}', at '${twice.firstAt ?? '#'}' and at '${twice.secondAt}'`;
         contested.set(twice.id, names);
-      }, this.#schemas, undefined, this.#places.refs, this.#places.idBases);
+      }, this.#schemas, undefined, this.#places.refs, this.#places.idBases, { map: this.#places.locations });
     } catch (_e) {
       // the document's own `$id` (see above)
     }
@@ -3034,7 +3153,7 @@ export class JarenValidator {
       if (identifier === undefined) continue;
 
       // Check if this id matches the resolved $id
-      const { id: resolvedId } = createJsonPointer(identifier, origin, undefined, schema.$id ? '$id' : 'id', keywordLocation(id, schema.$id ? '$id' : 'id'));
+      const { id: resolvedId } = createJsonPointer(identifier, origin, undefined, schema.$id ? '$id' : 'id', () => compiledLocation(keywordLocation(root.documentPlace(id, schema), schema.$id ? '$id' : 'id'), origin));
       if (id === resolvedId) {
         // This is a canonical $id path - create with origin as base
         try {
@@ -3217,7 +3336,7 @@ export class JarenValidator {
     // A root that loops back to itself before reading the instance decides
     // nothing on any instance: refused here rather than when it validates.
     // Whether a keyword reads the instance depends on these options.
-    assertRootReadsInstance(map, origin, schema, { options: validationOptions, formats: this.#formats, drafts: this.#places.drafts, foreign: this.#places.foreign, dialects: this.#places.dialects, held: map, rooted: this.#places.rooted }, this.#traverse);
+    assertRootReadsInstance(map, origin, schema, { options: validationOptions, formats: this.#formats, drafts: this.#places.drafts, foreign: this.#places.foreign, dialects: this.#places.dialects, held: map, rooted: this.#places.rooted, locations: this.#places.locations }, this.#traverse);
 
     // Pre-compile all refs before returning the validator
     // This ensures all ref chains are resolved at compile time

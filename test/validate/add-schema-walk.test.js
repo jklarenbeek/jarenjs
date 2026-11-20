@@ -63,9 +63,9 @@ describe('addSchema registers the rest of a document past a place its walk refus
   it('a malformed $id: an identifier beside it answers (was JK0009 naming it)', () => {
     assert.deepEqual(answers(holding(badId()).compile({ $ref: 'https://a.test/b.json' }), ['s', 1]), [true, false]);
   });
-  it('a malformed $id: the compile that reads it refuses it, naming the $id', () => {
+  it('a malformed $id: the compile that reads it refuses it, naming the $id and its place (it named no place)', () => {
     const validate = holding(badId()).compile({ $ref: 'https://a.test/a.json' });
-    assert.deepEqual(refusal(() => validate({})), ['JK0010', `JK0010: $id 'http://[x' ${REPAIR}`]);
+    assert.deepEqual(refusal(() => validate({})), ['JK0010', `JK0010: $id 'http://[x' ${REPAIR} at https://a.test/a.json#/properties/a/%24id`]);
   });
   it('a malformed $id: nothing below it is registered, as before', () => {
     assert.deepEqual(refusal(() => holding(badId()).compile({ $ref: 'https://a.test/c.json' })),
@@ -85,7 +85,7 @@ describe('addSchema registers the rest of a document past a place its walk refus
     assert.deepEqual(answers(holding(twice()).compile({ $ref: 'https://a.test/b.json' }), ['s', 1]), [true, false]);
   });
   it('an identifier declared twice: the compile that reads it is refused, naming both places (was the first place\'s answer)', () => {
-    const both = (id, first, second) => ['JK0012', `JK0012: '${id}' names two schemas (in 'https://a.test/a.json', at '${first}' and at '${second}'), and this compile reads it, which would answer by the one registered first; give one of them another name`];
+    const both = (id, first, second) => ['JK0012', `JK0012: '${id}' names two schemas (in 'https://a.test/a.json', at '${first}' and at '${second}'), and this compile reads it, which would answer by the one registered first; give one of them another name at #/%24ref`];
     assert.deepEqual(refusal(() => holding(twice()).compile({ $ref: 'https://a.test/x.json' })),
       both('https://a.test/x.json#', '#/%24defs/x/%24id', '#/%24defs/y/%24id'));
     assert.deepEqual(refusal(() => holding(twice()).compile({ $ref: 'https://a.test/a.json#n' })),
@@ -106,10 +106,10 @@ describe('addSchema registers the rest of a document past a place its walk refus
     assert.deepEqual(answers(validator.compile({ $ref: 'https://r.test/d.json#/$defs/s' }), ['s', 1]), [true, false]);
     // was JK0009 naming the anchor the stopped registration left out
     assert.deepEqual(refusal(() => validator.compile({ $ref: 'https://r.test/d.json#r1' })),
-      ['JK0001', 'JK0001: $ref cycle: https://r.test/d.json#r1 -> https://r.test/d.json#r2 -> https://r.test/d.json#r1 never reads the instance']);
+      ['JK0001', 'JK0001: $ref cycle: https://r.test/d.json#r1 -> https://r.test/d.json#r2 -> https://r.test/d.json#r1 never reads the instance at https://r.test/d.json#/%24defs/r2/%24ref']);
     // without the refused place the document is refused where it is added, as before
     assert.deepEqual(refusal(() => holding(ring({ type: 'number' }))),
-      ['JK0001', 'JK0001: $ref cycle: https://r.test/d.json#r2 -> https://r.test/d.json#r1 -> https://r.test/d.json#r2 never reads the instance']);
+      ['JK0001', 'JK0001: $ref cycle: https://r.test/d.json#r2 -> https://r.test/d.json#r1 -> https://r.test/d.json#r2 never reads the instance at https://r.test/d.json#/%24defs/r1/%24ref']);
   });
 });
 
@@ -118,7 +118,7 @@ describe('addSchema refuses only a loop every reading of the document makes', ()
   const sub = () => ({ $id: 'https://held.test/sub/name.json', $ref: 'https://held.test/root.json#/$defs/a' });
   const name = () => ({ $id: 'https://held.test/name.json', type: 'string' });
   const P = { properties: { p: { $ref: 'https://held.test/root.json#/$defs/a' } } };
-  const LOOP = ['JK0001', 'JK0001: $ref cycle: https://held.test/sub/a.json# -> https://held.test/sub/name.json# -> https://held.test/sub/a.json# never reads the instance'];
+  const LOOP = ['JK0001', 'JK0001: $ref cycle: https://held.test/sub/a.json# -> https://held.test/sub/name.json# -> https://held.test/sub/a.json# never reads the instance at https://held.test/sub/name.json#/%24ref'];
 
   for (const [order, documents] of [
     ['root, sub, name (was JK0001 at addSchema)', [root, sub, name]],
@@ -155,14 +155,14 @@ describe('addSchema refuses only a loop every reading of the document makes', ()
       { $id: 'https://m.test/sub/b.json', type: 'string' });
     const S = { $ref: 'https://m.test/root.json#/$defs/a' };
     assert.deepEqual(refusal(() => validator.compile(S)),
-      ['JK0001', 'JK0001: $ref cycle: https://m.test/sub/a.json# -> https://m.test/b.json# -> https://m.test/sub/a.json# never reads the instance']);
+      ['JK0001', 'JK0001: $ref cycle: https://m.test/sub/a.json# -> https://m.test/b.json# -> https://m.test/sub/a.json# never reads the instance at https://m.test/b.json#/%24ref']);
     assert.deepEqual(answers(validator.compile({ $schema: D19, ...S }), ['x', 5]), [true, false]);
   });
 
   it('a loop that does not depend on the reading is refused at addSchema, as before', () => {
     const validator = new JarenValidator().addSchema({ $id: 'https://l.test/root.json', $defs: { k: { type: 'string' } } });
     assert.deepEqual(refusal(() => validator.addSchema({ $id: 'https://l.test/d.json', $defs: { a: { $anchor: 'a', $ref: '#b' }, b: { $anchor: 'b', $ref: '#a' } } })),
-      ['JK0001', 'JK0001: $ref cycle: https://l.test/d.json#b -> https://l.test/d.json#a -> https://l.test/d.json#b never reads the instance']);
+      ['JK0001', 'JK0001: $ref cycle: https://l.test/d.json#b -> https://l.test/d.json#a -> https://l.test/d.json#b never reads the instance at https://l.test/d.json#/%24defs/a/%24ref']);
     // the refused document is not held; what was held still answers
     assert.deepEqual(answers(validator.compile({ $ref: 'https://l.test/root.json#/$defs/k' }), ['s', 1]), [true, false]);
     assert.deepEqual(refusal(() => validator.compile({ $ref: 'https://l.test/d.json' })),

@@ -27,7 +27,6 @@ import { decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 
 import { SchemaCompileError } from './errors.js';
 import { createTypeTestCompiler } from './query.js';
-import { compiledLocation, keywordLocation } from './traverse.js';
 import { undefinedElement } from './tools.js';
 import { encodeJsonPointerPath } from './origin.js';
 
@@ -37,15 +36,14 @@ const BOUND_EXTERNALS = Object.freeze(['root', 'path']);
 /**
  * Where a query compile refusal sits in the schema: the `$query` keyword of
  * the schema object, then the query document's own pointer to the refused
- * place, spelled as every other compile refusal names a place
- * ({@link compiledLocation}).
- * @param {string} schemaPath - The schema object's location
- * @param {string} origin - The URI the compiled document is held under
+ * place, spelled as every other compile refusal names a place (the
+ * validation object's `locationOf`).
+ * @param {import('./index.js').ValidationObject} schemaObj - The schema object holding the `$query`
  * @param {string} docPath - The refused place in the query document (a JSON pointer)
  * @returns {string}
  */
-function queryLocation(schemaPath, origin, docPath) {
-  let location = compiledLocation(keywordLocation(schemaPath, '$query'), origin);
+function queryLocation(schemaObj, docPath) {
+  let location = schemaObj.locationOf('$query');
   if (docPath === '') return location;
   for (const token of docPath.split('/').slice(1))
     location = encodeJsonPointerPath(location, decodeJSONPointerSegment(token));
@@ -127,7 +125,7 @@ export function compileQuerySchema(schemaObj, jsonSchema) {
   catch (e) {
     if (e instanceof JsonQueryCompileError)
       throw new SchemaCompileError(e.code, `invalid '$query' document: ${e.reason}`,
-        queryLocation(schemaObj.path, schemaObj.root.origin, e.docPath), { cause: e });
+        queryLocation(schemaObj, e.docPath), { cause: e });
     throw e;
   }
   finally {

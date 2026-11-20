@@ -334,17 +334,20 @@ is refused by a `SchemaCompileError` with the query compiler's own `JQ0xxx`
 code (`@jarenjs/json`'s QUERY-FORMAT §10.2: `JQ0002` an unknown operator,
 `JQ0005` an external other than `root` and `path`, …), whose `docPath` is the
 refused place under the `$query` keyword and whose `cause` is the query
-compiler's `JsonQueryCompileError`. Every compile refusal names a place of
-the schema compiled by its pointer into it (`#/properties/total/%24query`),
-with or without a root `$id`, and a place in another document the validator
-holds by that document's URI; inside an embedded resource (a subschema with
-an `$id` of its own), a `$query`, `$recursiveRef` or `$dynamicRef` refusal
-names the place by that resource's URI. The query code names the defect in the
+compiler's `JsonQueryCompileError`. Every compile refusal names its place one
+way, as `docPath`: a JSON Pointer into the document the place lies in, every
+token escaped, as a URI fragment — alone for a place of the schema compiled
+(`#/properties/total/%24query`), with or without a root `$id`, and after the
+document's URI for a place in another document the validator holds
+(`https://x.test/other#/properties/a/%24query`). An embedded resource (a
+subschema with an `$id` of its own) is a place of its document, never named
+by its `$id` (`#/%24defs/n/properties/a/%24query`), and a refusal the first
+call that reaches a place throws names the place `compile()` would. The query code names the defect in the
 query's own grammar; a `JK` code over it would send every reader to `cause`.
 
 | Code | Class | Meaning |
 |---|---|---|
-| `JK0001` | `SchemaCompileError` | A loop of references and in-place applicators never reads the instance: refused by `compile()`, and by `compileNormalizer` where every normalizer call runs into one |
+| `JK0001` | `SchemaCompileError` | A loop of references and in-place applicators never reads the instance: refused by `compile()`, and by `compileNormalizer` where every normalizer call runs into one; the validator's refusal is located at the reference that closes the loop |
 | `JK0002` | `SchemaCompileError` | The `maxReferenceDepth` or `maxSchemaDepth` option is not a positive safe integer: refused when a schema compiles, and by `compileNormalizer` |
 | `JK0003` | `SchemaCompileError` | The `outputFormat` option is not a format of `@jarenjs/validate/output`: refused when a schema compiles |
 | `JK0004` | `SchemaCompileError` | `compileAsync`'s `loadSchema` threw or rejected for a document a schema references |
@@ -352,10 +355,10 @@ query's own grammar; a `JK` code over it would send every reader to `cause`.
 | `JK0006` | `SchemaCompileError` | One `compileAsync` call needs more document loads than its `maxLoads` option (default 100) |
 | `JK0007` | `SchemaCompileError` | `compileAsync` was given something that is not a `JarenValidator`, a `loadSchema` that is not a function, or a `maxLoads` that is not a positive safe integer |
 | `JK0008` | `SchemaCompileError` | A draft-07 `$ref` beside an `$id`, which does not set its base, resolves to no schema the validator holds: refused when a schema compiles, or by the first call that reaches a reference resolved on first use |
-| `JK0009` | `SchemaCompileError` | A reference resolves to no schema the validator holds (a document nothing holds, a pointer that misses, or an anchor nothing declares): refused when a schema compiles, or by the first call that reaches a reference resolved on first use, a `$dynamicRef`, or a `$recursiveRef` in a document that declares no draft and is not read as 2019-09 |
+| `JK0009` | `SchemaCompileError` | A reference resolves to no schema the validator holds (a document nothing holds, a pointer that misses, or an anchor nothing declares): refused when a schema compiles, or by the first call that reaches a reference resolved on first use, a `$dynamicRef`, or a `$recursiveRef` in a document that declares no draft and is not read as 2019-09; located at the reference |
 | `JK0010` | `SchemaCompileError` | A `$ref`, `$dynamicRef`, `$recursiveRef` or `$id` (`id`) is not a valid URI reference: refused where the text is read, naming the keyword, the text and where it sits |
 | `JK0011` | `SchemaCompileError` | A `$recursiveRef` read as draft 2019-09 is not `"#"`: refused by the first call that reaches it, naming the `$ref` that applies the schema it names |
-| `JK0012` | `SchemaCompileError` | An identifier (`$id`, `$anchor`, `$dynamicAnchor`) names two schemas — a document declares it twice, or it already names another schema the validator holds: refused where the second is read, naming both places; in a registered document, refused by the compile that reads it |
+| `JK0012` | `SchemaCompileError` | An identifier (`$id`, `$anchor`, `$dynamicAnchor`) names two schemas — a document declares it twice, or it already names another schema the validator holds: refused where the second is read, naming both places; in a registered document, refused by the compile that reads it, at the reference that reads it |
 | `JK0013` | `SchemaCompileError` | A keyword the validator reads at a place holds a value that is not of the shape its draft's meta-schema requires (`type: 1`, `required: "a"`, `minLength: -1`, `properties: { "a": 5 }`, `anyOf: []`): refused where the place compiles, naming the keyword, the shape it takes and the value, located at the keyword or at the member or item of it that is wrong |
 | `JK0014` | `SchemaCompileError` | A `pattern`, or a `patternProperties` member name, is no regular expression: refused where the place compiles, naming the keyword, the shape it takes, the value and the `SyntaxError`'s message, located at the keyword or the member, the `SyntaxError` as the `cause` |
 | `JK0015` | `SchemaCompileError` | Under `unknownFormats: 'error'`, a `format` that asserts names no registered format — an unregistered name, or a value that is no name (`format: 5`): refused where the place compiles, naming the format, the registration that would serve it and the opt-out, located at the keyword |
@@ -401,10 +404,11 @@ schema already on the way: such a validator decides nothing on any instance.
   the root's own resource, where its dynamic target is its static one.
 
 *Upgrade: such a root used to compile and refused every instance `JK2001`.*
-The message names every schema location on the loop:
+The message names every schema location on the loop, and `docPath` the
+reference that closes it:
 
 ```text
-JK0001: $ref cycle: http://loop.test/a# -> http://loop.test/a#/allOf/0 -> http://loop.test/a# never reads the instance
+JK0001: $ref cycle: http://loop.test/a# -> http://loop.test/a#/allOf/0 -> http://loop.test/a# never reads the instance at #/allOf/0/%24ref
 ```
 
 A loop that only some instances reach still compiles, and answers every
@@ -494,7 +498,7 @@ depth that differs from host to host. The message names the first
 subschema past the bound:
 
 ```text
-JK0017: the schema nests subschemas more than 128 levels deep, deeper than a small host call stack compiles and validates; raise maxSchemaDepth to compile it at https://github.com/jklarenbeek/jarenjs#/properties/a/properties/a/…
+JK0017: the schema nests subschemas more than 128 levels deep, deeper than a small host call stack compiles and validates; raise maxSchemaDepth to compile it at #/properties/a/properties/a/…
 ```
 
 A reference resolved on first use builds its target when a call first
@@ -613,11 +617,10 @@ JK0009: Can not resolve schema for 'https://github.com/jklarenbeek/nope.json#': 
 JK0009: Can not resolve schema for 'https://github.com/jklarenbeek/jarenjs#/$defs/missing': '/$defs' is not a schema in 'https://github.com/jklarenbeek/jarenjs#'; fix the pointer at #/%24ref
 ```
 
-The `docPath` is the `$ref` that names the target: in the schema compiled
-(`#/…`), or, for a reference resolved on first use in another document the
-validator holds, in that document (`https://held.test/root.json#/$defs/a/%24ref`).
-A compile that refuses a reference of a document registered earlier names no
-place.
+The `docPath` is the `$ref` (or the `$dynamicRef`, the `$recursiveRef`) that
+names the target: in the schema compiled (`#/…`), or in another document the
+validator holds, or a schema handed as `compile`'s second argument, in that
+document (`https://held.test/root.json#/%24defs/a/%24ref`).
 
 A `$dynamicRef` or `$recursiveRef` whose target nothing resolves is refused
 the same way by the first call that reaches it, never answered (answered, it
@@ -697,8 +700,8 @@ the place registered first. Where anchors are not allowed
 ```text
 JK0012: 'https://github.com/jklarenbeek/x.json#' is declared twice (first at '#/%24defs/a/%24id'); give one of them another name at #/%24defs/b/%24id
 JK0012: $id declares 'https://a.test/x.json#', which names another schema the validator holds; give one of them another name at #/%24defs/a/%24id
-JK0012: 'https://d.test/x.json#' names two schemas (in 'https://d.test/r.json', at '#/%24defs/a/%24id' and at '#/%24defs/b/%24id'), and this compile reads it, which would answer by the one registered first; give one of them another name
-JK0012: 'https://d.test/x.json#' names two schemas (one registered under 'https://d.test/one.json', one under 'https://d.test/two.json'), and this compile reads it, which would answer by the one registered first; give one of them another name
+JK0012: 'https://d.test/x.json#' names two schemas (in 'https://d.test/r.json', at '#/%24defs/a/%24id' and at '#/%24defs/b/%24id'), and this compile reads it, which would answer by the one registered first; give one of them another name at #/%24ref
+JK0012: 'https://d.test/x.json#' names two schemas (one registered under 'https://d.test/one.json', one under 'https://d.test/two.json'), and this compile reads it, which would answer by the one registered first; give one of them another name at #/%24ref
 ```
 
 **`JK0013`, `JK0014` — a keyword value of the wrong shape.** Every keyword

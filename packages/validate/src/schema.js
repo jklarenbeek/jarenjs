@@ -57,7 +57,7 @@ import { compilePropertyDependencies } from './property-dependencies.js';
 import { compileDollarDataSchema } from './dollar-data.js';
 import { admitKeywordValues } from './keyword-values.js';
 import { wrapUnevaluated } from './unevaluated.js';
-import { compiledLocation, createJsonPointer, keywordLocation } from './traverse.js';
+import { createJsonPointer, locatedRefusal } from './traverse.js';
 import { getDynamicAnchorName, admitsDynamicReference, appliesRefSiblings } from './dynamic-ref.js';
 
 /**
@@ -124,7 +124,7 @@ function compileRecursiveRef(schemaObj, jsonSchema) {
   // the validator holds is refused (`JK0009`), as an unresolvable
   // $dynamicRef is, instead of passing every instance.
   if (ref !== '#') {
-    const place = compiledLocation(keywordLocation(schemaObj.path, '$recursiveRef'), root.origin);
+    const place = schemaObj.locationOf('$recursiveRef');
     let refusal;
     if ((schemaObj.declaredDraft ?? schemaObj.options.draftVersion) === 2019) {
       refusal = new SchemaCompileError('JK0011',
@@ -137,7 +137,7 @@ function compileRecursiveRef(schemaObj, jsonSchema) {
         root.heldSchema(ref, base);
       }
       catch (e) {
-        refusal = e;
+        refusal = locatedRefusal(e, place);
       }
     }
     return refusal === undefined ? undefined : function refuseRecursiveRef() {
@@ -157,7 +157,7 @@ function compileRecursiveRef(schemaObj, jsonSchema) {
   // plain name alone (`…#root`), whose URI before the name is not its own,
   // it names that document by its name
   const initialTargetUri = root.heldNameOf(baseUri) ?? createJsonPointer(ref, baseUri).id;
-  root.refuseContested(initialTargetUri, schemaObj.path, jsonSchema);
+  root.refuseContested(initialTargetUri, schemaObj.path, jsonSchema, () => schemaObj.locationOf('$recursiveRef'));
   
   // Look up the initial target schema by its URI
   // We do a direct lookup in the schemas map to avoid triggering compilation
@@ -216,11 +216,22 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
   // base URI of its own: it resolves against its own location, as
   // `compileValidator` does
   const baseUri = schemaObj.baseUri || schemaObj.path;
-  const { id: initialTargetUri, fragment: anchorName } = createJsonPointer(ref, baseUri, undefined, '$dynamicRef', compiledLocation(keywordLocation(schemaObj.path, '$dynamicRef'), root.origin));
-  root.refuseHeldPlace(initialTargetUri, jsonSchema, '$dynamicRef', keywordLocation(schemaObj.path, '$dynamicRef'));
+  /** Where the `$dynamicRef` lies, as a refusal names it */
+  const refAt = () => schemaObj.locationOf('$dynamicRef');
+  const { id: initialTargetUri, fragment: anchorName } = createJsonPointer(ref, baseUri, undefined, '$dynamicRef', refAt);
+  root.refuseHeldPlace(initialTargetUri, jsonSchema, '$dynamicRef', refAt);
   // What the reference resolves through when it reads its initial target.
   const holder = { $ref: initialTargetUri };
-  root.refuseContested(initialTargetUri, schemaObj.path, holder);
+  root.refuseContested(initialTargetUri, schemaObj.path, holder, refAt);
+  /** The initial target as a `$ref` reads it; a refusal is located at the `$dynamicRef` */
+  const resolveTarget = () => {
+    try {
+      return root.resolveObject(initialTargetUri, baseUri, holder);
+    }
+    catch (e) {
+      throw locatedRefusal(e, refAt());
+    }
+  };
 
   // Pointer fragments resolve statically, regardless of whether the reference
   // also names a resource. Plain-name fragments use the same dynamic lookup
@@ -229,7 +240,7 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
   // answered: under `not` a `false` would read as success.
   if (anchorName?.startsWith('/')) {
     return boundReference(schemaObj.path, schemaObj.options.maxReferenceDepth, root.referenceWeight(initialTargetUri), function validateDynamicRefPointer(data, dataPath, dataRoot) {
-      return root.resolveObject(initialTargetUri, baseUri, holder).validate(data, dataPath, dataRoot);
+      return resolveTarget().validate(data, dataPath, dataRoot);
     });
   }
 
@@ -300,7 +311,7 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
     // What the map holds under no such key (a `false` target, an anchor the
     // `$ref` resolver finds under another spelling) is resolved as a `$ref`
     // is; what nothing resolves is refused.
-    return root.resolveObject(initialTargetUri, baseUri, holder).validate(data, dataPath, dataRoot);
+    return resolveTarget().validate(data, dataPath, dataRoot);
   });
 }
 

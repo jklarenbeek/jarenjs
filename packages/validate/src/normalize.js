@@ -2038,10 +2038,10 @@ function openFrame(node, ctx, from) {
   const above = frames[frames.length - 1];
   const depth = from === FROM_ROOT || from === FROM_REF ? 0 : above.depth + 1;
   const ceiling = ctx.options.maxSchemaDepth;
-  if (depth >= ceiling) throw schemaTooDeep(ceiling, locationOf(node, ctx), 'normalizes');
+  if (depth >= ceiling) throw schemaTooDeep(ceiling, refusalPlace(node, ctx), 'normalizes');
   /** @type {CompileFrame} */
   const frame = { node, deferred: /** @type {any} */ (null), built: null, at: frames.length, depth,
-    below: (above?.below ?? 0) + (from === FROM_BELOW ? 1 : 0) };
+    below: (above?.below ?? 0) + (from === FROM_BELOW ? 1 : 0), from };
   frame.deferred = function normalizeDeferred(value) {
     return frame.built === null ? value : frame.built(value);
   };
@@ -2057,6 +2057,7 @@ function openFrame(node, ctx, from) {
  * @property {number} at - Its place on the stack of frames
  * @property {number} depth - Its nesting as the validator's compile counts it: from the root or a reference's target
  * @property {number} below - How many members or items lie on the way to it from the root
+ * @property {number} from - How it was reached (`FROM_ROOT`, `FROM_REF`, `FROM_ALLOF`, `FROM_BELOW`)
  */
 
 /**
@@ -2076,13 +2077,34 @@ function openFrame(node, ctx, from) {
 function enterAgain(reached, ctx, from) {
   const frames = ctx.compiling;
   const holder = frames[frames.length - 1];
-  if (from !== FROM_BELOW && holder.below === 0) throw new RefCycleError(loopLocations(frames, reached.at, ctx));
+  if (from !== FROM_BELOW && holder.below === 0)
+    throw new RefCycleError(loopLocations(frames, reached.at, ctx), closingReference(frames, reached, from, ctx));
   let weight = 1;
   for (let i = reached.at + 1; i < frames.length - 1; i++) {
     const node = frames[i].node;
     if (typeof node.$ref !== 'string' || Object.keys(node).length !== 1) weight++;
   }
   return boundReference(locationOf(holder.node, ctx), ctx.options.maxReferenceDepth, weight, reached.deferred, 'normalization');
+}
+
+/**
+ * Where a loop every call runs into is refused, as the validator locates it:
+ * at the reference followed last on the way round (the reach itself, or the
+ * last object on the loop entered through its holder's reference); at the
+ * `allOf` member reached again where no reference is on the loop.
+ * @param {CompileFrame[]} frames @param {CompileFrame} reached @param {number} from - How it is reached again
+ * @param {any} ctx
+ * @returns {string}
+ */
+function closingReference(frames, reached, from, ctx) {
+  /** @param {any} node @returns {string} */
+  const referenceOf = (node) => encodeJsonPointerPath(refusalPlace(node, ctx),
+    ['$ref', '$dynamicRef', '$recursiveRef'].find((name) => typeof node[name] === 'string') ?? '$ref');
+  const holder = /** @type {any} */ (frames[frames.length - 1].node);
+  if (from === FROM_REF) return referenceOf(holder);
+  for (let i = frames.length - 1; i > reached.at; i--)
+    if (frames[i].from === FROM_REF) return referenceOf(frames[i - 1].node);
+  return encodeJsonPointerPath(refusalPlace(holder, ctx), 'allOf', holder.allOf.indexOf(reached.node));
 }
 
 /**
@@ -2103,8 +2125,47 @@ function loopLocations(frames, at, ctx) {
 }
 
 /**
+ * Where a schema object lies in the document compiled, as the validator's
+ * compile refusals name a place (`docPath`): its JSON Pointer there, every
+ * token escaped, after `#` (an embedded resource is a place of the document,
+ * its `$id` names none); an object outside the document by {@link locationOf}.
+ * The document is read breadth first, each place once, and only the path to
+ * the object is spelled; asked only by a refusal.
+ * @param {object} node @param {any} ctx
+ * @returns {string}
+ */
+function refusalPlace(node, ctx) {
+  /** @type {any[]} */
+  const values = [ctx.document];
+  /** @type {number[]} */
+  const parents = [-1];
+  /** @type {string[]} */
+  const keys = [''];
+  const seen = new Set();
+  for (let i = 0; i < values.length; i++) {
+    const value = values[i];
+    if (value === node) {
+      const path = [];
+      for (let at = i; at > 0; at = parents[at]) path.push(keys[at]);
+      let place = '#';
+      for (let k = path.length - 1; k >= 0; k--) place = encodeJsonPointerPath(place, path[k]);
+      return place;
+    }
+    if (value === null || typeof value !== 'object' || seen.has(value)) continue;
+    seen.add(value);
+    for (const key of Object.keys(value)) {
+      values.push(value[key]);
+      parents.push(i);
+      keys.push(key);
+    }
+  }
+  return locationOf(node, ctx);
+}
+
+/**
  * The URI of a schema object of the document, as the validator names the
- * place: the base of the resource holding it and its JSON Pointer there.
+ * place in a loop's message and a reference bound: the base of the resource
+ * holding it and its JSON Pointer there.
  * @param {object} node @param {any} ctx
  * @returns {string}
  */
@@ -2305,7 +2366,7 @@ function compileStackRefusal(error, ctx) {
   if (!isStackExhausted(error)) return error;
   const frame = ctx.compiling[ctx.compiling.length - 1];
   return new SchemaCompileError('JK0017', 'the schema nests subschemas and references deeper than this host\'s call stack '
-    + 'compiles; nest them less deeply, or give the process a larger stack', frame === undefined ? undefined : locationOf(frame.node, ctx),
+    + 'compiles; nest them less deeply, or give the process a larger stack', frame === undefined ? undefined : refusalPlace(frame.node, ctx),
   { cause: error });
 }
 

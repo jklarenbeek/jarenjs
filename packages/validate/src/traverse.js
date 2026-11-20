@@ -78,9 +78,9 @@ export function keywordLocation(uri, keyword, ...members) {
 /**
  * A schema location as a compile refusal names it: a place in the document
  * the compile was handed (held under `origin`) by its pointer into that
- * document (`#/…`), as the walks name it; a place in any other document or
- * embedded resource by its absolute URI.
- * @param {string} location - The place, an absolute URI with a pointer fragment
+ * document (`#/…`), as the walks name it; a place in any other document by
+ * that document's name and the pointer ({@link documentPlace}).
+ * @param {string} location - The place, a document's name with a pointer fragment
  * @param {string} origin - The URI the compiled document is held under
  * @returns {string}
  */
@@ -146,7 +146,8 @@ export function withParsedPointers(fn) {
  * @param {string|undefined} baseUri - The base it resolves against
  * @param {JsonPointerOptions} [opts]
  * @param {string} [keyword] - The keyword the text is the value of, named by a refusal
- * @param {string} [location] - Where that keyword is in the schema, named by a refusal
+ * @param {string|(() => string)} [location] - Where that keyword is in the schema, named by a
+ *   refusal, or what names it, asked only when it refuses
  * @returns {JsonPointer}
  * @throws {SchemaCompileError} `JK0010` when the text, or the base, is not a valid URI
  */
@@ -176,7 +177,7 @@ export function createJsonPointer(refUri, baseUri, opts = new JsonPointerOptions
     const reason = isStringType(baseUri) && /^[a-z][a-z0-9+.-]*:/i.test(baseUri) && !URL.canParse(baseUri)
       ? `${named} resolves against '${baseUri}', which is not a valid URI; ${repairBase}`
       : `${named} is not a valid URI reference; correct it, percent-encoding any character a URI does not allow`;
-    throw new SchemaCompileError('JK0010', reason, location, { cause: e });
+    throw new SchemaCompileError('JK0010', reason, typeof location === 'function' ? location() : location, { cause: e });
   }
 }
 
@@ -330,6 +331,10 @@ function atFragment(uri) {
  * @property {WeakMap<object, string>} idBases - For an identified schema
  *   object, the base its identifier was read against: a compile that builds
  *   the object as a reference target reads it against the same
+ * @property {WeakMap<object, string>} [locations] - For the root of a
+ *   registered document and each identified schema object in it, its place
+ *   as a compile refusal names it ({@link documentPlace}): the document's
+ *   name, then the JSON Pointer to the object, every token escaped
  * @property {WeakSet<object>} [rooted] - The documents held under a plain
  *   name alone (`…#root`, where no schema is held for them under the URI
  *   before the fragment): each is the document of its own places, which are
@@ -452,16 +457,22 @@ export function keptRefBase(places, schema, reading) {
  *   holds: a `$schema` naming one of them, or one `schemas` holds, is read
  *   by that meta-schema's own `$schema`
  * @param {Map<string, string>} [sites] - Where to record the first `$ref` of
- *   the document naming each target (its location in the document)
+ *   the document naming each target: its place, spelled as `locations` spells
+ *   the document's places
  * @param {Map<object, string[]|null|undefined>|WeakMap<object, string[]|null|undefined>} [refs] -
  *   Where to record, for each object holding a reference, the place of its
  *   `$ref` and the targets a compile that builds it asks for
  *   ({@link SchemaPlaces}), and each schema object the walk reads
  * @param {WeakMap<object, string>} [idBases] - Where to record the base each
  *   identifier was read against ({@link SchemaPlaces})
+ * @param {{ map: WeakMap<object, string>, as?: string }} [locations] - Where to
+ *   record the place of the document's root and of each object an identifier
+ *   names ({@link documentPlace}), and, as `as`, the name its places are
+ *   spelled under (`#` for the document a compile was handed) where it is
+ *   not the document's own
  * @returns {string} The document's own id
  */
-export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPointerOptions(), onReference = undefined, places = undefined, defaultDraft = null, onFault = undefined, held = undefined, sites = undefined, refs = undefined, idBases = undefined) {
+export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPointerOptions(), onReference = undefined, places = undefined, defaultDraft = null, onFault = undefined, held = undefined, sites = undefined, refs = undefined, idBases = undefined, locations = undefined) {
   if (!isObjectClass(schema)) {
     const { id } = createJsonPointer(baseUri, undefined, opts);
     schemas.set(id, schema);
@@ -485,6 +496,13 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
   /** The base the root's `$id` was read against. */
   const given = baseUri;
   baseUri = rootUri;
+  // The name the document's places are spelled under: its URI, or the plain
+  // name a document is held under alone (a place below it is `…#root/a`).
+  const placesName = rootUri.indexOf('/', rootUri.indexOf('#')) !== -1 || places?.rooted?.has(schema) ? rootUri : `${withoutFragment(rootUri)}#`;
+  const spelled = locations?.as ?? placesName;
+  locations?.map.set(schema, spelled);
+  /** A place of the document as a refusal names it, where the walk records places ({@link documentPlace}). @param {string} at - `#/…` */
+  const refusedAt = (at) => locations === undefined ? at : spelled + at.slice(1);
 
   /**
    * Refuse a place, or offer the refusal to `onFault` and go on.
@@ -525,7 +543,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       const first = declared.get(id);
       fault(new SchemaCompileError('JK0012', first === undefined
         ? `${keyword} declares '${id}', which names another schema the validator holds; give one of them another name`
-        : `'${id}' is declared twice (first at '${first}'); give one of them another name`, place),
+        : `'${id}' is declared twice (first at '${first}'); give one of them another name`, refusedAt(place)),
       { id, first: held, second: obj, firstAt: first, secondAt: place });
       // the walk leaves the place; a compile that reaches it may build it
       unknown(obj, obj);
@@ -533,6 +551,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     }
     schemas.set(id, obj);
     if (!declared.has(id)) declared.set(id, place);
+    locations?.map.set(obj, spelled + path.slice(1));
     return true;
   };
   /**
@@ -596,7 +615,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       // the root's `$id` was resolved once, against the base it is read under
       if (obj === schema && idName === '$id') id = rootUri;
       else try {
-        ({ id } = createJsonPointer(idText, base, opts, idName, encodeJsonPointerPath(path, idName)));
+        ({ id } = createJsonPointer(idText, base, opts, idName, refusedAt(encodeJsonPointerPath(path, idName))));
       }
       catch (e) {
         fault(e);
@@ -652,7 +671,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     }
 
     if (onReference !== undefined && hasSchemaReference(obj, '$dynamicRef') && admitsDynamicReference('$dynamicRef', foreign ? null : draft))
-      onReference(createJsonPointer(schemaReference(obj, '$dynamicRef'), baseUri, opts, '$dynamicRef', encodeJsonPointerPath(path, '$dynamicRef')), encodeJsonPointerPath(path, '$dynamicRef'), false);
+      onReference(createJsonPointer(schemaReference(obj, '$dynamicRef'), baseUri, opts, '$dynamicRef', refusedAt(encodeJsonPointerPath(path, '$dynamicRef'))), encodeJsonPointerPath(path, '$dynamicRef'), false);
 
     // Before 2019-09 a `$ref` replaces its schema object: an `$id` beside it
     // names the object but does not set the base the reference resolves
@@ -664,7 +683,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     const referenceAt = reference === undefined ? undefined : encodeJsonPointerPath(path, '$ref');
     if (reference !== undefined) {
       try {
-        target = createJsonPointer(reference, keepsBase ? base : baseUri, opts, '$ref', referenceAt);
+        target = createJsonPointer(reference, keepsBase ? base : baseUri, opts, '$ref', refusedAt(referenceAt));
       }
       catch (e) {
         fault(e);
@@ -683,11 +702,12 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       else places?.lateTargets.delete(ref);
       // The latest walk to name a target decides whether a refusal to
       // resolve it says why the `$id` was not its base.
-      if (keepsBase && createJsonPointer(reference, baseUri, opts, '$ref', referenceAt).id !== ref) places?.keptRefs.add(ref);
+      if (keepsBase && createJsonPointer(reference, baseUri, opts, '$ref', refusedAt(referenceAt)).id !== ref) places?.keptRefs.add(ref);
       else places?.keptRefs.delete(ref);
       if (!schemas.has(ref))
         schemas.set(ref, null);
-      if (sites !== undefined && !sites.has(ref)) sites.set(ref, referenceAt);
+      // (spelled as the document's places are: `#/…` in the document a compile was handed)
+      if (sites !== undefined && !sites.has(ref)) sites.set(ref, refusedAt(referenceAt));
       if (onReference !== undefined) onReference(target, referenceAt, keepsBase && draft === null);
 
       // Don't continue here - we need to process other schemas in the same
@@ -708,8 +728,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
         // the place names a registered document's reference, below the id its place is walked
         // under; a compile's own are located by `sites`
         // (a place walked when named, and a document held under a plain name alone, are named by that id)
-        asked = [referenceAt === undefined || refs instanceof Map ? ''
-          : (rootUri.indexOf('/', rootUri.indexOf('#')) !== -1 || places?.rooted?.has(schema) ? rootUri : `${withoutFragment(rootUri)}#`) + referenceAt.slice(1)];
+        asked = [referenceAt === undefined || refs instanceof Map ? '' : placesName + referenceAt.slice(1)];
         try {
           for (const keyword of REFERENCE_KEYWORDS) {
             if (!isStringType(obj[keyword])) continue;
@@ -1048,17 +1067,92 @@ export function unresolvedReference(id, ignoredId = false, why = UNHELD) {
     : new SchemaCompileError('JK0009', `Can not resolve schema for '${id}': ${why}`);
 }
 
+/** The refusals of a reference that a reference's place locates. */
+const REFERENCE_REFUSALS = new Set(['JK0001', 'JK0008', 'JK0009', 'JK0012']);
+
 /**
- * A refusal to resolve a reference (`JK0008`, `JK0009`), located at the
- * `$ref` that names the target; any other error as it is.
+ * A refusal of a reference that names no place yet (`JK0008`, `JK0009`; a
+ * loop of references, `JK0001`; a contested identifier it is read through,
+ * `JK0012`), located at the reference; any other error as it is.
  * @param {unknown} error
- * @param {string|undefined} place - The `$ref`, as `docPath`
+ * @param {string|undefined} place - The reference, as `docPath`
  * @returns {unknown}
  */
 export function locatedRefusal(error, place) {
-  return place !== undefined && error instanceof SchemaCompileError && error.docPath === undefined
-    && (error.code === 'JK0008' || error.code === 'JK0009')
-    ? new SchemaCompileError(error.code, error.reason, place) : error;
+  if (place === undefined || !(error instanceof SchemaCompileError) || error.docPath !== undefined || !REFERENCE_REFUSALS.has(error.code))
+    return error;
+  return error instanceof RefCycleError ? error.at(place) : new SchemaCompileError(error.code, error.reason, place);
+}
+
+/** The places a walk recorded of the documents each compile was handed, by the schema map the compile reads. */
+const compiledPlaces = new WeakMap();
+
+/**
+ * Where a compile records the places of the documents it was handed
+ * ({@link storeSchemaIdsInMap} `locations`), for the schema map it reads.
+ * @param {Map<string, any>} schemas - The compile's schema map
+ * @returns {WeakMap<object, string>}
+ */
+export function compiledPlacesOf(schemas) {
+  let own = compiledPlaces.get(schemas);
+  if (own === undefined) compiledPlaces.set(schemas, own = new WeakMap());
+  return own;
+}
+
+/**
+ * Where the schema a key names lies in its document, as a compile refusal
+ * names a place (`docPath`): a JSON Pointer to it, every token escaped, as a
+ * URI fragment alone (`#/%24defs/n`) in the document a compile was handed,
+ * after the document's name in any other (`https://a.test/s.json#/properties/a`).
+ * An embedded resource is a place of its document: its identifier names no
+ * place. The place a walk recorded for the schema; else the place of what a
+ * key's document part names followed by the key's pointer, the first key
+ * whose pointer reaches the schema itself: the one it is built under, the
+ * reference it is the target of, then any key of the map naming it (a schema
+ * below a keyword no draft defines, which no walk records, is built under its
+ * `$id`, and a pointer to its place names it); else the key. Asked only by a
+ * refusal.
+ * @param {Map<string, any>} schemas - The schema map the compile reads
+ * @param {string} key - The key the schema is built under
+ * @param {SchemaPlaces|undefined} places - What the walks read
+ * @param {unknown} [schema] - The schema itself
+ * @param {string} [reference] - A reference naming the schema, read after the key
+ * @returns {string}
+ */
+export function documentPlace(schemas, key, places, schema = undefined, reference = undefined) {
+  const own = compiledPlaces.get(schemas);
+  const recorded = (/** @type {unknown} */ value) => isObjectClass(value) ? own?.get(value) ?? places?.locations?.get(value) : undefined;
+  const found = recorded(schema);
+  if (found !== undefined) return found;
+  let first;
+  const keys = function* keysOf() {
+    yield key;
+    if (reference !== undefined) yield reference;
+    if (isObjectClass(schema))
+      for (const [named, value] of schemas) if (value === schema && named !== key && named !== reference) yield named;
+  };
+  for (const spelled of keys()) {
+    const start = pointerStart(schemas, spelled, places?.rooted);
+    let node;
+    let place;
+    if (start === -1 || start === spelled.length) {
+      node = schemas.get(spelled);
+      place = recorded(node);
+      if (place === undefined) continue;
+    }
+    else {
+      const document = spelled.slice(0, start);
+      node = schemas.get(document) ?? schemas.get(document.endsWith('#') ? document.slice(0, -1) : `${document}#`);
+      place = recorded(node) ?? document;
+      for (const part of decodeJsonPointerPath(spelled.slice(start))) {
+        place = encodeJsonPointerPath(place, part);
+        node = node?.[part];
+      }
+    }
+    if (!isObjectClass(schema) || node === schema) return place;
+    first ??= place;
+  }
+  return first ?? (key.includes('#') ? key : `${key}#`);
 }
 
 /**
@@ -1174,11 +1268,27 @@ export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new Jso
  * one: no later resolution changes it.
  */
 export class RefCycleError extends SchemaCompileError {
-  /** @param {string[]} ids - the ids on the loop, the first repeated at the end */
-  constructor(ids) {
+  /** @type {string[]} */
+  #ids;
+
+  /**
+   * @param {string[]} ids - the ids on the loop, the first repeated at the end
+   * @param {string} [location] - The reference that enters the loop, as `docPath`
+   */
+  constructor(ids, location = undefined) {
     super('JK0001', ids.length === 2 && ids[0] === ids[1]
       ? `$ref cycle: ${ids[0]} refers to itself and never reads the instance`
-      : `$ref cycle: ${ids.join(' -> ')} never reads the instance`);
+      : `$ref cycle: ${ids.join(' -> ')} never reads the instance`, location);
+    this.#ids = ids;
+  }
+
+  /**
+   * The same refusal, located at a reference.
+   * @param {string} location - The reference, as `docPath`
+   * @returns {RefCycleError}
+   */
+  at(location) {
+    return new RefCycleError(this.#ids, location);
   }
 }
 
@@ -1692,22 +1802,32 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
       if (item !== refschema && !isReferenceHop(item, opts))
         return { id: base, schema: item };
       const ref = schemaReference(item, '$ref');
+      // A refusal of a hop's `$ref` names that `$ref`; one of the first, which
+      // its caller holds, is located by the caller.
+      const at = () => item === refschema ? undefined : keywordLocation(documentPlace(schemas, base, places, item), '$ref');
       // a hop of a chain spelling a place below a held document's name from outside it names nothing
       if (item !== refschema && places?.rooted !== undefined) {
         const { id: spelt } = createJsonPointer(ref, base, opts);
         if (spellsHeldPlace(schemas, spelt, places, item, '$ref')) {
           if (tentative) return undefined;
-          throw locatedRefusal(unresolvedReference(spelt), keywordLocation(base, '$ref'));
+          throw locatedRefusal(unresolvedReference(spelt), at());
         }
       }
-      const hop = resolveRefSchemaShallow(schemas, ref, base, opts, places, tentative);
+      let hop;
+      try {
+        hop = resolveRefSchemaShallow(schemas, ref, base, opts, places, tentative);
+      }
+      catch (e) {
+        throw locatedRefusal(e, at());
+      }
       if (hop === undefined) return undefined;
       const { id, schema } = hop;
 
       // A hop back to an id already visited is a loop of pure references: no
-      // schema on it reads the instance, so no answer is reachable.
+      // schema on it reads the instance, so no answer is reachable. It is
+      // refused at the `$ref` that closes it.
       if (seen.has(id))
-        throw new RefCycleError([...[...seen.keys()].slice(seen.get(id)), id]);
+        throw new RefCycleError([...[...seen.keys()].slice(seen.get(id)), id], at());
 
       seen.set(id, seen.size);
 
@@ -1748,6 +1868,8 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
  *   schemas by URI, which may resolve it
  * @property {WeakSet<object>} [rooted] - the documents held under a plain
  *   name alone ({@link SchemaPlaces})
+ * @property {WeakMap<object, string>} [locations] - the places of the
+ *   registered documents' identified schema objects ({@link SchemaPlaces})
  */
 
 /**
@@ -1913,11 +2035,13 @@ export function assertRootReadsInstance(schemas, rootId, root, reading, opts = n
   const visited = new Map();
   const ids = [];
   // what the walks read, for the identifiers a pointer passes on its way
-  const read = /** @type {SchemaPlaces} */ (/** @type {unknown} */ ({ drafts: reading.drafts, foreign: reading.foreign, contested: new Map(), rooted: reading.rooted }));
+  const read = /** @type {SchemaPlaces} */ (/** @type {unknown} */ ({ drafts: reading.drafts, foreign: reading.foreign, contested: new Map(), rooted: reading.rooted, locations: reading.locations }));
   let schema = root;
   let base = rootId;
   let at = rootId;
   let rootResource;
+  /** The reference followed last, which closes a loop: its holder, the holder's location and its keyword */
+  let closing;
   // Each step visits a new (schema, base) pair, of which a document has
   // finitely many; the cap only ends a walk whose bases never repeat.
   for (let steps = 0; steps <= schemas.size * 4 + 64; steps++) {
@@ -1932,14 +2056,17 @@ export function assertRootReadsInstance(schemas, rootId, root, reading, opts = n
     let bases = visited.get(schema);
     const seen = bases?.get(base);
     if (seen !== undefined)
-      throw new RefCycleError([...ids.slice(seen), location]);
+      throw new RefCycleError([...ids.slice(seen), location],
+        closing && keywordLocation(documentPlace(schemas, closing[1], read, closing[0]), closing[2]));
     if (bases === undefined) visited.set(schema, bases = new Map());
     bases.set(base, ids.length);
     ids.push(location);
 
     let ref;
-    if (hasSchemaReference(schema, '$ref'))
+    if (hasSchemaReference(schema, '$ref')) {
       ref = schemaReference(schema, '$ref');
+      closing = [schema, location, '$ref'];
+    }
     else {
       const first = firstInPlaceSubschema(schema, reading);
       if (first === undefined) return;
@@ -1949,6 +2076,7 @@ export function assertRootReadsInstance(schemas, rootId, root, reading, opts = n
           || (first[0] === '$recursiveRef' && dynamic !== '#'))
           return;
         ref = dynamic;
+        closing = [schema, location, first[0]];
       }
       else {
         at = `${location}/${first[0]}`;

@@ -75,7 +75,7 @@ describe('a document whose root $id holds a plain-name fragment', () => {
       .compile({ items: { $ref: 'https://x.test/n.json#root' } });
     assert.deepEqual([outside([{ a: 's' }]), outside([{ a: 1 }]), outside([1])], [true, false, false]);
     for (const $ref of ['#root', '#', 'https://x.test/n.json#root', 'https://x.test/n.json'])
-      assert.equal(refusal(() => new JarenValidator().compile({ $id: 'https://x.test/n.json#root', $ref })), 'JK0001', $ref);
+      assert.equal(refusal(() => new JarenValidator().compile({ $id: 'https://x.test/n.json#root', $ref })), 'JK0001 #/%24ref', $ref);
   });
 });
 

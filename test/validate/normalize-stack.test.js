@@ -55,7 +55,7 @@ describe('a compile past the host\'s call stack is refused JK0017', () => {
       assert.equal(answer.cause, 'RangeError');
       assert.equal(answer.stack, true);
       assert.equal(answer.repair, true);
-      assert.match(answer.docPath, /^https:\/\/github\.com\/jklarenbeek\/jarenjs#\/%24defs\/d[0-9]+/);
+      assert.match(answer.docPath, /^#\/%24defs\/d[0-9]+/);
     }
   });
 

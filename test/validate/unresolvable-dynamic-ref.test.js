@@ -44,19 +44,20 @@ const thrown = (fn) => {
 };
 
 describe('a dynamic reference nothing resolves is refused JK0009 by the call that reaches it', () => {
-  for (const [label, schema, uri] of [
-    ['a $dynamicRef pointer into a document nothing holds', { $schema: D20, $dynamicRef: 'https://o.test/d.json#/x' }, 'https://o.test/d.json#/x'],
-    ['a $dynamicRef anchor in a document nothing holds', { $schema: D20, $dynamicRef: 'https://o.test/d.json#foo' }, 'https://o.test/d.json#foo'],
-    ['a $dynamicRef to a document nothing holds', { $schema: D20, $dynamicRef: 'https://o.test/d.json' }, 'https://o.test/d.json#'],
-    ['a $dynamicRef anchor no schema declares', { $schema: D20, $dynamicRef: '#nope' }, `${ORIGIN}#nope`],
-    ['a $dynamicRef in a schema that declares no draft', { $dynamicRef: 'https://o.test/d.json' }, 'https://o.test/d.json#'],
+  for (const [label, schema, uri, place] of [
+    ['a $dynamicRef pointer into a document nothing holds', { $schema: D20, $dynamicRef: 'https://o.test/d.json#/x' }, 'https://o.test/d.json#/x', '#/%24dynamicRef'],
+    ['a $dynamicRef anchor in a document nothing holds', { $schema: D20, $dynamicRef: 'https://o.test/d.json#foo' }, 'https://o.test/d.json#foo', '#/%24dynamicRef'],
+    ['a $dynamicRef to a document nothing holds', { $schema: D20, $dynamicRef: 'https://o.test/d.json' }, 'https://o.test/d.json#', '#/%24dynamicRef'],
+    ['a $dynamicRef anchor no schema declares', { $schema: D20, $dynamicRef: '#nope' }, `${ORIGIN}#nope`, '#/%24dynamicRef'],
+    ['a $dynamicRef in a schema that declares no draft', { $dynamicRef: 'https://o.test/d.json' }, 'https://o.test/d.json#', '#/%24dynamicRef'],
     // read as 2019-09 a $recursiveRef other than "#" is refused JK0011 (recursive-ref-value.test.js)
-    ['a $recursiveRef in a schema that declares no draft', { $recursiveRef: 'https://o.test/d.json' }, 'https://o.test/d.json#'],
+    ['a $recursiveRef in a schema that declares no draft', { $recursiveRef: 'https://o.test/d.json' }, 'https://o.test/d.json#', '#/%24recursiveRef'],
   ]) {
     it(label, () => {
       const validate = compiled(schema);
       assert.deepEqual(answers(validate, [1, 'a']), ['JK0009', 'JK0009']);
-      assert.equal(thrown(() => validate(1)), `JK0009: Can not resolve schema for '${uri}': ${UNHELD}`);
+      // (at the reference: it named no place)
+      assert.equal(thrown(() => validate(1)), `JK0009: Can not resolve schema for '${uri}': ${UNHELD} at ${place}`);
     });
   }
 
@@ -68,14 +69,14 @@ describe('a dynamic reference nothing resolves is refused JK0009 by the call tha
   it('a pointer that misses names the step that misses', () => {
     const validate = compiled({ $schema: D20, $dynamicRef: '#/$defs/nope' });
     assert.equal(thrown(() => validate(1)),
-      `JK0009: Can not resolve schema for '${ORIGIN}#/$defs/nope': '/$defs' is not a schema in '${ORIGIN}#'; fix the pointer`);
+      `JK0009: Can not resolve schema for '${ORIGIN}#/$defs/nope': '/$defs' is not a schema in '${ORIGIN}#'; fix the pointer at #/%24dynamicRef`);
   });
 
   it('a pointer that misses in a held document', () => {
     const validate = compiled({ $schema: D20, $dynamicRef: 'https://h.test/d.json#/$defs/x' }, [[{ $id: 'https://h.test/d.json', type: 'string' }]]);
     assert.deepEqual(answers(validate, [1, 'a']), ['JK0009', 'JK0009']);
     assert.equal(thrown(() => validate(1)),
-      "JK0009: Can not resolve schema for 'https://h.test/d.json#/$defs/x': '/$defs' is not a schema in 'https://h.test/d.json#'; fix the pointer");
+      "JK0009: Can not resolve schema for 'https://h.test/d.json#/$defs/x': '/$defs' is not a schema in 'https://h.test/d.json#'; fix the pointer at #/%24dynamicRef");
   });
 
   it('an anchor no schema declares is unresolvable, not a loop: the schema compiles', () => {
@@ -87,7 +88,7 @@ describe('a dynamic reference nothing resolves is refused JK0009 by the call tha
     const validate = compiled({ properties: { a: { $recursiveRef: '#/$defs/nope' } } });
     assert.deepEqual(answers(validate, [{}, { a: 1 }]), [true, 'JK0009']);
     assert.equal(thrown(() => validate({ a: 1 })),
-      `JK0009: Can not resolve schema for '${ORIGIN}#/$defs/nope': '/$defs' is not a schema in '${ORIGIN}#'; fix the pointer`);
+      `JK0009: Can not resolve schema for '${ORIGIN}#/$defs/nope': '/$defs' is not a schema in '${ORIGIN}#'; fix the pointer at #/properties/a/%24recursiveRef`);
   });
 });
 
