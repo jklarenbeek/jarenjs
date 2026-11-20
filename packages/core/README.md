@@ -458,9 +458,15 @@ t({ comparison: '>=', limit: 18 });   // 'must be >= 18'
 A parameter renders as `String(value)`, an object or array as its JSON, and
 `formatMessageValue` quotes a value a message names (a string keeps its
 quotes, so `""` stays visible). A BigInt, which JSON cannot spell, renders as
-its digits at any depth (`10n` as `10`, `[10n]` as `["10"]`). *Upgrade: a
-BigInt inside an object or array parameter, and any BigInt passed to
-`formatMessageValue`, used to throw `TypeError`.*
+its digits at any depth (`10n` as `10`, `[10n]` as `["10"]`), and so does a
+`BigInt` object (`Object(10n)` as `10`). A value JSON cannot write — a
+circular reference, a value nested past the host's stack, a value whose own
+`toJSON` or getter throws — renders as its tag (`[object Object]`,
+`[object Array]`). *Upgrade: a BigInt inside an object or array parameter, and
+any BigInt passed to `formatMessageValue`, used to throw `TypeError`; a
+`BigInt` object and a circular reference threw `TypeError`, and a value nested
+some thousands of levels deep a `RangeError`, so a validator collecting errors
+threw where it answers `false` otherwise.*
 
 ## Units, currency and finance
 

@@ -419,6 +419,30 @@ export function createIsSchemaTypeHandler(type) {
 const isDefined = (data) => data !== undefined;
 const isJsonString = (data) => typeof data === 'string';
 const isAnyValue = () => true;
+// The values a reference keyword asserts by: a bound is a number (`NaN`
+// is none), a step a number above 0, a count a non-negative integer.
+// Every other value asserts nothing.
+const isBound = (value) => isNumberType(value) && value === value;
+const isStep = (value) => isNumberType(value) && value > 0;
+const isCount = (value) => Number.isInteger(value) && value >= 0;
+
+/**
+ * A `pattern` test for a source resolved per call: a source that is no
+ * regular expression asserts nothing, as an uncompilable format does.
+ * @param {string} data
+ * @param {string} pattern
+ * @returns {boolean}
+ */
+function matchesResolvedPattern(data, pattern) {
+  let test;
+  try {
+    test = createSchemaPatternTester(pattern);
+  }
+  catch {
+    return true;
+  }
+  return test(data);
+}
 
 /**
  * The options `compileDataRef` takes from a validation object: the Relative
@@ -471,8 +495,10 @@ function lastStepMultipleOf() {
  *
  * A ref that cannot be compiled throws when the schema is compiled. Every
  * validator then follows one lax contract: a data instance outside the
- * keyword's type, a ref that finds no value, or a resolved constraint of
- * the wrong type asserts nothing.
+ * keyword's type, a ref that finds no value, or a resolved constraint
+ * the keyword does not assert by (of the wrong type, or a value such as a
+ * negative count, a step of 0 or a source that is no regular expression)
+ * asserts nothing.
  *
  * @returns {Record<string, (schemaObj: object, ref: string) => ((data: any, dataPath: string, dataRoot: any) => boolean) | undefined>}
  */
@@ -547,28 +573,27 @@ export function createDataRefCompilers() {
 
   return {
     __proto__: null,
-    minimum: constraint('minimum', isNumberType, isNumberType,
+    minimum: constraint('minimum', isNumberType, isBound,
       (data, min) => data >= min),
-    maximum: constraint('maximum', isNumberType, isNumberType,
+    maximum: constraint('maximum', isNumberType, isBound,
       (data, max) => data <= max),
-    exclusiveMinimum: constraint('exclusiveMinimum', isNumberType, isNumberType,
+    exclusiveMinimum: constraint('exclusiveMinimum', isNumberType, isBound,
       (data, min) => data > min),
-    exclusiveMaximum: constraint('exclusiveMaximum', isNumberType, isNumberType,
+    exclusiveMaximum: constraint('exclusiveMaximum', isNumberType, isBound,
       (data, max) => data < max),
-    multipleOf: constraint('multipleOf', isNumberType, isNumberType, lastStepMultipleOf()),
-    minLength: constraint('minLength', isJsonString, isNumberType,
+    multipleOf: constraint('multipleOf', isNumberType, isStep, lastStepMultipleOf()),
+    minLength: constraint('minLength', isJsonString, isCount,
       (data, min, lengthOf) => lengthOf(data) >= min),
-    maxLength: constraint('maxLength', isJsonString, isNumberType,
+    maxLength: constraint('maxLength', isJsonString, isCount,
       (data, max, lengthOf) => lengthOf(data) <= max),
-    pattern: constraint('pattern', isJsonString, isStringType,
-      (data, pattern) => createSchemaPatternTester(pattern)(data)),
-    minItems: constraint('minItems', Array.isArray, isNumberType,
+    pattern: constraint('pattern', isJsonString, isStringType, matchesResolvedPattern),
+    minItems: constraint('minItems', Array.isArray, isCount,
       (data, min) => data.length >= min),
-    maxItems: constraint('maxItems', Array.isArray, isNumberType,
+    maxItems: constraint('maxItems', Array.isArray, isCount,
       (data, max) => data.length <= max),
-    minProperties: constraint('minProperties', isObjectInstance, isNumberType,
+    minProperties: constraint('minProperties', isObjectInstance, isCount,
       (data, min) => Object.keys(data).length >= min),
-    maxProperties: constraint('maxProperties', isObjectInstance, isNumberType,
+    maxProperties: constraint('maxProperties', isObjectInstance, isCount,
       (data, max) => Object.keys(data).length <= max),
     // as the static forms answer (enum.js): `NaN` is no member of a list
     // and an object or a function is compared by `equalsDeep`

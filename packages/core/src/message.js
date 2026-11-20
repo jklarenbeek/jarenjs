@@ -19,28 +19,55 @@ import { setObjectMember } from './object.js';
  */
 
 /**
+ * Whether a value is a BigInt or a `BigInt` object (which `JSON.stringify`
+ * would unwrap to a BigInt and refuse).
+ * @param {unknown} value
+ * @returns {value is bigint | BigInt}
+ */
+const isBigInt = (value) => typeof value === 'bigint' || value instanceof BigInt;
+
+/**
  * `JSON.stringify` replacer for a value a message quotes: a BigInt (a
  * schema or a field built in JavaScript may hold one), which JSON cannot
- * spell, is written as its digits.
+ * spell, is written as its digits, and so is a `BigInt` object.
  * @param {string} _key
  * @param {unknown} value
  * @returns {unknown}
  */
 function bigintDigits(_key, value) {
-  return typeof value === 'bigint' ? value.toString() : value;
+  return isBigInt(value) ? value.toString() : value;
+}
+
+/**
+ * The JSON of a value a message quotes, a BigInt or a `BigInt` object as
+ * its digits. A value JSON cannot write — a
+ * circular reference, a value nested past the host's stack, a value whose
+ * own `toJSON` or getter throws — is written as its tag (`[object Object]`,
+ * `[object Array]`), so a message renders whatever a schema or an
+ * instance holds.
+ * @param {unknown} value
+ * @returns {string | undefined}
+ */
+function jsonText(value) {
+  try {
+    return isBigInt(value) ? value.toString() : JSON.stringify(value, bigintDigits);
+  }
+  catch {
+    return Object.prototype.toString.call(value);
+  }
 }
 
 /**
  * Render one interpolated parameter: `String(v)` for primitives,
- * `JSON.stringify(v)` for objects and arrays, a BigInt at any depth as its
- * digits.
+ * `JSON.stringify(v)` for objects and arrays, a BigInt (or a `BigInt`
+ * object) at any depth as its digits.
  *
  * @param {unknown} value - The parameter value
  * @returns {string} The rendered value
  */
 export function formatTemplateParam(value) {
   return (value !== null && typeof value === 'object')
-    ? JSON.stringify(value, bigintDigits)
+    ? /** @type {string} */ (jsonText(value))
     : String(value);
 }
 
@@ -54,7 +81,7 @@ export function formatTemplateParam(value) {
  */
 export function formatMessageValue(value) {
   if (typeof value === 'string') return `"${value}"`;
-  return typeof value === 'bigint' ? value.toString() : String(JSON.stringify(value, bigintDigits));
+  return String(jsonText(value));
 }
 
 /**

@@ -120,9 +120,10 @@ describe('multipleOf reads the decimals the step and the value spell', () => {
     assert.deepEqual(wrong.slice(0, 5), []);
   });
 
-  it('keeps the answers for a value or a $data step that is not finite, and for a $data step of zero', () => {
+  it('keeps the answers for a value or a $data step that is not finite; a $data step of zero asserts nothing', () => {
     assert.deepEqual(answers(2, [Infinity, -Infinity, NaN]), [false, false, false]);
-    assert.deepEqual(dataAnswers(0, [0, 1]), [false, false]);
+    // a step the static keyword cannot take, as every reference keyword reads one
+    assert.deepEqual(dataAnswers(0, [0, 1]), [true, true]);
     assert.deepEqual(dataAnswers(Infinity, [1, Infinity]), [true, false]);
   });
 

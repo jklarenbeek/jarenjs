@@ -42,10 +42,7 @@ import {
   ARRAY_CONSTRAINTS, OBJECT_CONSTRAINTS,
 } from '@jarenjs/core/schema';
 
-import {
-  compileDataRef,
-  JSONPOINTER_NOTHING,
-} from '@jarenjs/json/pointer';
+import { compileDataRef } from '@jarenjs/json/pointer';
 
 import {
   createDataRefCompilers,
@@ -66,6 +63,8 @@ const KEYWORD_COMPILERS = createDataRefCompilers();
 
 //#region $data-only Validators
 
+const isNoName = (value) => typeof value !== 'string';
+
 /**
  * Compile $data reference for uniqueItems constraint
  * @param {object} schemaObj - The validation object
@@ -79,8 +78,9 @@ function compileDollarDataUniqueItems(schemaObj, ref) {
   return function validateDollarDataUniqueItems(data, dataPath, dataRoot) {
     if (!Array.isArray(data)) return true;
 
-    const shouldBeUnique = resolveRef(dataRoot, dataPath);
-    if (shouldBeUnique === JSONPOINTER_NOTHING || !shouldBeUnique) return true;
+    // a boolean is the keyword's type: `true` asserts, and `false`, like a
+    // value of another type or no value, asserts nothing
+    if (resolveRef(dataRoot, dataPath) !== true) return true;
 
     // the check `uniqueItems: true` makes
     return isUniqueDeepArray(data) || addError(data, dataPath);
@@ -102,8 +102,10 @@ function compileDollarDataRequired(schemaObj, ref) {
   return function validateDollarDataRequired(data, dataPath, dataRoot) {
     if (!isObjectInstance(data)) return true;
 
+    // a list of member names is the keyword's value: no array, or one that
+    // holds anything but a name, asserts nothing
     const requiredProps = resolveRef(dataRoot, dataPath);
-    if (requiredProps === JSONPOINTER_NOTHING || !Array.isArray(requiredProps)) return true;
+    if (!Array.isArray(requiredProps) || requiredProps.some(isNoName)) return true;
 
     for (const prop of requiredProps) {
       if (!Object.hasOwn(data, prop)) {

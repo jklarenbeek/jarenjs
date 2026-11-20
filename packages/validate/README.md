@@ -359,7 +359,7 @@ See also:
   - Object constraints: `minProperties`, `maxProperties`
   - Value constraints: `enum`, `const`
 
-  Both absolute JSON Pointers (e.g., `/A`, `/limits/min`) and relative JSON Pointers (e.g., `0/parent`, `1/sibling`) are supported. A reference that cannot be compiled (`{ "minimum": "abc" }`) fails the compile, as it does for `$data`; a reference that compiles but finds no value in the instance asserts nothing.
+  Both absolute JSON Pointers (e.g., `/A`, `/limits/min`) and relative JSON Pointers (e.g., `0/parent`, `1/sibling`) are supported. A reference that cannot be compiled (`{ "minimum": "abc" }`) fails the compile, as it does for `$data`; a reference that compiles but finds no value in the instance asserts nothing, and so does one that finds a value the keyword does not assert by: anything but a number for a bound (`NaN` included), anything but a number above 0 for `multipleOf`, anything but a non-negative integer for a count (`minLength`, `maxItems`, ...), anything but a string that is a regular expression for `pattern`, anything but a string for `format`, anything but an array for `enum` (`const` takes every value). *Upgrade: a bound or a count that found `NaN` refused every instance, a count that found `1.5`, `-1` or `Infinity` and a `multipleOf` that found `0` or a negative number asserted by them (a `multipleOf` of `0` refused every number), and a `pattern` that found `'('` threw an uncoded `SyntaxError` while validating.*
 
 - `$data` | Ajv-style instance references (`{ "minimum": { "$data": "1/limit" } }`) — supports every keyword the `data` list above supports, plus `uniqueItems` and `required`. Takes the same three reference forms: empty for the whole instance, an absolute JSON Pointer (`/limit`), or a Relative JSON Pointer (`1/limit`). Refs compile once at schema compile time through the compiled pointer engine of `@jarenjs/json`, and a reference that cannot be compiled **fails the compile** rather than quietly resolving to nothing — a constraint that disables itself is worse than a rejected schema. Only a string `$data` is a reference: an object whose `$data` is anything else is a plain value, so `{ "const": { "$data": 5 } }` admits only `{ "$data": 5 }`. *Upgrade: such a `const` accepted every value, and `{ "const": { "$data": "" } }` (the whole instance) refused every value.*
 
@@ -410,9 +410,15 @@ Jaren supports the `data-ref` proposal from json-everything through the `data` k
 The refs compile once at schema compile time through the compiled pointer engine of [`@jarenjs/json`](../json) and resolve allocation-free per validation.
 
 Dynamic `const` and `enum` compare by the same equality as their static forms,
-and a dynamic `uniqueItems` makes the check `uniqueItems: true` makes: one
-relation decides all of them (the keywords for all types, above). Dynamic
-string bounds count in the compiler's `lengthUnit` (or `useGrapheme`) as well.
+and a dynamic `uniqueItems` that finds `true` makes the check `uniqueItems: true`
+makes: one relation decides all of them (the keywords for all types, above).
+A dynamic `uniqueItems` that finds `false` or a value that is no boolean, and a
+dynamic `required` that finds no array or one holding anything but member names,
+assert nothing, as every reference keyword does on a value it does not assert
+by. *Upgrade: a dynamic `uniqueItems` that found a value that is no boolean
+(`'yes'`, `1`, `{}`, `[]`) refused an array with a repeated item, and a dynamic
+`required` that found `['a', 1]` required `a` and `1`.*
+Dynamic string bounds count in the compiler's `lengthUnit` (or `useGrapheme`) as well.
 
 #### Relative pointer dialect
 
