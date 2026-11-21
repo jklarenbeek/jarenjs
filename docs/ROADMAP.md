@@ -103,12 +103,6 @@ delete it or fix it.
 
 ## @jarenjs/validate
 
-- [ ] **A percent-encoded unreserved character is not the character in a
-  reference.** `$ref: '#%41'` does not reach `$anchor: 'A'`, nor
-  `http://x.test/%61.json` an `$id` of `http://x.test/a.json` (JK0009): URIs
-  are compared as the URL standard spells them, where RFC 3986 §6.2.2.2 makes
-  them equivalent. A coded refusal, not a wrong answer; reading them alike is
-  one rule for every URI part, in all four tools.
 - [ ] **Per-call cost of annotation tracking for `unevaluated*`** — a check
   over many members or items no longer scans the evaluation log once per
   member: a long stretch is gathered in one pass, so the check grows with the
@@ -129,23 +123,6 @@ delete it or fix it.
   still extends them even when nothing it can reach reads one. Following those
   needs every `$dynamicAnchor` the compilation can enter by that name, and the
   embedded resource's base.
-- [ ] **A `v`-mode literal `pattern` is still read as a literal.** `pattern`,
-  `patternProperties` keys, the `regex` format and `@jarenjs/forms`' field
-  `pattern` read a string as an ECMA-262 source in Unicode mode, so `"/a/"`
-  matches only text containing `/a/`; a string that is no valid Unicode-mode
-  source but compiles as a `/source/flags` literal (`"/[\\p{L}--[a-z]]/v"`)
-  still falls back to that literal, because it compiled before. Closing it
-  refuses such a schema when it compiles (a minor), with an upgrade sentence
-  that names the `v`-mode spelling.
-- [ ] **`compileAsync` still asks the loader for a URI under the default
-  base.** `{ $ref: 'name.json' }` in a schema without `$id`, on a validator
-  whose `traverse` names no origin, asks for
-  `https://github.com/jklarenbeek/name.json`; a failed load now names the base
-  and both repairs (an `$id`, or `traverse: new TraverseOptions(base)`), but
-  the request itself still goes out. Refusing before the load would refuse a
-  loader that serves that URI, which the README teaches and which answers
-  right, so it waits on a decision to change the default (a minor with an
-  upgrade sentence).
 - [ ] **A broken document's collected errors grow with the branches tried to
   the power of the nesting.** A failing `oneOf` or `anyOf` keeps every
   branch's errors, and each branch that descends repeats the errors of the

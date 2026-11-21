@@ -162,7 +162,9 @@ reads them, compiled in Unicode mode: `"/a/"` matches only text that contains
 `params.pattern` is the string the schema wrote. A RegExp that JavaScript code
 places in a schema keeps its own flags. A string that is no valid Unicode-mode
 source but compiles as a `v`-mode literal (`"/[\\p{L}--[a-z]]/v"`) is still
-read as that literal; one that compiles neither way is refused `JK0014` when
+read as that literal: a JSON document has no other way to write a `v`-mode
+pattern (a `patternProperties` key is always a string), so the literal stays the
+spelling for one; one that compiles neither way is refused `JK0014` when
 the schema compiles (it was an uncoded `SyntaxError`). *Upgrade: a string written
 `/source/flags` used to be read as a regular-expression literal, so `"/a/"`
 accepted `"a"` and `"/a/i"` accepted `"A"`; drop the slashes and spell a
