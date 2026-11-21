@@ -58,7 +58,7 @@ import {
 import { wrapUnevaluated } from './unevaluated.js';
 import { assertLengthUnit } from './string.js';
 import { registerFormatCompiler, registerFormatCompilers } from './format.js';
-import { equalsJson, mergeMap } from '@jarenjs/core/object';
+import { equalsDeep, equalsJson, mergeMap } from '@jarenjs/core/object';
 import { isStringWhiteSpace } from '@jarenjs/core/string';
 import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep, appliesRefSiblings } from './dynamic-ref.js';
 import { isRecursiveQueryCompileError } from './query-keyword.js';
@@ -245,7 +245,73 @@ class InternalValidationError {
     this.dataKey = dataKey;
     this.value = value;
     this.rest = rest;
+    // Where it lies highest in the error list, -1 when nowhere, and below
+    // that, where it lay when a kept answer gave it again, lowest first
+    // (ValidationRoot#callReference)
+    this.at = -1;
+    /** @type {number[]|null} */
+    this.below = null;
   }
+}
+
+/**
+ * Where an error lies below its highest place in the list (or, with
+ * `own`, highest), -1 when nowhere: the places a discard or a closed span
+ * emptied are dropped as they are read.
+ * @param {InternalValidationError[]} errors - The error list
+ * @param {InternalValidationError} fault
+ * @param {boolean} own - Whether its highest place is read too
+ * @returns {number}
+ */
+function placeUnder(errors, fault, own) {
+  const below = fault.below;
+  if (below === null) return -1;
+  while (below.length !== 0) {
+    const at = below[below.length - 1];
+    if (errors[at] === fault) return own ? below.pop() : at;
+    below.pop();
+  }
+  return -1;
+}
+
+/**
+ * What a resolved reference answered on one member at one location, with
+ * the errors it kept ({@link ValidationRoot#callReference}).
+ * @typedef {{ data: unknown, depth: number, valid: boolean, errors: InternalValidationError[] }} KeptAnswer
+ */
+
+/** The longest error list whose errors are compared pairwise for repeats before they are indexed by location */
+const PAIRWISE_ERRORS = 16;
+
+/**
+ * Whether two errors in their public form are the same error: the same
+ * keyword, instance location, schema location and params.
+ * @param {import('./messages.js').ValidationError} a
+ * @param {import('./messages.js').ValidationError} b
+ * @returns {boolean}
+ */
+function sameError(a, b) {
+  return a.keyword === b.keyword && a.instancePath === b.instancePath && a.schemaPath === b.schemaPath
+    && sameParams(a.params, b.params);
+}
+
+/**
+ * Whether two errors' params are equal, as `equalsDeep` reads them: a
+ * member that is the same value, or a string that differs, answers without
+ * a deep comparison.
+ * @param {Record<string, unknown>} a
+ * @param {Record<string, unknown>} b
+ * @returns {boolean}
+ */
+function sameParams(a, b) {
+  let count = 0;
+  for (const key in a) {
+    const x = a[key], y = b[key];
+    if (x === y ? x === undefined && !Object.hasOwn(b, key) : typeof x === 'string' || !equalsDeep(x, y)) return false;
+    count++;
+  }
+  for (const key in b) if (--count < 0 || !Object.hasOwn(a, key)) return false;
+  return count === 0;
 }
 
 /**
@@ -557,6 +623,12 @@ export class ValidationRoot {
   #ownReads = new WeakMap();
   /** @type {Array} Array of validation errors */
   #errors = null;
+  /** @type {number} Where the span of the error list a kept answer is given again into starts ({@link ValidationRoot#callReference}) */
+  #spanStart = 0;
+  /** @type {number} How many errors the span was given that the list held below it: none, and none it holds lies below it */
+  #spanOld = 0;
+  /** @type {Array|null} The error list once its repeats have left it ({@link ValidationRoot#distinctErrors}), so a later read converts it alone */
+  #distinctList = null;
   /** @type {ValidationObject|null} The root schema's ValidationObject */
   #firstSchema = null;
   /** @type {DynamicScope} The dynamic scope of the validation running: the anchors of the resources it entered, outermost first */
@@ -583,7 +655,7 @@ export class ValidationRoot {
   #keepsReferenceAnswers = false;
   /** @type {{ open: number }} The `oneOf`/`anyOf` branch walks open on the call stack */
   #branchWalks = { open: 0 };
-  /** @type {Map<Function, Map<string, {data: unknown, depth: number, valid: boolean, errors: InternalValidationError[]}>>|null} What resolved references answered in this validation, by target and location */
+  /** @type {Map<Function, Map<string, KeptAnswer>>|null} What resolved references answered in this validation, by target and location */
   #keptAnswers = null;
   /** @type {EvalLog} Log of evaluated properties/items for unevaluated* support */
   #evalLog = new EvalLog();
@@ -1352,9 +1424,124 @@ export class ValidationRoot {
    * @returns {boolean} Always returns false for convenience in validators
    */
   addError(error /*:InternalValidationError*/) {
-    this.#errors.push(error);
+    const errors = this.#errors;
+    error.at = errors.length;
+    errors.push(error);
     this.#recorder?.error(error);
     return false;
+  }
+
+  /**
+   * Keep an error a kept answer gives again, at the end of the list, unless
+   * the open span holds it already. That span is the whole list, except
+   * while a resolved reference's answer is being kept ({@link
+   * callReference}): there it is what that entry kept, so the answer it
+   * keeps is each error it raised or was given, once, whatever the list
+   * held before it.
+   * @param {InternalValidationError} fault
+   */
+  #keep(fault) {
+    const errors = this.#errors;
+    let at = fault.at;
+    if (at !== -1 && errors[at] !== fault) at = fault.at = placeUnder(errors, fault, true);
+    if (at >= this.#spanStart) return;
+    if (at !== -1) {
+      (fault.below ??= []).push(at);
+      this.#spanOld++;
+    }
+    fault.at = errors.length;
+    errors.push(fault);
+  }
+
+  /**
+   * Close the span a reference's entry kept its errors in, the span around
+   * it open again: an error the span around holds already leaves the list,
+   * the others join that span.
+   * @param {number} start - Where the closed span starts
+   * @param {number} old - How many errors it was given that the list held below it
+   */
+  #closeSpan(start, old) {
+    if (old === 0) return;
+    const errors = this.#errors;
+    const end = errors.length;
+    const outer = this.#spanStart;
+    let to = start;
+    for (let i = start; i < end; i++) {
+      const fault = errors[i];
+      const under = placeUnder(errors, fault, false);
+      if (under >= outer) {
+        fault.at = under;
+        /** @type {number[]} */ (fault.below).pop();
+        continue;
+      }
+      if (under !== -1) this.#spanOld++;
+      fault.at = to;
+      errors[to++] = fault;
+    }
+    errors.length = to;
+  }
+
+  /**
+   * The errors of the last validation in their public form, each once: an
+   * error the same as one before it (same keyword, instance location,
+   * schema location and params) leaves the list, its record too. The list
+   * holds each record once already ({@link callReference}); one error read
+   * from two records is one raised twice on one member, by a keyword the
+   * walk entered again where no answer was kept.
+   * @returns {import('./messages.js').ValidationError[]}
+   */
+  distinctErrors() {
+    const records = this.#errors;
+    const errors = convertInternalErrors(records);
+    const end = errors.length;
+    if (end < 2 || this.#distinctList === records) return errors;
+    this.#distinctList = records;
+    let to = 0;
+    if (end <= PAIRWISE_ERRORS) {
+      outer: for (let i = 0; i < end; i++) {
+        const error = errors[i];
+        for (let j = 0; j < to; j++) if (sameError(errors[j], error)) continue outer;
+        if (to !== i) {
+          records[to] = records[i];
+          errors[to] = error;
+        }
+        to++;
+      }
+    }
+    else {
+      /** @type {Map<string, import('./messages.js').ValidationError[]>} */
+      const byPlace = new Map();
+      outer: for (let i = 0; i < end; i++) {
+        const error = errors[i];
+        const place = `${error.instancePath}\u0000${error.schemaPath}`;
+        const same = byPlace.get(place);
+        if (same === undefined) byPlace.set(place, [error]);
+        else {
+          for (let j = 0; j < same.length; j++) if (sameError(same[j], error)) continue outer;
+          same.push(error);
+        }
+        if (to !== i) {
+          records[to] = records[i];
+          errors[to] = error;
+        }
+        to++;
+      }
+    }
+    if (to !== end) {
+      records.length = to;
+      errors.length = to;
+    }
+    return errors;
+  }
+
+  /**
+   * The records of the last validation's errors, each once ({@link distinctErrors}).
+   * @returns {InternalValidationError[]}
+   */
+  distinctRecords() {
+    const records = this.#errors;
+    if (records.length > 1 && this.#distinctList !== records) this.distinctErrors();
+    return records;
   }
 
   /** @returns {UnitRecorder|null} The output units' recorder, or null (an internal collaborator of the keyword compilers) */
@@ -1392,19 +1579,34 @@ export class ValidationRoot {
     let byPath = this.#keptAnswers?.get(validate);
     const kept = byPath?.get(dataPath);
     if (kept !== undefined && kept.data === data && kept.depth === depth) {
-      const errors = this.#errors;
-      for (let i = 0; i < kept.errors.length; i++) errors.push(kept.errors[i]);
+      const errors = kept.errors;
+      for (let i = 0; i < errors.length; i++) this.#keep(errors[i]);
       return kept.valid;
     }
-    const mark = this.#errors.length;
-    const valid = validate(data, dataPath, dataRoot);
-    if (typeof valid === 'boolean') {
-      if (this.#keptAnswers === null) this.#keptAnswers = new Map();
-      if (byPath === undefined) {
-        byPath = new Map();
-        this.#keptAnswers.set(validate, byPath);
+    // The entry's errors are kept apart until it returns, so its answer
+    // keeps each error it raised or was given once, the ones the list held
+    // before it too.
+    const start = this.#errors.length;
+    const outerStart = this.#spanStart, outerOld = this.#spanOld;
+    this.#spanStart = start;
+    this.#spanOld = 0;
+    let valid;
+    try {
+      valid = validate(data, dataPath, dataRoot);
+      if (typeof valid === 'boolean') {
+        if (this.#keptAnswers === null) this.#keptAnswers = new Map();
+        if (byPath === undefined) {
+          byPath = new Map();
+          this.#keptAnswers.set(validate, byPath);
+        }
+        byPath.set(dataPath, { data, depth, valid, errors: this.#errors.slice(start) });
       }
-      byPath.set(dataPath, { data, depth, valid, errors: this.#errors.slice(mark) });
+    }
+    finally {
+      const old = this.#spanOld;
+      this.#spanStart = outerStart;
+      this.#spanOld = outerOld;
+      this.#closeSpan(start, old);
     }
     return valid;
   }
@@ -1458,6 +1660,8 @@ export class ValidationRoot {
     // When skipErrors=true (default), we don't use the errors array
     if (!this.#options.skipErrors) {
       this.#errors = [];
+      this.#spanStart = 0;
+      this.#spanOld = 0;
     }
     // Every frame that enters a dynamic scope restores the scope it found,
     // so it is empty here already; emptied defensively.
@@ -2930,7 +3134,7 @@ export class JarenValidator {
       if (collectErrors) {
         return {
           valid,
-          errors: valid ? [] : convertInternalErrors(root.errors)
+          errors: valid ? [] : root.distinctErrors()
         };
       }
       return valid;
@@ -2956,7 +3160,7 @@ export class JarenValidator {
     if (!collectErrors) {
       const jarenValidateSchema = root.createValidateFn();
       Object.defineProperty(jarenValidateSchema, "errors", {
-        get: function () { return root.errors }
+        get: function () { return root.distinctRecords() }
       })
       return jarenValidateSchema;
     }
@@ -2965,12 +3169,12 @@ export class JarenValidator {
       const valid = root.validate(data);
       return {
         valid,
-        errors: valid ? [] : convertInternalErrors(root.errors)
+        errors: valid ? [] : root.distinctErrors()
       };
     }
 
     Object.defineProperty(jarenValidateSchema, "errors", {
-      get: function () { return root.errors }
+      get: function () { return root.distinctRecords() }
     })
     // The same answer, carrying the instance on its valid branch.
     Object.defineProperty(jarenValidateSchema, "narrow", {

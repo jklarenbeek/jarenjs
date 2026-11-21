@@ -123,15 +123,24 @@ delete it or fix it.
   still extends them even when nothing it can reach reads one. Following those
   needs every `$dynamicAnchor` the compilation can enter by that name, and the
   embedded resource's base.
-- [ ] **A broken document's collected errors grow with the branches tried to
-  the power of the nesting.** A failing `oneOf` or `anyOf` keeps every
-  branch's errors, and each branch that descends repeats the errors of the
-  members below it: the studio's `form` seed template broken by one plain
-  member in a phrase keeps 2,922 collected errors at the top phrase, 14,132
-  one phrase down and 123,538 three down, and a breakage deeper still keeps
-  millions, where the studio shows 20. Wanted: a decision between collapsing
-  repeated errors and bounding what a failing applicator keeps; either
-  changes the collected list (an upgrade note).
+- [ ] **An output format that records units walks every branch in full, and
+  exhausts the heap on the studio's `form` seed.** With `outputFormat` basic,
+  detailed, verbose, list or hierarchical the reference answers a collecting
+  walk keeps are off (the recorder hangs units under the evaluation path that
+  entered them, and a kept answer gives errors only), so every `oneOf`/`anyOf`
+  branch is walked again at every level: the VALID `minisite` seed takes
+  90-243 MB and 0.17-0.66 s, `dashboard` 238-506 MB and 0.56-1.35 s, and
+  `form`, valid or broken, runs out of a 2 GB heap, where `flagOutput` answers
+  in 2-3 ms. basic, detailed and list write 108-235 KB for those valid seeds:
+  their cost is the recording, and wants a kept answer that holds its unit
+  subtree relative to its reference plus a projection that drops a failed
+  subtree under a valid applicator before expanding it. verbose and
+  hierarchical write the failed branches' units under `valid: true` by their
+  own definition (65-219 MB of JSON on the valid seeds), so their size follows
+  the branches. On a broken document basic writes each failing path (minisite
+  one phrase down: 2,819 units, 529 distinct by location, instance and text).
+  Wanted: the bounded recording for basic/detailed/list, and a decision on
+  writing each distinct error once on a broken document.
 - [ ] **A two-position tuple validates at about half of Ajv's speed.** The
   validator benchmark's 'uniqueItems=false with an array of items' rows (a
   two-position `prefixItems`/`items` tuple of `type: boolean`; `uniqueItems:

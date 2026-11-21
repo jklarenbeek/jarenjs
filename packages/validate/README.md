@@ -940,6 +940,21 @@ Setting `collectErrors: true` implies `skipErrors: false` (collecting errors
 means recording them), so you do not need to set both. Set `skipErrors`
 yourself only to keep first-failure short-circuiting while still collecting.
 
+The list holds each distinct error once, in the order the validation first
+raised it: an error the same as one the list holds already (the same
+`keyword`, `instancePath`, `schemaPath` and `params`) is not kept again. A
+collecting validation tries every branch of a `oneOf`, and the branches of an
+`anyOf` up to a match, and branches that enter one definition on one member
+through references give again what it answered, errors included; so the list
+grows with the document and the schema, not with the branches tried to the
+power of the nesting. Nothing else bounds it: no error is left out for the
+count. *Upgrade: the list kept an error once per branch that raised it or gave
+it again, so a document broken a few phrases down a grammar of alternatives
+returned mostly exact repeats, and `{ "allOf": [false, false] }` returned two
+identical `allOf` errors (one now). The distinct errors and the order they
+first appear in are as before; a caller that counts errors counts distinct
+ones.*
+
 Read errors from the returned object. The `JarenValidator` instance has no
 `errors` property. A compiled function retains a legacy `errors` getter exposing
 its internal last-call diagnostics; that getter is not the public

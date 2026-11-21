@@ -860,7 +860,7 @@ flowchart LR
     F --> G[All validators complete]
     G --> H{collectErrors?}
 
-    H -->|true| I[convertInternalErrors - messages.js]
+    H -->|true| I[convertInternalErrors - messages.js,<br/>each distinct error once]
     H -->|false| J[Return boolean only]
 
     I --> K[Extract params, resolve msgid,<br/>match errorMessage registry,<br/>render through catalog]
@@ -888,6 +888,24 @@ levels), gives that answer again and records the errors that entry left
 and dropped when it returns. A compilation that tracks annotations, records
 output units, or holds any dynamic-scope keyword (`$dynamicRef`,
 `$dynamicAnchor`, `$recursiveRef`, `$recursiveAnchor`) walks in full.
+
+The error list keeps each distinct error once, in the order of first
+appearance. Most repeats are the same records given again by kept answers,
+so the list keeps a record once where it is given: an entry that keeps its
+answer opens a span of the list, a record given again into a span that holds
+it already is not added, and when the entry returns the records the span
+around it holds already leave the list. A span keeps every record its entry
+raised or was given, the ones below it included, so the answer it keeps is
+complete whatever a discard (`not`, `if`, `contains`, a matching `anyOf`, a
+`oneOf` that matched) later takes from below it. Each record knows where it
+lies highest in the list and where it was given again from, so these checks
+read no list; a discard truncates the list as before and the places it
+emptied are dropped when next read. The records left are converted once,
+and an error the same in its public form as one before it (keyword,
+instance location, schema location, params; two records of one keyword
+raised again where no answer was kept, or named after two property names)
+leaves both lists (`ValidationRoot#distinctErrors`). The legacy `errors`
+getter reads the same records.
 
 ### Report-Time Messages (messages.js)
 

@@ -82,10 +82,12 @@ describe('a collecting walk entering one definition again per branch', function 
       assert.deepStrictEqual(kept(instance), full(instance));
     const { valid, errors } = kept(nested(1, 'bad'));
     assert.strictEqual(valid, false);
+    // each distinct error once: the operand's errors, which every phrase
+    // branch gives again, are kept where the first branch raised them
     assert.deepStrictEqual(errors.map((e) => `${e.instancePath} ${e.keyword}`), [
       ' type', '/$a/0 type', '/$a/0 type', '/$a/0 type', '/$a/0 oneOf', '/$a/0 oneOf', '/$a items',
-      ' const', '/$a/0 type', '/$a/0 type', '/$a/0 type', '/$a/0 oneOf', '/$a/0 oneOf', '/$a items',
-      ' const', '/$a/0 type', '/$a/0 type', '/$a/0 type', '/$a/0 oneOf', '/$a/0 oneOf', '/$a items',
+      ' const', '/$a items',
+      ' const', '/$a items',
       ' oneOf', ' oneOf',
     ]);
   });
