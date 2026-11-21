@@ -35,7 +35,8 @@ const { engine, path, url, schema, at, model } = JSON.parse(process.env.JAREN_SC
 const pool = engine === 'postgres' ? new (await import('pg')).default.Pool({ connectionString: url, max: 1 }) : null;
 const now = () => at;
 const store = await openStore(model, { driver: pool === null ? nodeDriver() : postgresDriver(pool, { schema }),
-  ...(path === null ? {} : { path }),
+  // the running worker polls the same file every few milliseconds: wait out its lock, as a writer beside it would
+  ...(path === null ? {} : { path, busyTimeout: 5000 }),
   runtime: createRuntime({ zoneProvider: createIntlZoneProvider({ revision: 'host ICU' }), now }),
   jobs: { now, schedules: jobSchedules() } });
 try {
