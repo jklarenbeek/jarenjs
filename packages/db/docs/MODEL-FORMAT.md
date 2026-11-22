@@ -2498,7 +2498,15 @@ integer past a double's precision as well (`5.00000000000000000001` for 5);
 on SQLite a column that holds the double (a `number` member's) takes
 the number as it is. The statement is the one a safe integer binds, so it seeks
 as that one does, and a document's own such external runs in it too
-([ARCHITECTURE](../ARCHITECTURE.md#the-type-truth-table)). A predicate's
+([ARCHITECTURE](../ARCHITECTURE.md#the-type-truth-table)). An entity's
+`integer` column that another writer set past 2^53 by digits that are not
+the integer they name exactly as a double (`1152921504606847000` written for
+2^60) reads differently on the two engines: SQLite stores the exact 64-bit
+integer those digits name (2^60 + 24), which no JavaScript number represents,
+so a read of the row, a projection of the column and the engine's comparison
+refuse it `JD2003` while a native comparison judges it exactly (`$eq` 2^60 does
+not keep it); PostgreSQL stores the digits the writer spelled and reads them
+as the double 2^60, in a read and a comparison alike. A predicate's
 infinity keeps the engine's rows as well (on PostgreSQL it is the interval of
 decimals at and past the midpoint between the largest double and 2^1024),
 where a document's own infinity runs in the engine. One the

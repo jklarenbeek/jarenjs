@@ -675,11 +675,6 @@ costs a descriptor plus examples and no UI code at all.
   referenced key spelled and read as `String()` and `Number()` do (the
   referencing table rebuilt ahead of the key's check, or the check taken after
   both).
-- [ ] **An integer column another writer spelled by a JavaScript number's
-  digits reads differently on the two engines.** `1152921504606847000` written
-  beside the store into an `integer` column is refused `JD2003` on SQLite and
-  read as 2^60 on PostgreSQL. Wanted: one answer, without making SQLite's
-  exact column comparisons differ from the engine.
 - [ ] **A join table carries no column beyond its two keys.** A many-to-many
   join table is a read-only root (`$.<JoinTable>[*]`, MODEL-FORMAT §10.7)
   whose rows are its two keys, so "which pairs were attached since Friday" has
@@ -700,19 +695,6 @@ costs a descriptor plus examples and no UI code at all.
   exists). A migration plan's target model, `explainMapping` and the CLI still
   read a non-string `through` as the implicit `<A>_<B>` name: the refusal
   moves there once a plan reads its from model as history.
-- [ ] **A handle refuses a chain over one database a second store names
-  differently.** A handle takes a chain over another store's view when both
-  read one database (one SQLite file by its canonical path, one shared-cache
-  in-memory database the Node drivers hold, one PostgreSQL address, port,
-  database and schema), but one file through two hard links (which only a
-  rollback journal mode opens twice) or one server through two addresses (a
-  socket and TCP, IPv4 and IPv6) give the two stores different names, so the
-  chain is refused `JL0005` though it would answer right. The server's
-  `system_identifier` is not a fix (a standby or a restored copy carries it);
-  a file needs an identity every driver reports alike ([DB-CLIENT
-  §6](../packages/linq/docs/DB-CLIENT.md)). The native Node and Bun drivers
-  already pin a file's device and inode at open for shadow isolation, and refuse
-  (`JD0021`) a path that no longer names it.
 - [ ] **A PostgreSQL statement at the term bound can still compile for
   seconds.** One statement carries at most 128 predicate terms
   ([POSTGRESQL](../packages/db/docs/POSTGRESQL.md)); a leaf is one term, an
