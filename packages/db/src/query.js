@@ -57,7 +57,8 @@ import {
 } from './plan.js';
 import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath, UnrepresentableIdentity,
   entityTableColumns, physicalComparable, bindsAsWritten, bindsUnheldText, UNHELD_TEXT_REFUSAL,
-  entityOrderRead, bucketGuards, bucketAbsentGuard, numericEdge, listHolds } from './emit.js';
+  entityOrderRead, bucketGuards, bucketAbsentGuard, numericEdge, listHolds, readsEmptyApart, orderedLeadsOf,
+  emptyApartFrom } from './emit.js';
 import { modelPath } from './model-path.js';
 import { selectPlan, conjoin, effectiveOrder, planOrder, ordersByColumn } from './algebra.js';
 import {
@@ -1969,6 +1970,8 @@ export function createQueryEngine(context) {
     safeIntegerColumns: physicalPlan.safeIntegerColumns,
     jsonColumns: physicalPlan.jsonColumns,
     indexedColumns: physicalPlan.indexedColumns,
+    // read when a statement is planned, after the open verified the table
+    get orderedLeads() { return orderedLeadsOf(dialect, physicalPlan); },
   };
   /** The k-nearest counters `stats()` reports: how many rows the
    * fetch scored and how many candidates the cut kept, so a
@@ -3322,7 +3325,8 @@ const uncarriedPredicate = (root) => `the profile's predicate for '${root}' comp
  * whole document over the fetched root — the same honesty contract as
  * phase A.
  * @param {{ connection: any, entities: Map<string, any>, mapping: any,
- *   state: any }} context
+ *   state: any, tablePlans?: Map<string, any> }} context - `tablePlans`, each
+ *   entity's DDL plan as the open verified it, which says the indexes it reads in order
  * @returns {any}
  */
 export function createEntityQueryEngine(context) {
@@ -3361,6 +3365,8 @@ export function createEntityQueryEngine(context) {
     document: mapping.entities[name].document !== false,
     // the names a row identity must not share
     columns: entityTableColumns(mapping.entities[name]),
+    // the columns an ordered index of the table leads, as the open read it ({@link orderedLeadsOf})
+    get orderedLeads() { return entities.get(name)?.physical == null ? orderedLeadsOf(dialect, context.tablePlans?.get(name)) : new Map(); },
     ...(entities.get(name)?.physical == null ? {} : {
       mapping: mapping.entities[name],
       keys: mapping.entities[name].keys.map((key) => mapping.entities[name].columns.find((c) => c.name === key).physical),
@@ -4160,7 +4166,7 @@ export function createEntityQueryEngine(context) {
  * growing OFFSET whenever the top-level ordering is a single unique
  * column, with the choice reported by `explainLoad`.
  * @param {{ connection: any, entities: Map<string, any>, mapping: any,
- *   state: any }} context
+ *   state: any, tablePlans?: Map<string, any> }} context - `tablePlans` as the entity query engine's
  * @param {string} entityName
  * @returns {any}
  */
@@ -4823,6 +4829,24 @@ export function createLoadEngine(context, entityName) {
     // model declares); a managed entity's declared columns can
     const notNull = (/** @type {any} */ term) => keyColumns.includes(term.column)
       || (physicalEntity && columnOfProperty(term.column)?.notNull === true);
+    // the profile's row bound rides the root as LIMIT maxRows + 1, so
+    // a load past it is detected at the bound and refused (JD2007)
+    const rowBound = profile === null ? null : profile.maxRows;
+    const take = rowBound === null ? spec?.take
+      : Math.min(spec?.take ?? Infinity, rowBound + 1);
+    /** The columns an ordered index of this table leads, as the open read it ({@link orderedLeadsOf}). */
+    const orderedLeads = physicalEntity ? new Map() : orderedLeadsOf(dialect, context.tablePlans?.get(entityName));
+    /** Whether a term orders a column an ordered index leads, read as that index keys it.
+     * @param {string} property @param {string} sql - the term's value as the statement orders it */
+    const leadsIndex = (property, sql) => {
+      const column = columnOfProperty(property);
+      const keyed = column === undefined ? undefined : orderedLeads.get(column.physical ?? column.name);
+      const bare = `${rendered.aliasSql}.${q(column?.physical ?? column?.name ?? property)}`;
+      return keyed !== undefined && sql === (keyed === 'double' ? dialect.doubleRead(bare) : bare);
+    };
+    /** The rows read in two branches ({@link emptyApartFrom}), with the leading bound the branch that holds
+     * the key seeks by; `null` reads the table. @type {{ bound?: string } | null} */
+    let apart = null;
     /** @type {ReturnType<typeof orderIdentity> | null} */
     let identity = null;
     /** The values a call's `after` binds, checked against this ordering; `null` without one.
@@ -4848,8 +4872,25 @@ export function createLoadEngine(context, entityName) {
         afterValues = (given) => continuationValues(given, identity, order.length, keyColumns, digitKeys);
         const values = afterValues(after);
         const column = (/** @type {any} */ term) => termSql(term.column);
-        if (identity.length > 1 && identity.every((term, i) => notNull(term) && values[i] !== null
-          && term.desc === identity[0].desc)) {
+        const rowValue = identity.length > 1 && identity.every((term, i) => notNull(term) && values[i] !== null
+          && term.desc === identity[0].desc);
+        // every row after a value of the leading term lies at or beyond it in
+        // that term, except the empty keys its order places after the values:
+        // the bound is the seek the index the term leads reads, where the
+        // expansion below is a filter over the whole index. With the empty
+        // keys first it holds of every row after; with them last, of the
+        // branch that holds the key, read apart from the empty one
+        const lead = identity[0];
+        // (spelled where an index the store keys `NULLS FIRST` reads it)
+        const seeks = leadsIndex(lead.column, column(lead));
+        const bound = !rowValue && identity.length > 1 && values[0] !== null && dialect.capabilities.orderedIndexes === true && seeks
+          // a descending order with its empty keys last is the index read backward, which a
+          // page reads as it is: only an ascending one, which places them apart, reads them apart
+          && (notNull(lead) || lead.nullsFirst || (take !== undefined && readsEmptyApart(dialect) && !lead.desc))
+          ? `${column(lead)} ${lead.desc ? '<=' : '>='} ${param({ continuation: 0 })}` : null;
+        if (bound !== null && !notNull(lead) && !lead.nullsFirst) apart = { bound };
+        else if (bound !== null) conditions.push(bound);
+        if (rowValue) {
           // one direction over terms that cannot hold NULL: the row value
           // `(t1, ..., tn) > (?, ..., ?)` is exactly the expansion below,
           // and the key's index seeks it. A NULL element would make the
@@ -4932,9 +4973,8 @@ export function createLoadEngine(context, entityName) {
       // a text identity's raw bytes, which every row read proves its key against
       + (textKeys === null ? '' : `, ${textKeys.projection}`)
       + digitsProjection
-      + includeSql
-      + ` FROM ${dialect.tableName(tree.entityMapping.table, tree.entityMapping.schema)} AS ${rendered.aliasSql}`;
-    if (conditions.length > 0) sql += ` WHERE ${conditions.join(' AND ')}`;
+      + includeSql;
+    const fromSql = `${dialect.tableName(tree.entityMapping.table, tree.entityMapping.schema)} AS ${rendered.aliasSql}`;
     /**
      * A load's order term, a key the open read without its CHECK read as
      * the double the engine holds, so the keys another writer spelled
@@ -4966,12 +5006,27 @@ export function createLoadEngine(context, entityName) {
           term.ref.flavor === 'entity-column' && term.ref.notNull === true)}`;
       });
     if (identity === null) orderSql.push(...(physicalEntity ? keyColumns.map((key) => termSql(key)) : [`${rendered.aliasSql}.${rowIdentityOf(dialect, tree.entityMapping)}`]));
+    // a limited read whose leading term places the empty key where the index
+    // that column leads does not (ascending with it greatest, descending
+    // with it greatest) reads that index in two branches; so does a page
+    // past a value whose empty keys follow it ({@link emptyApartFrom})
+    const first = identity !== null ? identity[0] : order[0];
+    /** The leading term's property and value, where it is a mapped column that can hold NULL. */
+    const leading = first === undefined ? undefined : identity !== null
+      ? (notNull(first) ? undefined : { property: first.column, value: termSql(first.column) })
+      : (first.ref.flavor !== 'entity-column' || first.ref.notNull === true ? undefined
+        : { property: propertyOfPhysical(first.ref.column), value: loadOrderSql(propertyOfPhysical(first.ref.column)) });
+    if (apart === null && take !== undefined && after === undefined && leading !== undefined && readsEmptyApart(dialect)
+      && (identity !== null ? first.nullsFirst === first.desc : first.emptyGreatest === true)
+      && leadsIndex(leading.property, leading.value))
+      apart = {};
+    if (apart !== null && leading !== undefined) {
+      sql += ` FROM ${emptyApartFrom(dialect, { from: fromSql, alias: rendered.aliasSql, where: conditions, lead: leading.value,
+        desc: first.desc === true, rest: orderSql.slice(1), limit: /** @type {number} */ (take) + (pagination === 'offset' ? spec.skip : 0),
+        ...(apart.bound === undefined ? {} : { bound: apart.bound }), keyed: identity !== null })}`;
+    }
+    else sql += ` FROM ${fromSql}${conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : ''}`;
     sql += ` ORDER BY ${orderSql.join(', ')}`;
-    // the profile's row bound rides the root as LIMIT maxRows + 1, so
-    // a load past it is detected at the bound and refused (JD2007)
-    const rowBound = profile === null ? null : profile.maxRows;
-    const take = rowBound === null ? spec?.take
-      : Math.min(spec?.take ?? Infinity, rowBound + 1);
     if (take !== undefined || pagination === 'offset') {
       sql += ` ${dialect.limitClause(take === undefined ? null : take,
         pagination === 'offset' ? spec.skip : undefined)}`;

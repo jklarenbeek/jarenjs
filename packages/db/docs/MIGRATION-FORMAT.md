@@ -1383,14 +1383,21 @@ scale a retype from text left on PostgreSQL dropped (`12.0` is `12`); one past
 holds what a double does not, `NaN` and the infinities spell as themselves, a
 value past the double range as `Infinity`, and one below it as `0`. A key
 another table's foreign key references and the column that references it are
-spelled alike (`5` in both). The link rebuilds the key's table first and the
-referencing table after it, and while only the first is rebuilt the reference
-need not match its key (SQLite compares a reference as its key's type reads
-it: the text `5` meets the number `5`, but the number `5` is the text `5.0`).
-So a rebuild's `foreign_key_check` passes over a broken reference from a table
-a later rebuild of the same link spells anew; that reference is judged after
-the later rebuild, against the check taken before the first, and fails the
-link there if the two still do not match. One limit stays: on SQLite a number
+spelled alike (`5` in both). The link rebuilds the key's table first and then
+every table that references it: one whose foreign-key property is declared, one
+whose column the relation infers (no property of its own), and a many-to-many
+join table, which is rebuilt after every entity (its memberships copied, on
+PostgreSQL with their `rid`, and its index created under its final name). While
+only the first is rebuilt the reference need not match its key (SQLite compares
+a reference as its key's type reads it: the text `5` meets the number `5`, but
+the number `5` is the text `5.0`). So a rebuild's `foreign_key_check` passes
+over a broken reference from a table a later rebuild of the same link spells
+anew, or a later step drops; that reference is judged after the later rebuild,
+against the check taken before the first, and fails the link there if the two
+still do not match (one still broken when the link ends fails the link's own
+check, §6). On PostgreSQL the key's rebuild drops each foreign key that
+references the key, and the referencing table's rebuild creates it again,
+which judges every row it copies (below). One limit stays: on SQLite a number
 whose shortest spelling takes 16 or 17 significant digits can end in the
 neighbour of `String()`'s last digit, and the text still reads back as the
 same number. The copy chooses among the candidates that read back the one
@@ -1475,14 +1482,37 @@ On PostgreSQL the step keeps what the old table held, where a new table can:
   [PostgreSQL native preservation](#postgresql-native-preservation)) prepared
   by a fresh create of the target model does not match them: prepare the
   reference by replaying the same chain from the same baseline instead.
-- **An entity that another object depends on cannot be rebuilt.** PostgreSQL
-  refuses to drop a table another object depends on, and the rebuild
-  re-points nothing: another entity's foreign key to the table, the table's
-  own reference to itself, or an application's view over it keeps the old
-  table from being dropped. The step fails `JD0023`,
-  naming the dependent as the server's detail does (`view post_titles depends
-  on table "Post"`), and the link rolls back whole. A rebuild of an entity
-  nothing depends on applies.
+- **A referenced entity rebuilds with the foreign keys that reference it.**
+  PostgreSQL refuses to drop a table another table's foreign key references,
+  and the temporary table's reference to itself names the old table. Right
+  after the lock the step drops each such key: an allocation block
+  (`["unreference", table, column, referenced]`) drops every foreign key of
+  that column alone that references the table, under whatever name the server
+  or an earlier rebuild gave it; a reference of the table to itself is dropped
+  from the temporary table too, right after its create. Once the table is in
+  place each key the target declares is added again (`ALTER TABLE … ADD
+  FOREIGN KEY`, with its action, under the name a create gives it), which the
+  server validates over every row that references the table — except a key of
+  a table a later rebuild of the same link spells anew (a retyped key's
+  referencing table, above), whose rebuild creates it. The link is one
+  transaction: a reference to no row fails the link `JD0023` and it rolls back
+  whole, every key as it was. Dropping a foreign key takes an `ACCESS
+  EXCLUSIVE` lock on both tables, so readers of the rebuilt table and of each
+  table that references it wait too, from the step's second statement until
+  the link commits; a key added `NOT VALID` and validated in the same
+  transaction holds the same locks, so it is added validated at once. A
+  rename of a referenced entity rebuilds each table that references it, and
+  one of those that another table references rebuilds the same way.
+- **An entity that another object depends on cannot be rebuilt.** An
+  application's view over the table, a foreign key from a table the model
+  does not declare, or any other object the server keeps on the table beyond
+  the model's own foreign keys, keeps the old table from being dropped: the
+  step fails `JD0023`, naming the dependent as the server's detail does
+  (`view post_titles depends on table "Post"`), and the link rolls back whole. A
+  self-referencing entity whose key is retyped is refused before that, at the
+  temporary table's create, whose reference to the old table cannot join the
+  two types (`foreign key constraint "<table>__rebuild_<column>_fkey" cannot be
+  implemented`).
 - **A referenced entity's column changes in place where it can.** For an
   entity another entity's foreign key references, its own included, the
   planner makes two changes without a rebuild: a column's `enum` declared,
@@ -1508,10 +1538,12 @@ On PostgreSQL the step keeps what the old table held, where a new table can:
   references it is compiled again against a retyped column. The referencing
   rows, their foreign key and its action stay as they are. A retype into text
   from a number or an integer spells each value through a select of its own,
-  which `ALTER COLUMN … TYPE … USING` cannot hold, so it stays a rebuild and is
-  refused there, as is any change of a referenced entity's key, foreign keys
-  or calendar members (re-pointing a foreign key through a rebuild is not
-  supported). An entity nothing references rebuilds as before.
+  which `ALTER COLUMN … TYPE … USING` cannot hold, so it stays a rebuild, as
+  does a change of a referenced entity's key (a retype, or its allocation
+  gained or dropped: every column that references it is rebuilt with it) or
+  of its foreign keys, and the rebuild drops and adds again the keys that
+  reference the table (above). An entity nothing references rebuilds as
+  before.
 - **The temporary names must fit too.** Planning a rebuild names the
   temporary table `<entity>__rebuild` and checks its index names as
   `<entity>__rebuild_<member>` as well, although the step creates the indexes

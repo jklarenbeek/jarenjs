@@ -155,11 +155,22 @@ more index every write that sets the member keeps. A unique index keeps its plai
 column that holds no NULL (a composite key's member, ordered with the default
 placement), over a calendar member's key columns, a derived column or a
 declared expression, and a join table's: an ordering over a unique member is
-sorted, and so is an ascending ordering with `$empty: 'greatest'` (`ASC NULLS
-LAST`, descending with `'least'`) over any indexed member, which a plain index
-served. A table an
+sorted. An ordering whose leading term places the empty key where such an index
+does not — ascending with `$empty: 'greatest'` (`ASC NULLS LAST`), which the
+index places first, or descending with it (`DESC NULLS FIRST`), which the index
+read backward places last — over a member such an index leads under no
+condition (or the double an index beside keys) is read in two branches when it
+is limited: a window, a load with `take` and a keyset page read the rows that
+hold the key in the index's order (`IS NOT NULL`), then those that hold none
+(`IS NULL`), each branch limited to the rows the statement keeps (its limit
+and its offset), and sort at most twice that many rows into the statement's
+order. An unlimited ordering, and one over a member no such index leads, is
+sorted. A table an
 earlier release created holds its indexes plain and none beside: it opens and
-answers as before, sorting those rows, and `planColumnUpgrade` drops each
+answers as before, sorting those rows — the open reads which indexes it holds
+plain, and a statement over one sends what that release sent, so an ordering
+that places the empty key greatest reads the plain index as it did, in one
+statement — and `planColumnUpgrade` drops each
 index it holds plain where this release keys it so and creates it again, and
 creates each one beside that the table lacks (MIGRATION-FORMAT §3).
 `introspect()` reads such an index back as the plain index it was declared
@@ -367,7 +378,20 @@ creates over such a column (above, "Indexes in the order a statement reads"),
 so a window, a load's `orderBy` and a keyset page read it from the index, the
 row identity or the key ordering a tie after it; a table an earlier release
 created, whose indexes are plain, sorts those rows until `planColumnUpgrade`
-respells them. A text keyset requires the `UTF8` database encoding, read at open — no
+respells them. A page past a value of a leading term such an index leads
+seeks that index from the value: beside the continuation's comparison, which reads as a filter, it spells
+the bound every following row meets in that term (`"s" >= $1`, `<=`
+descending), which the index reads as its condition. Where the term's empty
+keys follow the value (ascending with them greatest, descending with them
+least) the bound holds of the rows that hold the key alone, and the page reads
+those from it and the empty ones apart, in two branches (above), the empty
+ones ordered by the key alone, which the key's index holds in order — an
+ascending page only: descending, the index read backward places the empty keys
+last as the page orders them, and the page keeps the continuation's comparison
+alone, a filter over the index read from its start. A page past
+an empty key reads, where the empty keys sort last, the rest of them alone,
+and where they sort first the rest of them and then every row that holds the
+key, through the index's empty rows first. A text keyset requires the `UTF8` database encoding, read at open — no
 per-row byte proof runs here — and refuses `JD0032` naming any other. An
 explicit `orderBy` over a uuid column with the `null` NULL policy stays
 refused, as every such column is for the typed path. A text, integer, number

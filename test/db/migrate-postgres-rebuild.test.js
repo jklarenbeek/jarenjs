@@ -15,9 +15,11 @@
  * number it appends to a taken name, `Post_pkey1`, the temporary table's
  * name a rebuild leaves, the name a renamed table keeps), because the store
  * reads the key's constraint from the catalog when it opens; no other
- * constraint is the key, however its name looks. A rebuild of an entity that
- * another object depends on (a foreign key, a view) is refused, naming the
- * dependent as the server does, and changes nothing. Writers wait for a
+ * constraint is the key, however its name looks. A rebuild of an entity a
+ * foreign key references, its own included, drops each such key and adds it
+ * again, validated, under the name a create gives it; one that another object
+ * depends on (a view) is refused, naming the dependent as the server does, and
+ * changes nothing. Writers wait for a
  * rebuild: a write committed by another session while the rebuild waits for
  * the table, or while it runs, is kept, and a waiting writer continues
  * against the rebuilt table. The store reopens clean.
@@ -288,6 +290,28 @@ describe('postgres: a rebuild keeps what the old table held',
     });
 
     it('a rebuild of an entity another object depends on is refused, naming the dependent as the server does', async () => {
+      // no foreign key: an application's view over the entity's table
+      const [from, to] = [postModel(), postModel(['x', 'y'])];
+      await withSchema(async ({ pool, schema, driver }) => {
+        const store = await openStore(from, { driver: driver() });
+        try { await store.entity('Post').create({ title: 'x' }); }
+        finally { await store.close(); }
+        await pool.query(`CREATE VIEW "${schema}"."post_titles" AS SELECT "title" FROM "${schema}"."Post"`);
+        const rows = async () => (await pool.query(`SELECT * FROM "${schema}"."Post" ORDER BY rid`)).rows;
+        const held = await rows();
+        await assert.rejects(migrate({ driver: driver() }, [rebuildOf(from, to, schema, 'r')], { baseline: from, model: to, shadow: false }), {
+          code: 'JD0023',
+          message: "JD0023: migration 'r' step 0 (rebuild) failed: a PostgreSQL rebuild of an entity that another object "
+            + 'depends on is not supported: the old \'Post\' cannot be dropped while view post_titles depends on table "Post"',
+        });
+        // the link rolled back whole: nothing recorded, the rows and the key as they were
+        assert.deepEqual((await migrationHistory({ driver: driver() })).history.rows, []);
+        assert.deepEqual(await rows(), held);
+        assert.deepEqual(await keyNames(pool, schema, 'Post'), ['Post_pkey']);
+      });
+    });
+
+    it('a rebuild of an entity a foreign key references, its own included, drops each key and adds it again', async () => {
       // a number retyped into text, which only a rebuild spells as String() does
       // (an enum's change, or a retype a cast makes, changes such a table in place)
       const comments = { 'x-entity': { relation: { to: 'Comment', many: true, via: 'postId', onDelete: 'cascade' } } };
@@ -299,40 +323,205 @@ describe('postgres: a rebuild keeps what the old table held',
       const tree = (/** @type {string} */ type) => ({ $model: '0.1', entities: { Category: { schema: {
         type: 'object', properties: { cid: { type: 'integer', 'x-entity': { key: true, default: 'auto' } },
           name: { type: 'string' }, n: { type }, parentId: { type: 'integer' }, children } } } } });
-      /** @type {[any, any, string, (store: any, pool: any, schema: string) => Promise<void>, string][]} */
+      /** @type {[any, any, string, string, (store: any) => Promise<void>, any][]} */
       const cases = [
-        [referenced('number'), referenced('string'), 'Post', async (store) => {
-          await store.entity('Post').create({ title: 'x' });
+        [referenced('number'), referenced('string'), 'Post', 'Comment', async (store) => {
+          await store.entity('Post').create({ title: 'x', n: 5 });
           await store.entity('Comment').create({ postId: 1, body: 'c' });
-        }, 'constraint Comment_postId_fkey on table "Comment" depends on table "Post"'],
-        [tree('number'), tree('string'), 'Category', async (store) => {
-          await store.entity('Category').create({ name: 'a' });
+        }, { postId: 99, body: 'o' }],
+        [tree('number'), tree('string'), 'Category', 'Category', async (store) => {
+          await store.entity('Category').create({ name: 'a', n: 5 });
           await store.entity('Category').create({ name: 'b', parentId: 1 });
-        }, 'constraint Category__rebuild_parentId_fkey on table "Category__rebuild" depends on table "Category"'],
-        // no foreign key at all: an application's view over the entity's table
-        [postModel(), postModel(['x', 'y']), 'Post', async (store, pool, schema) => {
-          await store.entity('Post').create({ title: 'x' });
-          await pool.query(`CREATE VIEW "${schema}"."post_titles" AS SELECT "title" FROM "${schema}"."Post"`);
-        }, 'view post_titles depends on table "Post"'],
+        }, { name: 'o', parentId: 99 }],
       ];
-      for (const [from, to, table, seed, dependent] of cases) {
+      for (const [from, to, table, child, seed, orphan] of cases) {
         await withSchema(async ({ pool, schema, driver }) => {
-          const store = await openStore(from, { driver: driver() });
-          try { await seed(store, pool, schema); }
+          /** Every foreign key of the schema: its table, name, definition and whether it is validated. */
+          const keys = async () => (await pool.query('SELECT c.conrelid::regclass::text AS t, c.conname, c.convalidated, '
+            + "pg_catalog.pg_get_constraintdef(c.oid) AS d FROM pg_catalog.pg_constraint c WHERE c.contype = 'f' "
+            + 'AND c.connamespace = $1::regnamespace ORDER BY 1, 2', [`"${schema}"`])).rows;
+          let store = await openStore(from, { driver: driver() });
+          let refused;
+          try {
+            await seed(store);
+            refused = await created(store, child, orphan);
+          }
           finally { await store.close(); }
-          const rows = async () => (await pool.query(`SELECT * FROM "${schema}"."${table}" ORDER BY rid`)).rows;
-          const held = await rows();
-          await assert.rejects(migrate({ driver: driver() }, [rebuildOf(from, to, schema, 'r')], { baseline: from, model: to, shadow: false }), {
-            code: 'JD0023',
-            message: "JD0023: migration 'r' step 0 (rebuild) failed: a PostgreSQL rebuild of an entity that another object "
-              + `depends on is not supported: the old '${table}' cannot be dropped while ${dependent}`,
-          });
-          // the link rolled back whole: nothing recorded, the rows and the key as they were
-          assert.deepEqual((await migrationHistory({ driver: driver() })).history.rows, []);
-          assert.deepEqual(await rows(), held);
-          assert.deepEqual(await keyNames(pool, schema, table), [`${table}_pkey`]);
+          assert.equal(typeof refused, 'string', 'a reference to no row is refused');
+          const held = await keys();
+          const children = async () => (await pool.query(`SELECT "cid", rid FROM "${schema}"."${child}" ORDER BY rid`)).rows;
+          const before = await children();
+          const migration = rebuildOf(from, to, schema, 'r');
+          // after the step's lock, the key the server would not drop past
+          assert.match(migration.steps[0].create[1], new RegExp(`^DO \\$jaren_allocation\\$\\n-- \\["unreference","${child}","${child === table ? 'parentId' : 'postId'}","${table}"\\]\\n`));
+          await migrate({ driver: driver() }, [migration], { baseline: from, model: to, shadow: false });
+          // the key is back under the name a create gives it, validated, with its action
+          assert.deepEqual(await keys(), held);
+          assert.deepEqual(await children(), before);
+          store = await openStore(to, { driver: driver() });
+          try {
+            assert.equal((await store.entity(table).get(1))?.n, '5');
+            assert.equal(await created(store, child, orphan), refused);
+            // the cascade still holds
+            await store.entity(table).delete(1);
+            assert.deepEqual(await children(), []);
+          }
+          finally { await store.close(); }
         });
       }
+    });
+
+    it('the rules of a rebuilt referenced table and of the table that references it hold, in the session that ran them before', async () => {
+      const comments = { 'x-entity': { relation: { to: 'Comment', many: true, via: 'postId', onDelete: 'cascade' } } };
+      const model = (/** @type {string} */ type) => ({ $model: '0.1', entities: {
+        Post: { schema: { type: 'object', properties: { pid: { type: 'integer', 'x-entity': { key: true } }, title: { type: 'string' }, score: { type }, comments } },
+          invariants: [{ name: 'titled', on: ['insert', 'update'], enforcement: 'database', assert: { $ne: ['$.new.title', 'bad'] } }] },
+        Comment: { schema: { type: 'object', properties: { cid: { type: 'integer', 'x-entity': { key: true } }, postId: { type: 'integer' } } },
+          invariants: [{ name: 'posted', on: ['insert'], enforcement: 'database', assert: { '$exists-row': { entity: 'Post', match: { pid: '$.new.postId' } } } }] } } });
+      const { default: pg } = await import('pg');
+      // one session: the rules run in it before the link and after
+      const pool = new pg.Pool({ connectionString: process.env.JAREN_PG_URL, max: 1 });
+      const schema = `jaren_rebuild_${process.pid}_${schemaNumber++}`;
+      await pool.query(`CREATE SCHEMA "${schema}"`);
+      try {
+        const driver = () => postgresDriver(pool, { schema });
+        const verdict = (/** @type {Promise<any>} */ write) => write.then(() => 'ok', (/** @type {any} */ error) => error.code);
+        const store = await openStore(model('number'), { driver: driver() });
+        try {
+          await store.entity('Post').create({ pid: 1, title: 'ok', score: 5 });
+          await store.entity('Comment').create({ cid: 1, postId: 1 });
+        }
+        finally { await store.close(); }
+        const plan = planModelMigration(model('number'), model('string'), { dialect: postgresDialect({ searchPath: schema }), id: 'r' });
+        plan.migration.steps = plan.migration.steps.filter((/** @type {any} */ step) => step.draft !== true);
+        assert.deepEqual(plan.migration.steps.filter((/** @type {any} */ step) => step.kind === 'rebuild').map((/** @type {any} */ step) => step.table), ['Post']);
+        await migrate({ driver: driver() }, [plan.migration], { baseline: model('number'), model: model('string'), shadow: false });
+        const after = await openStore(model('string'), { driver: driver() });
+        try {
+          assert.equal(await verdict(after.entity('Post').create({ pid: 2, title: 'bad', score: '2' })), 'JD2096');
+          assert.equal(await verdict(after.entity('Post').create({ pid: 2, title: 'fine', score: '2' })), 'ok');
+          assert.equal(await verdict(after.entity('Comment').create({ cid: 2, postId: 2 })), 'ok');
+          assert.notEqual(await verdict(after.entity('Comment').create({ cid: 3, postId: 102 })), 'ok');
+          assert.equal((await after.entity('Post').asNoTracking().get(1))?.score, '5');
+        }
+        finally { await after.close(); }
+      }
+      finally {
+        await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+        await pool.end();
+      }
+    });
+
+    for (const gain of [true, false]) {
+      it(`a referenced key that ${gain ? 'gains' : 'drops'} its allocation where the link rebuilds its table rebuilds each table that references it`, async () => {
+        const key = { type: 'integer', 'x-entity': gain ? { key: true } : { key: true, default: 'auto' } };
+        const relations = { comments: { 'x-entity': { relation: { to: 'Comment', many: true, via: 'postId', onDelete: 'cascade' } } },
+          tags: { 'x-entity': { relation: { to: 'Tag', many: true } } } };
+        const model = (/** @type {any} */ pid, /** @type {string} */ type) => ({ $model: '0.1', entities: {
+          Post: { schema: { type: 'object', properties: { pid, n: { type }, ...relations } } },
+          Comment: { schema: { type: 'object', properties: { cid: { type: 'integer', 'x-entity': { key: true } } } } },
+          Tag: { schema: { type: 'object', properties: { tid: { type: 'integer', 'x-entity': { key: true } } } } } } });
+        const [from, to] = [model(key, 'number'), model({ ...key, 'x-entity': gain ? { key: true, default: 'auto' } : { key: true } }, 'string')];
+        await withSchema(async ({ pool, schema, driver }) => {
+          let store = await openStore(from, { driver: driver() });
+          try {
+            await store.entity('Post').create(gain ? { pid: 1, n: 5 } : { n: 5 });
+            await store.entity('Comment').create({ cid: 1, postId: 1 });
+            await store.entity('Tag').create({ tid: 7 });
+          }
+          finally { await store.close(); }
+          await pool.query(`INSERT INTO "${schema}"."Post_Tag" ("Post_key", "Tag_key") VALUES (1, 7)`);
+          const migration = planned(from, to, schema, 'r');
+          // the referencing column's type follows the key's (bigint where it allocates, numeric where not)
+          assert.deepEqual(migration.steps.filter((/** @type {any} */ step) => step.kind === 'rebuild').map((/** @type {any} */ step) => step.table),
+            ['Post', 'Comment', 'Post_Tag']);
+          await migrate({ driver: driver() }, [migration], { baseline: from, model: to, shadow: false });
+          const types = async () => (await pool.query('SELECT table_name AS t, column_name AS c, data_type AS d FROM information_schema.columns '
+            + "WHERE table_schema = $1 AND column_name IN ('pid', 'postId', 'Post_key') ORDER BY 1, 2", [schema])).rows;
+          const kind = gain ? 'bigint' : 'numeric';
+          assert.deepEqual(await types(), [{ t: 'Comment', c: 'postId', d: kind }, { t: 'Post', c: 'pid', d: kind }, { t: 'Post_Tag', c: 'Post_key', d: kind }]);
+          store = await openStore(to, { driver: driver() });
+          try {
+            if (gain) assert.equal((await store.entity('Post').create({ n: '6' })).pid, 2);
+            await store.entity('Post').delete(1);
+            assert.deepEqual((await pool.query(`SELECT (SELECT count(*) FROM "${schema}"."Comment")::int AS c, (SELECT count(*) FROM "${schema}"."Post_Tag")::int AS j`)).rows,
+              [{ c: 0, j: 0 }]);
+          }
+          finally { await store.close(); }
+        });
+      });
+    }
+
+    it('a link that fails after a rebuild dropped the keys that reference its table keeps them, and every row', async () => {
+      const comments = { 'x-entity': { relation: { to: 'Comment', many: true, via: 'postId', onDelete: 'cascade' } } };
+      const model = (/** @type {string} */ type) => ({ $model: '0.1', entities: { Post: postEntity(undefined, { comments, n: { type } }),
+        Comment: { schema: { type: 'object', properties: { cid: { type: 'integer', 'x-entity': { key: true } } } } } } });
+      await withSchema(async ({ pool, schema, driver }) => {
+        const store = await openStore(model('number'), { driver: driver() });
+        try {
+          await store.entity('Post').create({ title: 'x', n: 5 });
+          await store.entity('Comment').create({ cid: 1, postId: 1 });
+        }
+        finally { await store.close(); }
+        const keys = async () => (await pool.query('SELECT c.conrelid::regclass::text AS t, c.conname, '
+          + "pg_catalog.pg_get_constraintdef(c.oid) AS d FROM pg_catalog.pg_constraint c WHERE c.contype = 'f' "
+          + 'AND c.connamespace = $1::regnamespace ORDER BY 1, 2', [`"${schema}"`])).rows;
+        const held = await keys();
+        const migration = rebuildOf(model('number'), model('string'), schema, 'r');
+        migration.steps.push({ kind: 'sql', sql: 'UPDATE "Comment" SET "cid" = 1 / 0' });
+        await assert.rejects(migrate({ driver: driver() }, [migration], { baseline: model('number'), model: model('string'), shadow: false }),
+          (/** @type {any} */ error) => error.code === 'JD0023' && /step 1 \(sql\) failed: division by zero/.test(error.message));
+        assert.deepEqual(await keys(), held);
+        assert.deepEqual((await pool.query(`SELECT "pid"::text AS pid, "n"::text AS n FROM "${schema}"."Post"`)).rows, [{ pid: '1', n: '5' }]);
+      });
+    });
+
+    it('a rename of a referenced entity rebuilds each table that references it, one another table references included', async () => {
+      const rel = (/** @type {string} */ to, /** @type {string} */ via) => ({ 'x-entity': { relation: { to, many: true, via, onDelete: 'cascade' } } });
+      const keyed = (/** @type {string} */ name) => ({ [name]: { type: 'integer', 'x-entity': { key: true } } });
+      const from = { $model: '0.1', entities: { P: { schema: { type: 'object', properties: { ...keyed('id'), kids: rel('C', 'pid') } } },
+        C: { schema: { type: 'object', properties: { ...keyed('cid'), ds: rel('D', 'c') } } }, D: { schema: { type: 'object', properties: keyed('did') } } } };
+      const to = structuredClone(from);
+      to.entities.Q = { ...to.entities.P, 'x-rename': 'P' };
+      delete to.entities.P;
+      await withSchema(async ({ pool, schema, driver }) => {
+        let store = await openStore(from, { driver: driver() });
+        try {
+          await store.entity('P').create({ id: 1 });
+          await store.entity('C').create({ cid: 1, pid: 1 });
+          await store.entity('D').create({ did: 1, c: 1 });
+        }
+        finally { await store.close(); }
+        const migration = planned(from, to, schema, 'r');
+        assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.kind), ['ddl', 'rebuild']);
+        await migrate({ driver: driver() }, [migration], { baseline: from, model: to, shadow: false });
+        store = await openStore(to, { driver: driver() });
+        try {
+          await store.entity('Q').delete(1);
+          assert.deepEqual((await pool.query(`SELECT (SELECT count(*) FROM "${schema}"."C")::int AS c, (SELECT count(*) FROM "${schema}"."D")::int AS d`)).rows,
+            [{ c: 0, d: 0 }]);
+        }
+        finally { await store.close(); }
+      });
+    });
+
+    it('a self-referencing entity whose key is retyped is refused at the temporary table\'s create, and changes nothing', async () => {
+      const model = (/** @type {string} */ type) => ({ $model: '0.1', entities: { P: { schema: { type: 'object', properties: {
+        id: { type, 'x-entity': { key: true } }, up: { 'x-entity': { relation: { to: 'P', via: 'pid', onDelete: 'setNull' } } } } } } } });
+      await withSchema(async ({ pool, schema, driver }) => {
+        const store = await openStore(model('number'), { driver: driver() });
+        try {
+          await store.entity('P').create({ id: 1 });
+          await store.entity('P').create({ id: 2, pid: 1 });
+        }
+        finally { await store.close(); }
+        // the temporary table's reference to itself names the old table, whose key keeps the old type
+        await assert.rejects(migrate({ driver: driver() }, [rebuildOf(model('number'), model('string'), schema, 'r')],
+          { baseline: model('number'), model: model('string'), shadow: false }),
+        { code: 'JD0023', message: "JD0023: migration 'r' step 0 (rebuild) failed: foreign key constraint \"P__rebuild_pid_fkey\" cannot be implemented" });
+        assert.deepEqual((await pool.query(`SELECT "id"::text AS id, "pid"::text AS pid FROM "${schema}"."P" ORDER BY rid`)).rows,
+          [{ id: '1', pid: null }, { id: '2', pid: '1' }]);
+      });
     });
 
     /**

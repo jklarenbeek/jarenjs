@@ -4316,6 +4316,37 @@ opens and reads every store this release leaves, but refuses a migration
 document whose step this release planned in place (`JD0021`): apply such a
 link under this release, or plan it again under the previous one.
 
+## 84. A retyped key rebuilds every table that references it, and an empty-last ordering reads its index
+
+- A key retyped (a number into text, say) rebuilds its table and then every
+  table that references it — one whose foreign-key property is declared, one
+  whose column the relation infers, and a many-to-many join table — each
+  column spelled as the key's new type, where the link was refused `JD0023`
+  ([MIGRATION-FORMAT §10](MIGRATION-FORMAT.md)).
+- On PostgreSQL a rebuild of an entity another table's foreign key references,
+  its own included, drops each such key and adds it again, validated, in the
+  same transaction, where it was refused at the drop. It holds an `ACCESS
+  EXCLUSIVE` lock on the table and on each table that references it, readers
+  included, until the link commits. An application's view over the table, a
+  foreign key from a table the model does not declare, and a self-referencing
+  entity whose key is retyped are still refused (`JD0023`).
+- On PostgreSQL an ordering with `$empty: 'greatest'` (descending with
+  `'least'`) over an index the store keys `NULLS FIRST` reads it in two
+  ordered branches, the non-empty rows then the empty ones, where it sorted
+  every row (a ten-row window over 20,000 rows 11.1 ms to about 0.33 ms; a
+  load 4.2 to 0.23 ms), and an ascending keyset page past a value seeks the
+  index from it (a page after 19,000 rows 4.0 to about 0.23 ms). A table an
+  earlier release created, whose indexes the open reads as plain, is read as
+  that release read it until `planColumnUpgrade` respells it.
+
+**Downgrade.** No table, column, index or CHECK text a store persists changes:
+the previous release opens, reads, writes and introspects every store this
+release migrates. Its runner refuses a PostgreSQL migration document this
+release planned with a block that drops and re-adds foreign keys (`JD0021
+PostgreSQL migration steps require one transactional statement`) before any
+statement runs — exactly the links it refused at the drop; apply such a link
+under this release. A SQLite document runs under either.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

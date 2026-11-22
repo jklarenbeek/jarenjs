@@ -4189,7 +4189,7 @@ export function openStore(model, options) {
             zoneProvider, runtime.now);
           const entityEngine = entities.size > 0
             ? createEntityQueryEngine({ connection, entities, mapping, state: queryState,
-              profile: storeProfile, roots: declaredRoots })
+              profile: storeProfile, roots: declaredRoots, tablePlans: entityPlans })
             : null;
           /** @type {Map<string, any>} */
           const loadEngines = new Map();
@@ -4203,7 +4203,7 @@ export function openStore(model, options) {
               }
               engine = createLoadEngine(
                 { connection, entities, mapping, state: queryState, coreFor: entityCoreFor,
-                  profile: storeProfile, roots: declaredRoots }, name);
+                  profile: storeProfile, roots: declaredRoots, tablePlans: entityPlans }, name);
               loadEngines.set(name, engine);
             }
             return engine;

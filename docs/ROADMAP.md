@@ -535,32 +535,25 @@ costs a descriptor plus examples and no UI code at all.
   independent-database shadow replay of exact qualified programs, and
   [separate managed-data oracles](../packages/db/docs/POSTGRESQL.md) for
   coherent dump/restore and archived-WAL recovery.
-- [ ] **PostgreSQL entity changes beyond an unreferenced table.** A change the
-  planner expresses as a rebuild (a key declaration, a type, a relation, a
-  calendar member) rebuilds the table on PostgreSQL under a table lock, which
-  holds for an entity no foreign key references, its own included: a
-  referenced or self-referencing entity is refused at the drop (`JD0023`,
-  naming what depends on it) and the link rolls back whole ([MIGRATION-FORMAT
-  §10](../packages/db/docs/MIGRATION-FORMAT.md)). Such an entity's column
-  whose `enum` changes, or whose type changes by a cast (a text into a number,
-  an integer or a boolean; a number into an integer; an integer into a number;
-  a boolean into any type), and that is no key, no foreign key's column and
-  read by no index, changes in place instead, under an `ACCESS EXCLUSIVE`
-  lock. A number or an integer retyped into text (its spelled copy is a
-  select, which `ALTER COLUMN … TYPE … USING` cannot hold), an indexed column,
-  a key and a foreign key still rebuild and are refused. A rename of a
-  referenced entity plans such a rebuild for every table that references it,
-  so a rename alone is refused when one of those is itself referenced. Wanted:
-  foreign keys re-pointed through the rebuild, and an in-place retype into
-  text.
-- [ ] **A retyped key that an inferred foreign key or a join table
-  references.** A key retyped (a number into text, for one) rebuilds its table
-  and each table whose declared `via` property references it, but not a table
-  whose foreign key column the relation infers (no property of its own) nor a
-  many-to-many join table: their column keeps the key's old type, so the link
-  is refused `JD0023` at the key's rebuild (the reference no longer matches
-  its key) and rolls back whole, on SQLite; on PostgreSQL the key's rebuild is
-  refused at the drop. Wanted: those tables rebuilt in the same link.
+- [ ] **A PostgreSQL rebuild under a view, a self-referencing entity's retyped
+  key, and a retype into text in place.** A change the planner expresses as a
+  rebuild (a key declaration, a type, a relation, a calendar member) rebuilds
+  the table on PostgreSQL under a table lock; for an entity another table's
+  foreign key references, its own included, the step drops each such key and
+  adds it again, validated, in the same transaction ([MIGRATION-FORMAT
+  §10](../packages/db/docs/MIGRATION-FORMAT.md)), which holds an `ACCESS
+  EXCLUSIVE` lock on the table and on each table that references it, readers
+  included, from the step's second statement until the link commits. An
+  application's view over the table, a foreign key from a table the model does
+  not declare, or another object the server keeps on it is refused at the drop
+  (`JD0023`, naming it), and a self-referencing entity whose key is retyped is
+  refused at the temporary table's create (its reference to the old table
+  cannot join the two types); either link rolls back whole. A referenced
+  entity's `enum` change, or a retype by a cast of a column that is no key, no
+  foreign key's column and read by no index, changes in place instead; a
+  number or an integer retyped into text (its spelled copy is a select, which
+  `ALTER COLUMN … TYPE … USING` cannot hold) rebuilds. Wanted: a
+  self-referencing entity's retyped key, and an in-place retype into text.
 - [ ] **A join table carries no column beyond its two keys.** A many-to-many
   join table is a read-only root (`$.<JoinTable>[*]`, MODEL-FORMAT §10.7)
   whose rows are its two keys, so "which pairs were attached since Friday" has
@@ -626,24 +619,22 @@ costs a descriptor plus examples and no UI code at all.
   keys a bounded image of the value (a hash index, or an expression over a
   digest, with the comparison spelled to read it) so no write is refused, read
   back by `introspect()`.
-- [ ] **On PostgreSQL an ordering an index the store creates does not key is
-  sorted.** A non-unique index the store creates over a column a statement
-  orders bare keys it `NULLS FIRST` with the row identity after it, and an
-  index led by a number column that declares `doubleOrder` has one beside it
-  over the double, so a window, a load's `orderBy` and a keyset page read
-  them; an ascending ordering with `$empty: 'greatest'` (descending with
-  `'least'`) places an empty key last, which those indexes do not give, and
-  sorts every row where the plain index an earlier release created served it
-  (measured: 20,000 rows, a ten-row window 0.23 ms with the plain index,
-  11.2-12.7 ms now; two ordered, limited branches over the `NULLS FIRST`
-  index, the non-empty rows then the empty ones by `rid`, measured 0.33 ms
-  with equal answers, but keep a sort of the branches' rows and are spelled
-  for no window, load or keyset page yet); an ordering over a unique member,
-  whose index keeps its plain spelling, and over a number member whose index
-  declares no `doubleOrder`, sorts as before; and a keyset page's continuation
-  is a filter over the index, so a page deep into the order walks the index
-  from its start. Wanted: the empty-last orderings read in index order, and a
-  keyset continuation the index seeks.
+- [ ] **On PostgreSQL an ordering over a unique member is sorted, and a
+  descending page deep into its order walks the index.** A non-unique index
+  the store creates over a column a statement orders bare keys it `NULLS
+  FIRST` with the row identity after it, and an index led by a number column
+  that declares `doubleOrder` has one beside it over the double, so a window,
+  a load's `orderBy` and a keyset page read them — an ordering with `$empty:
+  'greatest'` in two ordered, limited branches under one sort of their rows —
+  and an ascending page past a value seeks the index from it; a table an
+  earlier release created, whose indexes the open reads as plain, is read as
+  that release read it until `planColumnUpgrade` respells it. But an ordering
+  over a unique member, whose index keeps its plain spelling, and over a
+  number member whose index declares no `doubleOrder`, sorts as before; and a
+  descending page with its empty keys last (the default) reads the index
+  backward from its start, its continuation a filter, since its empty keys
+  follow every value and no one bound holds of them. Wanted: an ordering over
+  a unique member read in index order, and a descending page that seeks.
 - [ ] **On PostgreSQL a load's scalar `after` over a `numeric` key without the
   store's key CHECK, and such a key at or past 2^53, still compare bare.** A
   table an earlier release created holds a writer's digits until

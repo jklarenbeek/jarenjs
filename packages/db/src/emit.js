@@ -594,6 +594,78 @@ export function entityOrderRead(dialect, ref, sql) {
 }
 
 /**
+ * Whether a statement may read an ordering's rows in two branches
+ * ({@link emptyApartFrom}): the engine's indexes are keyed `NULLS FIRST`
+ * with the row identity after (`capabilities.orderedIndexes`), and its
+ * parameters are numbered, so a condition spelled in both branches binds
+ * one value.
+ * @param {any} dialect
+ * @returns {boolean}
+ */
+export function readsEmptyApart(dialect) {
+  return dialect.capabilities?.orderedIndexes === true && dialect.parameterRef(1, 'v') !== dialect.parameterRef(2, 'v');
+}
+
+/**
+ * The columns of a table an index the store creates keys first over every
+ * row, `NULLS FIRST` with the row identity after (`ddl.js` `ordersIndex`,
+ * its plan's `ordered`), each with what it keys: `'column'`, the column as it
+ * stands, or `'double'`, the double the engine holds of a number column
+ * whose index declares `doubleOrder` (the index beside, `orderIndexes`).
+ * An index the open found held plain, or an index beside it found missing
+ * (`ddl.js` `heldPlainOf`: a table an earlier release created, not yet
+ * respelled), leads nothing: its statements read the table as that release
+ * did. An ordering of such a column whose empty key goes where the index does
+ * not place it reads it in two branches ({@link emptyApartFrom}).
+ * @param {any} dialect
+ * @param {any} plan - the table's DDL plan, as the open verified it
+ * @returns {Map<string, 'column' | 'double'>}
+ */
+export function orderedLeadsOf(dialect, plan) {
+  /** @type {Map<string, 'column' | 'double'>} */
+  const leads = new Map();
+  if (!readsEmptyApart(dialect) || plan == null) return leads;
+  /** @type {Set<string>} */
+  const plain = plan.heldPlain ?? new Set();
+  for (const index of plan.expected?.indexes ?? [])
+    if (index.ordered === true && index.where === undefined && !plain.has(index.name)) leads.set(index.columns[0], 'column');
+  for (const index of plan.orderIndexes ?? []) if (!plain.has(index.name)) leads.set(index.column, 'double');
+  return leads;
+}
+
+/**
+ * The FROM item an ordering reads its leading term's index through where
+ * that index places the empty key apart from where the ordering does: an
+ * ascending ordering with the empty key greatest (`NULLS LAST`), which an
+ * index keyed `NULLS FIRST` places first, and a descending one with the
+ * empty key greatest (`NULLS FIRST`), which the index read backward places
+ * last. Two ordered branches, each limited to the rows the statement can
+ * keep: those that hold the key, in the index's order (an `IS NOT NULL`
+ * seek, under `bound`, a keyset continuation's leading bound, where
+ * given), then those that hold none, by the terms after it (an `IS NULL`
+ * seek). The statement orders their union as it ordered the table and
+ * keeps its limit, so it answers the same rows; it sorts at most twice
+ * `limit` rows. The branch's columns are the table's, under `alias`. The
+ * empty rows are ordered as the index holds them, by the row identity, where
+ * the terms after the leading one start with it; by those terms alone
+ * (`keyed`: a page's, which a tie orders by the key) the key's own index can
+ * read them, where the index the term leads holds them by the row.
+ * @param {any} dialect
+ * @param {{ from: string, alias: string, where: string[], lead: string, desc: boolean, rest: string[],
+ *   limit: number, bound?: string, keyed?: boolean }} spec - the table as the statement names it (`from`,
+ *   with its alias), its conditions, the leading term's value and direction, the terms after it as the
+ *   statement spells them, and how many rows (its limit plus its offset) the statement can keep
+ * @returns {string}
+ */
+export function emptyApartFrom(dialect, { from, alias, where, lead, desc, rest, limit, bound, keyed = false }) {
+  const branch = (/** @type {boolean} */ empty) => `(SELECT * FROM ${from} WHERE `
+    + `${[...where, ...(empty || bound === undefined ? [] : [bound]), `${lead} IS ${empty ? '' : 'NOT '}NULL`].join(' AND ')} `
+    + `ORDER BY ${[...(empty && keyed ? [] : [`${lead} ${desc && !empty ? 'DESC NULLS LAST' : 'ASC NULLS FIRST'}`]), ...rest].join(', ')} `
+    + `${dialect.limitClause(limit)})`;
+  return `(${branch(false)} UNION ALL ${branch(true)}) AS ${alias}`;
+}
+
+/**
  * An entity column of the number family compared with another member, read
  * as the double the engine holds where the column holds the digits a writer
  * spelled (`decimalDigits`: a `number` or `integer` column the store made,
@@ -864,10 +936,12 @@ function probeEdge(probe, param, axis) {
  * @param {import('./algebra.js').Plan} plan
  * @param {any} dialect
  * @param {{ table: string, keyColumn: string, docColumn: string, doubleColumns?: Set<string>,
- *   safeIntegerColumns?: Set<string>, indexedColumns?: Map<string, 'leads' | 'follows'> }} physical - the
+ *   safeIntegerColumns?: Set<string>, indexedColumns?: Map<string, 'leads' | 'follows'>,
+ *   orderedLeads?: Map<string, 'column' | 'double'> }} physical - the
  *   table's names, the generated columns that hold a number as a double, those whose integers the
- *   schema bounds within ±(2^53 − 1), and those a B-tree index keys (leading one that holds every row,
- *   or otherwise)
+ *   schema bounds within ±(2^53 − 1), those a B-tree index keys (leading one that holds every row,
+ *   or otherwise), and those an index the store keys `NULLS FIRST` leads over every row, by what
+ *   it keys ({@link orderedLeadsOf})
  * @param {boolean} [probeWide] - whether an ordering may read an integer column bare behind
  *   the dialect's `limitUnlessWide`; `false` emits the statement that orders by the double
  * @returns {{ sql: string, slots: ParamSlot[], seeks?: any[], columns: string[],
@@ -1538,15 +1612,18 @@ export function emitPlan(plan, dialect, physical, probeWide = true) {
     // ascending, NULLS LAST when descending — and mirrored for
     // $empty: 'greatest' (probed against the engine)
     const nullsFirst = term.emptyGreatest === term.desc;
-    // a number orders as the double the engine holds, so two spellings of
-    // one double tie and the next term decides between them, as the
-    // engine's do; a column that holds the double already, or only safe
-    // integers, orders bare and through its index, and so does a probed
-    // integer column, which holds only safe integers when the probe is false
-    const value = valueOf(term.ref, kindOf(term.ref));
-    return `${ordersByDouble(term) && !(probed && probesWide(term)) ? dialect.doubleRead(value) : value} `
-      + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
+    return `${orderValue(term, probed)} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
   }), dialect.rowIdentity()];
+  /** What an order term sorts by. A number orders as the double the engine
+   * holds, so two spellings of one double tie and the next term decides
+   * between them, as the engine's do; a column that holds the double
+   * already, or only safe integers, orders bare and through its index, and
+   * so does a probed integer column, which holds only safe integers when the
+   * probe is false. @param {any} term @param {boolean} probed */
+  const orderValue = (term, probed) => {
+    const value = valueOf(term.ref, kindOf(term.ref));
+    return ordersByDouble(term) && !(probed && probesWide(term)) ? dialect.doubleRead(value) : value;
+  };
   /** Whether an order term reads its number through `doubleRead`. @param {any} term */
   const ordersByDouble = (term) => kindOf(term.ref) === 'number'
     && !holdsDouble(term.ref, valueOf(term.ref, 'number'));
@@ -1587,10 +1664,22 @@ export function emitPlan(plan, dialect, physical, probeWide = true) {
   const numbered = plan.group !== null && plan.order !== null;
   if (numbered && plan.group.aggregates.length > 0)
     throw new Error('emit: a grouping that numbers its rows by an ordering folds no aggregate');
+  // a window whose leading term places the empty key where the index that
+  // term leads does not ({@link emptyApartFrom}) reads that index in two
+  // branches, the rows that hold the key and then those that hold none
+  const lead = plan.order?.[0];
+  const apart = ordered && !numbered && probes.length === 0 && plan.window !== null && plan.window.limit !== null
+    && lead !== undefined && lead.emptyGreatest === true && readsEmptyApart(dialect)
+    && physical.orderedLeads?.get(lead.ref.column) === (ordersByDouble(lead) ? 'double' : 'column')
+    && valueOf(lead.ref, ordersByDouble(lead) ? 'number' : kindOf(lead.ref)) === q(lead.ref.column);
   let sql = numbered
     ? `SELECT ${plan.group.keys.flatMap((_, i) => [q(`vk${i}`), q(`tk${i}`)]).join(', ')} FROM ${numberedRows(q, {
       columns: [selection], from: q(physical.table), where, order: rowOrder() })}`
-    : `SELECT ${selection} FROM ${q(physical.table)}${where}`;
+    : apart
+      ? `SELECT ${selection} FROM ${emptyApartFrom(dialect, { from: q(physical.table), alias: q(physical.table),
+        where: plan.filter === null ? [] : [where.slice(' WHERE '.length)], lead: orderValue(lead, false), desc: lead.desc === true,
+        rest: rowOrder().slice(1), limit: plan.window.limit + (plan.window.offset ?? 0) })}`
+      : `SELECT ${selection} FROM ${q(physical.table)}${where}`;
   if (plan.group !== null) {
     // BY THE ALIASES the selection named, not by a second spelling of
     // the same member. Two reasons, and the second is the load-bearing
@@ -2243,6 +2332,31 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
       from: fromSql, where: whereSql, order: plan.bindings.flatMap(identityTerms) })}`;
   }
   else sql = `SELECT ${selection} FROM ${fromSql}${whereSql}`;
+  /** The values the order terms sort by, and the terms as spelled. @type {string[]} */
+  const orderValues = [];
+  const orderTerms = group || plan.aggregate !== null ? [] : (plan.order ?? []).map((term) => {
+    // only a plain mapped column orders by its column; an epoch
+    // path orders by the document string — codepoint order, exactly
+    // the engine's — because mixed stored precisions would let the
+    // integer column sort differently; any other document member
+    // orders as its declared type, a number numerically
+    // a number orders as the double the engine holds ({@link entityOrderRead})
+    const read = (alias) => entityOrderRead(dialect, term.ref, term.ref.flavor === 'entity-column'
+      ? physicalComparable(term.ref, `${alias}.${q(term.ref.column)}`, dialect) : `${alias}.${q('doc')}`);
+    // a hop key is the member of the one related row: no value, which
+    // the empty placement orders, where the hop finds none
+    let value;
+    if (term.hop === undefined) value = read(aliasOf(term.binding));
+    else {
+      const { alias, sql: from } = emitters.hopFrom(term.hop);
+      value = `(SELECT ${read(alias)} ${from})`;
+    }
+    orderValues.push(value);
+    const nullsFirst = term.emptyGreatest === term.desc;
+    // a column that holds no NULL places none, which a hop's missing row is
+    const notNull = term.hop === undefined && term.ref.flavor === 'entity-column' && term.ref.notNull === true;
+    return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst, notNull)}`;
+  });
 
   if (group) {
     const { groupBy, orderBy } = groupingClauses(q, dialect, group, (index) => q(`vk${index}`),
@@ -2251,32 +2365,26 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
     if (plan.window !== null) sql += ` ${dialect.limitClause(plan.window.limit, plan.window.offset)}`;
   }
   else if (plan.aggregate === null) {
-    const terms = (plan.order ?? []).map((term) => {
-      // only a plain mapped column orders by its column; an epoch
-      // path orders by the document string — codepoint order, exactly
-      // the engine's — because mixed stored precisions would let the
-      // integer column sort differently; any other document member
-      // orders as its declared type, a number numerically
-      // a number orders as the double the engine holds ({@link entityOrderRead})
-      const read = (alias) => entityOrderRead(dialect, term.ref, term.ref.flavor === 'entity-column'
-        ? physicalComparable(term.ref, `${alias}.${q(term.ref.column)}`, dialect) : `${alias}.${q('doc')}`);
-      // a hop key is the member of the one related row: no value, which
-      // the empty placement orders, where the hop finds none
-      let value;
-      if (term.hop === undefined) value = read(aliasOf(term.binding));
-      else {
-        const { alias, sql: from } = emitters.hopFrom(term.hop);
-        value = `(SELECT ${read(alias)} ${from})`;
-      }
-      const nullsFirst = term.emptyGreatest === term.desc;
-      // a column that holds no NULL places none, which a hop's missing row is
-      const notNull = term.hop === undefined && term.ref.flavor === 'entity-column' && term.ref.notNull === true;
-      return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst, notNull)}`;
-    });
+    const terms = [...orderTerms];
     // the engine's nested-loop order: binding-order row identities, each
     // descending where the plan reads the order inverted (a `$reverse`)
     for (const binding of plan.bindings)
       terms.push(...identityTerms(binding).map((term) => (plan.reverse === true ? `${term} DESC` : term)));
+    // a window over one root whose leading term places the empty key where
+    // the index that column leads does not reads that index in two
+    // branches ({@link emptyApartFrom})
+    const lead = plan.order?.[0];
+    const keyed = lead === undefined || lead.hop !== undefined || lead.ref.flavor !== 'entity-column' || !entityOf.has(lead.binding)
+      ? undefined : physicalOf(entityOf.get(lead.binding)).orderedLeads?.get(lead.ref.column);
+    if (keyed !== undefined && !joined && plan.bindings.length === 1 && plan.quantifier === undefined && plan.window !== null
+      && plan.window.limit !== null && lead.emptyGreatest === true && lead.ref.notNull !== true) {
+      const bare = physicalComparable(lead.ref, `${aliasOf(lead.binding)}.${q(lead.ref.column)}`, dialect);
+      if (orderValues[0] === (keyed === 'double' ? dialect.doubleRead(bare) : bare)) {
+        sql = `SELECT ${selection} FROM ${emptyApartFrom(dialect, { from: fromSql, alias: aliasOf(lead.binding),
+          where: filterSql, lead: orderValues[0], desc: lead.desc === true, rest: terms.slice(1),
+          limit: plan.window.limit + (plan.window.offset ?? 0) })}`;
+      }
+    }
     sql += ` ORDER BY ${terms.join(', ')}`;
     if (plan.window !== null)
       sql += ` ${dialect.limitClause(plan.window.limit, plan.window.offset)}`;

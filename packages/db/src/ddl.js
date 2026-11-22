@@ -1725,6 +1725,8 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
       `${kind} '${collection}': the existing table does not match the declared model (${difference}); reshaping a live database is the migration story, and nothing was altered`,
       docPath);
   };
+  // what this reading finds held plain replaces what an earlier one found
+  heldPlainOf(plan).clear();
   // an engine that keeps no CREATE text has its catalog read back what that
   // text would carry — each index's condition and shape, each generated
   // column's expression — through the dialect's exact read-back
@@ -1880,6 +1882,8 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
                 // an `ordered` index held as this release creates it; one an earlier
                 // release created holds it plain, and is compared so below
                 if (heldOrdered(dialect, have, haveColumns, want)) return chain(verifyIndexCondition(), () => collectColumns(i + 1));
+                // held plain: the statements read it as an earlier release's ({@link heldPlainOf})
+                if (want.ordered === true) heldPlainOf(plan).add(want.name);
                 const keyed = (/** @type {readonly string[]} */ terms) => haveColumns.length === want.columns.length + terms.length
                   && haveColumns.every((column, at) => column === (at < want.columns.length ? want.columns[at] : null));
                 if (![[], want.terms ?? [], want.earlierTerms ?? []].some(keyed))
@@ -1904,6 +1908,9 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
           const besides = () => (dialect.capabilities.declaredSqlText === true ? null
             : verifyKindIndexes(connection, kindIndexes, heldKindIndexes, plan.conditionColumns ?? [], disagree));
           const heldOrderIndexes = indexRows.filter((row) => String(row.origin) === 'c' && orderIndexes.has(String(row.name)));
+          // one beside that the table goes without orders nothing ({@link heldPlainOf})
+          const heldNames = new Set(heldOrderIndexes.map((row) => String(row.name)));
+          for (const name of orderIndexes.keys()) if (!heldNames.has(name)) heldPlainOf(plan).add(name);
           return chain(collectColumns(0), () => chain(besides(), () => chain(verifyOrderIndexes(connection, orderIndexes, heldOrderIndexes, disagree), () =>
             chain(verifyIntervalChecks(connection, plan, disagree), () =>
               chain(verifyRulePrograms(connection, plan.table, plan.programs ?? [], disagree,
@@ -1927,6 +1934,24 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
 export function keyOrderOf(row) {
   return row.key_options === undefined || row.key_options === null ? {}
     : { shaped: Number(row.shaped) === 1, options: String(row.key_options) };
+}
+
+/**
+ * The names of the indexes a table's plan keys in the order a statement
+ * reads ({@link ordersIndex}, `ordered`; and each one beside a number's,
+ * {@link orderIndexesOf}) that the table, as the open read it, holds plain
+ * or goes without: a table an earlier release created, which
+ * `planColumnUpgrade` has not respelled. A statement that would read such an
+ * index in its order reads the table as that release did. Empty for a table
+ * the open created, and on the plan, not enumerable, so a plan still clones
+ * and compares as it did.
+ * @param {any} plan
+ * @returns {Set<string>}
+ */
+export function heldPlainOf(plan) {
+  if (!Object.prototype.hasOwnProperty.call(plan, 'heldPlain'))
+    Object.defineProperty(plan, 'heldPlain', { value: new Set(), enumerable: false });
+  return plan.heldPlain;
 }
 
 /** The per-key flags of an `ordered` index over `count` columns: each column

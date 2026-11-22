@@ -2570,6 +2570,7 @@ function mistypedMemberStep(dialect, table, member, kind) {
 function planEntityChanges(fromModel, toModel, dialect, steps, report, transform = null, expressions = undefined) {
   /** @type {any[]} */
   const programs = [];
+  const stepsStart = steps.length;
   const fromEntities = normalizeEntities(fromModel);
   const toEntities = normalizeEntities(toModel);
   if (fromEntities.size === 0 && toEntities.size === 0) return programs;
@@ -2690,6 +2691,36 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
   /** The join tables renamed in place, which a rebuilding link must still rebuild, each with the
    * name its index over the second column was created under. @type {{ name: string, target: any, index: string }[]} */
   const renamedInPlace = [];
+  /** The storage of the key each endpoint column of a continued join table
+   * holds, before and after, by its target column; `null` where no endpoint's
+   * key changes its storage. A retyped key retypes the column that references
+   * it, which the join table is rebuilt for once every entity is (`retypedJoins`).
+   * @param {any} join @param {any} target @param {(toColumn: string) => string} sourceOf
+   * @returns {Map<string, { source: string, from: string, to: string }> | null} */
+  const endpointStorages = (join, target, sourceOf) => {
+    const keyStorage = (/** @type {any} */ mapping, /** @type {string} */ entity) =>
+      mapping.entities[entity]?.columns.find((/** @type {any} */ column) => column.key)?.storage;
+    const storages = new Map();
+    for (const side of [target.left, target.right]) {
+      const source = sourceOf(side.column);
+      const fromSide = [join.left, join.right].find((candidate) => candidate.column === source);
+      storages.set(side.column, { source, from: keyStorage(fromMapping, fromSide.entity), to: keyStorage(toMapping, side.entity) });
+    }
+    return [...storages.values()].some(({ from, to }) => from !== undefined && to !== undefined && from !== to) ? storages : null;
+  };
+  /** The join tables a retyped endpoint key rebuilds, under the name each has
+   * once the entity renames are made. @type {{ name: string, target: any, storages: Map<string, any> }[]} */
+  const retypedJoins = [];
+  /** The continued join tables no rename and no retype touches, which an
+   * endpoint key's allocation may still retype (`allocationMoved`). @type {{ name: string, target: any }[]} */
+  const keptJoins = [];
+  for (const [joinName, join] of Object.entries(fromMapping.joinTables)) {
+    const target = continued(joinName);
+    if (target === undefined || [join.left, join.right].some((side) => renamedEntity(side.entity) !== side.entity)) continue;
+    const storages = endpointStorages(join, target, (toColumn) => toColumn);
+    if (storages !== null) retypedJoins.push({ name: joinName, target, storages });
+    else keptJoins.push({ name: joinName, target });
+  }
   for (const [joinName, join] of Object.entries(fromMapping.joinTables)) {
     if (![join.left, join.right].some((side) => renamedEntity(side.entity) !== side.entity)) continue;
     const newJoin = renamedJoinName(joinName);
@@ -2703,6 +2734,17 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     // renaming the table and the column is enough
     const renamedColumns = [join.left, join.right]
       .map((side) => ({ from: side.column, to: `${renamedEntity(side.entity)}_key` }));
+    // a retyped endpoint key: the table takes its new name now and is rebuilt
+    // once every entity is, its columns copied from their old names
+    const storages = endpointStorages(join, target, (toColumn) => renamedColumns.find((column) => column.to === toColumn).from);
+    if (storages !== null) {
+      if (newJoin !== joinName) {
+        steps.push({ kind: 'ddl', sql: dialect.ddl.renameTable(joinName, newJoin),
+          note: `rename join table '${joinName}' with its endpoint` });
+      }
+      retypedJoins.push({ name: newJoin, target, storages });
+      continue;
+    }
     const targetOrder = [target.left.column, target.right.column];
     const sameOrder = renamedColumns.every((column, i) => column.to === targetOrder[i]);
     if (sameOrder) {
@@ -2760,6 +2802,18 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
   const targetOrder = creationOrder([...toEntities.keys()], (name) => toMapping.entities[name].foreignKeys.map((fk) => fk.references));
   /** The foreign keys that close a cycle, added once every table of the migration exists. */
   const keysAfter = [];
+  /** The entities the link rebuilds, as the loop reaches them. @type {Set<string>} */
+  const rebuiltSoFar = new Set();
+  // where the engine's allocation is a column property, a single integer key
+  // that gains or drops it changes type, and so does each column that
+  // references it: converted in place with the key's own column, or, where
+  // the key's table is rebuilt, rebuilt with it (`allocationSteps`)
+  const keyAllocated = (/** @type {any} */ mapping, /** @type {string} */ entity) => {
+    const key = mapping.entities[entity]?.columns.filter((/** @type {any} */ column) => column.key);
+    return key?.length === 1 && key[0].storage === 'integer' && key[0].auto === true;
+  };
+  const allocationMoved = (/** @type {string} */ entity) => dialect.autoKeyType !== undefined && rebuiltSoFar.has(entity)
+    && keyAllocated(fromMapping, renamedFrom.get(entity) ?? entity) !== keyAllocated(toMapping, entity);
   for (const name of targetOrder) {
     const toEntity = toEntities.get(name);
     const fromName = renamedFrom.get(name) ?? name;
@@ -2777,7 +2831,9 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     }
     const fm = fromMapping.entities[fromName];
 
-    const fkKey = (fk) => `${fk.column}|${fk.references}|${fk.referencesKey}|${fk.onDelete}`;
+    // the storage of the key a foreign key references is its column's, whether
+    // the column is declared or inferred: a retyped key retypes the column
+    const fkKey = (fk) => `${fk.column}|${fk.references}|${fk.referencesKey}|${fk.onDelete}|${fk.referencesType}`;
     const fromFks = new Set(fm.foreignKeys.map(fkKey));
     const toFks = new Set(tm.foreignKeys.map(fkKey));
     const fksEqual = fromFks.size === toFks.size
@@ -2807,9 +2863,11 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     // columns, which every engine does by rebuilding an entity's table
     const temporalFacts = (/** @type {any} */ mapping) => JSON.stringify((mapping.temporals ?? [])
       .map((/** @type {any} */ temporal) => [temporal.name, temporal.kind, temporal.policy ?? null]).sort());
+    // a key this link rebuilds, whose allocation changes the type of the column that references it
+    const referencesMoved = tm.foreignKeys.some((/** @type {any} */ fk) => fk.references !== name && allocationMoved(fk.references));
     const needsRebuild = !keysEqual || !fksEqual || changedColumns.length > 0
       || addedColumns.some((columnName) => toColumns.get(columnName).check !== undefined)
-      || temporalFacts(fm) !== temporalFacts(tm);
+      || temporalFacts(fm) !== temporalFacts(tm) || referencesMoved;
 
     // a single key that gains or drops the database's allocation (an integer
     // declared `default: "auto"`, or retyped into one): where the engine's
@@ -2829,12 +2887,13 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     // the columns a rebuild would change that change in place instead: on an
     // engine that alters a column, for a table another table references,
     // which a rebuild could not drop (§10)
-    const altered = needsRebuild && keysEqual && fksEqual && fromName === name && temporalFacts(fm) === temporalFacts(tm)
+    const altered = needsRebuild && keysEqual && fksEqual && !referencesMoved && fromName === name && temporalFacts(fm) === temporalFacts(tm)
       && !addedColumns.some((columnName) => toColumns.get(columnName).check !== undefined)
       && (keyBefore === undefined || keyAfter === undefined || allocated(keyBefore) === allocated(keyAfter))
       && referencesTo(fromName).length > 0
       ? alteredInPlace(dialect, name, tm, fromColumns, toColumns, changedColumns, [fromPlan, toPlan]) : null;
     const rebuilt = needsRebuild && altered === null;
+    if (rebuilt) rebuiltSoFar.add(name);
     // the rules' programs: one that changes, and all of a rebuilt table (whose
     // triggers its DROP takes, but not a PostgreSQL function), are dropped
     // before the table's own work and created again last of all, after the
@@ -3059,6 +3118,19 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     }
   }
 
+  // a join table whose endpoint key is retyped, rebuilt after every entity: its
+  // references are judged once the key's table is rebuilt too
+  for (const { name, target } of keptJoins) {
+    if (![target.left, target.right].some((/** @type {any} */ side) => allocationMoved(side.entity))) continue;
+    const storages = new Map([target.left, target.right].map((/** @type {any} */ side) => {
+      const storage = toMapping.entities[side.entity].columns.find((/** @type {any} */ column) => column.key).storage;
+      return [side.column, { source: side.column, from: storage, to: storage }];
+    }));
+    retypedJoins.push({ name, target, storages });
+  }
+  for (const { name, target, storages } of retypedJoins)
+    steps.push(renderJoinRebuild(name, target, storages, toMapping, dialect));
+
   // ————— join tables —————
   const fromJoins = new Set(Object.keys(fromMapping.joinTables).filter((joinName) => continued(joinName) !== undefined).map(renamedJoinName));
   for (const joinName of Object.keys(toMapping.joinTables)) {
@@ -3068,7 +3140,73 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
       steps.push({ kind: 'ddl', sql, note: `create join table '${joinName}'` });
     }
   }
+
+  // PostgreSQL drops no table another table's foreign key references: a
+  // rebuild drops each such key first and adds it again once the table is
+  // rebuilt, where the link does not rebuild the referencing table later
+  // (whose own rebuild creates it, against the key's new type)
+  if (dialect.name === 'postgres') {
+    unreferencedRebuilds(dialect, steps.slice(stepsStart), (/** @type {string} */ table) => {
+      // the keys that may stand in the database when the step runs: the
+      // from-model's (under the names the entity renames gave their tables,
+      // a join table under either name) and the target's
+      const held = referencesTo(renamedFrom.get(table) ?? table);
+      for (const [joinName, join] of Object.entries(fromMapping.joinTables)) {
+        for (const side of [join.left, join.right])
+          if (renamedEntity(side.entity) === table) held.push({ table: renamedJoinName(joinName), column: side.column });
+      }
+      /** The target's keys that reference `table` from a table the link does not create. @type {any[]} */
+      const wanted = [];
+      for (const [other, holder] of Object.entries(toMapping.entities)) {
+        if (!fromEntities.has(renamedFrom.get(other) ?? other)) continue;
+        for (const fk of holder.foreignKeys) {
+          if (fk.references === table)
+            wanted.push({ table: other, column: fk.column, references: { table, column: fk.referencesKey, onDelete: fk.onDelete } });
+        }
+      }
+      for (const [joinName, join] of Object.entries(toMapping.joinTables)) {
+        if (!fromJoins.has(joinName)) continue;
+        for (const side of [join.left, join.right]) {
+          if (side.entity === table)
+            wanted.push({ table: joinName, column: side.column, references: { table, column: side.referencesKey, onDelete: 'cascade' } });
+        }
+      }
+      return { held: [...held, ...wanted], wanted };
+    });
+  }
   return programs;
+}
+
+/**
+ * Give each PostgreSQL rebuild step (§10) of `steps` the statements that let
+ * it drop a table another table's foreign key references, which the server
+ * refuses: after the lock, each such key is dropped (`unreference` blocks:
+ * `held`, by its referencing column, whatever the engine named it); a key of
+ * the table to itself is dropped from the temporary table too, right after its
+ * create; and once the table is rebuilt each key the target declares
+ * (`wanted`) is added again, which judges every row that references the table,
+ * unless a later rebuild step of the link spells the referencing table anew
+ * and creates the key itself. The link is one transaction: a reference the
+ * added key refuses rolls it back whole.
+ * @param {any} dialect @param {any[]} steps
+ * @param {(table: string) => { held: { table: string, column: string }[], wanted: any[] }} referencing
+ */
+function unreferencedRebuilds(dialect, steps, referencing) {
+  const q = dialect.quoteIdentifier;
+  const rebuilds = steps.filter((step) => step.kind === 'rebuild');
+  rebuilds.forEach((step, at) => {
+    const { held, wanted } = referencing(step.table);
+    if (held.length === 0) return;
+    const later = new Set(rebuilds.slice(at + 1).map((other) => other.table));
+    const temporary = `${step.table}__rebuild`;
+    const drops = [...new Map(held.map((key) => [`${key.table}\0${key.column}`, key])).values()]
+      .map((key) => allocationBlock(dialect, 'unreference', key.table, key.column, step.table));
+    step.create.splice(1, 0, ...drops);
+    const created = step.create.findIndex((/** @type {string} */ sql) => sql.startsWith(`CREATE TABLE ${q(temporary)} `));
+    step.create.splice(created + 1, 0, ...wanted.filter((key) => key.table === step.table)
+      .map((key) => allocationBlock(dialect, 'unreference', temporary, key.column, step.table)));
+    step.indexes.push(...wanted.filter((key) => !later.has(key.table)).map((key) => dialect.ddl.addForeignKey(key)));
+  });
 }
 
 /**
@@ -3195,10 +3333,15 @@ function wholeKeySql(dialect, table, column) {
  * or a column referencing one that became a `numeric` again, adds the CHECK
  * that refuses a NaN (`dialect.numberCheck`) unless the column holds it, as
  * a column created a `numeric` does and one created a `bigint` does not.
- * @param {any} dialect @param {'lock' | 'ensure' | 'release' | 'guard' | 'uncheck'} action @param {string} table @param {string} column
+ * `unreference` drops each foreign key of the column alone that references
+ * `referenced`, whatever the engine named it: a referencing table's key that
+ * a rebuild of the referenced table could not drop past, added again or
+ * created by the referencing table's own rebuild (`unreferencedRebuilds`).
+ * @param {any} dialect @param {'lock' | 'ensure' | 'release' | 'guard' | 'uncheck' | 'unreference'} action @param {string} table @param {string} column
+ * @param {string} [referenced] - the table an `unreference` block's foreign keys reference
  * @returns {string}
  */
-function allocationBlock(dialect, action, table, column) {
+function allocationBlock(dialect, action, table, column, referenced) {
   const q = dialect.quoteIdentifier, literal = dialect.stringLiteral;
   const owned = serialSequenceSql(dialect, table, column);
   const qualified = `${q(table)}.${q(column)}`;
@@ -3230,24 +3373,33 @@ function allocationBlock(dialect, action, table, column) {
       + `FROM pg_catalog.pg_attribute a WHERE a.attrelid = c.conrelid AND a.attname = ${literal(column)})] LOOP`,
       `    EXECUTE ${literal(`ALTER TABLE ${q(table)} DROP CONSTRAINT `)} || pg_catalog.quote_ident(k.conname);`,
       '  END LOOP;', 'END;'],
+    unreference: ['DECLARE', '  k record;', 'BEGIN',
+      '  FOR k IN SELECT c.conname FROM pg_catalog.pg_constraint c WHERE c.conrelid = '
+      + `pg_catalog.to_regclass(${literal(q(table))}) AND c.contype = 'f' AND c.confrelid = pg_catalog.to_regclass(${literal(q(String(referenced)))}) `
+      + 'AND c.conkey = ARRAY[(SELECT a.attnum '
+      + `FROM pg_catalog.pg_attribute a WHERE a.attrelid = c.conrelid AND a.attname = ${literal(column)})] LOOP`,
+      `    EXECUTE ${literal(`ALTER TABLE ${q(table)} DROP CONSTRAINT `)} || pg_catalog.quote_ident(k.conname);`,
+      '  END LOOP;', 'END;'],
   }[action];
   let tag = '$jaren_allocation$';
   for (let i = 1; body.some((line) => line.includes(tag)); i++) tag = `$jaren_allocation_${i}$`;
-  return `DO ${tag}\n-- ${JSON.stringify([action, table, column])}\n${body.join('\n')}\n${tag}`;
+  const named = action === 'unreference' ? [action, table, column, referenced] : [action, table, column];
+  return `DO ${tag}\n-- ${JSON.stringify(named)}\n${body.join('\n')}\n${tag}`;
 }
 
 /**
  * What an allocation block's first line names: its action, table and key, or
  * `null` for any other statement.
- * @param {unknown} sql @returns {['lock' | 'ensure' | 'release' | 'guard' | 'uncheck', string, string] | null}
+ * @param {unknown} sql @returns {[any, string, string, string?] | null}
  */
 function allocationBlockOf(sql) {
   const header = typeof sql === 'string' ? /^DO \$[A-Za-z_0-9]*\$\n-- (\[[^\n]*\])\n/.exec(sql) : null;
   if (header === null) return null;
   try {
-    const [action, table, column] = JSON.parse(header[1]);
-    return ['lock', 'ensure', 'release', 'guard', 'uncheck'].includes(action) && typeof table === 'string' && typeof column === 'string'
-      ? [action, table, column] : null;
+    const [action, table, column, referenced] = JSON.parse(header[1]);
+    if (typeof table !== 'string' || typeof column !== 'string') return null;
+    if (action === 'unreference') return typeof referenced === 'string' ? [action, table, column, referenced] : null;
+    return ['lock', 'ensure', 'release', 'guard', 'uncheck'].includes(action) ? [action, table, column] : null;
   }
   catch { return null; }
 }
@@ -3855,6 +4007,51 @@ function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report, expre
 }
 
 /**
+ * Render the rebuild step (§10) of a join table an endpoint key's retype
+ * retypes: the target table under the temporary name, the memberships copied
+ * with each retyped column spelled as the key it references now is
+ * (`retypedSql`, checked first by `retypeCheckSql`), and its index under the
+ * final name. On PostgreSQL the step opens with the table's lock and carries
+ * each row's `rid` and the sequence, as an entity's rebuild does.
+ * @param {string} name - the join table, under the name it has when the step runs
+ * @param {any} target - its target mapping
+ * @param {Map<string, { source: string, from: string, to: string }>} storages - by target column
+ * @param {any} toMapping @param {any} dialect
+ * @returns {any}
+ */
+function renderJoinRebuild(name, target, storages, toMapping, dialect) {
+  const q = dialect.quoteIdentifier;
+  const temporary = `${name}__rebuild`;
+  const create = [planJoinTable(temporary, target, toMapping, dialect, name).createSql[0]];
+  const indexes = planJoinTable(name, target, toMapping, dialect).createSql.slice(1);
+  /** @type {string[]} */
+  const targets = [], sources = [];
+  for (const [column, { source, from, to }] of storages) {
+    targets.push(q(column));
+    if (from === to) {
+      sources.push(q(source));
+      continue;
+    }
+    sources.push(retypedSql(dialect, q(source), from, to, dialect.comparableColumnType(dialect.typeFor(to, 'generated'))));
+    const check = retypeCheckSql(dialect, name, source, from, to, false);
+    if (check !== null) create.push(check);
+  }
+  const identity = dialect.identityColumn?.name;
+  if (dialect.name === 'postgres') {
+    create.unshift(rebuildLockSql(dialect, name));
+    if (identity !== undefined) {
+      targets.push(q(identity));
+      sources.push(q(identity));
+      create.push(carriedSequenceSql(dialect, name, temporary, identity));
+      indexes.push(advancedSequenceSql(dialect, name, identity));
+    }
+  }
+  return { kind: 'rebuild', table: name, create,
+    copy: `INSERT INTO ${q(temporary)} (${targets.join(', ')}) SELECT ${sources.join(', ')} FROM ${q(name)}`, indexes,
+    note: `rebuild join table '${name}' (an endpoint key is retyped)` };
+}
+
+/**
  * Create a model's WHOLE physical shape on a connection: collections,
  * entity tables and join tables, exactly as `openStore` would. Used
  * by the shadow baseline, the fresh reference database that shape
@@ -4252,6 +4449,23 @@ function renamesOf(steps) {
 }
 
 /**
+ * The table a `ddl` or `sql` step drops: exactly `DROP TABLE [IF EXISTS]
+ * <name>` (quoted, bare or schema-qualified), as `renamesOf` reads a rename;
+ * `undefined` for any other step.
+ * @param {any} step @returns {string | undefined}
+ */
+function droppedTableOf(step) {
+  if ((step?.kind !== 'ddl' && step?.kind !== 'sql') || typeof step.sql !== 'string') return undefined;
+  const tokens = sqlTokens(step.sql);
+  if (tokens.at(-1)?.kind === 'symbol' && tokens.at(-1)?.value === ';') tokens.pop();
+  if (!isKeyword(tokens[0], 'DROP') || !isKeyword(tokens[1], 'TABLE')) return undefined;
+  let at = isKeyword(tokens[2], 'IF') && isKeyword(tokens[3], 'EXISTS') ? 4 : 2;
+  if (tokens[at + 1]?.kind === 'symbol' && tokens[at + 1].value === '.') at += 2;
+  const name = tokens[at]?.kind === 'word' || tokens[at]?.kind === 'identifier' ? tokens[at].value : undefined;
+  return tokens.length === at + 1 ? name : undefined;
+}
+
+/**
  * The violations `after` holds beyond `before`, compared as whole rows and
  * counted: a WITHOUT ROWID table's violations carry no rowid, so two of
  * them read alike, and one fixed while another appears is still one new.
@@ -4363,9 +4577,11 @@ function runSteps(connection, migration, options) {
         let before = null;
         // a reference from a table a later rebuild of the link spells anew is
         // judged after that rebuild: a key and the column that references it
-        // are retyped in two steps, and match again only once both are
-        const later = new Set(migration.steps.slice(i + 1).filter((/** @type {any} */ s) => s.kind === 'rebuild')
-          .map((/** @type {any} */ s) => tableNameKey(s.table)));
+        // are retyped in two steps, and match again only once both are. One
+        // from a table a later step drops goes with it; what is still broken
+        // when the link ends, the link's own check refuses
+        const later = new Set(migration.steps.slice(i + 1).flatMap((/** @type {any} */ s) => (s.kind === 'rebuild' ? [s.table]
+          : droppedTableOf(s) ?? [])).map((/** @type {any} */ table) => tableNameKey(table)));
         const since = held;
         const runNext = (j) => {
           if (j >= statements.length) {
