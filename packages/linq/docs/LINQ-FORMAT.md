@@ -206,7 +206,7 @@ and the bundle is the byte count the tree-shaking probe builds.
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 972 | — | — | — | — |
-| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,239 | 34 | 8 | 17 | 259,715 B |
+| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,239 | 34 | 8 | 17 | 260,405 B |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,266 | 82 | 10 | 4 | 47,750 B |
 | [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,244 | 31 | 7 | 3 | 60,086 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 980 | 17 | 8 | 3 | 29,086 B |
@@ -219,7 +219,7 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 25,801 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 84 | 9 | 1 | 1 | 5,240 B |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 100 | 21 | 1 | 1 | 7,116 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,617 | 54 | 5 | 2 | 1,183,788 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,617 | 54 | 5 | 2 | 1,188,151 B |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 14,413 B |
 | **16 documents** | | **14,288** | **382** | **75** | | |
 <!--/fact-->
@@ -265,7 +265,7 @@ it and each document publishes it. The rounded column is what
 <!--fact:pens.cost-->
 | Subpath | Document | Bundle | Rounded |
 |---|---|---:|---:|
-| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 259,715 B | 260 kB |
+| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 260,405 B | 260 kB |
 | `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 47,750 B | 48 kB |
 | `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 60,086 B | 60 kB |
 | `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 29,086 B | 29 kB |
@@ -278,7 +278,7 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 25,801 B | 26 kB |
 | `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 5,240 B | 5 kB |
 | `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 7,116 B | 7 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 1,183,788 B | 1184 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 1,188,151 B | 1188 kB |
 | `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 14,413 B | 14 kB |
 <!--/fact-->
 

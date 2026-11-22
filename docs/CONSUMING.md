@@ -169,7 +169,7 @@ the table and stale in the paragraph that cites it:
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->26<!--/fact--> kB | text template capture; no renderer |
 | `./project` | <!--fact:bundle.project.kb-->5<!--/fact--> kB | project files; no Studio engine |
 | `./charts` | <!--fact:bundle.charts.kb-->7<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->1184<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->1188<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both
@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->21 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->11 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -249,23 +249,23 @@ included.
 | `.` | 214 | core 88, db 85, json 35, validate 6 | 12.1 |
 | `./app` | 1 | db 1 | 0.1 |
 | `./async-live` | 140 | core 64, db 47, json 23, validate 6 | 7.8 |
-| `./bun` | 132 | core 63, db 40, json 23, validate 6 | 6.4 |
+| `./bun` | 132 | core 63, db 40, json 23, validate 6 | 6.5 |
 | `./entity` | 135 | core 63, db 41, json 25, validate 6 | 7.3 |
-| `./model` | 123 | core 63, db 31, json 23, validate 6 | 6.1 |
+| `./model` | 123 | core 63, db 31, json 23, validate 6 | 6.2 |
 | `./node` | 133 | core 63, db 41, json 23, validate 6 | 6.9 |
 | `./node-pool` | 108 | core 62, db 23, json 23 | 5.0 |
-| `./node-process` | 104 | core 62, json 23, db 19 | 4.9 |
+| `./node-process` | 104 | core 62, json 23, db 19 | 5.0 |
 | `./node-worker` | 104 | core 62, json 23, db 19 | 4.9 |
 | `./postgres` | 122 | core 63, db 36, json 23 | 5.3 |
-| `./query` | 136 | core 63, db 44, json 23, validate 6 | 7.7 |
+| `./query` | 136 | core 63, db 44, json 23, validate 6 | 7.8 |
 | `./relational` | 126 | core 63, db 34, json 23, validate 6 | 6.2 |
 | `./schedules` | 44 | core 29, db 9, json 6 | 2.1 |
 | `./search` | 95 | core 67, json 23, db 5 | 4.3 |
-| `./temporals` | 210 | core 88, db 81, json 35, validate 6 | 11.9 |
-| `./trigger-rules` | 124 | core 63, db 32, json 23, validate 6 | 6.2 |
+| `./temporals` | 210 | core 88, db 81, json 35, validate 6 | 12.0 |
+| `./trigger-rules` | 124 | core 63, db 32, json 23, validate 6 | 6.3 |
 | `./typed` | 1 | db 1 | 0.1 |
 | `./wasm` | 106 | core 62, json 23, db 21 | 5.0 |
-| `./worker-endpoint` | 137 | core 63, db 45, json 23, validate 6 | 7.0 |
+| `./worker-endpoint` | 137 | core 63, db 45, json 23, validate 6 | 7.1 |
 <!--/fact-->
 
 **`@jarenjs/linq`**
@@ -278,7 +278,7 @@ included.
 | `./authoring` | 15 | core 8, linq 7 | 1.0 |
 | `./charts` | 15 | core 8, linq 7 | 1.0 |
 | `./contract` | 20 | core 10, linq 10 | 1.2 |
-| `./db` | 286 | core 101, db 85, json 38, validate 28, linq 27, formats 7 | 14.7 |
+| `./db` | 286 | core 101, db 85, json 38, validate 28, linq 27, formats 7 | 14.8 |
 | `./flow` | 19 | linq 11, core 8 | 1.1 |
 | `./forms` | 21 | linq 13, core 8 | 1.2 |
 | `./formula` | 93 | core 62, json 26, linq 5 | 4.3 |
@@ -300,7 +300,7 @@ included.
 | `./basic` | 3 | json 2, core 1 | 0.2 |
 | `./canonical` | 17 | core 10, json 7 | 0.9 |
 | `./formula` | 88 | core 62, json 26 | 3.9 |
-| `./formula/batch` | 89 | core 62, json 27 | 3.9 |
+| `./formula/batch` | 89 | core 62, json 27 | 4.0 |
 | `./formula/migrate` | 91 | core 62, json 29 | 4.3 |
 | `./jslt` | 105 | core 73, json 32 | 4.3 |
 | `./jtlt` | 110 | core 73, json 37 | 4.3 |
@@ -322,7 +322,7 @@ included.
 |---|---:|---|---:|
 | `.` | 124 | core 73, validate 27, json 24 | 5.5 |
 | `./load` | 41 | core 24, validate 11, json 6 | 1.8 |
-| `./normalize` | 126 | core 73, validate 29, json 24 | 5.8 |
+| `./normalize` | 126 | core 73, validate 29, json 24 | 5.9 |
 | `./output` | 42 | core 25, validate 11, json 6 | 1.9 |
 | `./query` | 124 | core 73, validate 27, json 24 | 5.5 |
 | `./references` | 24 | core 12, json 6, validate 6 | 1.1 |
