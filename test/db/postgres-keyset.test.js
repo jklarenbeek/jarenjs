@@ -294,9 +294,12 @@ describe('a keyset page over a physical PostgreSQL table', { skip: !url && 'JARE
       const refusedOrder = (/** @type {any} */ error) => error.code === 'JD0032' && /orderBy must address typed entity paths/.test(error.message);
       await assert.rejects(() => store.entity('Big').load({ orderBy: '$it.id' }), refusedOrder);
       assert.equal((await store.explain({ $for: { it: '$.Big[*]' }, $where: { $eq: ['$it.id', 1] }, $return: '$it.id' })).mode, 'set');
-      // a uuid column that can hold NULL stays refused, as a nullable text column is: the typed path requires a value
+      // a uuid column that can hold NULL stays refused: the typed path requires a value
       await assert.rejects(() => store.entity('Tagged').load({ orderBy: '$it.owner' }), refusedOrder);
-      await assert.rejects(() => store.entity('Tagged').load({ orderBy: '$it.label' }), refusedOrder);
+      // a text column that reads a NULL as a present null orders natively, as on SQLite: the nulls first, then by
+      // the key
+      assert.deepEqual((await store.entity('Tagged').load({ orderBy: '$it.label' })).map((/** @type {any} */ row) => `${row.sequence}/${row.label}`),
+        ['1/null', '9007199254740993/null', '1/x']);
     }
     finally { await close(); }
   });

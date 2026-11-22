@@ -17,6 +17,7 @@ import {
 import { postgresDialect } from '@jarenjs/db/postgres';
 import { fullDoubleDialect } from './helpers.js';
 import { decimalEdge, decimalIntervals } from '../../packages/db/src/double-interval.js';
+import { numericEdge, listHolds } from '../../packages/db/src/emit.js';
 
 const MODEL = {
   $model: '0.1',
@@ -487,22 +488,39 @@ describe('PostgreSQL: a literal comparison reads the typed extraction alone', ()
 
   it('an external compares a number with the decimals that round to its double, each edge with its tie side', () => {
     assert.strictEqual(pg.decimalDigits, true);
-    const M = `to_jsonb(${N})`;
+    // the member read at the number kind is NULL for every other type, so it
+    // compares with each edge bound as a `numeric`, bare, as a literal does
+    const M = N;
     const forms = {
-      $eq: `${M} >= (($4)::jsonb) AND ${M} > (($5)::jsonb) AND ${M} <= (($6)::jsonb) AND ${M} < (($7)::jsonb)`,
-      $lt: `(${M} < (($4)::jsonb) OR ${M} <= (($5)::jsonb))`,
-      $le: `${M} <= (($4)::jsonb) AND ${M} < (($5)::jsonb)`,
-      $gt: `(${M} > (($4)::jsonb) OR ${M} >= (($5)::jsonb))`,
-      $ge: `${M} >= (($4)::jsonb) AND ${M} > (($5)::jsonb)`,
+      $eq: `${M} >= (($4)::numeric) AND ${M} > (($5)::numeric) AND ${M} <= (($6)::numeric) AND ${M} < (($7)::numeric)`,
+      $lt: `(${M} < (($4)::numeric) OR ${M} <= (($5)::numeric))`,
+      $le: `${M} <= (($4)::numeric) AND ${M} < (($5)::numeric)`,
+      $gt: `(${M} > (($4)::numeric) OR ${M} >= (($5)::numeric))`,
+      $ge: `${M} >= (($4)::numeric) AND ${M} > (($5)::numeric)`,
     };
     const edges = { $eq: ['low', 'lowExclusive', 'high', 'highExclusive'], $lt: ['low', 'lowExclusive'],
       $le: ['high', 'highExclusive'], $gt: ['high', 'highExclusive'], $ge: ['low', 'lowExclusive'] };
     for (const [op, form] of Object.entries(forms)) {
       const { where, slots } = whereFor({ [op]: ['$it.n', '$x'] }, pg);
-      assert.ok(where.includes(`IN ('number') AND ${form}))`), `${op}: ${where}`);
+      assert.ok(where.includes(`IN ('number') AND (${M} IS NOT NULL AND ${form})))`), `${op}: ${where}`);
       assert.deepStrictEqual(slots.slice(3), edges[/** @type {keyof typeof edges} */ (op)]
-        .map((decimal) => ({ external: 'x', json: true, decimal, compared: true })), op);
+        .map((decimal) => ({ external: 'x', json: true, decimal, numeric: true, compared: true })), op);
     }
+  });
+
+  it('an external\'s numeric edges and a list\'s kinds bind as the number branch reads them', () => {
+    // a finite number binds the decimal interval's edges, an infinity its open side as itself, anything else nothing
+    assert.deepStrictEqual(['low', 'high'].map((edge) => numericEdge(5, /** @type {any} */ (edge))),
+      [decimalEdge(5, 'low'), decimalEdge(5, 'high')]);
+    assert.deepStrictEqual(['low', 'high', 'highExclusive'].map((edge) => numericEdge(Infinity, /** @type {any} */ (edge))),
+      [decimalEdge(Infinity, 'low'), 'Infinity', 'Infinity']);
+    assert.deepStrictEqual(['low', 'lowExclusive', 'high'].map((edge) => numericEdge(-Infinity, /** @type {any} */ (edge))),
+      ['-Infinity', '-Infinity', decimalEdge(-Infinity, 'high')]);
+    assert.deepStrictEqual(['s', null, true, NaN, { a: 1 }].map((value) => numericEdge(value, 'low')), [null, null, null, null, null]);
+    assert.deepStrictEqual([[5, 's'], [5], ['s'], { a: 5 }, [], 'x', null, [null, true]].map((value) =>
+      [listHolds(value, 'text'), listHolds(value, 'number')]),
+    [['true', 'true'], ['false', 'true'], ['true', 'false'], ['false', 'true'], ['false', 'false'], ['false', 'false'],
+      ['false', 'false'], ['false', 'false']]);
   });
 
   it('an indexed member reads its generated column, an unindexed one its typed CASE, no discriminator beside either', () => {
@@ -538,16 +556,27 @@ describe('PostgreSQL: a literal comparison reads the typed extraction alone', ()
       planQuery({ $for: { it: '$[*]' }, $where: predicate, $return: '$it.id' }, shape).plan, pg, ITEMS_PHYSICAL);
     const within = (/** @type {string} */ member) => [`${member} >= ("interval_edge".e ->> 0)::numeric`, `${member} > ("interval_edge".e ->> 1)::numeric`,
       `${member} <= ("interval_edge".e ->> 2)::numeric`, `${member} < ("interval_edge".e ->> 3)::numeric`].join(' AND ');
-    const intervals = (/** @type {string} */ slot) => `"gx_q" IN (SELECT unnest(ARRAY(SELECT DISTINCT "interval_row"."gx_q" FROM `
-      + `jsonb_array_elements((${slot})::jsonb) AS "interval_edge"(e) JOIN "items" AS "interval_row" ON ${within('"interval_row"."gx_q"')})))`;
+    const found = (/** @type {string} */ slot) => `ARRAY(SELECT DISTINCT "interval_row"."gx_q" FROM `
+      + `jsonb_array_elements((${slot})::jsonb) AS "interval_edge"(e) JOIN "items" AS "interval_row" ON ${within('"interval_row"."gx_q"')})`;
+    const intervals = (/** @type {string} */ slot) => `"gx_q" IN (SELECT unnest(${found(slot)}))`;
     const literal = emitted({ $eq: ['$it.q', { $seq: [5, 2 ** 60] }] });
     assert.ok(literal.sql.includes(`("gx_q" IS NOT NULL AND ${intervals('$1')})`), literal.sql);
     assert.deepStrictEqual(literal.slots, [{ literal: decimalIntervals([5, 2 ** 60]) }]);
-    // an external list's slot binds its numbers' intervals; its text branch, the list itself
+    // an external list's slot binds its numbers' intervals, the column `= ANY` of them (an `OR` keeps a
+    // sublink from a join); its text branch, the list itself; each branch beside whether the list holds its kind
     const external = emitted({ $eq: ['$it.q', '$xs[*]'] });
-    assert.ok(external.sql.includes(intervals('$2')), external.sql);
-    assert.deepStrictEqual(external.slots, [{ external: 'xs', json: true, list: true },
+    assert.ok(external.sql.includes(`"gx_q" = ANY(${found('$4')})`), external.sql);
+    assert.deepStrictEqual(external.slots, [{ external: 'xs', json: true, list: true, holds: 'text' },
+      { external: 'xs', json: true, list: true }, { external: 'xs', json: true, list: true, holds: 'number' },
       { external: 'xs', json: true, list: true, intervals: true }]);
+    // a column that holds the member as JSON compares an external number with each edge as JSON, beside its type
+    const json = emitPlan(planQuery({ $for: { it: '$[*]' }, $where: { $eq: ['$it.q', '$x'] }, $return: '$it.id' }, shape).plan,
+      pg, { ...ITEMS_PHYSICAL, jsonColumns: new Set(['gx_q']) });
+    assert.ok(json.sql.includes('"gx_q" >= (($4)::jsonb) AND "gx_q" > (($5)::jsonb)'), json.sql);
+    assert.deepStrictEqual(json.slots.slice(3, 5), [{ external: 'x', json: true, decimal: 'low', compared: true },
+      { external: 'x', json: true, decimal: 'lowExclusive', compared: true }]);
+    // a column that reads a NULL as a present null differs from a value where it is NULL too
+    assert.strictEqual(pg.distinct('"c"', '$1'), '"c" IS DISTINCT FROM $1');
     const unindexed = emitted({ $eq: ['$it.n', { $seq: [5] }] });
     assert.ok(unindexed.sql.includes(pg.inList(pg.doubleRead(N), '$1', 'double')), unindexed.sql);
     assert.deepStrictEqual(unindexed.slots, [{ literal: '[5]' }]);

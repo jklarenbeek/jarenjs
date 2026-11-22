@@ -56,9 +56,11 @@ stands for an absent member, a stored JSON `null` and every other JSON type, so
 no `jsonb_typeof` discriminator sits beside it (the dialect declares
 `typedExtract`). `$ne` keeps presence through the member's JSON value: a stored
 `null` and a value of another type differ, an absent member does not, as the
-engine answers. An external operand and a type test keep the discriminator — an
-external's type is known only when it binds, and a type test asks for the type
-by name — and SQLite's extraction is untyped, so its `json_type` guards stay.
+engine answers. A type test keeps the discriminator — it asks for the type by
+name — and so does an external operand's text branch and its difference; an
+external's number branch reads the typed extraction alone, beside the
+external's own JSON type, which is a constant of the call (below). SQLite's
+extraction is untyped, so its `json_type` guards stay.
 The discriminator was a `CASE` over three `jsonb_typeof` calls, twice per term,
 that every row evaluated beside the typed extraction's own `CASE` and that the
 planner's selectivity estimate could not price; where the member is indexed the
@@ -310,8 +312,14 @@ a term over a column that may hold NULL spells the engine's empty-first
 placement (`ASC NULLS FIRST`, `DESC NULLS LAST`), which is not the order a
 default index provides, so its rows are sorted. A text keyset requires the `UTF8` database encoding, read at open — no
 per-row byte proof runs here — and refuses `JD0032` naming any other. An
-explicit `orderBy` over a text or uuid column with the `null` NULL policy stays
-refused, as every such column is for the typed path.
+explicit `orderBy` over a uuid column with the `null` NULL policy stays
+refused, as every such column is for the typed path. A text, integer, number
+or boolean column with that policy (it reads a NULL as a present `null`) is
+read natively, as on SQLite: a load orders by it, and a query's predicates,
+groupings and aggregates over it run in SQL beside the guards that raise the
+engine's `JQ2005` (a `null` group or order key) and `JQ2001` (a `null` a sum,
+mean or extreme folds), and a difference from a value holds where it is NULL
+(`IS DISTINCT FROM`).
 
 The server types a bound literal from the column it is compared with, so an
 integer past an adopted `smallint` or `integer` column's own width
@@ -378,9 +386,18 @@ a document another writer spelled by other digits (`1152921504606846976` for
 engine keeps it ([ARCHITECTURE](../ARCHITECTURE.md), "A number past 2^53 is
 compared as the double it is"). A literal binds the interval's edges as
 `numeric` literals, so an indexed member's comparison is a range over its
-column (an equality two bounds) and seeks; a list over an indexed member or an
-entity column finds the values in its intervals through the column's index and
-seeks too; a list over any other member reads the member as the double, as an
+column (an equality two bounds) and seeks. An external binds the same edges as
+`numeric` parameters beside a test of its JSON type, which the server folds as
+the call binds: the branch of the other kind drops out, and an indexed member's
+comparison with a number external is the same range and seeks. A list over an
+indexed member or an entity column finds the values in its intervals through
+the column's index and seeks too; an external list's number branch is the
+column `= ANY` of those values, its text branch the column `= ANY` of the
+list's strings, and each branch stands beside whether the list holds an item of
+its kind, so the branch of a kind the list does not hold folds away: a list of
+numbers over a number member and a list of strings over a string member seek
+the member's index, where a list holding both kinds reads every document whose
+member the other kind's branch reads from the document. A list over any other member reads the member as the double, as an
 ordering does, and costs a membership more than the bare `numeric` did. Two
 numbers compared with each other — two members, an entity's two columns, a
 join's or a hop's columns — are read as the doubles, so they cost the `CASE`
@@ -534,7 +551,12 @@ comparison of the member with another member, and the value a grouping
 projects read the NULL where the engine
 refuses (`JQ2005`, `JQ2001`), orders the values or answers the value itself: an
 ordering puts the document among the empty members, and a stored `"x"` groups
-as the string `"null"`. This is the store's documented loss — native and
+as the string `"null"`. A unique index over a member of several kinds keys
+the kinds its schema lists, so two documents holding one value of a kind it
+does not list (`q: true` twice under `["number", "string"]`, or the same
+object or array) are both stored and a seek for that value answers both, where
+SQLite's index refuses the second `JD2005`; a listed kind is refused alike on
+both. This is the store's documented loss — native and
 residual answers agree only over documents that conform to the schema
 ([ARCHITECTURE](../ARCHITECTURE.md), "Two documented preconditions"). SQLite
 stops elsewhere: its STRICT generated column refuses the write of a text, an

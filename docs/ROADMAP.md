@@ -395,13 +395,6 @@ costs a descriptor plus examples and no UI code at all.
 
 ## @jarenjs/linq & @jarenjs/db — the data pair
 
-- [ ] **A bare collection root's first item, element or existence reads every document.** Over a
-  collection handle (no root of its own), `any()`, `first()`, `elementAt(n)` and
-  `take(n).toArray()` push `{ $exists: '$[*]' }` and `[{ $subsequence: ['$[*]', n, k] }]`.
-  The planner answers them `set`: one `SELECT` of every document, then the window or the test
-  in JS. Explain reports this honestly, so the cost is unbounded but nothing is hidden. Wanted:
-  the `'$[*]'` operand of a top-level `$exists` or `$subsequence` planned as the `$for` scan it
-  abbreviates, as `'$[*]'` alone and `{ $count: '$[*]' }` are.
 - [ ] **A backlog read from the tick backwards is not counted.** A tick whose backlog is longer than one search reads
   under the limits fires exactly what `missed` says, but counts as skipped only the occurrences of the span it read;
   `counts.uncounted` says a tick did so. Wanted: the passed occurrences counted without enumerating them.
@@ -418,28 +411,6 @@ costs a descriptor plus examples and no UI code at all.
   a collection — is read into `introspect()`'s derived model rather than
   reported, and `jaren-db plan --store` reaches SQLite alone. Wanted:
   `store.introspect()` naming each CHECK its own model does not declare.
-- [ ] **A unique index over a document whose member holds a kind its schema
-  does not list answers differently on the two engines.** The store does not
-  validate a member against its declared types by default: under a unique
-  `$.q` over `['number', 'string']` two documents with `q: true` (or two equal
-  objects) are both stored on PostgreSQL, whose indexes key only the kinds the
-  union lists, and the second is refused on SQLite, whose untyped column keys
-  every kind. Wanted: a decision — key every kind on PostgreSQL (an index per
-  kind beside every unique union index: a minor and an insert cost), or state
-  the unvalidated-document boundary for uniqueness as for queries.
-- [ ] **On PostgreSQL an index refuses a key past the B-tree's entry limit.**
-  A declared index over a member is a B-tree keying the value whole, unique or
-  not, so a document whose member is past PostgreSQL's B-tree entry limit (a
-  long string, a large object or array) is refused `JD2005` (`class: 'error'`,
-  the server's message), though it duplicates nothing, where SQLite stores it.
-  An exclusion constraint over a hash index holds a value of any size exactly,
-  but serves equality alone: a range, an ordering or keyset pagination over a
-  unique member would read every row; and a hash index keys one column, so a
-  composite one needs an immutable expression that combines its members
-  (`ROW(...)` and `jsonb_build_array(...)` are refused). Wanted: a decision —
-  keep the stated limit, or a design that keeps both (an exclusion constraint
-  for uniqueness beside a B-tree over a bounded prefix that range and ordering
-  seeks read with an exact recheck; a plan change, a minor).
 - [ ] **Replication over an entity expression index.** Replication orders an
   envelope's writes by unique columns, never by an expression index's key
   ([MODEL-FORMAT §7A](../packages/db/docs/MODEL-FORMAT.md)): a value the
@@ -725,21 +696,30 @@ costs a descriptor plus examples and no UI code at all.
 - [ ] **On PostgreSQL a comparison of another kind of a union member seeks no
   non-unique composite or conditional index, and no non-unique index over a
   path with a guarded step.** A declared single-path index over a member of
-  several scalar kinds has an index beside it per other kind (`c_by_q$text`)
-  over the document read that comparison spells, and so does every unique
-  index (composite, conditional or guarded, which needs them to refuse a
-  duplicate of each kind), so it seeks; a non-unique composite (`['$.q',
-  '$.k']`) or conditional index over such a member, and a non-unique index
-  over a path whose step the dialect guards (`$.u[0]` under an open container
-  with `items: { type: ['number', 'string'] }`), has none, and that comparison
-  reads every row. Wanted: the same index beside those (for a guarded path,
-  under each spelling of the guard the table may hold).
+  several scalar kinds has an index beside it per other kind (`c_by_q$text`),
+  and so does every unique index, so it seeks; a non-unique composite
+  (`['$.q', '$.k']`) or conditional index over such a member, and a non-unique
+  index over a path whose step the dialect guards (`$.u[0]`), has none, and
+  that comparison reads every row. The same index beside those seeks
+  (measured: Seq Scan to Index Scan on all three), but it keys the member at
+  its other kind, so a write the declared index stores today — a string past
+  the B-tree entry limit (about 2.7 kB), or another writer's number of
+  thousands of digits, which the declared column holds as NULL — would be
+  refused `JD2005`, and `introspect()` reads such an index back beside no
+  non-unique composite, conditional or guarded index. Wanted: an index that
+  keys a bounded image of the value (a hash index, or an expression over a
+  digest, with the comparison spelled to read it) so no write is refused, read
+  back by `introspect()`.
 - [ ] **On PostgreSQL an ordering over an indexed collection member is sorted,
   never read in index order.** The statement orders `ASC NULLS FIRST` beside
-  `"rid"`, which an ascending B-tree index does not provide (`Sort` over `Seq
-  Scan`), so an `$orderby` sorts every matching row however few a page or a
-  narrow `$where` returns. Wanted: an index whose null placement the order
-  reads, or an order whose null placement the index provides.
+  `"rid"` (a number member by its double's `CASE`), which an ascending B-tree
+  index over the generated column does not provide (`Sort` over `Seq Scan`).
+  Measured on 20,000 rows, a ten-row window: 10.8 ms by a string member, 14.4
+  ms by a number; with an index `(column NULLS FIRST, rid)` 0.24 ms, and with
+  an expression index over the double `NULLS FIRST` 0.27 ms. Wanted: those
+  indexes as the store's own (a DDL change: `introspect()` must read them back
+  as the declared index and `planColumnUpgrade` must replace an earlier
+  release's).
 - [ ] **On PostgreSQL a load's order and a page's continuation read a
   `numeric` key without the store's key CHECK bare.** A table an earlier
   release created holds a writer's digits until `planColumnUpgrade` adds the
@@ -756,55 +736,57 @@ costs a descriptor plus examples and no UI code at all.
   continuation carries (the row's stored digits).
 - [ ] **On PostgreSQL an entity's ordering over a column that may hold NULL
   never reads an index.** A term over a reference or an indexed column is `ASC
-  NULLS FIRST` (descending `DESC NULLS LAST`), the engine's empty-first
-  placement, which a default B-tree does not give, so a window, a load's
-  `orderBy` and a keyset page over it sort every row (a key and a column the
-  catalog declares `NOT NULL` read their index). Wanted: indexes the store
-  creates declared `NULLS FIRST` (a DDL change: the previous release reads
-  such an index as not plain), measured; an ascending scan still reads the
-  whole null group first. A non-key `number`/`integer` column orders by the
-  double and needs an expression index besides.
-- [ ] **On PostgreSQL a collection's external list never seeks.** A membership
-  in an external list reads a text branch beside the number branch (`OR`),
-  which reads the document, so the statement scans even where the number
-  branch ranges over an index; a typed `number` member's external comparison
-  reads `to_jsonb(column)` and scans too.
+  NULLS FIRST` (descending `DESC NULLS LAST`), which a default B-tree does not
+  give, so a window, a load's `orderBy` and a keyset page sort every row (a
+  key and a column the catalog declares `NOT NULL` read their index). Measured
+  on 20,000 rows: a ten-row window by a string column 2.8 ms, a load `orderBy
+  … take 10` 4.2 ms; with an index `(column NULLS FIRST, rid)` 0.14-0.15 ms; a
+  number column (ordered by the double) 5.9 ms, 0.21 ms with an expression
+  index over the double `NULLS FIRST`. Wanted: indexes the store creates
+  declared so (a DDL change with its read-back in `introspect()` and its
+  upgrade in `planColumnUpgrade`).
+- [ ] **On PostgreSQL an external list holding both strings and numbers reads
+  every document.** Each branch of a membership in an external list stands
+  beside whether the list holds its kind, so a list of one kind seeks the
+  member's index (numbers by the interval of decimals that round to each,
+  strings by `= ANY`), and a number external compares the generated `numeric`
+  column with `numeric` edges and seeks; a list holding both keeps both
+  branches in an `OR`, and a branch over a kind the member has no column for
+  reads the document, so it scans (measured: 20,000 documents, a two-number
+  list 35.6 ms before, 1.3 ms now). Wanted: the branch of the other kind as
+  its own index read (a `UNION` of the two seeks).
 - [ ] **On PostgreSQL a join's equality over two non-key number columns no
   longer seeks.** It reads both columns as the doubles (bounded by ranges of
-  each around the other), which the planner cannot estimate, so it hashes or
-  merges on the doubles where it seeked the bare column's index. Wanted: an
-  index the doubles' equality uses (an expression index over the double),
-  measured.
+  each around the other), which the planner cannot estimate, so it hashes on
+  the doubles. Measured (20 × 20,000 rows): 4.3 ms; the doubles' equality
+  through an expression index over the inner column's double 0.22 ms, and the
+  bare equality, exact where both columns hold only shortest-digit spellings,
+  0.25 ms. Wanted: the store's expression index over the double (with item
+  35's read-back and upgrade) and the equality spelled to read it.
 - [ ] **On SQLite an empty window over an indexed `integer` member the schema
-  does not bound is read twice, and a read of every row is sorted.** The order
-  key reads the double (`CAST("gx_v" AS REAL)`) so two spellings of one double
-  past 2^53 tie as the engine's do. A window with a limit reads the column
-  bare, in index order, behind a probe in its own LIMIT (the column's MIN and
-  MAX past ±(2^53 − 1) leave no row), and an empty answer is read again
-  ordered by the double: a window that holds no row, and every window over
-  rows that hold such an integer, costs both statements, the first a whole
-  index walk where no index serves the filter. A read of every row sorts.
-  Wanted: a statement that tells an empty answer from a probe that found such
-  an integer (a sentinel row whose order SQLite keeps), or an index over the
-  double, measured.
-- [ ] **On PostgreSQL a column that reads a NULL as a present `null` is read
-  in the engine.** No column whose policy is `null: 'null'` is read natively
-  on PostgreSQL (`nativeQuery` is false for it), so a grouping ordered by such
-  a key, and a grouped sum, mean or extreme over one, run in the engine there,
-  where SQLite runs them in SQL beside a guard that raises the engine's
-  `JQ2005` or `JQ2001`. Wanted: qualify such a column on PostgreSQL, with the
-  same guards.
+  does not bound is read twice.** The order key reads the double (`CAST("gx_v"
+  AS REAL)`) so two spellings of one double past 2^53 tie as the engine's do.
+  A window with a limit reads the column bare, in index order, behind a probe
+  in its own LIMIT, and an empty answer is read again ordered by the double:
+  measured on 20,000 rows, a five-row window that holds no row costs 13.1 ms
+  (the fallback alone 5.5 ms), where a window over rows costs 0.03 ms. An
+  index over `CAST("gx_v" AS REAL)` loses (16.8 ms: its walk decodes every row
+  to test the filter) and a read of every row is decode-bound either way
+  (17-18 ms). Wanted: a statement that tells an empty answer from a probe that
+  found such an integer (a sentinel row whose order SQLite keeps), so the
+  empty answer costs one statement.
 - [ ] **A native grouping in the engine's order of first appearance cannot
   know its group count.** A native `$distinct` or `$groupby` whose order does
   not name every key groups every row it reads and then sorts the groups by
-  their first row: with nearly as many groups as rows it does the engine's
-  work and that sort besides and is slower than the engine, more so on
-  PostgreSQL, whose client also reads one row per group through the cursor,
-  than on SQLite. A grouping ordered by every key needs no such sort
-  (NATIVE-PLANS). Wanted: a cost signal that costs the answering path no
-  second round trip — a distinct-count estimate the planner holds without a
-  catalog read, or a bounded-group run-time fallback that does not run both
-  plans.
+  their first row: with nearly as many groups as rows it is slower than the
+  engine — on PostgreSQL 1.5-1.8x at 16,000 one-row groups, and a grouping
+  ordered by its key as much (the client reads one row per group); a larger
+  driver fetch window (`windowRows` 64 -> 4096) speeds the engine's read of
+  every document more than the grouping's, so it widens the gap (1.8-2.5x) —
+  more than on SQLite (1.2x). Wanted: a cost signal that costs the answering
+  path no second round trip — a distinct-count estimate the planner holds
+  without a catalog read, or a bounded-group run-time fallback that does not
+  run both plans.
 - [ ] **PostgreSQL verifies a layout index condition or expression key it
   cannot read back by shape.** A layout index's condition, or the key under an
   expression term, that the PostgreSQL read-back does not read — a timestamp

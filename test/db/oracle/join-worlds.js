@@ -359,15 +359,14 @@ function absentWorlds(indexed) {
  * reads a NULL as a present `null` pairs, in the engine, with another such
  * column's `null` and with nothing else; SQL pairs none. So two of them are
  * the engine's, and one against a key or against a column whose NULL reads
- * as no member is native (PostgreSQL keeps every such column out of a native
- * statement, so its plan is the engine's whatever the combination).
+ * as no member is native, on both engines.
  * @param {boolean} indexed
  * @param {any} claim - the schema's claim on the null-policy column
  * @returns {World[]}
  */
 function presentWorlds(indexed, claim) {
   const label = `${indexed ? ' (indexed)' : ''}${Array.isArray(claim.type) ? ', typed to admit null' : ''}`;
-  const native = { sqlite: /** @type {Mode} */ ('native'), postgres: /** @type {Mode} */ ('set') };
+  const native = { sqlite: /** @type {Mode} */ ('native'), postgres: /** @type {Mode} */ ('native') };
   const onV = (/** @type {string} */ l, /** @type {string} */ r) => join(eq(l, r));
   return [
     {

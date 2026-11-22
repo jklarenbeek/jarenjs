@@ -208,10 +208,12 @@ describe('planProgramUpgrade({ repair })', () => {
     await assert.rejects(plannedOn(target, model, { repair: [name] }), { code: 'JD0013',
       message: new RegExp(`option 'repair' names '${name.replace('.', '\\.')}', which is no program of the model the database holds drifted or lacks`) });
     await drift();
-    // the open names the route, but where SQLite compares a layout the store owns by its whole text, which names the two texts
+    // the open names the route; where SQLite compares a layout the store owns by its whole text it names the two
+    // texts first
     const ownedOnSqlite = target.path !== undefined && model.entities.Child.physical === undefined;
-    await assert.rejects(openStore(model, target), { code: 'JD0002', message: ownedOnSqlite ? /is declared as/
-      : new RegExp(REPAIR_ROUTE(table, `_jaren_rule_5_${table}_insert`).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) });
+    const route = REPAIR_ROUTE(table, `_jaren_rule_5_${table}_insert`).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    await assert.rejects(openStore(model, target), { code: 'JD0002',
+      message: new RegExp(ownedOnSqlite ? `is declared as[^]*; ${route}` : route) });
     // a name beside the drift that is not drifted is refused; the drift unnamed still is
     await assert.rejects(plannedOn(target, model, { repair: [name, `${table}._jaren_rule_5_${table}_update`] }), { code: 'JD0013' });
     await assert.rejects(plannedOn(target, model), { code: 'JD0002', message: /name it in the option repair to reinstall it/ });

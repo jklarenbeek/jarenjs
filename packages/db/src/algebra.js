@@ -236,7 +236,7 @@ export const PLAN_VERSION = 2;
  *   bucket: PlanBucket | null,
  *   group: PlanGroup | null,
  *   seeks: PlanSeek[],
- *   aggregate: { fn: 'count' | 'sum' | 'avg' | 'min' | 'max',
+ *   aggregate: { fn: 'count' | 'exists' | 'sum' | 'avg' | 'min' | 'max',
  *     ref: PlanRef | null }
  *     | { fn: 'registered', ref: PlanRef, operator: string, sql: string }
  *     | null,

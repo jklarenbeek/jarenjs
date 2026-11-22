@@ -416,7 +416,7 @@ export function sameTriggerText(want, have) {
 
 /** The route out of a refused rule program: the reviewed link that reinstalls it.
  * @param {string} table @param {string} program @returns {string} */
-function repairRoute(table, program) {
+export function repairRoute(table, program) {
   return `apply an explicit migration (planProgramUpgrade's repair: ['${table}.${program}'] plans the link that reinstalls it)`;
 }
 

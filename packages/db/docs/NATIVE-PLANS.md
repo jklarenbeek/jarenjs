@@ -191,7 +191,15 @@ column (`bind.entityGrouping` otherwise).
 A count of the bare root wildcard, `{ "$count": "$[*]" }` (what a chain's
 `count()` over a collection handle sends), is the count of the scan it
 abbreviates: one `COUNT(*)` that reads no row, the statement its explain
-reports. A count over an object or array constructor of member paths, literals and
+reports. The same wildcard as the operand of a top-level window or existence
+test reads that scan too: `[{ "$subsequence": ["$[*]", 5, 1] }]` (a chain's
+`first()`, `elementAt(n)` or `take(n)`) is its `LIMIT … OFFSET …`, and
+`{ "$exists": "$[*]" }` (`any()`) a one-row probe, `SELECT COUNT(*) FROM
+(SELECT 1 … LIMIT 1)`, on both engines. A top-level `$exists` over a phrase is
+that probe wherever the phrase's count is one `COUNT(*)`, with no order: an
+existence test over groups, under a window, over a return that can raise or
+beside a conjunct that runs as a registered function (which a count reads on
+every row and the probe may stop before) runs in the engine. A count over an object or array constructor of member paths, literals and
 operators that cannot raise is one `COUNT(*)` that reads no row: `$default` over
 member paths and literals, `$upper`, `$lower` and `$string-length` over a member
 the schema types exactly `string` (reached by no negative index; an adopted
@@ -335,17 +343,19 @@ read one stored string differently.
   that reads the column (`{ "n": "$it.n", "day": "$it.day" }`) raise `JD2003`
   natively too. To keep such rows out of the table, constrain the column in
   the database (a CHECK that `day` holds a date).
-- **A native count or window over a constructor never evaluates the rows it
-  skips.** Collection `c` (`o` number with an index on `$.o`, `u` typed
+- **A native count, window or existence test over a constructor never
+  evaluates the rows it skips.** Collection `c` (`o` number with an index on `$.o`, `u` typed
   `string`) on a store with no validation hook, rows `{ "id": "a", "o": 1, "u": "x" }`,
   `{ "id": "b", "o": 2, "u": 5 }` and `{ "id": "c", "o": 3, "u": "y" }`:
   `{ "$count": { "$for": { "it": "$[*]" }, "$return": { "k": { "$upper": "$it.u" } } } }`
   answers `3` natively, and
   `{ "$subsequence": [{ "$for": { "it": "$[*]" }, "$orderby": ["$it.o"], "$return": { "k": { "$upper": "$it.u" } } }, 0, 1] }`
-  answers `{ "k": "X" }`; the engine raises `JQ2001` (`expected a string, got
-  a number`) on row `b` for both. The schema types `u` exactly `string`, so
+  answers `{ "k": "X" }`, and the same phrase under `$exists` answers `true`;
+  the engine raises `JQ2001` (`expected a string, got a number`) on row `b`
+  for all three. The schema types `u` exactly `string`, so
   the planner proves the constructor cannot raise and counts the rows (one
-  `COUNT(*)` that reads none) or stops the statement once the window is full;
+  `COUNT(*)` that reads none), stops the statement once the window is full or
+  probes one row;
   a row the schema forbids is never evaluated. For the same reason a `query()`
   cursor over that return streams and yields the items before the row it
   raises on. Evaluating every row would cost the count and the window what

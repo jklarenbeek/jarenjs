@@ -349,21 +349,20 @@ describe('a column that reads a NULL back as a present null', () => {
           if (member === 'c' && (aggregate === '$sum' || aggregate === '$avg')) continue;
           const query = { $for: { t: '$.T[*]' }, $groupby: { k: '$t.id' }, $return: { k: '$k', v: { [aggregate]: `$t.${member}` } } };
           const label = `${host}: the ${name} of ${member}`;
-          // PostgreSQL qualifies no column of this policy for native reads, so the engine keeps it there
+          // a column of this policy is native on both engines, beside the count of its nulls
           const explained = await store.explain(query);
-          assert.equal(explained.mode, host === 'sqlite' ? 'native' : 'set', label);
-          if (host !== 'sqlite') assert.equal(reasonOf(explained), 'entity.projection', label);
+          assert.equal(explained.mode, 'native', label);
           const engine = await answerOf(store, query, { pushdown: false });
           assert.equal(engine, 'throws JQ2001', label);
           assert.equal(await answerOf(store, query), engine, label);
-          if (host === 'sqlite') assert.equal(await answerOf(store, query, { strict: true }), engine, label);
+          assert.equal(await answerOf(store, query, { strict: true }), engine, label);
           // the rows of b the engine reads no null from are answered, in SQL
           if (member === 'b') {
             const clean = { ...query, $where: { $and: [{ $ge: ['$t.id', 2] }, { $le: ['$t.id', 3] }] } };
             const expected = JSON.stringify([{ k: 2, v: 3 }, { k: 3, v: 5 }]);
             assert.equal(await answerOf(store, clean, { pushdown: false }), expected, `${label} (engine)`);
             assert.equal(await answerOf(store, clean), expected, label);
-            if (host === 'sqlite') assert.equal(await answerOf(store, clean, { strict: true }), expected, label);
+            assert.equal(await answerOf(store, clean, { strict: true }), expected, label);
           }
         }
       }
@@ -373,25 +372,24 @@ describe('a column that reads a NULL back as a present null', () => {
   it('orders the groups by such a key in SQL and refuses the null, as the engine refuses to order it', async () => {
     await onNullPolicy(async (store, host) => {
       const query = { $for: { t: '$.T[*]' }, $groupby: { z: '$t.a' }, $orderby: ['$z'], $return: { z: '$z', n: { $count: '$t' } } };
-      // PostgreSQL qualifies no column of this policy for native reads, so the engine keeps it there
+      // a column of this policy is native on both engines, its key read beside its type
       const explained = await store.explain(query);
-      assert.equal(explained.mode, host === 'sqlite' ? 'native' : 'set', host);
-      if (host !== 'sqlite') assert.equal(reasonOf(explained), 'entity.projection', host);
+      assert.equal(explained.mode, 'native', host);
       assert.equal(await answerOf(store, query, { pushdown: false }), 'throws JQ2005', host);
       assert.equal(await answerOf(store, query), 'throws JQ2005', host);
-      if (host === 'sqlite') assert.equal(await answerOf(store, query, { strict: true }), 'throws JQ2005', host);
+      assert.equal(await answerOf(store, query, { strict: true }), 'throws JQ2005', host);
       // the groups whose key is no null are ordered, in SQL
       const clean = { ...query, $where: { $ne: ['$t.a', null] } };
       const ordered = JSON.stringify([{ z: 'x', n: 1 }, { z: 'y', n: 1 }]);
       assert.equal(await answerOf(store, clean, { pushdown: false }), ordered, `${host} (engine)`);
       assert.equal(await answerOf(store, clean), ordered, host);
-      if (host === 'sqlite') assert.equal(await answerOf(store, clean, { strict: true }), ordered, host);
+      assert.equal(await answerOf(store, clean, { strict: true }), ordered, host);
       // the null is a key of its own, and a count of the rows beside it needs no order
       const unordered = { $for: { t: '$.T[*]' }, $groupby: { z: '$t.a' }, $return: { z: '$z', n: { $count: '$t' } } };
       const expected = JSON.stringify([{ z: null, n: 2 }, { z: 'x', n: 1 }, { z: 'y', n: 1 }]);
       assert.equal(await answerOf(store, unordered, { pushdown: false }), expected, `${host} (engine)`);
       assert.equal(await answerOf(store, unordered), expected, host);
-      if (host === 'sqlite') assert.equal((await store.explain(unordered)).mode, 'native', host);
+      assert.equal((await store.explain(unordered)).mode, 'native', host);
     });
   });
 });

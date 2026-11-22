@@ -1072,8 +1072,9 @@ describe('entities: a string operator takes the members the database and the eng
       day: [false, undefined, false, 'JQ2001'], // a codec past the scalar ones proves nothing
     });
     await onBothEnginesPhysical(wordsModel, WORDS_DDL, async (store, host) => {
-      // PostgreSQL keeps a column that reads a NULL as a present `null` out of every native statement
-      const unaddressable = host === 'postgres' ? ['hole', 'maybe'] : [];
+      // a column that reads a NULL as a present `null` is native on both engines
+      /** @type {string[]} */
+      const unaddressable = [];
       for (const [member, [joined, joinRaises, summed, sumRaises]] of Object.entries(EXPECTED)) {
         for (const [operator, native, raises] of /** @type {[string, boolean, string | undefined][]} */ ([
           ['$concat', joined, joinRaises], ['$add', summed, sumRaises]])) {
@@ -1104,10 +1105,9 @@ describe('entities: a string operator takes the members the database and the eng
           assert.equal(run.value, 3, label);
         }
       }
-      // a column is counted without being read, whatever it holds; PostgreSQL keeps a column that reads a NULL
-      // as a present `null`, and a date read through a codec, out of every native statement, so their paths
-      // are no member paths there
-      const unaddressable = host === 'postgres' ? ['hole', 'maybe', 'day'] : [];
+      // a column is counted without being read, whatever it holds; PostgreSQL keeps a date read through a
+      // codec out of every native statement, so its path is no member path there
+      const unaddressable = host === 'postgres' ? ['day'] : [];
       for (const [member] of MEMBERS) {
         const explained = await store.explain({ $count: { $for: { w: '$.Word[*]' }, $return: { v: { $exists: `$w.${member}` } } } });
         assert.equal(explained.mode, unaddressable.includes(member) ? 'set' : 'native', `${host}: $exists of ${member}`);

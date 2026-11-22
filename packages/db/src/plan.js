@@ -3736,9 +3736,38 @@ function collectionResult(analysis, plan = null, mode = 'set', reasons = [],
   return { analysis, plan, mode, reasons, rowReturn, udfs, prefilters, series, rowRaises };
 }
 
+/**
+ * A plain object of exactly one member, `name`. @param {any} document @param {string} name
+ * @returns {boolean}
+ */
+const isOnly = (document, name) => document !== null && typeof document === 'object' && !Array.isArray(document)
+  && Object.keys(document).length === 1 && Object.hasOwn(document, name);
+
+/**
+ * The bare wildcard as the operand of a top-level window or existence test
+ * — `{ $subsequence: ['$[*]', n, k] }` (nested windows included) and
+ * `{ $exists: '$[*]' }`, what a chain's `first()`, `elementAt(n)`,
+ * `take(n)` and `any()` emit over a collection — reads the scan it
+ * abbreviates, as `'$[*]'` alone does: every document is one item of
+ * `'$[*]'` and one row of the `$for` phrase, so the window is the
+ * phrase's LIMIT and the test its one-row probe. Any other document is
+ * returned as it is.
+ * @param {any} document
+ * @returns {any}
+ */
+function rootOperand(document) {
+  if (isOnly(document, '$exists') && document.$exists === '$[*]') return { $exists: ROOT_SCAN };
+  if (!isOnly(document, '$subsequence') || !Array.isArray(document.$subsequence)
+    || document.$subsequence.length < 2) return document;
+  const [operand, ...bounds] = document.$subsequence;
+  const inner = operand === '$[*]' ? ROOT_SCAN : rootOperand(operand);
+  return inner === operand ? document : { $subsequence: [inner, ...bounds] };
+}
+
 function planCollectionCore(document, shape, options = undefined) {
   if (document === '$[*]') document = ROOT_SCAN;
   else if (isRootCount(document)) document = ROOT_COUNT;
+  else document = rootOperand(document);
   const analysis = analyzeQuery(document, analyzeOptionsFor(shape?.operators));
   if (rootReads(analysis.root) < 2) return planCollectionPhrase(document, analysis, shape, options);
   // A second read of the root sees what the engine is handed as the
@@ -3893,6 +3922,15 @@ function planCollectionPhrase(document, analysis, shape, options) {
     rawInner = rawInner?.[aggregate.name] ?? rawInner;
     assertDecidedKind(root);
   }
+  // a top-level existence test over a phrase is its count's question asked
+  // of one row: the phrase's items, probed with a LIMIT 1 (emit.js)
+  if (aggregate === null && !distinct && windows.length === 0 && root.kind === 'op' && root.name === '$exists'
+    && root.args.length === 1) {
+    aggregate = { name: '$exists', fn: 'exists' };
+    root = root.args[0];
+    rawInner = rawInner?.$exists ?? rawInner;
+    assertDecidedKind(root);
+  }
 
   // a document that IS a series operator over the collection: the
   // operand's own conjuncts (and what the frozen spec implies) narrow
@@ -3993,10 +4031,15 @@ function planCollectionPhrase(document, analysis, shape, options) {
       // answered the row count for a `$count` of the groups
       return collectionResult(analysis, null, 'set', [refusal(aggregate.name, PLAN_REASONS.groupedAggregate)]);
     }
-    if (aggregate.fn === 'count') {
+    if (aggregate.fn === 'count' || aggregate.fn === 'exists') {
+      // a conjunct that runs as a registered function raises on the row the engine raises on, which a
+      // count reads and a probe that stops at the first row may not
+      if (aggregate.fn === 'exists' && flwor.udfs.length > 0) {
+        return collectionResult(analysis, null, 'set', [refusal('$exists', PLAN_REASONS.registeredFunction)]);
+      }
       // a constructor that cannot raise is one item per row, so the rows are the count
       if (!flwor.projectionNative && !rowsAreItems) {
-        return collectionResult(analysis, null, 'set', [refusal('$count',
+        return collectionResult(analysis, null, 'set', [refusal(aggregate.name,
           flwor.totalReturn ? PLAN_REASONS.registeredFunction : PLAN_REASONS.countProjection)]);
       }
       // a count over one member path counts the rows where the member
@@ -4006,7 +4049,7 @@ function planCollectionPhrase(document, analysis, shape, options) {
         plan.filter = conjoin(plan.filter,
           { p: 'typeIs', ref: flwor.projectedPath, types: [], positive: true });
       }
-      plan.aggregate = { fn: 'count', ref: null };
+      plan.aggregate = { fn: aggregate.fn, ref: null };
       return collectionResult(analysis, plan, 'native',
         [], null, flwor.udfs, flwor.prefilters,
         classifySelection(plan, shape, true));

@@ -57,7 +57,7 @@ import {
 } from './plan.js';
 import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath, UnrepresentableIdentity,
   entityTableColumns, physicalComparable, bindsAsWritten, bindsUnheldText, UNHELD_TEXT_REFUSAL,
-  entityOrderRead, bucketGuards, bucketAbsentGuard } from './emit.js';
+  entityOrderRead, bucketGuards, bucketAbsentGuard, numericEdge, listHolds } from './emit.js';
 import { modelPath } from './model-path.js';
 import { selectPlan, conjoin, effectiveOrder, planOrder, ordersByColumn } from './algebra.js';
 import {
@@ -323,7 +323,9 @@ function slotValue(slot, externals, anchors = null) {
       return decimalIntervals(Array.isArray(value) ? value : value !== null && typeof value === 'object' ? Object.values(value) : []);
     // one bound of the decimals that round to the number, which a member
     // read by its decimal digits is compared with (`decimal`)
-    if (slot.decimal !== undefined) return decimalEdge(value, slot.decimal);
+    if (slot.decimal !== undefined) return slot.numeric === true ? numericEdge(value, slot.decimal) : decimalEdge(value, slot.decimal);
+    // whether a list holds an item of a kind, which keeps the other kind's branch out of the statement (`holds`)
+    if (slot.holds !== undefined) return listHolds(value, slot.holds);
     // a guarded comparison reads this slot for its JSON type alone, and an
     // infinity, whose JSON text is `null`, is a number there: its finite
     // edge stands in for it
@@ -2694,6 +2696,7 @@ export function createQueryEngine(context) {
     const fn = entry.plan.aggregate.fn;
     const value = row?.value ?? null;
     if (fn === 'count') return value ?? 0;
+    if (fn === 'exists') return Number(value ?? 0) > 0;
     if (fn === 'sum') return value === null ? 0 : value;
     return value === null ? undefined : value;
   };
@@ -3045,6 +3048,8 @@ export function createQueryEngine(context) {
     const eqpParams = chosen.slots.map((slot) => {
       const value = 'typed' in slot ? undefined : slotValue(slot, externals);
       if (bindable(value) || typeof value === 'bigint') return value;
+      // a bound external that is no number binds its `numeric` bound as NULL, which is the run's own value
+      if (value === null && 'numeric' in slot && externals?.[slot.external] !== undefined) return value;
       substituted = true;
       return null;
     });

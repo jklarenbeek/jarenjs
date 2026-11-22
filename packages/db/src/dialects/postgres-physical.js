@@ -128,5 +128,5 @@ export function qualifyPostgresPhysicalColumn(column, actual, kind, database = u
   column.nanSafe = !postgresHoldsNaN(type) || (column.guards ?? []).includes('not-nan');
   // Native typed projections and predicates are independently qualified. The
   // decoded evaluator remains exact for every codec and reports its residual.
-  column.nativeQuery = ['text', 'integer', 'number', 'boolean'].includes(column.codec) && column.null !== 'null';
+  column.nativeQuery = ['text', 'integer', 'number', 'boolean'].includes(column.codec);
 }

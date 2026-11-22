@@ -24,7 +24,7 @@ import { BBOX_COMPONENTS, BBOX_INDEX_ORDER, derivedMappingFor } from './derive.j
 import { expressionSql, expressionStem, expressionFunctions, normalizeExpression } from './expression.js';
 import { foldIdentifier } from './invariants.js';
 import { SCALAR_TYPES, columnKindFor } from './scalar-types.js';
-import { verifyRulePrograms } from './physical.js';
+import { verifyRulePrograms, repairRoute } from './physical.js';
 import { rowPaths, rowPredicate, storedBoolean } from './dialects/row-predicate.js';
 import { planTable } from './dialects/sqlite-schema.js';
 import { readIntervalCheck, readsConforming } from './dialects/check-read.js';
@@ -1547,7 +1547,10 @@ function verifyDeclaredSql(connection, plan, disagree) {
         if (have === undefined)
           disagree(`the model declares '${name}', which the database does not have`);
         if (have !== wanted && !(earlier.get(name) ?? []).some((spelling) => spelling.sql === have)) {
-          disagree(`'${name}' is declared as\n  ${have}\nand the model declares\n  ${wanted}`);
+          // a store-owned rule program names the reviewed link that reinstalls it
+          const program = name.startsWith('_jaren_rule_') && /^CREATE TRIGGER\b/i.test(wanted)
+            ? `; ${repairRoute(plan.table, name)}` : '';
+          disagree(`'${name}' is declared as\n  ${have}\nand the model declares\n  ${wanted}${program}`);
         }
       }
       for (const name of actual.keys()) {

@@ -907,6 +907,9 @@ export function postgresDialect(options = undefined) {
     jsonAppend: (exprSql, arrayPathText, valueSql) =>
       `jsonb_insert(${exprSql}, ${stringLiteral(pathWith(arrayPathText, '-1'))}, ${valueSql}, true)`,
     jsonEncode: (paramSql) => `(${paramSql})::jsonb`,
+    // a column that reads a NULL as a present `null` differs from a value
+    // where it is NULL too: the standard spelling of SQLite's `IS NOT`
+    distinct: (left, right) => `${left} IS DISTINCT FROM ${right}`,
     // `jsonb_set` takes a jsonb value: a number or a text column is not one
     // (`to_jsonb` of a numeric keeps its scale, of a text is the JSON string)
     jsonValue: (columnSql) => `to_jsonb(${columnSql})`,
@@ -954,9 +957,12 @@ export function postgresDialect(options = undefined) {
     decimalDigits: true,
     externalCompare: (valueSql, kind) =>
       (kind === 'number' ? `to_jsonb(${valueSql})` : valueSql),
+    // a `decimal` is one bound of an external's interval bound as `numeric`
+    // text (`decimalEdge`, a slot marked `numeric`), compared with a number
+    // column bare
     externalRef: (paramSql, kind) => (kind === 'text'
       ? `((((${paramSql})::jsonb) #>> '{}') COLLATE "C")`
-      : `((${paramSql})::jsonb)`),
+      : kind === 'decimal' ? `((${paramSql})::numeric)` : `((${paramSql})::jsonb)`),
     valueTypeOf: (paramSql) => typeOfJsonb(`((${paramSql})::jsonb)`),
     // Membership in a JSON list bound as ONE parameter (its JSON text, as
     // every external here): an array's elements or an object's member
@@ -968,15 +974,19 @@ export function postgresDialect(options = undefined) {
     // read as the double the engine holds (`doubleRead`) against the
     // doubles the list's numbers are: a decimal is in the interval of
     // decimals that round to a double exactly where it reads as that double
-    inList: (valueSql, listSql, kind) => {
+    // (an external list's branch, beside its other kind's in an `OR`, is the
+    // value `= ANY` of that list, an index condition: the `OR` keeps the
+    // sublink from becoming a join)
+    inList: (valueSql, listSql, kind, branched = false) => {
       const list = `((${listSql})::jsonb)`;
       const items = `(SELECT jsonb_array_elements(${list}) WHERE jsonb_typeof(${list}) = 'array' UNION ALL `
         + `SELECT m.value FROM jsonb_each(CASE WHEN jsonb_typeof(${list}) = 'object' THEN ${list} `
         + "ELSE '{}'::jsonb END) AS m)";
-      return kind === 'text'
-        ? `${valueSql} IN (SELECT (i.e #>> '{}') COLLATE "C" FROM ${items} AS i(e) WHERE jsonb_typeof(i.e) = 'string')`
-        : `${valueSql} IN (SELECT (i.e #>> '{}')::${kind === 'double' ? 'float8' : 'numeric'} FROM ${items} AS i(e) `
-          + "WHERE jsonb_typeof(i.e) = 'number')";
+      const values = kind === 'text'
+        ? `SELECT (i.e #>> '{}') COLLATE "C" FROM ${items} AS i(e) WHERE jsonb_typeof(i.e) = 'string'`
+        : `SELECT (i.e #>> '{}')::${kind === 'double' ? 'float8' : 'numeric'} FROM ${items} AS i(e) `
+          + "WHERE jsonb_typeof(i.e) = 'number'";
+      return branched ? `${valueSql} = ANY(ARRAY(${values}))` : `${valueSql} IN (${values})`;
     },
     // Membership of a column in the intervals of decimals that round to a
     // list's doubles, bound as one JSON array of edge tuples: the column's
@@ -988,13 +998,17 @@ export function postgresDialect(options = undefined) {
     // table. A column that holds its member as `jsonb` (`json`) reads each
     // edge as a JSON number, which orders against the column's numbers as a
     // `numeric` does and above or below every other JSON type, so a range
-    // between two edges holds numbers alone
-    intervalIn: (valueSql, tuplesSql, tableSql, columnSql, within, json = false) => {
+    // between two edges holds numbers alone. An external list's membership
+    // sits in an `OR` beside its other kind's branch, which keeps a sublink
+    // from becoming a join, so it is the column `= ANY` of that array, an
+    // index condition once the branch the list holds no item of folds away
+    intervalIn: (valueSql, tuplesSql, tableSql, columnSql, within, json = false, external = false) => {
       const inner = `"interval_row".${columnSql}`;
       const edge = (/** @type {number} */ index) => `("interval_edge".e ->> ${index})::${json ? 'jsonb' : 'numeric'}`;
-      return `${valueSql} IN (SELECT unnest(ARRAY(SELECT DISTINCT ${inner} FROM `
+      const found = `ARRAY(SELECT DISTINCT ${inner} FROM `
         + `jsonb_array_elements((${tuplesSql})::jsonb) AS "interval_edge"(e) JOIN ${tableSql} AS "interval_row" `
-        + `ON ${within(inner, edge)})))`;
+        + `ON ${within(inner, edge)})`;
+      return external ? `${valueSql} = ANY(${found})` : `${valueSql} IN (SELECT unnest(${found}))`;
     },
     // the half-open range over the prefix, seekable through a B-tree on
     // a `C`-collated column. Both operands are byte-ordered — the column

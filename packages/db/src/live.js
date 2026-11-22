@@ -413,6 +413,9 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
   if (windowed && planQuery(whole, queryShape, {}).mode === 'knn')
     return rerun('a k-nearest ranking re-runs (the vector column cuts the candidates and the engine orders them)');
 
+  // an existence test answers a boolean, not rows to maintain, however its phrase plans
+  if (isJsonObject(inner) && Object.keys(inner).length === 1 && Object.hasOwn(inner, '$exists'))
+    return rerun('an existence test re-runs');
   const planned = planQuery(inner, queryShape, {});
   const distinct = isJsonObject(inner) ? inner.$distinct : null;
   // the holders of each value are kept for a distinct of one path; a distinct of a constructor re-runs

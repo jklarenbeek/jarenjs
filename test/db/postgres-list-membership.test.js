@@ -97,7 +97,8 @@ describe('PostgreSQL: membership over thousands of values', { skip: !url && 'JAR
     assert.deepEqual(sorted(await items.execute(query, { ...options, pushdown: false })), sorted(EXPECTED));
     const collectionPlan = await items.explain(query, options);
     assert.equal(collectionPlan.mode, 'native');
-    assert.deepEqual(collectionPlan.params, [{ external: 'ids' }, { external: 'ids' }]);
+    // each branch beside whether the list holds its kind, then the list
+    assert.deepEqual(collectionPlan.params, [{ external: 'ids' }, { external: 'ids' }, { external: 'ids' }, { external: 'ids' }]);
 
     const entityQuery = overItem({ $eq: ['$it.sku', '$ids[*]'] });
     assert.deepEqual(await store.execute(entityQuery, options), sorted(EXPECTED));
