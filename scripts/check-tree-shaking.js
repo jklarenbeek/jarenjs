@@ -486,7 +486,8 @@ if (modelEngineLeak.length > 0)
 // Raised to 59,800 (measured 59774): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
 // Raised to 59,900 (measured 59812): the builder's date format taking a zone operand, which every pen shares (expression 38).
 // Raised to 60,100 (measured 60086): a collection's declared calendar members and an entity member's calendar kind (collection 128, entity 11), and the captured expression's instantOf and wallClock, which every pen shares (expression 107).
-if (modelBytes > 60100)
+// Raised to 60,200 (measured 60122): an index's doubleOrder option, a boolean the builder checks and carries (collection 36).
+if (modelBytes > 60200)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
@@ -873,7 +874,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,188,200 (measured 1188151): a row-decided pick of a Date, Map or bigint external refused at the row and each $seq position mapped to its operand (query 2136, model 205, residual 79, the query engine's compare guard ~650), and PostgreSQL keys read by their named CHECK with foreign CHECKs reported (introspect 718, ddl 307, plan 84, dialect 64, emit 42).
 // Raised to 1,192,600 (measured 1192523): a collection's conditional index read back with the indexes beside it and the store's own rule programs read back (introspect 1985), a physical layout's trigger compared formatting aside with the repair route named (physical 142, ddl 79), a bare collection root's first item, element and existence planned as the scan's LIMIT and a one-row probe, and PostgreSQL's external and external-list comparisons bound as numeric edges beside whether the list holds each kind (emit 1257, plan 615, query 245, live 102, store 62).
 // Raised to 1,198,900 (measured 1198896): one shared catalog read per namespace at open and in a migration's validation (sqlite-catalog 1610, namespace-catalog 1379, store 274, migrate 166, sqlite 75, physical-transform 14, net of ddl 103 and introspect 11), the job tables and the change log read before any bracket with a lock failure answered busy (jobs 559, capture 286, dialects/jobs 63), linq transaction records built on first read (open 314), and a page over an earlier release's re-keyed key carrying its digits, a windowed count and a reversal native, and a $ne chain over one column as one list (query 770, plan 574, algebra 536, emit 230, async 109, dialect 26).
-if (clientBytes > 1198900)
+// Raised to 1,207,300 (measured 1207266): PostgreSQL indexes keyed in the order a statement reads with the declared double beside a number index, verified and read back (ddl 4118, dialect 132, introspect 6), a rule added to a populated table judging its rows and a probe's lock and row-level-security refusal (invariants 531, invariant-sql 523, entity 416, errors 112, tracker 57, row-predicate 30), and replication ordered by an expression index's key with its tables read before any bracket (replication 1061).
+if (clientBytes > 1207300)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
