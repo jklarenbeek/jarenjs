@@ -1192,7 +1192,7 @@ catch them:
 
 ## 7. Cost
 
-`@jarenjs/linq/model` builds to **<!--fact:bundle.model-->60,086<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/model` builds to **<!--fact:bundle.model-->60,122<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.model.kb-->60<!--/fact--> kB) beside the other subpath prices in

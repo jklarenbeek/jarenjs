@@ -304,19 +304,19 @@ changes, until it is measured again:
 
 <!--fact:postgres.membership-->
 
-Measured 2026-11-22T06:28:37.133Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (jit=on, jit_above_cost=100000, jit_inline_above_cost=500000, jit_optimize_above_cost=500000), Node 24.22.1, pg 8.23.0; 2000 documents in each table, analyzed first; the median of 31 calls after 6 warm-up calls; host load (one-minute average) 2.65 before and 3.83 after, on 16 cores.
+Measured 2026-11-22T09:32:24.480Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (jit=on, jit_above_cost=100000, jit_inline_above_cost=500000, jit_optimize_above_cost=500000), Node 24.22.1, pg 8.23.0; 2000 documents in each table, analyzed first; the median of 31 calls after 6 warm-up calls; host load (one-minute average) 4.04 before and 3.88 after, on 16 cores.
 
 One statement carries at most 128 leaf predicates. A chain of `$and` pairs (pairs) is not regrouped, so every term is a leaf; the same number of terms written as equalities on one member and ranges on another (regrouped) becomes one membership list and one bound.
 
 | Chain | Terms | Leaf predicates | Plan | `execute()` ms | The engine alone, ms | Rows |
 |---|---:|---:|---|---:|---:|---:|
-| pairs | 50 | 50 | native | 2.52 | 11.45 | 25 |
-| pairs | 100 | 100 | native | 2.98 | 14.94 | 50 |
-| pairs | 200 | 200 | engine, `predicate.termBound` | 20.65 | same route | 100 |
-| pairs | 400 | 400 | engine, `predicate.termBound` | 35.30 | same route | 200 |
-| regrouped | 400 | 2 | native | 4.58 | 48.37 | 200 |
+| pairs | 50 | 50 | native | 2.67 | 12.62 | 25 |
+| pairs | 100 | 100 | native | 3.06 | 15.96 | 50 |
+| pairs | 200 | 200 | engine, `predicate.termBound` | 22.96 | same route | 100 |
+| pairs | 400 | 400 | engine, `predicate.termBound` | 38.58 | same route | 200 |
+| regrouped | 400 | 2 | native | 4.67 | 46.84 | 200 |
 
-The native statements under `EXPLAIN (ANALYZE)`: the planner priced them at 147.29 to 288.37 against jit_above_cost=100000, the server planned them in 0.09 to 0.35 ms and ran them in 0.41 to 5.18 ms, and its JIT compiled 0 of the 3.
+The native statements under `EXPLAIN (ANALYZE)`: the planner priced them at 147.29 to 288.37 against jit_above_cost=100000, the server planned them in 0.09 to 0.38 ms and ran them in 0.43 to 5.16 ms, and its JIT compiled 0 of the 3.
 
 The planner's own estimate, `explain().budget.estimatedRows`, against the rows each statement returns:
 
@@ -756,16 +756,16 @@ column is what being one Store costs (below 1×) or gains (above):
 
 <!--fact:postgres.sessions-->
 
-Measured 2026-11-22T06:29:18.821Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (fsync=on, synchronous_commit=on, full_page_writes=on), Node 24.22.1, pg 8.23.0; 8 clients at once, each 40 one-document write transactions on keys of its own; the median of 5 rounds, each measuring every shape once.
+Measured 2026-11-22T09:33:07.220Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (fsync=on, synchronous_commit=on, full_page_writes=on), Node 24.22.1, pg 8.23.0; 8 clients at once, each 40 one-document write transactions on keys of its own; the median of 5 rounds, each measuring every shape once.
 
 | N | One store on N sessions, tx/s | N stores of one session, tx/s | One store over N stores |
 |---:|---:|---:|---:|
-| 1 | 1176 | 1165 | 1.01× |
-| 2 | 2667 | 2686 | 0.99× |
-| 4 | 4050 | 3910 | 1.04× |
-| 8 | 6707 | 6882 | 0.97× |
+| 1 | 1222 | 1207 | 1.01× |
+| 2 | 2475 | 2548 | 0.97× |
+| 4 | 3777 | 3831 | 0.99× |
+| 8 | 6558 | 6796 | 0.96× |
 
-One transaction with nothing beside it: 0.833 ms on a store of one session, 0.826 ms through the router of a store on two (-0.9%). A store on one session has no router.
+One transaction with nothing beside it: 0.831 ms on a store of one session, 0.853 ms through the router of a store on two (2.7%). A store on one session has no router.
 
 One host, client and server on one machine; each client a run of one-document transactions on keys of its own (no conflicts), every commit durable, so it waits on a disk the host shares with whatever else runs there. A store on one session runs them in turn; several sessions and separate stores let the server work on them together. No production throughput claim.
 
@@ -897,11 +897,11 @@ records matching tool versions and each recovery assertion:
 
 | Logical backup / restore server | Tables / rows | Archive bytes | Omitted metadata cases detected | Elapsed ms |
 |---|---:|---:|---:|---:|
-| 16.15 (Debian 16.15-1.pgdg12+2) | 14 / 16 | 27444 | 10 | 1118.16 |
-| 17.11 (Debian 17.11-1.pgdg12+2) | 14 / 16 | 27984 | 10 | 1085.62 |
-| 18.6 (Debian 18.6-1.pgdg12+2) | 14 / 16 | 27804 | 10 | 1102.37 |
+| 16.15 (Debian 16.15-1.pgdg12+2) | 14 / 16 | 27483 | 10 | 1246.92 |
+| 17.11 (Debian 17.11-1.pgdg12+2) | 14 / 16 | 28025 | 10 | 1154.98 |
+| 18.6 (Debian 18.6-1.pgdg12+2) | 14 / 16 | 27845 | 10 | 1193.05 |
 
-Archived WAL: 17.11 (Debian 17.11-1.pgdg12+2), 14 tables / 16 rows, 5866.09 ms; source stopped before promotion: true. Physical sequence advances are retained in the result. Power loss and fleet failover were not tested.
+Archived WAL: 17.11 (Debian 17.11-1.pgdg12+2), 14 tables / 16 rows, 5947.62 ms; source stopped before promotion: true. Physical sequence advances are retained in the result. Power loss and fleet failover were not tested.
 
 <!--/fact-->
 
@@ -916,10 +916,10 @@ retains earlier Bun memory-budget losses even when a later sample passes.
 
 | Existing SQLite adoption executable | Workload | RSS bytes | Frozen reference bytes | RSS disposition |
 |---|---|---:|---:|---|
-| bun-executable | catalog | 278249472 | 536870912 | within reference |
-| bun-executable | archive-stock | 885485568 | 1073741824 | within reference |
-| node-executable | catalog | 302120960 | 536870912 | within reference |
-| node-executable | archive-stock | 827027456 | 1073741824 | within reference |
+| bun-executable | catalog | 283701248 | 536870912 | within reference |
+| bun-executable | archive-stock | 884043776 | 1073741824 | within reference |
+| node-executable | catalog | 301621248 | 536870912 | within reference |
+| node-executable | archive-stock | 822923264 | 1073741824 | within reference |
 
 These larger physical SQLite workloads are separate from the small build-selected managed application. Functional recovery success does not imply memory-budget success. Earlier samples remain in the resource history.
 
