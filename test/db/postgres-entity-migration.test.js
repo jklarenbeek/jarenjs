@@ -388,7 +388,7 @@ describe('the steps a key that gains or drops allocation plans', () => {
   it('PostgreSQL converts the referencing columns, then the key, before it gives the key a sequence it owns', () => {
     const migration = planModelMigration(allocationModel(false, { rules: false }), allocationModel(true, { rules: false }), { dialect: tenant, id: 'gain' }).migration;
     const texts = statements(migration);
-    assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.kind), ['ddl', 'sql', 'ddl', 'ddl', 'ddl', 'ddl', 'sql']);
+    assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.kind), ['ddl', 'sql', 'ddl', 'ddl', 'ddl', 'ddl', 'ddl', 'ddl', 'ddl', 'sql']);
     // the key's table is locked against every other session first: the check and the conversions then see the
     // same keys, and a writer that holds the key's table finishes before a column that references it is touched
     assert.match(texts[0], /^DO \$jaren_allocation\$\n-- \["lock","Post","pid"\]\n/);
@@ -396,20 +396,24 @@ describe('the steps a key that gains or drops allocation plans', () => {
     // a key a conversion would round is refused next, naming the key and the value
     assert.match(texts[1], /^WITH .*"pid"::numeric <> pg_catalog\.trunc\("pid"::numeric\).*::bigint FROM /);
     assert.match(texts[1], /the key ''pid'' of ''Post'' holds /);
-    assert.deepEqual(texts.slice(2, 5), [
+    // each column holding the key drops its key CHECK by name, which no bigint takes, before it converts
+    assert.deepEqual(texts.slice(2, 8), [
+      'ALTER TABLE "Comment" DROP CONSTRAINT IF EXISTS "Comment_postId_jaren_key"',
+      'ALTER TABLE "Post_Tag" DROP CONSTRAINT IF EXISTS "Post_Tag_Post_key_jaren_key"',
+      'ALTER TABLE "Post" DROP CONSTRAINT IF EXISTS "Post_pid_jaren_key"',
       'ALTER TABLE "Comment" ALTER COLUMN "postId" TYPE bigint',
       'ALTER TABLE "Post_Tag" ALTER COLUMN "Post_key" TYPE bigint',
       'ALTER TABLE "Post" ALTER COLUMN "pid" TYPE bigint']);
-    assert.match(texts[5], /^DO \$jaren/);
-    assert.match(texts[5], /pg_catalog\.pg_get_serial_sequence\('"Post"', 'pid'\)/);
-    assert.match(texts[6], /^WITH "_jaren_sequence" AS \(SELECT GREATEST\(pg_catalog\.nextval\(pg_catalog\.pg_get_serial_sequence\('"Post"', 'pid'\)\)/);
+    assert.match(texts[8], /^DO \$jaren/);
+    assert.match(texts[8], /pg_catalog\.pg_get_serial_sequence\('"Post"', 'pid'\)/);
+    assert.match(texts[9], /^WITH "_jaren_sequence" AS \(SELECT GREATEST\(pg_catalog\.nextval\(pg_catalog\.pg_get_serial_sequence\('"Post"', 'pid'\)\)/);
     assert.equal(migration.steps.some((/** @type {any} */ step) => /CASCADE|DROP SEQUENCE/.test(step.sql ?? '')), false);
   });
 
   it('PostgreSQL drops the default, converts the key, then the referencing columns, then the sequence the key owned', () => {
     const migration = planModelMigration(allocationModel(true, { rules: false }), allocationModel(false, { rules: false }), { dialect: tenant, id: 'drop' }).migration;
     const texts = statements(migration);
-    assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.kind), ['ddl', 'ddl', 'ddl', 'ddl', 'ddl', 'ddl']);
+    assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.kind), Array(15).fill('ddl'));
     assert.deepEqual(texts.slice(0, 5), [
       'ALTER TABLE "Post" ALTER COLUMN "pid" DROP IDENTITY IF EXISTS',
       'ALTER TABLE "Post" ALTER COLUMN "pid" DROP DEFAULT',
@@ -419,6 +423,14 @@ describe('the steps a key that gains or drops allocation plans', () => {
     assert.match(texts[5], /^DO \$jaren/);
     assert.match(texts[5], /pg_catalog\.pg_get_serial_sequence\('"Post"', 'pid'\)/);
     assert.match(texts[5], /DROP SEQUENCE/);
+    // then each column holding the key gets the CHECKs a fresh store gives it: the NaN CHECK where it holds none,
+    // and the key CHECK dropped by its name and added again
+    for (const [at, table, column] of /** @type {[number, string, string][]} */ ([[6, 'Comment', 'postId'], [9, 'Post_Tag', 'Post_key'], [12, 'Post', 'pid']])) {
+      assert.match(texts[at], new RegExp(`^DO \\$jaren_allocation\\$\n-- \\["guard","${table}","${column}"\\]\n`));
+      assert.match(texts[at], new RegExp(`ALTER TABLE "${table}" ADD CHECK \\("${column}" <> 'NaN'\\);`));
+      assert.equal(texts[at + 1], `ALTER TABLE "${table}" DROP CONSTRAINT IF EXISTS "${table}_${column}_jaren_key"`);
+      assert.match(texts[at + 2], new RegExp(`^ALTER TABLE "${table}" ADD CONSTRAINT "${table}_${column}_jaren_key" CHECK \\(CASE WHEN abs\\("${column}"\\)`));
+    }
   });
 
   it('SQLite plans nothing for either edit: its rowid allocates a key either way', () => {

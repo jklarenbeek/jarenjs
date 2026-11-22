@@ -846,6 +846,16 @@ export function explainMapping(model, options = undefined) {
  * @returns {{entities:Map<string,any>,mapping:any}} */
 export function compileEntityModel(model, options = undefined) {
   const entities = entitiesOf(model, entityQueryOptions(options, 'compileEntityModel()'), temporalHooksOf(options));
+  // a join table is named by a string; anything else stood for the implicit
+  // `<A>_<B>` name without a word. Refused where a store opens or prepares
+  // its declaration, not where a plan reads a model, so a history that
+  // carries one still plans
+  for (const entity of entities.values()) {
+    for (const { relation, docPath } of entity.relations) {
+      if (relation.through !== undefined && typeof relation.through !== 'string')
+        throw modelError('through names the join table, as a string', `${docPath}/x-entity/relation/through`);
+    }
+  }
   return { entities, mapping: mappingOf(model, entities) };
 }
 

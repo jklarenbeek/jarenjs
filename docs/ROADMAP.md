@@ -409,15 +409,15 @@ costs a descriptor plus examples and no UI code at all.
   only when a host installs `@jarenjs/db/temporals`, but the declaration's reading, its DDL and introspection terms and
   its refusals ship in every store client, about 11 KB of the client bundle that a store declaring no calendar member
   never runs. Wanted: the declaration read behind the seam too, so a store without it keeps only the refusal.
-- [ ] **PostgreSQL reads a collection's CHECKs only where the model declares one.** A collection declaring
-  no interval and no temporal member opens on PostgreSQL over a table carrying a CHECK of someone else's
-  (`ALTER TABLE … ADD CONSTRAINT x CHECK (…)`), where SQLite's CREATE-text comparison answers `JD0002`; the
-  CHECK changes which writes the table refuses.
-The fluent front door and the SQLite document store shipped as a pair;
-what each does is its own documentation's job
-([linq](../packages/linq/README.md) ·
-[db](../packages/db/README.md)). What remains open:
-
+- [ ] **A CHECK the model does not declare is read back as a declaration where
+  the format has one.** On PostgreSQL a CHECK of someone else's opens, still
+  refuses the writes it governs (`JD2005`) and is an `unmapped-constraint`
+  line of `introspect()` on a collection, an entity and a join table alike,
+  where SQLite's CREATE-text comparison answers `JD0002`; but one of a shape
+  the model format declares — an enum over an entity column, an interval over
+  a collection — is read into `introspect()`'s derived model rather than
+  reported, and `jaren-db plan --store` reaches SQLite alone. Wanted:
+  `store.introspect()` naming each CHECK its own model does not declare.
 - [ ] **A unique index over a document whose member holds a kind its schema
   does not list answers differently on the two engines.** The store does not
   validate a member against its declared types by default: under a unique
@@ -698,56 +698,20 @@ what each does is its own documentation's job
   no column to read; such a membership is an entity with two one-to-many edges
   today. Wanted: columns declared on a `through` (an attach instant at least).
   Five decisions come first: the declaration (`through` is a table name on
-  either side of the edge; an object form must be declared once or
-  identically); who writes a value (`link()` carries none, and the unit of
-  work, the capture journal, replication documents and live join rows carry
-  only the two keys; a database default such as `'now'` is the database's
-  transaction time, which a replay or a capture apply on another database does
-  not reproduce); what re-linking an existing pair does (an idempotent no-op
-  today: keep the first value or refresh it); how `introspectModel` tells a
-  join table with a third column from an entity (it reads exactly two
-  foreign-key columns as one); and the migration strategy that adds or drops a
-  column on a join table (none exists).
-- [ ] **A non-JSON external a row or an iteration variable picks is read as `{}`.**
-  An external the engine compares or equates — reached through name, index,
-  wildcard, slice, filter and descendant segments, through `$let` (in a
-  `{ $let, $return }` phrase too), `$for` (its window too), quantifier,
-  grouping and `$fold` variables, handed through by `$head`, `$tail`,
-  `$reverse`, `$seq`, `$entries` or a constructor compared whole, or picked
-  where the call's externals alone decide the pick (the branch an `$if`
-  condition takes, the first operand of `$coalesce` or `$default` that is not
-  empty, the target of `$subsequence` or `$get` at the bounds or key they
-  compute, a member a path names in a constructor, a nested phrase's return)
-  — that holds a `Date`, a `Map` or another object with no own member, or a
-  `bigint`, is refused `JD0041` before any statement runs
-  ([MODEL-FORMAT §10.1](../packages/db/docs/MODEL-FORMAT.md)). One whose pick
-  a row, the collection or an iteration variable decides — an `$if` whose
-  condition, a `$coalesce` or `$default` operand after one that, or a
-  `$subsequence` or `$get` whose bounds or key reads a row, the input
-  document or a `$for`, quantifier, grouping, window or `$fold` variable, or
-  calls a registered function; a nested phrase that does so and filters,
-  groups, counts, windows or folds; an array constructor's element by index
-  or slice where the constructor reads a row and an element of it is not
-  exactly one item; a filter that reads the input document
-  (`$xs[?@.k == $[0].k]`) — is still compared as `{}` and matches no row
-  where a row or an item picks it. Which operand those hand through is
-  decided per row or per item, so a refusal by what the external holds would
-  refuse calls whose rows never pick it, which answer right. Wanted: the
-  comparison itself reporting a non-JSON item it reads, row by row; and a
-  pick an iteration variable over the externals decides, followed item by
-  item.
-- [ ] **`JD0041` follows a position in a `$seq` operand by operand.** A
-  positional operator over a `$seq` (`$head`, `$tail`, `$subsequence`, `$get`)
-  is applied to each operand's items as if each stood alone: a comparison
-  with `{ $head: { $seq: ['$e.at', '$a'] } }` reads each row's own `at`,
-  never `$a`, yet a `Date` under `$a` is refused `JD0041` though the call
-  answers as its ISO string does; and `{ $tail: { $seq: ['$e.tenant', '$a'] } }`,
-  which reads `$a` for every row, matches no row with a `Date` (its ISO
-  string answers "b") and is not refused
-  ([MODEL-FORMAT §10.1](../packages/db/docs/MODEL-FORMAT.md)). Wanted: follow
-  a position in a concatenation by the item counts before it — decided per
-  call where each earlier operand is exactly one item or the externals
-  decide it.
+  either side of the edge, and any other value is refused `JD0005` where a
+  store opens or prepares the model, which keeps an object form free; an
+  object form must be declared once or identically); who writes a value
+  (`link()` carries none, and the unit of work, the capture journal,
+  replication documents and live join rows carry only the two keys; a database
+  default such as `'now'` is the database's transaction time, which a replay
+  or a capture apply on another database does not reproduce); what re-linking
+  an existing pair does (an idempotent no-op today: keep the first value or
+  refresh it); how `introspectModel` tells a join table with a third column
+  from an entity (it reads exactly two foreign-key columns as one); and the
+  migration strategy that adds or drops a column on a join table (none
+  exists). A migration plan's target model, `explainMapping` and the CLI still
+  read a non-string `through` as the implicit `<A>_<B>` name: the refusal
+  moves there once a plan reads its from model as history.
 - [ ] **A handle refuses a chain over one database a second store names
   differently.** A handle takes a chain over another store's view when both
   read one database (one SQLite file by its canonical path, one shared-cache
@@ -806,32 +770,20 @@ what each does is its own documentation's job
   Scan`), so an `$orderby` sorts every matching row however few a page or a
   narrow `$where` returns. Wanted: an index whose null placement the order
   reads, or an order whose null placement the index provides.
-- [ ] **On PostgreSQL a `numeric` key without the store's key CHECK, or at
-  or past 2^53, compares exactly with another column, and orders, includes
-  and pages exactly.** A table the store creates holds a key the caller
-  writes, and a column referencing one, to its double's digits below 2^53, so
-  every comparison there is exact and the engine's. A table an earlier release
-  created holds a writer's digits until `planColumnUpgrade` adds the CHECK: a
-  literal, a literal list and an external list compare with its key by the
-  interval of decimals that round to the number's double, but a join, a hop's
-  correlation, two references in one row and a key beside a non-key number
-  column compare the key exactly, so a row re-keyed `6.00000000000000000001`
-  is dropped where the engine keeps it, and an ordering, a load's include and
-  a keyset continuation read it bare. A physical mapping's `numeric` key is
-  compared exactly in every shape, a literal included. At or past 2^53 the
-  CHECK leaves a writer's digits their own (JavaScript's digits there are not
-  always PostgreSQL's shortest), so a pair, an ordering and an external list
-  compare such a key exactly where another writer may have spelled it
-  otherwise. Wanted: a physical mapping's key qualified by its CHECKs at open,
-  or documented as the mapping's loss; an external list's element at or past
-  2^53 read by its interval.
-- [ ] **The key CHECK after a column's default changes.** Gaining or dropping
-  `default: 'auto'` on a PostgreSQL `numeric` key leaves its key CHECK in the
-  form the server rewrote, which the open no longer recognises as the store's
-  own: answers stay correct (the table reads as one without the CHECK), but
-  `introspect()` reports the CHECK and the exact paths are lost. Wanted: a
-  named key CHECK recognised by name and meaning, with the upgrade that names
-  the CHECKs earlier releases wrote.
+- [ ] **On PostgreSQL a load's order and a page's continuation read a
+  `numeric` key without the store's key CHECK bare.** A table an earlier
+  release created holds a writer's digits until `planColumnUpgrade` adds the
+  CHECK: a literal, a literal list and an external list compare with its key
+  by the interval of decimals that round to the number's double, and a join, a
+  hop's correlation, two references in one row and a query's ordering compare
+  it as the doubles the engine holds, but a load's `orderBy` and a page's
+  keyset continuation read it bare, so a post another writer re-keyed
+  `5.99999999999999999999` orders apart from post 6, and the continuation
+  after it (`pid > 6`) never pages post 6. At or past 2^53 the CHECK leaves a
+  writer's digits their own, so a pair and an ordering compare such a key
+  exactly where another writer may have spelled it otherwise. Wanted: the
+  load's order term read as the double, with a unique tie-break its
+  continuation carries (the row's stored digits).
 - [ ] **On PostgreSQL an entity's ordering over a column that may hold NULL
   never reads an index.** A term over a reference or an indexed column is `ASC
   NULLS FIRST` (descending `DESC NULLS LAST`), the engine's empty-first
@@ -885,12 +837,13 @@ what each does is its own documentation's job
   plans.
 - [ ] **PostgreSQL verifies a layout index condition or expression key it
   cannot read back by shape.** A layout index's condition, or the key under an
-  expression term, that the PostgreSQL read-back does not read — a date or
-  uuid literal the server rewrites by its type, `TRIM` (deparsed `TRIM(BOTH
-  FROM …)`), a quantified comparison other than `= ANY` and `<> ALL`, `IS
-  [NOT] TRUE` — is not compared, so an index recreated under another such
-  condition or key opens as the declared one, where SQLite compares the CREATE
-  text (MODEL-FORMAT §12). Wanted: read those forms into the condition form.
+  expression term, that the PostgreSQL read-back does not read — a timestamp
+  literal, a date a session under another `DateStyle` writes, a function
+  outside the relational vocabulary, a quantified comparison over anything but
+  a list of non-NULL literals — is not compared, so an index recreated under
+  another such condition or key opens as the declared one, where SQLite
+  compares the CREATE text (MODEL-FORMAT §12); `introspect()` reports such an
+  index (`unmapped-index`). Wanted: read those forms into the condition form.
 - [ ] **A locking probe's refusal under row-level security reads as the
   rule's.** On PostgreSQL a probe that locks the row it finds reads it
   through the table's UPDATE policy as well as its SELECT policy, so for a

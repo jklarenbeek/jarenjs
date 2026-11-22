@@ -6,12 +6,12 @@
  * another writer could re-key a row `6.00000000000000000001`, which the engine
  * reads as 6. A table the store creates holds each such column to its
  * double's digits below 2^53 by a CHECK, so every shape compares the key
- * exactly and as the engine, through its index; a literal past 2^53 compares
- * by its double's interval. A table an earlier release created, without the
- * CHECK, compares a literal, a literal list and an external list by the
- * interval and two such columns exactly — a listed loss — until
- * `planColumnUpgrade` adds the CHECK, refused `JD0023` naming the rows another
- * writer spelled otherwise. A key the database allocates (`bigserial`, its
+ * exactly and as the engine, through its index; a literal past 2^53, and an
+ * external list, compare by the double's interval. A table an earlier release
+ * created, without the CHECK, compares a literal, a literal list and an
+ * external list by the interval and two such columns as the doubles the
+ * engine holds, until `planColumnUpgrade` adds the CHECK, refused `JD0023`
+ * naming the rows another writer spelled otherwise. A key the database allocates (`bigserial`, its
  * references `bigint`) holds integers alone and compares exactly, as before,
  * and so does a key the open reads as held so. PostgreSQL where JAREN_PG_URL
  * names a server; SQLite always.
@@ -97,9 +97,6 @@ const SHAPES = /** @type {[string, any, any, unknown][]} */ ([
     { k: '$k.kid', p: '$p.name' }), undefined, [{ k: 'k1', p: 'p6' }, { k: 'k1', p: 'p7' }, { k: 'k2', p: 'p6' }, { k: 'k2', p: 'p7' }]],
 ]);
 
-/** Whether a shape compares a key with a number rather than with another column. @param {string} name */
-const withNumber = (name) => /a literal|list/.test(name);
-
 /**
  * The statements of the shapes that compare two columns: as stored, a key exactly.
  * @param {any} store
@@ -112,6 +109,20 @@ async function pairsCompareExactly(store) {
   // a number column beside it reads the double, the key exactly against it
   assert.match(await sql('a key joined to a number column'), /ON \("t0"\."pid" = \(\(CASE WHEN abs\("t1"\."score"\)/);
   assert.doesNotMatch(await sql('a join table\'s key joined to a key'), /::float8/);
+}
+
+/**
+ * The statements of the shapes that compare two columns over a table without
+ * the key's CHECK: as the doubles the engine holds, never the key bare.
+ * @param {any} store
+ */
+async function pairsCompareAsDoubles(store) {
+  for (const name of ['a key joined to a reference', 'a hop from a key to a reference', 'two references in one row, $eq',
+    'a key joined to a number column', 'a join table\'s key joined to a key']) {
+    const sql = (await store.explain(/** @type {any} */ (SHAPES.find((shape) => shape[0] === name))[1])).sql;
+    assert.match(sql, /::float8/, name);
+    assert.doesNotMatch(sql, /"(postId|Post_key)" = "t0"\."pid"|"postId" = "t0"\."replyTo"/, name);
+  }
 }
 
 /**
@@ -174,10 +185,10 @@ const reopened = (createAuto, openAuto, earlier, fn) => withPostgres(async (pg) 
 describe('an entity key another writer spelled in a table an earlier release created, PostgreSQL', { skip: skipFor('postgres') }, () => {
   for (const [title, createAuto, openAuto] of /** @type {[string, boolean, boolean][]} */ ([
     ['a key the caller writes', false, false], ['a key the model allocates over a table that holds it as numeric', false, true]])) {
-    it(`compares ${title} with a number as the engine reads it, and with another column exactly`, async () => {
+    it(`compares ${title} with a number and with another column as the engine reads it`, async () => {
       await reopened(createAuto, openAuto, true, async (store, { pool, schema }) => {
         await fill(store, pool, schema, true);
-        for (const [name, query, externals, expected] of SHAPES.filter(([name]) => withNumber(name))) {
+        for (const [name, query, externals, expected] of SHAPES) {
           const options = externals === undefined ? {} : { externals };
           assert.equal((await store.explain(query, options)).mode, 'native', name);
           assert.deepEqual(await store.execute(query, { ...options, pushdown: false }), expected, `${name}: the engine`);
@@ -185,11 +196,8 @@ describe('an entity key another writer spelled in a table an earlier release cre
         }
         const loaded = await store.entity('Post').asNoTracking().load({ where: { $eq: ['$it.pid', 6] } });
         assert.deepEqual(loaded.map((/** @type {any} */ post) => post.name).sort(), ['p6', 'p7']);
-        // the listed loss: two columns compare the key exactly, so a join drops the re-keyed post's other spelling
-        await pairsCompareExactly(store);
-        const keyJoin = /** @type {any} */ (SHAPES.find(([name]) => name === 'a key joined to a reference'));
-        assert.deepEqual(await store.execute(keyJoin[1]), [{ c: 'c1', p: 'p6' }, { c: 'c2', p: 'p5' }, { c: 'c3', p: 'p7' }]);
-        assert.deepEqual(await store.execute(keyJoin[1], { pushdown: false }), keyJoin[3]);
+        // two columns compare the key as the doubles the engine holds, so a join keeps the re-keyed post's other spelling
+        await pairsCompareAsDoubles(store);
       });
     });
   }
@@ -335,7 +343,8 @@ describe('an entity key under its CHECK, PostgreSQL', { skip: skipFor('postgres'
         (await store.explain(query, externals === undefined ? {} : { externals })).sql;
       assert.match(await sql(P({ $eq: ['$p.pid', 6] })), /WHERE \("t0"\."pid" IS NOT NULL AND "t0"\."pid" = \$1\)/);
       assert.match(await sql(C({ $eq: ['$c.postId', { $seq: [6] }] })), /"t0"\."postId" IN \(SELECT \(i\.e #>> '\{\}'\)::numeric/);
-      assert.match(await sql(P({ $eq: ['$p.pid', '$ids[*]'] }), { ids: [6] }), /"t0"\."pid" IN \(SELECT \(i\.e #>> '\{\}'\)::numeric/);
+      // an external list may hold a number past 2^53, whose digits the CHECK leaves the writer's
+      assert.match(await sql(P({ $eq: ['$p.pid', '$ids[*]'] }), { ids: [6] }), /"interval_row"\."pid" >= \("interval_edge"\.e ->> 0\)::numeric/);
       assert.match(await sql(P({ $eq: ['$p.pid', 2 ** 53] })), /"t0"\."pid" >= \$1 AND "t0"\."pid" <= \$2/);
       assert.match(await sql(P({ $eq: ['$p.pid', { $seq: [6, 2 ** 60] }] })), /"interval_row"\."pid" >= \("interval_edge"\.e ->> 0\)::numeric/);
       assert.match(await sql({ $for: { p: '$.Post[*]' }, $orderby: ['$p.pid'], $return: '$p.name' }), /ORDER BY "t0"\."pid" ASC, "t0"\."rid"/);
@@ -413,7 +422,7 @@ describe('an entity key under its CHECK, PostgreSQL', { skip: skipFor('postgres'
       const { migration, report } = await upgradeOf();
       // each column once, in the order the tables are planned
       assert.deepEqual(report.upgraded, ['Post.pid', 'Comment.postId', 'Comment.replyTo', 'Tag.tid', 'Kid.postRef', 'N.id', 'Post_Tag.Post_key', 'Post_Tag.Tag_key']);
-      assert.ok(migration.steps.every((/** @type {any} */ step) => /^ALTER TABLE "\w+" ADD CHECK \(CASE WHEN abs\(/.test(step.sql)), JSON.stringify(migration.steps));
+      assert.ok(migration.steps.every((/** @type {any} */ step) => /^ALTER TABLE "(\w+)" ADD CONSTRAINT "\1_\w+_jaren_key" CHECK \(CASE WHEN abs\(/.test(step.sql)), JSON.stringify(migration.steps));
       assert.deepEqual((await migrate({ driver: driver() }, [migration], { baseline: model(false), model: model(false), shadow: false })).applied, [migration.id]);
       assert.deepEqual(await keyChecked(pool, schema), KEY_CHECKED.caller);
       assert.deepEqual((await upgradeOf()).migration.steps, []);
@@ -444,7 +453,7 @@ describe('an entity key under its CHECK, PostgreSQL', { skip: skipFor('postgres'
         const { migration, report } = await planColumnUpgrade(connection, model(false));
         assert.deepEqual(report.upgraded.filter((/** @type {string} */ name) => name === 'Post.pid'), ['Post.pid']);
         assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.sql).filter((/** @type {string} */ text) => text.startsWith('ALTER TABLE "Post"')),
-          ['ALTER TABLE "Post" ADD CHECK ("pid" <> \'NaN\')', `ALTER TABLE "Post" ADD CHECK (${check.replaceAll('pid', '"pid"')})`]);
+          ['ALTER TABLE "Post" ADD CHECK ("pid" <> \'NaN\')', `ALTER TABLE "Post" ADD CONSTRAINT "Post_pid_jaren_key" CHECK (${check.replaceAll('pid', '"pid"')})`]);
       }
       finally { await connection.close(); }
       await pool.query(`ALTER TABLE "${schema}"."Post" VALIDATE CONSTRAINT "Post_pid_check1"`);

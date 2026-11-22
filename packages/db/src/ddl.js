@@ -2150,12 +2150,32 @@ export function keyCheckOf(dialect, columnName, type, keyColumn) {
 }
 
 /**
- * The planned columns holding a key with its CHECK (`keyCheckOf`), each with that CHECK.
- * @param {{ name: string, keyCheck?: string }[]} columns
- * @returns {{ column: string, check: string }[]}
+ * The name of the key CHECK ({@link keyCheckOf}) of a table's column:
+ * `<table>_<column>_jaren_key`, or, where that is longer than the engine keeps
+ * an identifier (PostgreSQL's 63 bytes), the table clipped at a character
+ * boundary beside a short hash of the two names, so a table and a column that
+ * each fit never make a name the engine truncates. A table names one CHECK per
+ * column so; the name says which CHECK a migration that changes the column's
+ * type drops and adds again, and nothing else (the open reads a key CHECK by
+ * its expression, under any name: an earlier release's has the engine's).
+ * @param {any} dialect @param {string} table @param {string} column
+ * @returns {string}
+ */
+export function keyCheckName(dialect, table, column) {
+  const natural = `${table}_${column}_jaren_key`;
+  const limit = dialect.maxIdentifierBytes;
+  if (!Number.isFinite(limit) || utf8ByteLength(natural) <= limit) return natural;
+  const suffix = `_${hashContent(`${table}\u0000${column}`)}_jaren_key`;
+  return clipToBytes(table, limit - suffix.length) + suffix;
+}
+
+/**
+ * The planned columns holding a key with its CHECK (`keyCheckOf`), each with that CHECK and its name.
+ * @param {{ name: string, keyCheck?: string, keyCheckName?: string }[]} columns
+ * @returns {{ column: string, check: string, name: string }[]}
  */
 const keyChecksOf = (columns) => columns.flatMap((column) => (column.keyCheck === undefined ? []
-  : [{ column: column.name, check: column.keyCheck }]));
+  : [{ column: column.name, check: column.keyCheck, name: /** @type {string} */ (column.keyCheckName) }]));
 
 /**
  * The planned columns whose CHECK is a number column's own (`numberCheckOf`),
@@ -2179,13 +2199,15 @@ const numberChecksOf = (columns, dialect) => columns.flatMap((column) => {
  * @param {any} entities - the full `explainMapping` result (key types
  *   come from the referenced entity's columns)
  * @param {any} dialect
- * @param {{ deferCycles?: boolean, expressions?: Record<string, any>, temporalHooks?: any }} [options] - `deferCycles`: on a dialect
+ * @param {{ deferCycles?: boolean, expressions?: Record<string, any>, temporalHooks?: any, named?: string }} [options] - `deferCycles`: on a dialect
  *   that alters a table in place, leave the foreign keys that close a cycle
  *   out of the table and plan them as `deferredForeignKeys`, statements to
  *   run once every table of the cycle exists; `expressions`, the host's
  *   declared index functions an expression index calls (`openStore`'s);
  *   `temporalHooks`, the temporal seam's (`@jarenjs/db/temporals`), which
- *   plan the key columns and CHECK of each declared calendar member
+ *   plan the key columns and CHECK of each declared calendar member;
+ *   `named`, the table its key CHECKs are named after where `name` is a
+ *   rebuild's temporary one, which takes the table's name once it is done
  * @returns {{ table: string, createSql: string[], expected: any,
  *   columnNames: Set<string>, objects?: { name: string, what: string, docPath: string }[],
  *   programs?: any[], conditionColumns?: { name: string, physical: string, codec: string }[],
@@ -2285,7 +2307,7 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
       notNull: column.key && !singleKey,
       // an enum's list admits no NaN, so it is the column's whole CHECK
       check: column.check !== undefined ? renderCheck(column.name, column.check) : numberCheckOf(dialect, column.name, type),
-      ...(keyCheck === undefined ? {} : { keyCheck }),
+      ...(keyCheck === undefined ? {} : { keyCheck, keyCheckName: keyCheckName(dialect, options.named ?? name, column.name) }),
     });
   }
   for (const fk of entityMapping.foreignKeys) {
@@ -2296,7 +2318,7 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
       name: fk.column,
       type,
       check: numberCheckOf(dialect, fk.column, type),
-      ...(keyCheck === undefined ? {} : { keyCheck }),
+      ...(keyCheck === undefined ? {} : { keyCheck, keyCheckName: keyCheckName(dialect, options.named ?? name, fk.column) }),
       references: { table: fk.references, column: fk.referencesKey, onDelete: fk.onDelete },
     });
   }
@@ -2519,11 +2541,12 @@ function rulePrograms(name, entityMapping, entities, dialect, declared, readable
  * @param {any} join - `explainMapping(model).joinTables[tableName]`
  * @param {any} entities - the full mapping
  * @param {any} dialect
+ * @param {string} [named] - the table its key CHECKs are named after, where `tableName` is a rebuild's temporary one
  * @returns {{ table: string, createSql: string[], expected: any,
  *   objects: { name: string, what: string, docPath: string }[],
  *   numberChecks: { column: string, check: string }[], keyChecks: { column: string, check: string }[], keys: string[] }}
  */
-export function planJoinTable(tableName, join, entities, dialect) {
+export function planJoinTable(tableName, join, entities, dialect, named = tableName) {
   // the join table and its columns are named from the two entities
   // (see `refuseLongName`)
   refuseLongName(dialect, tableName, `the join table of '${join.left.entity}' and '${join.right.entity}'`, `/entities/${join.left.entity}`);
@@ -2541,7 +2564,7 @@ export function planJoinTable(tableName, join, entities, dialect) {
       name: side.column,
       type,
       check: numberCheckOf(dialect, side.column, type),
-      ...(keyCheck === undefined ? {} : { keyCheck }),
+      ...(keyCheck === undefined ? {} : { keyCheck, keyCheckName: keyCheckName(dialect, named, side.column) }),
       references: { table: side.entity, column: side.referencesKey, onDelete: 'cascade' },
     };
   };

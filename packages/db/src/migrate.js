@@ -44,7 +44,7 @@ import { modelIdentity, migrationIdentity } from './migration-identity.js';
 import { migrationChecksum, historyStatements, readMigrationHistory, checkHistoryObservation, checkAppliedRows,
   historyHeader, identityRows, checkHistoryIdentity, checkHistoryChain, writeIdentityRows } from './migration-history.js';
 export { HISTORY_TABLE, ENGINE_TABLES };
-import { DOC_COLUMN, planCollection, withoutContainerKeys, verifyShape, legacyColumnTypes, earlierIndexesHeld, planEntity as planEntityTable, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder, kindIndexSql, kindIndexTerms, kindIndexDropSql, numberCheckOf, planInvariants, MANAGED_SQL_OPTIONS } from './ddl.js';
+import { DOC_COLUMN, keyCheckName, planCollection, withoutContainerKeys, verifyShape, legacyColumnTypes, earlierIndexesHeld, planEntity as planEntityTable, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder, kindIndexSql, kindIndexTerms, kindIndexDropSql, numberCheckOf, planInvariants, MANAGED_SQL_OPTIONS } from './ddl.js';
 import { normalizeEntities as normalizeModelEntities, explainMapping as explainModelMapping, asHistory } from './model.js';
 import { storeTemporals } from './temporals.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
@@ -1562,10 +1562,13 @@ export function planColumnUpgrade(connection, model, options = undefined) {
         upgraded.push(`${table}.${column}`);
         steps.push({ kind: 'ddl', sql, note: `refuse a NaN in the number column '${column}' of '${table}', as a fresh store creates it` });
       }
-      for (const { table, column, sql } of unchecked.key) {
+      for (const { table, column, sql, drops } of unchecked.key) {
         // a column without either CHECK is named once
         if (!upgraded.includes(`${table}.${column}`)) upgraded.push(`${table}.${column}`);
-        steps.push({ kind: 'ddl', sql, note: `hold the key column '${column}' of '${table}' to the digits of a double, as a fresh store creates it` });
+        for (const drop of drops)
+          steps.push({ kind: 'ddl', sql: drop, note: `drop the key CHECK of '${column}' of '${table}' the server rewrote when the column's type changed, which no longer holds the key to the digits of a double` });
+        if (sql !== undefined)
+          steps.push({ kind: 'ddl', sql, note: `hold the key column '${column}' of '${table}' to the digits of a double, as a fresh store creates it` });
       }
       const created = new Set(steps.map((step) => step.sql));
       const unique = collections.flatMap(({ plan }) => (plan.kindIndexes ?? [])
@@ -1578,7 +1581,7 @@ export function planColumnUpgrade(connection, model, options = undefined) {
         const migration = { $migration: MIGRATION_VERSION, id, from: to, to, identity, steps };
         return chain(refuseDuplicates(connection, unique), () =>
           chain(refuseStoredNaN(connection, unchecked.nan), () =>
-          chain(refuseStoredKeyDigits(connection, unchecked.key), () => ({ migration, report: { upgraded } }))));
+          chain(refuseStoredKeyDigits(connection, unchecked.key.filter((entry) => entry.sql !== undefined)), () => ({ migration, report: { upgraded } }))));
       });
     }))));
 }
@@ -1862,11 +1865,14 @@ function entityPlansOf(model, dialect) {
  * @param {any} connection
  * @param {any[]} plans - from `planEntity` and `planJoinTable`
  * @returns {any} value-or-promise of `{ nan: Missing[], key: Missing[] }`, each
- *   `Missing` `{ table: string, column: string, keys: string[], check: string, sql: string }`
+ *   `Missing` `{ table: string, column: string, keys: string[], check: string, drops: string[], sql?: string }`:
+ *   `drops` the statements that drop the column's key CHECK the server rewrote
+ *   when its type changed, which guards nothing, before `sql` adds the CHECK
+ *   (none where the column holds it already)
  */
 function missingNumberChecks(connection, plans) {
   const dialect = connection.dialect;
-  /** @type {{ nan: { table: string, column: string, keys: string[], check: string, sql: string }[], key: { table: string, column: string, keys: string[], check: string, sql: string }[] }} */
+  /** @type {{ nan: { table: string, column: string, keys: string[], check: string, drops: string[], sql?: string }[], key: { table: string, column: string, keys: string[], check: string, drops: string[], sql?: string }[] }} */
   const missing = { nan: [], key: [] };
   const numeric = dialect.typeFor('number', 'generated');
   const next = (/** @type {number} */ i) => {
@@ -1878,13 +1884,24 @@ function missingNumberChecks(connection, plans) {
         : chain(connection.prepare(dialect.introspect.columns(plan.table)), (columns) => chain(columns.all([]), (columnRows) =>
           chain(connection.prepare(dialect.introspect.checks(plan.table)), (checks) => chain(checks.all([]), (checkRows) => {
             const read = dialect.readChecks(checkRows).filter((/** @type {any} */ check) => check.validated !== false);
-            /** @param {'nan' | 'key'} kind @param {{ column: string, check: string }[]} planned @param {(check: any) => boolean} own */
+            /** @param {'nan' | 'key'} kind @param {{ column: string, check: string, name?: string }[]} planned @param {(check: any) => boolean} own */
             const unheld = (kind, planned, own) => {
               const held = new Set(read.filter(own).map((/** @type {any} */ check) => check.column));
-              for (const { column, check } of planned) {
+              for (const { column, check, name } of planned) {
                 const typed = columnRows.find((/** @type {any} */ candidate) => String(candidate.name) === column);
-                if (typed === undefined || String(typed.type) !== numeric || held.has(column)) continue;
-                missing[kind].push({ table: plan.table, column, keys: plan.keys, check, sql: dialect.ddl.addCheck({ table: plan.table, sql: check }) });
+                if (typed === undefined || String(typed.type) !== numeric) continue;
+                // the store's own key CHECK as the server rewrote it when the column's type
+                // changed (`check-read.js` `keyGuardOf`), which no longer holds the key to the
+                // double's digits, goes, under whatever name; a key CHECK added takes its name
+                const stale = name === undefined ? [] : read
+                  .filter((/** @type {any} */ other) => other.column === column && other.keyCheck === 'rewritten')
+                  .map((/** @type {any} */ other) => String(other.name));
+                if (held.has(column) && stale.length === 0) continue;
+                const taken = name !== undefined && !stale.includes(name)
+                  && checkRows.some((/** @type {any} */ row) => String(row.name) === name);
+                missing[kind].push({ table: plan.table, column, keys: plan.keys, check,
+                  drops: stale.map((other) => dialect.ddl.dropCheck({ table: plan.table, name: other })),
+                  ...(held.has(column) ? {} : { sql: dialect.ddl.addCheck({ table: plan.table, sql: check, ...(name === undefined || taken ? {} : { name }) }) }) });
               }
             };
             unheld('nan', plan.numberChecks ?? [], (check) => check.notNaN === true);
@@ -2419,7 +2436,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     // built beside the old one and takes the name once the old one is gone
     const staged = finalName === oldName ? `${oldName}__rebuild` : finalName;
     // the table alone: its index is created last, under the final table's name
-    steps.push({ kind: 'ddl', sql: planJoinTable(staged, target, toMapping, dialect).createSql[0],
+    steps.push({ kind: 'ddl', sql: planJoinTable(staged, target, toMapping, dialect, finalName).createSql[0],
       note: `rebuild join table '${oldName}' as '${finalName}' ${why}` });
     const indexes = () => {
       for (const sql of planJoinTable(finalName, target, toMapping, dialect).createSql.slice(1))
@@ -2899,8 +2916,11 @@ function wholeKeySql(dialect, table, column) {
  * session, readers included; `ensure` gives the key a sequence it owns, unless
  * it owns one, and makes it the key's default, unless it is an identity;
  * `release` drops the sequence the key owns, unless it owns none. The last two
- * find the sequence at run time, whatever it is called.
- * @param {any} dialect @param {'lock' | 'ensure' | 'release'} action @param {string} table @param {string} column
+ * find the sequence at run time, whatever it is called. `guard`, over a key
+ * or a column referencing one that became a `numeric` again, adds the CHECK
+ * that refuses a NaN (`dialect.numberCheck`) unless the column holds it, as
+ * a column created a `numeric` does and one created a `bigint` does not.
+ * @param {any} dialect @param {'lock' | 'ensure' | 'release' | 'guard'} action @param {string} table @param {string} column
  * @returns {string}
  */
 function allocationBlock(dialect, action, table, column) {
@@ -2924,6 +2944,11 @@ function allocationBlock(dialect, action, table, column) {
       `    seq := ${owned};`, '  END IF;', "  IF ident = '' THEN",
       `    EXECUTE ${literal(`ALTER TABLE ${q(table)} ALTER COLUMN ${q(column)} SET DEFAULT nextval(`)} || pg_catalog.quote_literal(seq) || ${literal('::regclass)')};`,
       '  END IF;', 'END;'],
+    guard: ['BEGIN', '  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint WHERE conrelid = '
+      + `pg_catalog.to_regclass(${literal(q(table))}) AND contype = 'c' AND convalidated `
+      + `AND pg_catalog.pg_get_expr(conbin, conrelid) = ${literal('(')} || pg_catalog.quote_ident(${literal(column)}) `
+      + `|| ${literal(" <> 'NaN'::numeric)")}) THEN`,
+    `    ALTER TABLE ${q(table)} ADD CHECK (${dialect.numberCheck(q(column))});`, '  END IF;', 'END;'],
   }[action];
   let tag = '$jaren_allocation$';
   for (let i = 1; body.some((line) => line.includes(tag)); i++) tag = `$jaren_allocation_${i}$`;
@@ -2933,14 +2958,14 @@ function allocationBlock(dialect, action, table, column) {
 /**
  * What an allocation block's first line names: its action, table and key, or
  * `null` for any other statement.
- * @param {unknown} sql @returns {['lock' | 'ensure' | 'release', string, string] | null}
+ * @param {unknown} sql @returns {['lock' | 'ensure' | 'release' | 'guard', string, string] | null}
  */
 function allocationBlockOf(sql) {
   const header = typeof sql === 'string' ? /^DO \$[A-Za-z_0-9]*\$\n-- (\[[^\n]*\])\n/.exec(sql) : null;
   if (header === null) return null;
   try {
     const [action, table, column] = JSON.parse(header[1]);
-    return (action === 'lock' || action === 'ensure' || action === 'release') && typeof table === 'string' && typeof column === 'string'
+    return (action === 'lock' || action === 'ensure' || action === 'release' || action === 'guard') && typeof table === 'string' && typeof column === 'string'
       ? [action, table, column] : null;
   }
   catch { return null; }
@@ -2970,10 +2995,17 @@ function isAllocationBlock(dialect, sql) {
  * key is a number the conversion would round runs under that lock, then every
  * referencing column and then the key become `bigint`; dropping, the key
  * (its identity and default removed) and then every referencing column become
- * `numeric`. A column that already has what the step gives it, an identity
+ * `numeric`. Each column holding the key keeps the CHECKs a fresh store gives
+ * it in its type: gaining, its key CHECK (`ddl.js` `keyCheckOf`, by its name
+ * `keyCheckName`) is dropped, which no `bigint` takes; dropping, the column
+ * gets the CHECK that refuses a NaN unless it holds one, and its key CHECK
+ * is dropped by that name and added again — the server's rewrite of one kept
+ * through the `bigint` holds no digits to the double's — so that no `numeric`
+ * key is left without it. A `bigint` holds only integers, so neither CHECK
+ * can refuse a stored row. A column that already has what the step gives it, an identity
  * that allocates already, or an edit that finds no sequence to drop, is left
- * as it is. A table the same edit rebuilds takes its sequence from the
- * rebuild, and is only locked and checked.
+ * as it is. A table the same edit rebuilds takes its sequence and its CHECKs
+ * from the rebuild, and is only locked and checked.
  * @param {any} dialect @param {string} table @param {string} column - the key
  * @param {boolean} gain - whether the key gains allocation (else it drops it)
  * @param {{ table: string, column: string }[]} referencing - the columns that reference the key
@@ -2990,13 +3022,24 @@ function allocationSteps(dialect, table, column, gain, referencing, rebuilt, rec
   const key = `the key '${column}' of '${table}'`;
   const references = (/** @type {string} */ type) => referencing.map((reference) => alter(reference.table, reference.column, type,
     `convert '${reference.table}'.'${reference.column}', which references ${key}, to ${type}`));
+  // each column holding the key, and its key CHECK (`ddl.js` `keyCheckOf`) by the name a fresh store gives it
+  const holders = [...referencing, { table, column }].map((holder) => ({ ...holder, check: keyCheckName(dialect, holder.table, holder.column) }));
+  /** @param {{ table: string, column: string, check: string }} holder @param {string} note */
+  const dropKeyCheck = (holder, note) => ({ kind: 'ddl', sql: `ALTER TABLE ${q(holder.table)} DROP CONSTRAINT IF EXISTS ${q(holder.check)}`, note });
+  const unchecked = holders.map((holder) => dropKeyCheck(holder, `drop the key CHECK of '${holder.table}'.'${holder.column}', which a bigint does not take`));
+  const checked = holders.flatMap((holder) => [
+    { kind: 'ddl', sql: allocationBlock(dialect, 'guard', holder.table, holder.column),
+      note: `refuse a NaN in '${holder.table}'.'${holder.column}', unless the column does, as a fresh store creates it` },
+    dropKeyCheck(holder, `drop the key CHECK of '${holder.table}'.'${holder.column}' the bigint kept, which no longer holds it to the digits of a double`),
+    { kind: 'ddl', sql: dialect.ddl.addCheck({ table: holder.table, name: holder.check, sql: dialect.keyCheck(q(holder.column)) }),
+      note: `hold '${holder.table}'.'${holder.column}' to the digits of a double, as a fresh store creates it` }]);
   if (gain) {
     // the key's table is locked first, readers included: the check and the conversions then see the same keys
     // (a session cannot commit a fractional one between them), and a session that wrote the key's table before
     // the migration began finishes its work on the tables that reference it before any of them is touched
     return [{ kind: 'ddl', sql: allocationBlock(dialect, 'lock', table, column), note: `lock '${table}' against every other session while its keys are checked and converted` },
       { kind: 'sql', sql: wholeKeySql(dialect, table, column), note: `check that every stored value of ${key} is a whole number a bigint holds` },
-      ...(rebuilt ? [] : [...references(allocated), alter(table, column, allocated, `convert ${key} to ${allocated}`),
+      ...(rebuilt ? [] : [...unchecked, ...references(allocated), alter(table, column, allocated, `convert ${key} to ${allocated}`),
         { kind: 'ddl', sql: allocationBlock(dialect, 'ensure', table, column), note: `give ${key} a sequence it owns and make it the default` },
         { kind: 'sql', sql: advancedSequenceSql(dialect, table, column), note: `continue the sequence of ${key} past the highest stored key` },
         ...recompile])];
@@ -3006,7 +3049,7 @@ function allocationSteps(dialect, table, column, gain, referencing, rebuilt, rec
     { kind: 'ddl', sql: `ALTER TABLE ${q(table)} ALTER COLUMN ${q(column)} DROP DEFAULT`, note: `remove the default of ${key}` },
     alter(table, column, stored, `convert ${key} to ${stored}`), ...references(stored),
     { kind: 'ddl', sql: allocationBlock(dialect, 'release', table, column), note: `drop the sequence ${key} owned` },
-    ...recompile];
+    ...checked, ...recompile];
 }
 
 /** A rebuilt table's primary key, with its schema, when it is not yet under
@@ -3279,7 +3322,7 @@ function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report, expre
   const q = dialect.quoteIdentifier;
   const pathText = (memberName) => dialect.jsonPathText([{ name: memberName }]);
   const temporary = `${name}__rebuild`;
-  const create = [planEntity(temporary, tm, toMapping, dialect, { expressions }).createSql[0]];
+  const create = [planEntity(temporary, tm, toMapping, dialect, { expressions, named: name }).createSql[0]];
   const finalPlan = planEntity(name, tm, toMapping, dialect, { expressions });
   // the rule programs end `createSql`, and are not this step's
   const indexes = finalPlan.createSql.slice(1, finalPlan.createSql.length - (finalPlan.programs?.length ?? 0));

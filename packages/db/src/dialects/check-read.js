@@ -363,8 +363,10 @@ const NAN_TYPES = /* @__PURE__ */ Object.freeze([['NUMERIC'], ['DOUBLE', 'PRECIS
 /** The guard a CHECK holds one column to, where its text is one this reader
  * recognises, as the catalog deparses it: `not-nan` for `(a <> 'NaN'::numeric)`
  * — the CHECK a store gives a PostgreSQL `numeric` column of an entity or join
- * table (`dialect.numberCheck`), which is also `notNaN: true` — and for the same
- * CHECK over a float column, `(a <> 'NaN'::double precision)` (or `::real`).
+ * table (`dialect.numberCheck`), which is also `notNaN: true`, and the same
+ * CHECK as the server rewrites it over a column that became a `bigint`,
+ * `((a)::numeric <> 'NaN'::numeric)` — and for the same CHECK over a float
+ * column, `(a <> 'NaN'::double precision)` (or `::real`).
  * `{ column, guard }`, or `null` for any other text.
  * @param {{ kind: string, value: string }[]} tokens
  * @returns {{ column: string, guard: 'not-nan', notNaN?: true } | null} */
@@ -375,6 +377,13 @@ function guardOf(tokens) {
   while (take('(')) open++;
   const column = tokens[cursor.at++];
   if (!column || !['identifier', 'word'].includes(column.kind)) return null;
+  // the server's cast of the column to `numeric`, as it rewrites the CHECK of
+  // a key that became a `bigint` (which holds no NaN): the same refusal
+  if (open > 0 && tokens[cursor.at]?.value === ')' && tokens[cursor.at + 1]?.value === '::'
+    && tokens[cursor.at + 2]?.kind === 'word' && tokens[cursor.at + 2].value.toUpperCase() === 'NUMERIC') {
+    cursor.at += 3;
+    open--;
+  }
   if (!(take('<') && take('>'))) return null;
   const nan = tokens[cursor.at++];
   if (nan?.kind !== 'string' || nan.value !== 'NaN' || !take('::')) return null;
@@ -391,27 +400,61 @@ const KEY_CHECK = /* @__PURE__ */ sqlTokens('CASE WHEN ((abs(k) >= (\'9007199254
   + 'WHEN (abs(k) < ((5)::numeric * power((10)::numeric, (\'-324\'::integer)::numeric))) THEN false '
   + 'ELSE (k = (((k)::double precision)::text)::numeric) END');
 
-/** The guard the store's own key CHECK ({@link KEY_CHECK}) holds its column
- * to: `shortest-digits`, only digits whose exact comparison is the double's
- * (also `keyCheck: true`, the store's own spelling, which `introspect()`
- * reads as declaring nothing beyond the column's type). `null` for any
- * other text, the same CHECK over two columns among it.
- * @param {{ kind: string, value: string }[]} tokens
- * @returns {{ column: string, guard: 'shortest-digits', keyCheck: true } | null} */
-function keyGuardOf(tokens) {
-  if (tokens.length !== KEY_CHECK.length) return null;
+/** The same CHECK as the server rewrites it when the column becomes a
+ * `bigint` (a key that gains the database's allocation): every read of the
+ * column cast, `trunc` taken over the double. Over a `bigint` it holds for
+ * every row, and refuses nothing. */
+const KEY_CHECK_BIGINT = /* @__PURE__ */ sqlTokens('CASE WHEN (((abs(k))::numeric >= (\'9007199254740992\'::bigint)::numeric) '
+  + 'OR ((k)::double precision = trunc((k)::double precision))) THEN true '
+  + 'WHEN ((abs(k))::numeric < ((5)::numeric * power((10)::numeric, (\'-324\'::integer)::numeric))) THEN false '
+  + 'ELSE ((k)::numeric = (((k)::double precision)::text)::numeric) END');
+
+/** And as it stands once the column is a `numeric` again (a key whose
+ * allocation was released): `trunc` still over the double, so a fraction
+ * whose double is an integer (`6.00000000000000000001`) passes it, and the
+ * CHECK no longer holds the key to its double's digits. */
+const KEY_CHECK_RELEASED = /* @__PURE__ */ sqlTokens('CASE WHEN ((abs(k) >= (\'9007199254740992\'::bigint)::numeric) '
+  + 'OR ((k)::double precision = trunc((k)::double precision))) THEN true '
+  + 'WHEN (abs(k) < ((5)::numeric * power((10)::numeric, (\'-324\'::integer)::numeric))) THEN false '
+  + 'ELSE (k = (((k)::double precision)::text)::numeric) END');
+
+/** The column a CHECK's tokens hold where they are `template`'s with its one
+ * column `k` spelled alike throughout, else `undefined`.
+ * @param {{ kind: string, value: string }[]} tokens @param {{ kind: string, value: string }[]} template
+ * @returns {string | undefined} */
+function templateColumn(tokens, template) {
+  if (tokens.length !== template.length) return undefined;
   /** @type {string | undefined} */
   let column;
   for (let at = 0; at < tokens.length; at++) {
-    const want = KEY_CHECK[at], token = tokens[at];
+    const want = template[at], token = tokens[at];
     if (want.kind === 'word' && want.value === 'k') {
-      if (token.kind !== 'identifier' && token.kind !== 'word') return null;
-      if (column !== undefined && token.value !== column) return null;
+      if (token.kind !== 'identifier' && token.kind !== 'word') return undefined;
+      if (column !== undefined && token.value !== column) return undefined;
       column = token.value;
     }
-    else if (token.kind !== want.kind || token.value !== want.value) return null;
+    else if (token.kind !== want.kind || token.value !== want.value) return undefined;
   }
-  return column === undefined ? null : { column, guard: 'shortest-digits', keyCheck: true };
+  return column;
+}
+
+/** What a CHECK is of the store's own key CHECK, read by its expression
+ * under any name (an earlier release's carries the name the engine gave it):
+ * the CHECK itself ({@link KEY_CHECK}) holds its column to `shortest-digits`,
+ * only digits whose exact comparison is the double's (also `keyCheck: true`,
+ * the store's own spelling, which `introspect()` reads as declaring nothing
+ * beyond the column's type); the same CHECK as the server rewrote it on a
+ * change of the column's type is the store's own too, but guards nothing
+ * (`keyCheck: 'rewritten'`): over a `bigint` it refuses nothing, and over a
+ * `numeric` again it admits digits that are not the double's. `null` for any
+ * other text, the same CHECK over two columns among it.
+ * @param {{ kind: string, value: string }[]} tokens
+ * @returns {{ column: string, guard: 'shortest-digits', keyCheck: true } | { column: string, keyCheck: 'rewritten' } | null} */
+function keyGuardOf(tokens) {
+  const column = templateColumn(tokens, KEY_CHECK);
+  if (column !== undefined) return { column, guard: 'shortest-digits', keyCheck: true };
+  const rewritten = templateColumn(tokens, KEY_CHECK_BIGINT) ?? templateColumn(tokens, KEY_CHECK_RELEASED);
+  return rewritten === undefined ? null : { column: rewritten, keyCheck: 'rewritten' };
 }
 
 /**

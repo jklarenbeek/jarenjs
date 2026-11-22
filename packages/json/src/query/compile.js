@@ -19,7 +19,7 @@ import {
   runSegmentsV,
 } from '../segments.js';
 import { queryRuntimeError } from './messages.js';
-import { EMPTY, Seq, seqOf, appendItem, ebv, stableKeyString, stableKeyStringWithin, itemRef } from './runtime.js';
+import { EMPTY, Seq, seqOf, appendItem, ebv, stableKeyString, stableKeyStringWithin, itemRef, COMPARE_GUARD, guardedItems } from './runtime.js';
 import { CARD_ONE, CARD_MANY, hostFailureText, collectReadSlots } from './normalize.js';
 // The operator registry: every section-8 operator compiles through its
 // table entry (compileOp). Only referenced inside functions, so the
@@ -1371,7 +1371,7 @@ function compileFlwor(node) {
   if (groupby !== null) {
     const keys = groupby.keys;
     const groupCount = keys.length;
-    const keyGets = keys.map((k) => compileNode(k.expr));
+    const keyGets = keys.map((k) => guardedItems(compileNode(k.expr), k.expr.docPath));
     const keyPaths = keys.map((k) => k.docPath);
     const keySlots = keys.map((k) => k.slot);
     const accSlots = groupby.accSlots;
@@ -1415,12 +1415,13 @@ function compileFlwor(node) {
   let emit = groupby !== null ? groupSink : (orderby !== null ? rowSink : sink);
   // an equijoin the planner can serve from a hash table is answered by
   // the probe clause below, so its conjunct never reaches $where
-  const join = planHashJoin(node);
+  // (a compareGuard reads each pair the comparison does: no bucket skips one)
+  const join = COMPARE_GUARD.fn === null ? planHashJoin(node) : null;
   // a spatial or an interval predicate is screened by an index instead:
   // the probe keeps $where intact and runs it on every candidate, so no
   // where-stage is installed at all - the probe evaluates the predicate
   // itself, on the candidates
-  const screened = join === null ? planScreenedJoin(node) : null;
+  const screened = join === null && COMPARE_GUARD.fn === null ? planScreenedJoin(node) : null;
   if (screened === null && join !== null && join.residual !== null) {
     const conds = join.residual.map(compileNode);
     const paths = join.residual.map((a) => a.docPath);
@@ -1696,16 +1697,22 @@ function compileUncounted(node) {
  * @param {object} root - the AST root from normalizeQuery
  * @param {{ slot: number, limit: number } | null} steps - the step
  *   counter's frame slot and its limit, or null for no instrumentation
+ * @param {((item: any, other: any, docPath: string, externals: any) => void) | null} [guard] -
+ *   the `compareGuard` option: each comparison, `$distinct`, `$index-of`
+ *   and grouping key hands it the items it reads, with the frame's `ext`
  * @returns {(frame: any[]) => any} the root getter
  */
-export function compileQueryRoot(root, steps) {
+export function compileQueryRoot(root, steps, guard = null) {
   const prev = STEPS;
+  const prevGuard = COMPARE_GUARD.fn;
   STEPS = steps;
+  COMPARE_GUARD.fn = guard;
   try {
     return compileNode(root);
   }
   finally {
     STEPS = prev;
+    COMPARE_GUARD.fn = prevGuard;
   }
 }
 

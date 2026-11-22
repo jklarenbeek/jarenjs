@@ -24,7 +24,7 @@ spatial/vector execution capability to this release.
 | Several sessions per Store | `sessions: N` runs independent transactions and reads at once, each on a session of its own; conflicts settle in the database; capture, jobs and live queries stay exact: [session tests](../../../test/db/postgres-sessions.test.js) | The store's own unit of work runs on the first session, one call at a time; captured writes stay ordered by the capture lock; replication runs on one session |
 | Writer lock, isolation, owner | `mode: 'immediate'` loses no update between two Stores, the three isolation levels run and are reported, a lock wait past `lock_timeout` is busy and retryable, one owner per schema: [isolation](../../../test/db/postgres-isolation.test.js) and [owner](../../../test/db/postgres-owner.test.js) tests | The writer lock orders immediate transactions only; plain writes lock rows. The owner lock is cooperative and names no holder |
 | Relational statements through the Store | `store.relational` and `tx.relational` over the native cursors, the write rules shared with trusted SQL, a failed write inside a transaction contained by its savepoint: [store-bound tests](../../../test/db/relational-store.test.js) | A root native cursor holds the session until released, so other root calls wait for it; `lastInsertRowid` is never reported |
-| Physical tables and catalog | Explicit codecs, exact bigint/decimal strings, date/time distinctions, declared layout and rich loss/disposition inventory: [physical tests](../../../test/db/postgres-physical.test.js); a declared index's condition, and the key under each expression term, read back from the catalog and compared as one condition or expression across the server's spellings: [condition tests](../../../test/db/postgres-layout-condition.test.js), [expression term tests](../../../test/db/postgres-layout-expression.test.js) | Arbitrary catalog objects are inventoried, not automatically translated into model intent; a condition or key either side does not read back (a date or uuid literal, `TRIM`, another quantified comparison) is verified by the index's shape alone |
+| Physical tables and catalog | Explicit codecs, exact bigint/decimal strings, date/time distinctions, declared layout and rich loss/disposition inventory: [physical tests](../../../test/db/postgres-physical.test.js); a declared index's condition, and the key under each expression term, read back from the catalog and compared as one condition or expression across the server's spellings: [condition tests](../../../test/db/postgres-layout-condition.test.js), [expression term tests](../../../test/db/postgres-layout-expression.test.js) | Arbitrary catalog objects are inventoried, not automatically translated into model intent; a condition or key either side does not read back (a timestamp literal, a date a session under another `DateStyle` writes) is verified by the index's shape alone, and `introspect()` reports the index (`unmapped-index`) |
 | Native migrations | Reviewed native catalog artifacts, dependency/sequence preservation, receipts, transaction rollback and separate shadow replay: [migration tests](../../../test/db/postgres-migration.test.js) | Concurrent index creation and unreviewed destructive dependencies refuse; opening never silently changes an existing schema |
 | Entity migrations | A scalar moves between its column and the document, a rebuild retypes a member, and a key gains or drops `default: "auto"` (its referencing columns, sequence and rule functions converted by planned steps) with the values SQLite keeps, on 16, 17 and 18: [entity migration tests](../../../test/db/postgres-entity-migration.test.js) | A rebuild of an entity another object depends on refuses at the drop (`JD0023`); a conversion rewrites its table under an exclusive lock, and a session connected before it keeps what it prepared against the old column type |
 | Database rules | Persistence invariants as PL/pgSQL trigger functions (SQLSTATE `23J01`) under a fixed `search_path = pg_catalog, pg_temp`, with a statement program refusing `TRUNCATE` where deletes are judged, installed by a reviewed migration on a physical layout or with the table on a layout the store owns, and verified field by field through the catalog at open, an open's tables read in one catalog read of the namespace for its collections and one for its entities; one differential oracle with SQLite over refusals, audit rows, revisions, existence probes, store enforcement and fresh and migrated installs; an existence probe reads the target through its key or any index its open verifies, unique or not, and a probe no odd number of `$not`s encloses locks the row it finds — a store rule's and a database rule's program alike — `FOR KEY SHARE` when it matches key columns only and `FOR SHARE` otherwise; a program an earlier release installed opens, is reported (`store.earlierPrograms`) and is replaced by a reviewed link (`planProgramUpgrade`, `CREATE OR REPLACE FUNCTION`): [invariant tests](../../../test/db/postgres-invariants.test.js), [store-owned rule tests](../../../test/db/postgres-store-owned-rules.test.js), [index probe tests](../../../test/db/index-probes.test.js), [probe lock tests](../../../test/db/probe-locks.test.js), [program spelling tests](../../../test/db/program-spellings.test.js), [program upgrade tests](../../../test/db/program-upgrade.test.js), [row-level security tests](../../../test/db/probe-rls.test.js) | A layout the store owns takes rules over its columns, probes included, and no audit, effect, epoch or document member; a program an earlier release installed locks no row, so another transaction may delete or change the row it found and commit beside the probing write, until its reviewed link applies; the lock makes a delete of that row, an update of its key and, under `FOR SHARE`, every update of it wait for the probing transaction, needs `UPDATE` on one column of the target, and under row-level security reads through the UPDATE policy, so a writer references only rows it may lock ([MODEL-FORMAT §13.3](MODEL-FORMAT.md#133-store-enforcement)); a refused trusted statement spends its transaction (`JD2088`); `TableTrigger` documents remain SQLite SQL |
@@ -444,47 +444,82 @@ among them, and a reference no property declares, which has its foreign key
 too), is a `numeric`, where another writer could spell a key by digits the
 engine reads otherwise (`6.00000000000000000001` reads as 6). Beside its
 `NaN` CHECK, each such column of a table the store creates carries
-`CHECK (CASE WHEN abs(k) >= 9007199254740992 OR k = trunc(k) THEN true WHEN
-abs(k) < 5 * power(10::numeric, -324) THEN false ELSE k =
-k::float8::text::numeric END)`: an integer below 2^53 in magnitude is a
-double exactly, a fraction is held only by its double's shortest digits (the
-text the store writes), and a nonzero value below the least double (`1e-400`)
-is refused. Another writer's `UPDATE … SET pid = 6.00000000000000000001` fails
-`23514`, and a statement of the store's own that would write such a key (a
-relational `set` of `pid + 1e-20`) is refused `JD2005` with `class:
-'constraint'`. Such a key compares exactly in every shape — with a literal, a
-literal list or an external list, with another column in a join, a hop's
-correlation or one row, in an ordering, a load's include and a page's keyset
-continuation — which is the engine's comparison of the doubles and what the
-key's index serves: a lookup is an equality over the index, and a join of
+`CONSTRAINT "<table>_<column>_jaren_key" CHECK (CASE WHEN abs(k) >=
+9007199254740992 OR k = trunc(k) THEN true WHEN abs(k) < 5 * power(10::numeric,
+-324) THEN false ELSE k = k::float8::text::numeric END)` (a name longer than
+the server's 63 bytes is the table clipped beside a short hash): an integer
+below 2^53 in magnitude is a double exactly, a fraction is held only by its
+double's shortest digits (the text the store writes), and a nonzero value
+below the least double (`1e-400`) is refused. Another writer's `UPDATE … SET
+pid = 6.00000000000000000001` fails `23514`, and a statement of the store's own
+that would write such a key (a relational `set` of `pid + 1e-20`) is refused
+`JD2005` with `class: 'constraint'`. Such a key compares exactly in every
+shape — with a literal and a literal list, with another column in a join, a
+hop's correlation or one row, in an ordering, a load's include and a page's
+keyset continuation — which is the engine's comparison of the doubles and what
+the key's index serves: a lookup is an equality over the index, and a join of
 every row hashes. The CHECK leaves the digits of a value at or past 2^53 the
 writer's own: JavaScript writes such an integer by digits PostgreSQL's
 shortest text of the double does not always share (`999359725292056000`
 against `9.993597252920561e+17`), so constraining them would refuse the
 store's own writes. A literal or a literal list holding a number at or past
-2^53 therefore still compares by the interval of decimals that round to it,
-while a pair, an ordering and an external list compare such a key exactly, so
-there a key another writer spelled by other digits is dropped where the engine
-keeps it. `NaN` and the infinities pass this CHECK (the `NaN` CHECK refuses
-`NaN`). Its fraction arm reads the `float8` text (see `extra_float_digits`
-above). `introspect()` reads the CHECK as the store's own. A table an earlier
-release created has no such CHECK: its open reads which key columns the
-catalog holds it on, validated, and a column without it compares with a
+2^53, and an external list (which may hold one), therefore compare by the
+interval of decimals that round to each number, through the key's index,
+while a pair and an ordering compare such a key exactly, so there a key
+another writer spelled by other digits is dropped where the engine keeps it. `NaN` and the infinities pass this CHECK (the `NaN` CHECK refuses `NaN`).
+Its fraction arm reads the `float8` text (see `extra_float_digits` above).
+
+The open reads the key CHECK by its expression, under any name: an earlier
+release's is unnamed (the server named it `<table>_<column>_check1`), and
+`introspect()` reads either as the store's own. A key that gains `default:
+'auto'` becomes a `bigint` (and each column referencing it too), whose CHECK
+the migration drops by its name; one that loses it becomes a `numeric` again
+and gets both CHECKs back — the `NaN` CHECK where the column holds none (a
+table created allocated has neither), the key CHECK dropped by its name and
+added again — so no route leaves a `numeric` key without the CHECK. The
+server rewrites a CHECK it keeps across a change of the column's type, and an
+earlier release's key CHECK kept so (unnamed, so not dropped) reads `trunc`
+over the double: it refuses nothing over the `bigint`, which `introspect()`
+reads silently, and over the `numeric` again it no longer holds the key to its
+double's digits (`6.00000000000000000001` passes it), which `introspect()`
+reports as `unmapped-constraint` and `planColumnUpgrade` drops — and so does
+a renamed table's, still named after its old name, and every key CHECK of a
+table an allocation link an earlier release planned released, which has none
+until `planColumnUpgrade` adds it. A table an
+earlier release created without the CHECK, or holding only that rewrite, has
+its open read which key columns the catalog holds the CHECK on, validated, and
+a column without it compares as every other number column does: with a
 literal, a literal list or an external list (in a query, a hop's filter or a
 load's `where`) by the interval of decimals that round to the number's double,
 which its index still serves (a lookup is a range of two edges over the
-index), and with another column, in an ordering, an include and a continuation
-exactly, so a row another writer re-keyed by other digits is dropped there
-where the engine keeps it. `planColumnUpgrade` adds the CHECK (refused
-`JD0023` naming the rows another writer spelled otherwise, with the statement
-that re-spells them, MIGRATION-FORMAT §3); the next open reads the column as
-exact. A table the store maps but did not create (a physical mapping) carries
-whatever CHECKs the application gave it and is read as before. A key the
-database allocates is a `bigserial` (a column referencing it a `bigint`),
-which holds integers alone: it carries no such CHECK and keeps the exact
-comparison, and so does a key the model leaves to the caller in a table a
-database created while the model allocated it, which the open reads as
-`bigint`.
+index), and with another column — a join, a hop's correlation, two references
+in one row — and in a query's ordering as the doubles the engine holds, so a
+row another writer re-keyed by other digits is kept where the engine keeps it.
+A load's order, its include and a page's keyset continuation still read such a
+key bare, so there a page can step past a row another writer re-keyed, until
+`planColumnUpgrade` adds the CHECK (refused `JD0023` naming the rows another
+writer spelled otherwise, with the statement that re-spells them,
+MIGRATION-FORMAT §3); the next open reads the column as exact. A physical
+mapping declares no `numeric` key (a key's codec is `text`, `integer`, `bigint`
+or `uuid`, and an `integer` codec over a `numeric` column is `JD0002`), so its
+keys compare exactly. A key the database allocates is a `bigserial` (a column
+referencing it a `bigint`), which holds integers alone: it carries no such
+CHECK and keeps the exact comparison, and so does a key the model leaves to
+the caller in a table a database created while the model allocated it, which
+the open reads as `bigint`.
+
+A CHECK the model does not declare — one an operator added by hand, or
+another writer's — is not refused at open on PostgreSQL, which keeps each
+CHECK apart from the table and verifies only the ones the model declares (a
+declared interval's, a temporal member's): it still governs writes, which it
+refuses `JD2005` with `class: 'constraint'`, and `introspect()` reports it as
+`unmapped-constraint`, on a collection, an entity and a join table alike — the
+CHECKs the store gives its own tables (the `NaN` CHECK, the key CHECK, an
+enum's, an interval's) are none of them. SQLite keeps a table's CHECKs in its
+CREATE text, which its open compares whole, so there the same table is
+`JD0002` at open (and `jaren-db plan --store` names the CREATE text that
+differs), and `introspect()` over the database reports the CHECK as
+PostgreSQL's does.
 
 A collection member the schema types `number` or `integer` is read typed: its
 generated column, and the `CASE` a statement reads an unindexed one by, hold a

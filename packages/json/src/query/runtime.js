@@ -33,6 +33,32 @@ export class Seq {
 }
 
 /**
+ * The `compareGuard` option of the compilation in flight (null for none):
+ * set around the whole tree as the step limit is, so an ordinary compile
+ * emits exactly the closures it always did.
+ * @type {{ fn: ((item: any, other: any, docPath: string, externals: any) => void) | null }}
+ */
+export const COMPARE_GUARD = { fn: null };
+
+/**
+ * A getter whose items `compareGuard` reads before an operator equates
+ * them, with the call's externals (`frame.ext`); the getter itself where no
+ * guard was compiled.
+ * @param {(frame: any) => any} get @param {string} docPath
+ * @returns {(frame: any) => any}
+ */
+export function guardedItems(get, docPath) {
+  const guard = COMPARE_GUARD.fn;
+  if (guard === null) return get;
+  return (f) => {
+    const v = get(f);
+    if (v instanceof Seq) for (const item of v.items) guard(item, undefined, docPath, f.ext);
+    else if (v !== EMPTY) guard(v, undefined, docPath, f.ext);
+    return v;
+  };
+}
+
+/**
  * Build a sequence value from a flat accumulator array of items.
  * Returns EMPTY for zero items, the raw item for one, a Seq otherwise.
  * The array is adopted, not copied; callers hand over ownership.

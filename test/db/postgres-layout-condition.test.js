@@ -6,11 +6,17 @@
  * another condition is `JD0002`, while every spelling the server reads as
  * the same condition — operands commuted, a list as `IN`, `= ANY` or an `OR`
  * chain, a comparison flipped, the server's casts and literal spellings, a
- * NULL test either way — reopens clean. A condition the reader cannot read
- * back is not compared, as before.
+ * NULL test either way, `TRIM(BOTH FROM …)` for `trim`, a date or uuid
+ * literal the server writes by its type, a quantified comparison as the OR
+ * (or AND) of its items, a truth test as the null-safe comparison with the
+ * constant (and `IS TRUE` as the boolean, the rows a condition holds for) —
+ * reopens clean. A condition the reader
+ * cannot read back is not compared, as before, and `introspect()` names the
+ * index it cannot read.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { openStore } from '@jarenjs/db';
 import { postgresDialect } from '@jarenjs/db/postgres';
 import { relationalEmitter } from '../../packages/db/src/relational.js';
 import { conditionForm } from '../../packages/db/src/dialects/postgres-read-back.js';
@@ -33,10 +39,10 @@ const not = (value) => ({ $sql: 'not', value });
 const cast = (value, type) => ({ $sql: 'cast', value, type });
 
 const TABLE = 'CREATE TABLE t(id integer PRIMARY KEY, s text, v varchar(10), n integer, sm smallint, bi bigint, '
-  + 'm numeric, d double precision, b boolean, dt date, u uuid, "Mx" text)';
+  + 'm numeric, d double precision, b boolean, dt date, u uuid, ts timestamp, "Mx" text)';
 /** The catalog type of each column of `t`, as the open reads it. @type {Record<string, string>} */
 const TYPES = { id: 'integer', s: 'text', v: 'character varying(10)', n: 'integer', sm: 'smallint', bi: 'bigint',
-  m: 'numeric', d: 'double precision', b: 'boolean', dt: 'date', u: 'uuid', Mx: 'text' };
+  m: 'numeric', d: 'double precision', b: 'boolean', dt: 'date', u: 'uuid', ts: 'timestamp without time zone', Mx: 'text' };
 /** @param {string} column */
 const typeOf = (column) => TYPES[column];
 const emitter = relationalEmitter({ inline: true, dialect: postgresDialect({ searchPath: 'public' }) });
@@ -98,6 +104,14 @@ const SAME = [
   ['a quoted mixed-case column', bin('=', col('Mx'), val('a')), '"Mx" = \'a\''],
   ['a doubled quote inside a literal', bin('=', col('s'), val("it's")), "s = 'it''s'"],
   ['a BETWEEN the server spells as two bounds', bin('AND', bin('>=', col('n'), val(1)), bin('<=', col('n'), val(5))), 'n BETWEEN 1 AND 5'],
+  ['TRIM as the server writes it', bin('=', call('trim', col('s')), val('a')), "TRIM(BOTH FROM s) = 'a'"],
+  ['a date literal the server writes by its type', bin('>', col('dt'), val('2024-01-01')), "dt > '2024-01-01'::date"],
+  ['a uuid literal in another case', bin('=', col('u'), val('A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11')), "u = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'"],
+  ['a quantified comparison of one item', N5, 'n > ANY (ARRAY[5])'],
+  ['a quantified comparison, an OR of its items', bin('OR', N5, bin('>', col('n'), val(7))), 'n > ANY (ARRAY[5, 7])'],
+  ['IS NOT TRUE, the null-safe comparison with true', bin('IS NOT', col('b'), val('t')), 'b IS NOT TRUE'],
+  ['IS TRUE, which holds for the rows the boolean does', col('b'), 'b IS TRUE'],
+  ['IS FALSE, which holds for the rows its negation does', not(col('b')), 'b IS FALSE'],
 ];
 /** Declared conditions beyond the pairs, each reopened in the PostgreSQL rendering's own spelling. */
 const RENDERED = [
@@ -140,14 +154,16 @@ const DRIFT = [
   ['a bigint column cast to double precision', bin('=', col('bi'), val(5)), '(bi)::double precision = 5'],
   ['a numeric column cast to double precision', bin('=', col('m'), val(0.1)), '(m)::double precision = 0.1'],
   ['a numeric column cast to real', bin('>', col('m'), val(5)), '(m)::real > 5'],
+  ['TRIM, which the server writes TRIM(BOTH FROM ...)', bin('=', call('trim', col('s')), val('a')), "trim(s) = 'b'"],
+  ['a date literal, which the server writes by its type', bin('>', col('dt'), val('2024-01-01')), "dt > '2025-01-01'"],
+  ['a uuid literal, which the server writes by its type', bin('=', col('u'), val('A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11')), "u = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12'"],
+  ['IS NOT TRUE for the boolean', col('b'), 'b IS NOT TRUE'],
+  ['IS NOT FALSE for the boolean negated', not(col('b')), 'b IS NOT FALSE'],
+  ['a quantified comparison other than = ANY', N5, 'n > ANY (ARRAY[6, 7])'],
 ];
 /** A declared condition the reader cannot read back on one side: not compared, so it opens as it did. */
 const UNREAD = [
-  ['TRIM, which the server writes TRIM(BOTH FROM ...)', bin('=', call('trim', col('s')), val('a')), "trim(s) = 'b'"],
-  ['a date literal, which the server rewrites', bin('>', col('dt'), val('2024-01-01')), "dt > '2025-01-01'"],
-  ['a uuid literal, which the server rewrites', bin('=', col('u'), val('A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11')), "u = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12'"],
-  ['IS NOT TRUE', col('b'), 'b IS NOT TRUE'],
-  ['a quantified comparison other than = ANY', N5, 'n > ANY (ARRAY[6, 7])'],
+  ['a timestamp literal', bin('>', col('ts'), val('2024-01-01 10:00:00')), "ts > '2025-01-01 10:00'"],
   ['a table-qualified column, which the server never writes', bin('>', { $sql: 'column', name: 'n', table: 't' }, val(5)), 'n > 6'],
 ];
 
@@ -160,7 +176,7 @@ describe('a layout index condition on PostgreSQL', { skip }, () => {
   /** The condition the server keeps of `t_cond`, and both sides' forms. @param {any} fixture @param {any} where */
   const forms = async (fixture, where) => {
     const [{ predicate }] = await fixture.all("SELECT pg_get_expr(indpred, indrelid) AS predicate FROM pg_index WHERE indexrelid = 't_cond'::regclass");
-    return { predicate, stored: conditionForm(predicate, true, typeOf), declared: conditionForm(emitter.expr(where), true, typeOf) };
+    return { predicate, stored: conditionForm(predicate, true, typeOf, true), declared: conditionForm(emitter.expr(where), true, typeOf, true) };
   };
 
   it('reopens clean under every spelling the server reads as the declared condition', async () => {
@@ -215,6 +231,14 @@ describe('a layout index condition on PostgreSQL', { skip }, () => {
         assert.equal(error, null, `${label}: ${error?.message}`);
         const { stored, declared } = await forms(fixture, where);
         assert.ok(stored === null || declared === null, `${label}: one side does not read`);
+        // a condition the server keeps that the reader does not read is a line of the store's introspect(), never silence
+        if (stored !== null) continue;
+        const store = await openStore(layout(where), { driver: fixture.target.driver });
+        try {
+          const { report } = await store.introspect();
+          assert.ok(report.some((/** @type {any} */ row) => row.code === 'unmapped-index' && row.object === 't.t_cond'), `${label}: ${JSON.stringify(report)}`);
+        }
+        finally { await store.close(); }
       }
     }
     finally { await fixture.dispose(); }

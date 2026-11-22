@@ -7,7 +7,8 @@
  * over another expression — or over the plain column — is `JD0002`, while
  * every spelling the server reads as the same expression reopens clean. A
  * term's direction, operator class and collation are not compared, and a key
- * either side does not read back is not compared, as before.
+ * either side does not read back is not compared, as before — `TRIM(… FROM …)`
+ * and a date literal the server writes by its type are read.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -31,9 +32,9 @@ const cast = (value, type) => ({ $sql: 'cast', value, type });
 /** @param {any} value @param {string} collation */
 const collate = (value, collation) => ({ $sql: 'collate', value, collation });
 
-const TABLE = 'CREATE TABLE t(id integer PRIMARY KEY, s text, v varchar(10), n integer, m numeric, dt date)';
+const TABLE = 'CREATE TABLE t(id integer PRIMARY KEY, s text, v varchar(10), n integer, m numeric, dt date, ts timestamp)';
 /** The catalog type of each column of `t`, as the open reads it. @type {Record<string, string>} */
-const TYPES = { id: 'integer', s: 'text', v: 'character varying(10)', n: 'integer', m: 'numeric', dt: 'date' };
+const TYPES = { id: 'integer', s: 'text', v: 'character varying(10)', n: 'integer', m: 'numeric', dt: 'date', ts: 'timestamp without time zone' };
 /** @param {string} name */
 const typeOf = (name) => TYPES[name];
 const emitter = relationalEmitter({ inline: true, dialect: postgresDialect({ searchPath: 'public' }) });
@@ -57,6 +58,9 @@ const SAME = [
   ['a descending key, whose direction is not compared', LOWER, 'lower(s) DESC NULLS LAST'],
   ['an operator class, which is not compared', LOWER, 'lower(s) text_pattern_ops'],
   ['a collation, which is not compared', collate(LOWER, 'NOCASE'), 'lower(s)'],
+  ['TRIM, which the server writes TRIM(BOTH FROM ...)', call('trim', col('s')), 'trim(s)'],
+  ['btrim, the function TRIM calls', call('trim', col('s')), 'btrim(s)'],
+  ['a date literal, which the server writes by its type', call('coalesce', col('dt'), val('2024-01-01')), "COALESCE(dt, '2024-01-01')"],
 ];
 /** Declared expression terms beyond the pairs, each reopened in the PostgreSQL rendering's own spelling. */
 const RENDERED = [
@@ -77,11 +81,12 @@ const DRIFT = [
   ['another operator', bin('+', col('n'), val(1)), '(n - 1)'],
   ['a narrowing cast the declaration does not make', call('abs', col('m')), 'abs((m)::integer)'],
   ['another function under a collation', collate(LOWER, 'NOCASE'), 'upper(s)'],
+  ['TRIM of another side', call('trim', col('s')), 'TRIM(LEADING FROM s)'],
+  ['another date literal', call('coalesce', col('dt'), val('2024-01-01')), "COALESCE(dt, '2025-01-01'::date)"],
 ];
 /** A declared expression term the reader cannot read back on one side: not compared, so it opens as it did. */
 const UNREAD = [
-  ['TRIM, which the server writes TRIM(... FROM ...)', call('trim', col('s')), 'TRIM(LEADING FROM s)'],
-  ['a date literal, which the server rewrites', call('coalesce', col('dt'), val('2024-01-01')), "COALESCE(dt, '2025-01-01'::date)"],
+  ['a timestamp literal', call('coalesce', col('ts'), val('2024-01-01 10:00:00')), "COALESCE(ts, '2025-01-01 10:00:00')"],
 ];
 
 describe('the expression terms a layout declares, as the mapping reports them', () => {

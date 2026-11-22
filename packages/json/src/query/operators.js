@@ -95,7 +95,7 @@ import {
 import { queryCompileError, queryRuntimeError, messageRef } from './messages.js';
 import {
   EMPTY, Seq, seqOf, appendItem, ebv, firstItem,
-  itemRef,
+  itemRef, COMPARE_GUARD, guardedItems,
 } from './runtime.js';
 import {
   CARD_ZERO, CARD_ONE, CARD_OPT, CARD_MANY, joinCard, sumCard, zoneKnown,
@@ -280,17 +280,29 @@ function itemGe(a, b) {
 // items compares true; either side empty means no witnessing pair
 // (contrast the path filter dialect where Nothing == Nothing holds -
 // section 5.2)
-function comparisonEntry(itemCmp) {
+// (with `framed`, the item comparison also takes the frame: the guarded
+// comparison a compareGuard compiles)
+function comparisonEntry(itemCmp, framed = false) {
   return {
     params: ARGS_2,
     result: RESULT_ONE,
     resultType: RT_BOOLEAN,
     compile: (gets, args) => {
+      const guard = framed ? null : COMPARE_GUARD.fn;
+      if (guard !== null) {
+        // each pair is handed to the guard before it is compared
+        const leftPath = args[0].docPath, rightPath = args[1].docPath;
+        return comparisonEntry((a, b, f) => {
+          guard(a, b, leftPath, f.ext);
+          guard(b, a, rightPath, f.ext);
+          return itemCmp(a, b);
+        }, true).compile(gets, args);
+      }
       const left = gets[0];
       const right = gets[1];
       if (args[0].card === CARD_ONE && args[1].card === CARD_ONE)
         // the common case: two singletons, one direct item comparison
-        return (f) => itemCmp(left(f), right(f));
+        return framed ? (f) => itemCmp(left(f), right(f), f) : (f) => itemCmp(left(f), right(f));
       return (f) => {
         const lv = left(f);
         if (lv === EMPTY)
@@ -304,14 +316,14 @@ function comparisonEntry(itemCmp) {
             const ri = rv.items;
             for (let i = 0; i < li.length; i++) {
               for (let j = 0; j < ri.length; j++) {
-                if (itemCmp(li[i], ri[j]))
+                if (itemCmp(li[i], ri[j], f))
                   return true;
               }
             }
             return false;
           }
           for (let i = 0; i < li.length; i++) {
-            if (itemCmp(li[i], rv))
+            if (itemCmp(li[i], rv, f))
               return true;
           }
           return false;
@@ -319,12 +331,12 @@ function comparisonEntry(itemCmp) {
         if (rv instanceof Seq) {
           const ri = rv.items;
           for (let j = 0; j < ri.length; j++) {
-            if (itemCmp(lv, ri[j]))
+            if (itemCmp(lv, ri[j], f))
               return true;
           }
           return false;
         }
-        return itemCmp(lv, rv);
+        return itemCmp(lv, rv, f);
       };
     },
   };
@@ -845,7 +857,8 @@ function aggregateEntry(operator, result, resultType) {
   return {
     params: UNARY, result, resultType,
     compile: (gets, args) => {
-      const get = gets[0], docPath = args[0].docPath;
+      const docPath = args[0].docPath;
+      const get = operator === '$distinct' ? guardedItems(gets[0], docPath) : gets[0];
       return (f) => aggregateSequence(operator, get(f), docPath);
     },
   };
@@ -1759,8 +1772,8 @@ export const OPERATORS = Object.freeze({
     params: ARGS_2,
     result: (cards) => (cards[0] === CARD_MANY ? CARD_MANY : (cards[0] === CARD_ZERO ? CARD_ZERO : CARD_OPT)),
     compile: (gets, args) => {
-      const seqGet = gets[0];
-      const itemGet = gets[1];
+      const seqGet = guardedItems(gets[0], args[0].docPath);
+      const itemGet = guardedItems(gets[1], args[1].docPath);
       const itemPath = args[1].docPath;
       return (f) => {
         const v = seqGet(f);

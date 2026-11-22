@@ -187,7 +187,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   rowPredicateFlavor?: any,
  *   readBack?: { conditionReads: (planned: string, columns: any[]) => boolean,
  *     condition: (stored: string | null, planned: string | undefined, columns: any[], conforming: boolean) => string | null,
- *     layoutConditionDiffers: (stored: string, planned: string, typeOf: (column: string) => string | undefined, conforming: boolean) => boolean,
+ *     layoutConditionDiffers: (stored: string, planned: string, typeOf: (column: string) => string | undefined, conforming: boolean, condition?: boolean) => boolean,
  *     expressionReads: (planned: string) => boolean,
  *    expression: (stored: string, planned: string, conforming: boolean) => string | null,
  *     check: (stored: string, planned: string, conforming: boolean) => string | null },
@@ -299,7 +299,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   qualifyPhysicalColumn?: (column: any, actual: any, kind: string, database?: any, catalogColumn?: any) => void,
  *   invariantTriggers?: (mapping: any, all: any, dialect: any, spelling?: number) => any[],
  *   readChecks?: (rows: any[]) => { name: string, sql?: string, validated?: boolean, conforming?: boolean,
- *     column?: string, values?: any[], notNaN?: boolean, keyCheck?: boolean, guard?: string }[],
+ *     column?: string, values?: any[], notNaN?: boolean, keyCheck?: true | 'rewritten', guard?: string }[],
  *   introspect: { version: () => string, compileOptions: () => string,
  *     pragma: (name: string) => string,
  *     tableExists: () => string, columns: (table: string) => string,
@@ -559,13 +559,14 @@ export function createDialect(spec) {
      * everything unmapped. One generator, both document kinds.
      * @param {{ table: string, columns: {
      *   name: string, type: string, notNull?: boolean,
-     *   primaryKey?: boolean, check?: string, keyCheck?: string,
+     *   primaryKey?: boolean, check?: string, keyCheck?: string, keyCheckName?: string,
      *   references?: { table: string, column: string,
      *     onDelete: 'cascade' | 'restrict' | 'setNull' } }[],
      *   compositeKey?: string[], generated?: { name: string, type: string,
      *   pathText: string | null, expression?: string | null, stored?: boolean }[],
      *   checks?: { name: string, sql: string }[] }} shape - `keyCheck`, a column holding a
-     *   key's second CHECK beside its own (`ddl.js` `keyCheckOf`); `generated`, the
+     *   key's second CHECK beside its own (`ddl.js` `keyCheckOf`), under `keyCheckName`
+     *   (`ddl.js` `keyCheckName`) where it has one; `generated`, the
      *   key columns of the entity's declared temporal members over its document
      *   column (`doc`), and `checks`, their named CHECKs
      * @returns {string}
@@ -576,7 +577,8 @@ export function createDialect(spec) {
         if (column.primaryKey === true) sql += ' PRIMARY KEY';
         if (column.notNull === true) sql += ' NOT NULL';
         if (column.check !== undefined) sql += ` CHECK (${column.check})`;
-        if (column.keyCheck !== undefined) sql += ` CHECK (${column.keyCheck})`;
+        if (column.keyCheck !== undefined)
+          sql += `${column.keyCheckName === undefined ? '' : ` CONSTRAINT ${q(column.keyCheckName)}`} CHECK (${column.keyCheck})`;
         if (column.references !== undefined) {
           sql += referenceSql(column.references);
         }

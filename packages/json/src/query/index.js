@@ -87,6 +87,14 @@ const hasOwn = Object.hasOwn;
  *   normalizeQuery in normalize.js for the full shape. The published
  *   format vocabulary is unchanged: without extensions, documents
  *   using such operators fail JQ0002.
+ * @property {(item: any, other: any, docPath: string, externals: any) => void} [compareGuard] -
+ *   Package-internal host hook (used by `@jarenjs/db`; not a public
+ *   contract): called with each pair of items a comparison
+ *   (`$eq`…`$ge`) reads (`other` the item it is compared with), and each
+ *   item `$distinct`, `$index-of` or a grouping key equates (`other`
+ *   undefined), with the operand's docPath and the call's externals,
+ *   before the engine compares them; it may throw to refuse the call.
+ *   Without it the compiled closures are the ordinary ones.
  * @property {Record<string, (...args: any[]) => any>} [functions]
  *   Registry of named trusted pure host functions for `$call`
  *   (QUERY-FORMAT.md section 8.12); an unregistered or empty name is
@@ -249,7 +257,8 @@ export function compileJsonQuery(doc, options = {}) {
   // descendant segments compile under the query's own nesting bound
   const get = withDescentCeiling(
     limits !== null && limits.descentDepth !== null ? limits.descentDepth : DATA_DEPTH_CEILING,
-    () => compileQueryRoot(root, stepSlot < 0 ? null : { slot: stepSlot, limit: limits.steps }));
+    () => compileQueryRoot(root, stepSlot < 0 ? null : { slot: stepSlot, limit: limits.steps }, options?.compareGuard ?? null));
+  const guarded = options?.compareGuard != null;
   const extCount = externals.length;
   const resultCap = limits !== null && limits.resultItems !== null ? limits.resultItems : 0;
 
@@ -274,6 +283,8 @@ export function compileJsonQuery(doc, options = {}) {
       const v = ext != null && hasOwn(ext, e.name) ? ext[e.name] : undefined;
       frame[e.slot] = v === undefined ? UNBOUND : v;
     }
+    // a guarded compile reads the call's externals beside each comparison
+    if (guarded) /** @type {any} */ (frame).ext = ext;
     return get(frame);
   }
 

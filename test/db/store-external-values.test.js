@@ -8,8 +8,11 @@
  * predicate, or handed to one by the operand an expression picks where the
  * call's externals alone decide which (`$if` on an external flag, the first
  * `$coalesce` operand that is not empty, a computed `$get` key, a nested
- * phrase's return), before any statement runs. `$gt ['$e.at', '$since']`
- * with `since` a `Date` matched no row, with and without pushdown, where its
+ * phrase's return), or by the item a variable over the externals takes,
+ * or by an `$if` a row decides between two such values, with a `$seq`
+ * operand read at the positions it stands at, before any statement runs.
+ * `$gt ['$e.at', '$since']` with `since` a `Date` matched no row, with and
+ * without pushdown, where its
  * ISO string answers. Every other use answers as before: a `Date` returned
  * or handed to a host function is the caller's own value, one the document
  * never compares or the externals pick past is not read, one only a row
@@ -444,6 +447,185 @@ for (const engine of ENGINES) {
         for (const pushdown of [true, false]) {
           assert.strictEqual(await store.collection('ev').execute(document, { externals: { xs: [{ k: 1, at: SINCE }] }, pushdown }), undefined);
         }
+      });
+    });
+
+    it('a $seq operand is read at the positions it stands at', async () => {
+      await seeded(engine, async (store) => {
+        const ev = store.collection('ev');
+        const member = "collection('ev').execute";
+        const W = '/$where/$gt/1';
+        const late = '2027-01-01T00:00:00Z';
+        const after = (/** @type {any} */ operand) => evs({ $gt: ['$e.at', operand] });
+        /** @type {[any, any, any][]} each document, externals holding a Date a position never reaches, and the answer */
+        const answered = [
+          // the operand before it is one item: $head reads that one, $get reads two items and so nothing
+          [after({ $head: { $seq: ['$b', '$a'] } }), { a: SINCE, b: ISO }, 'b'],
+          [after({ $get: [{ $seq: ['x', '$a'] }, 1] }), { a: SINCE }, undefined],
+          [after({ $get: [{ $seq: [{ $count: '$e.tenant' }, '$a'] }, 1] }), { a: SINCE }, undefined],
+          [after({ $subsequence: [{ $seq: ['$e.tenant', '$b', '$a'] }, 0, 1] }), { a: SINCE, b: ISO }, undefined],
+          [after({ $subsequence: [{ $seq: ['$b', '$e.tenant', '$a'] }, '$i', 1] }), { a: SINCE, b: ISO, i: 0 }, 'b'],
+          [after({ $head: { $tail: { $seq: ['$b', '$c', '$a'] } } }), { a: SINCE, b: ISO, c: late }, undefined],
+          // the externals alone decide the operands: the engine reads the positions
+          [after({ $head: { $seq: ['$xs[*]', '$a'] } }), { xs: [ISO], a: SINCE }, 'b'],
+          // a path read on each item leaves the number before it no item: $tail drops the Date
+          [evs({ $gt: ['$e.at', { $tail: '$s.v' }] }, { $let: { s: { $seq: [{ $count: '$e.tenant' }, '$o'] } } }), { o: { v: SINCE } }, undefined],
+          // a reversal reads the items from the end
+          [after({ $head: { $reverse: { $seq: ['$a', '$b'] } } }), { a: SINCE, b: ISO }, 'b'],
+          [after({ $head: { $reverse: '$xs[*]' } }), { xs: [SINCE, ISO] }, 'b'],
+        ];
+        /** The JSON value a Date stands for, wherever it stands. @param {any} value @returns {any} */
+        const json = (value) => (value === SINCE ? ISO : Array.isArray(value) ? value.map(json)
+          : value !== null && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, json(item)])) : value);
+        for (const [document, externals, answer] of answered) {
+          for (const pushdown of [true, false]) {
+            assert.deepStrictEqual(await ev.execute(document, { externals, pushdown }), answer, JSON.stringify(document));
+            assert.deepStrictEqual(await ev.execute(document, { externals: json(externals), pushdown }), answer, JSON.stringify(document));
+          }
+        }
+        /** @type {[any, any, string?][]} each document, externals holding a Date a position reaches, and where it is compared */
+        const refused = [
+          [after({ $tail: { $seq: ['$b', '$a'] } }), { a: SINCE, b: ISO }],
+          // an operand of one item a row computes stands before it
+          [after({ $tail: { $seq: [{ $count: '$e.tenant' }, '$a'] } }), { a: SINCE }],
+          [after({ $subsequence: [{ $seq: [{ $count: '$e.tenant' }, '$a'] }, 1, 1] }), { a: SINCE }],
+          [after({ $subsequence: [{ $seq: ['$b', 'x', '$a'] }, '$i', 1] }), { a: SINCE, b: ISO, i: 2 }],
+          [after({ $tail: { $tail: { $seq: ['$b', { $seq: ['$c', '$a'] }] } } }), { a: SINCE, b: late, c: late }],
+          [after({ $head: { $reverse: { $seq: ['$b', '$a'] } } }), { a: SINCE, b: ISO }],
+          // a row's member that may be absent leaves the reading of each operand alone: $head reads it so
+          [evs({ $gt: ['$e.tenant', { $head: { $seq: ['$e.missing', '$a'] } }] }), { a: SINCE }],
+        ];
+        for (const [document, externals, docPath = W] of refused) {
+          const label = JSON.stringify(document);
+          for (const pushdown of [true, false]) {
+            assert.notStrictEqual(await ev.execute(document, { externals: json(externals), pushdown }), undefined, label);
+            const { error } = await refusal(() => ev.execute(document, { externals, pushdown }));
+            assert.strictEqual(error.message, compared(member, 'a', docPath), label);
+          }
+        }
+        // and $tail does not read it alone: as before
+        for (const pushdown of [true, false]) {
+          const document = evs({ $gt: ['$e.tenant', { $tail: { $seq: ['$e.missing', '$a'] } }] });
+          assert.strictEqual(await ev.execute(document, { externals: { a: SINCE }, pushdown }), undefined);
+          assert.strictEqual(await ev.execute(document, { externals: { a: ISO }, pushdown }), undefined);
+        }
+        const pick = rowsOf({ $gt: ['$e.at', { $tail: { $seq: [{ $count: '$e.tenant' }, '$a'] } }] });
+        assert.strictEqual(await store.entity('Event').execute(pick, { externals: { a: ISO } }), 2);
+        assert.strictEqual((await refusal(() => store.entity('Event').execute(pick, { externals: { a: SINCE } }))).error.message,
+          compared('entity execute()', 'a', W));
+      });
+    });
+
+    it('a pick a variable over the externals decides is followed item by item', async () => {
+      await seeded(engine, async (store) => {
+        const ev = store.collection('ev');
+        const member = "collection('ev').execute";
+        const late = '2027-01-01T00:00:00Z';
+        const S = '/$where/$satisfies/$gt/1';
+        const some = (/** @type {any} */ operand) => evs({ $some: { x: '$xs[*]' }, $satisfies: { $gt: ['$e.at', operand] } });
+        const counted = { $for: { e: '$[*]', w: '$ws[*]' }, $where: { $gt: ['$e.at', { $if: [{ $eq: [{ $count: '$w.items[*]' }, 2] }, '$a', '$b'] }] }, $return: '$e.id' };
+        /** @type {[any, any, any, string, string][]} each document, externals of which `name` holds a Date an item
+         * picks, their JSON form, the external, and where it is compared */
+        const cases = [
+          [some({ $if: ['$x.f', '$x.v', '$x.w'] }), { xs: [{ f: false, v: ISO, w: late }, { f: true, v: SINCE, w: late }] },
+            { xs: [{ f: false, v: ISO, w: late }, { f: true, v: ISO, w: late }] }, 'xs', S],
+          [some({ $coalesce: ['$x.m', '$x.v'] }), { xs: [{ v: SINCE }] }, { xs: [{ v: ISO }] }, 'xs', S],
+          [some({ $get: ['$o', '$x.k'] }), { xs: [{ k: 'p' }], o: { p: SINCE, q: ISO } }, { xs: [{ k: 'p' }], o: { p: ISO, q: ISO } }, 'o', S],
+          [counted, { ws: [{ items: [1] }, { items: [2, 3] }], a: SINCE, b: ISO }, { ws: [{ items: [1] }, { items: [2, 3] }], a: ISO, b: ISO }, 'a', '/$where/$gt/1'],
+        ];
+        for (const [document, dated, json, name, docPath] of cases) {
+          const label = JSON.stringify(document);
+          for (const pushdown of [true, false]) {
+            assert.notStrictEqual(await ev.execute(document, { externals: json, pushdown }), undefined, label);
+            const { error } = await refusal(() => ev.execute(document, { externals: dated, pushdown }));
+            assert.strictEqual(error.message, compared(member, name, docPath), label);
+          }
+        }
+        // no item picks it: each answers as the JSON value
+        /** @type {[any, any, any][]} */
+        const answered = [
+          [some({ $if: ['$x.f', '$x.v', '$x.w'] }), { xs: [{ f: false, v: SINCE, w: ISO }] }, 'b'],
+          [some({ $get: ['$o', '$x.k'] }), { xs: [{ k: 'q' }], o: { p: SINCE, q: ISO } }, 'b'],
+          [counted, { ws: [{ items: [1] }, { items: [2] }], a: SINCE, b: ISO }, ['b', 'b']],
+        ];
+        for (const [document, externals, answer] of answered) {
+          for (const pushdown of [true, false]) assert.deepStrictEqual(await ev.execute(document, { externals, pushdown }), answer, JSON.stringify(document));
+        }
+      });
+    });
+
+    it('a non-JSON external a row picks is refused at the row that reads it, and every other row answers as before', async () => {
+      await seeded(engine, async (store) => {
+        const ev = store.collection('ev');
+        const Event = store.entity('Event');
+        const W = '/$where/$gt/1';
+        const t2 = { $eq: ['$e.tenant', 't2'] };
+        const none = { $eq: ['$e.tenant', 't9'] };
+        /** @type {[any, any, any, string, string?, string?, boolean?][]} each comparison, externals a row hands a comparison
+         * a non-JSON value from, their JSON form, the external refused, where, what it holds, and whether a collection alone runs it */
+        const cases = [
+          [{ $gt: ['$e.at', { $if: [t2, '$a', '$e.at'] }] }, { a: SINCE }, { a: ISO }, 'a'],
+          [{ $gt: ['$e.at', { $coalesce: ['$e.missing', '$a'] }] }, { a: SINCE }, { a: ISO }, 'a'],
+          [{ $gt: ['$e.at', { $get: ['$o', '$e.tenant'] }] }, { o: { t1: SINCE, t2: SINCE } }, { o: { t1: ISO, t2: ISO } }, 'o'],
+          // the first row picks `$b`: the refusal names what that row reads
+          [{ $gt: ['$e.at', { $if: [t2, '$a', '$b'] }] }, { a: SINCE, b: new Date(SINCE.getTime()) }, { a: ISO, b: ISO }, 'b'],
+          [{ $gt: ['$e.at', { $tail: { $seq: ['$e.tenant', '$a'] } }] }, { a: SINCE }, { a: ISO }, 'a'],
+          [{ $gt: ['$e.at', { $subsequence: [{ $seq: ['$e.tenant', '$a'] }, 1, 1] }] }, { a: SINCE }, { a: ISO }, 'a'],
+          [{ $eq: [{ x: 1 }, { $coalesce: ['$e.missing', '$m'] }] }, { m: new Map([['x', 1]]) }, { m: { x: 1 } }, 'm', '/$where/$eq/1', 'Map'],
+          [{ $gt: ['$e.at', '$xs[?@.k == $[0].tenant].v'] }, { xs: [{ k: 't1', v: SINCE }] }, { xs: [{ k: 't1', v: ISO }] }, 'xs', W, 'Date', true],
+        ];
+        for (const [where, dated, json, name, docPath = W, kind = 'Date', collectionOnly = false] of cases) {
+          const label = JSON.stringify(where);
+          for (const pushdown of [true, false]) {
+            assert.notStrictEqual(await ev.execute(evs(where), { externals: json, pushdown }), undefined, label);
+            assert.strictEqual((await refusal(() => ev.execute(evs(where), { externals: dated, pushdown }))).error.message,
+              compared("collection('ev').execute", name, docPath, '', kind), label);
+            if (collectionOnly) continue;
+            assert.notStrictEqual(await Event.execute(rowsOf(where), { externals: json, pushdown }), undefined, label);
+            const { error } = await refusal(() => Event.execute(rowsOf(where), { externals: dated, pushdown }));
+            assert.strictEqual(error.message, compared('entity execute()', name, docPath, '', kind), label);
+            assert.strictEqual(error.docPath, docPath, label);
+          }
+        }
+        assert.strictEqual((await refusal(() => ev.execute(evs({ $gt: ['$e.at', { $if: [t2, '$n', '$e.at'] }] }), { externals: { n: 5n } }))).error.message,
+          `JD0041: collection('ev').execute external '$n' holds a bigint, which a comparison reads as no number — pass the number it stands for, Number(value) at ${W}`);
+        // a filter that reads the input compares each candidate's member whenever it runs
+        const filtered = evs({ $gt: ['$e.at', '$xs[?@.k == $[0].at].v'] });
+        assert.strictEqual(await ev.execute(filtered, { externals: { xs: [{ k: ROWS[0][1], v: ISO }] } }), 'b');
+        assert.strictEqual((await refusal(() => ev.execute(filtered, { externals: { xs: [{ k: SINCE, v: ISO }] } }))).error.message,
+          compared("collection('ev').execute", 'xs', W));
+        // a cursor is refused at the pull that reads such a row
+        const tail = { $gt: ['$e.at', { $tail: { $seq: ['$e.tenant', '$a'] } }] };
+        assert.strictEqual((await refusal(() => drain(ev.query(evs(tail), { externals: { a: SINCE } })))).error.message,
+          compared("collection('ev').query", 'a', W));
+        assert.strictEqual((await refusal(() => drain(Event.cursor(rowsOf(tail), { externals: { a: SINCE } })))).error.message,
+          compared('entity cursor()', 'a', W));
+        // no row picks it: each answers as its JSON value does
+        /** @type {[any, any, any][]} */
+        const answered = [
+          [{ $gt: ['$e.at', { $if: [none, '$a', '2026-02-01T00:00:00Z'] }] }, { a: SINCE }, ['b', 2]],
+          [{ $eq: ['$e.at', { $head: { $seq: ['$e.at', '$a'] } }] }, { a: SINCE }, [['a', 'b'], [1, 2]]],
+          [{ $gt: ['$e.at', { $get: [{ $seq: ['$e.tenant', '$a'] }, 1] }] }, { a: SINCE }, [undefined, undefined]],
+          [{ $and: [{ $eq: ['$a', '$a'] }, { $gt: ['$e.at', { $if: [none, '$c', ISO] }] }] }, { a: SINCE, c: SINCE }, ['b', 2]],
+        ];
+        for (const [where, externals, [fromCollection, fromEntity]] of answered) {
+          for (const pushdown of [true, false]) {
+            assert.deepStrictEqual(await ev.execute(evs(where), { externals, pushdown }), fromCollection, JSON.stringify(where));
+            assert.deepStrictEqual(await Event.execute(rowsOf(where), { externals, pushdown }), fromEntity, JSON.stringify(where));
+          }
+        }
+        // a value a row returns is the caller's own
+        const returned = await ev.execute({ $for: { e: '$[*]' }, $return: { $if: [t2, '$a', '$e.at'] } }, { externals: { a: SINCE } });
+        assert.ok(returned[1] === SINCE && returned[0] === ROWS[0][1]);
+        // the entity engine declines pushdown and says why; the JSON value pushes down as before
+        const explained = await Event.explain(rowsOf(tail), { externals: { a: SINCE } });
+        assert.deepStrictEqual(explained.reasons[0], { construct: 'external',
+          reason: 'a row may hand a comparison an external it reads otherwise than it stands for' });
+        assert.ok(!(await Event.explain(rowsOf(tail), { externals: { a: ISO } })).reasons.some((reason) => reason.reason.startsWith('a row may hand')));
+        // where the externals pick past it, nothing declines
+        const past = rowsOf({ $gt: ['$e.at', { $if: ['$f', { $if: [t2, '$a', '$b'] }, ISO] }] });
+        assert.ok(!(await Event.explain(past, { externals: { f: false, a: SINCE, b: SINCE } })).reasons.some((reason) => reason.reason.startsWith('a row may hand')));
+        assert.strictEqual(await Event.execute(past, { externals: { f: false, a: SINCE, b: SINCE } }), 2);
       });
     });
 

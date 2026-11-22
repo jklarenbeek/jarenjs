@@ -220,7 +220,7 @@ function verifyDeclaredIndexes(connection, declared, existing, columns, fail) {
       }
       const planned = readBack !== undefined && index.where !== undefined && typeof have.predicate === 'string'
         ? renderedCondition(dialect, index.where) : undefined;
-      if (planned !== undefined && readBack.layoutConditionDiffers(have.predicate, planned, typeOf, have.conforming !== false))
+      if (planned !== undefined && readBack.layoutConditionDiffers(have.predicate, planned, typeOf, have.conforming !== false, true))
         fail(`index '${index.name}' is declared as\n  WHERE ${have.predicate}\nand the model declares\n  WHERE ${planned}`);
       return step(i + 1);
     });

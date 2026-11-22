@@ -252,17 +252,28 @@ function decimalMembership(dialect, param, value, list, seek) {
  * CHECK (`keyDigits`: a `numeric` an earlier release created, where another
  * writer may have spelled a key by any digits; under the CHECK it holds only
  * digits whose exact comparison is the double's). Its comparison with a
- * literal or a list is then every other number column's; its order, and its
- * comparison with another column, stay the key's. Under the CHECK
- * (`keyDigits: 'unsafe'`) only a literal or a literal list holding a number
- * at or past 2^53, whose digits the CHECK leaves the writer's, compares so.
+ * literal or a list, its order and its comparison with another column are
+ * then every other number column's. Under the CHECK (`keyDigits: 'unsafe'`)
+ * only a literal or a literal list holding a number at or past 2^53, whose
+ * digits the CHECK leaves the writer's, and an external list, which may hold
+ * one, compare so.
  * @param {any} dialect @param {any} ref - the column's ref
- * @param {readonly number[]} [numbers] - the literals it is compared with, where the statement holds them
+ * @param {readonly number[] | null} [numbers] - the literals it is compared with, where the statement holds them;
+ *   `null` for an external list, whose numbers it does not hold, any of which may lie at or past 2^53
  * @returns {boolean}
  */
 const decimalColumn = (dialect, ref, numbers) => dialect.decimalDigits && ref.codec === undefined
-  && (ref.holdsKey !== true || ref.keyDigits === true || ref.keyDigits === 'unsafe' && numbers !== undefined && numbers.some(pastSafeDigits))
+  && (ref.holdsKey !== true || ref.keyDigits === true
+    || ref.keyDigits === 'unsafe' && (numbers === null || numbers !== undefined && numbers.some(pastSafeDigits)))
   && (ref.storage === 'number' || ref.storage === 'integer');
+
+/**
+ * Whether a column holding a key compares with another key exactly: a key,
+ * or a column referencing one, that the open did not read without the key's
+ * CHECK (`keyDigits: true`, a writer's digits, which compare as doubles).
+ * @param {{ holdsKey?: boolean, keyDigits?: true | 'unsafe' }} ref @returns {boolean}
+ */
+const exactKey = (ref) => ref.holdsKey === true && ref.keyDigits !== true;
 
 /** A number at or past 2^53 in magnitude, where a key's CHECK leaves a writer's digits its own (`keyDigits: 'unsafe'`).
  * @param {number} value @returns {boolean} */
@@ -539,7 +550,9 @@ export function documentMemberOf(dialect, docSql, ref) {
  * {@link decimalColumn}s and a `number` key). A column holding a key (an
  * `integer` key or a reference to one) is read bare and keeps its index
  * order: it may be the `bigserial` a database-allocated key takes, and two
- * keys are two values the store wrote. On SQLite an `integer` column holds
+ * keys are two values the store wrote — unless the open read it without the
+ * key's CHECK (`keyDigits: true`), where another writer's digits order as
+ * the double too. On SQLite an `integer` column holds
  * no integer the engine reads but as its own double, and a physical table's
  * column orders as its codec; both read bare. A query's order terms, a
  * load's order and keyset terms and an include's order terms read one term
@@ -553,7 +566,8 @@ export function documentMemberOf(dialect, docSql, ref) {
  */
 export function entityOrderRead(dialect, ref, sql) {
   if (ref.flavor === 'entity-column' || ref.flavor === undefined)
-    return (decimalColumn(dialect, ref) && ref.holdsKey !== true) || (ref.storage === 'number' && ref.codec === undefined && dialect.decimalDigits)
+    return (decimalColumn(dialect, ref) && (ref.holdsKey !== true || ref.keyDigits === true))
+      || (ref.storage === 'number' && ref.codec === undefined && dialect.decimalDigits)
       ? dialect.doubleRead(sql) : sql;
   const member = documentMemberOf(dialect, sql, ref);
   return kindOf(ref) === 'number' ? dialect.doubleRead(member) : member;
@@ -1733,7 +1747,7 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       // column holds no string or number
       const kind = pred.ref.storage === 'string' ? 'text' : pred.ref.storage === 'boolean' ? null : 'number';
       if (kind === null) return dialect.booleanLiteral(false);
-      if (decimalColumn(dialect, pred.ref, 'ext' in pred.operand ? undefined
+      if (decimalColumn(dialect, pred.ref, 'ext' in pred.operand ? null
         : pred.operand.list.filter((/** @type {any} */ value) => typeof value === 'number'))) {
         // a number column holds the decimal digits a writer spelled, as a
         // document member does; it seeks where the caller names its table
@@ -1878,8 +1892,9 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
     }
     if (pred.p === 'refCmp') {
       // two numbers compare as the doubles the engine holds, but two key
-      // columns (a key and a reference to one) exactly, as a join does
-      const doubles = plainFamily(pred) === 'number' && !(pred.left.holdsKey === true && pred.right.holdsKey === true);
+      // columns (a key and a reference to one) exactly, as a join does —
+      // unless one holds a writer's digits without the key's CHECK (`keyDigits`)
+      const doubles = plainFamily(pred) === 'number' && !(exactKey(pred.left) && exactKey(pred.right));
       return compareRefs(pred, (ref) => {
         if (ref.flavor === 'entity-column') {
           const value = physicalComparable(ref, `${aliasSql}.${q(ref.column)}`, dialect);

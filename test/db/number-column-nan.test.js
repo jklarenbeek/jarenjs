@@ -38,11 +38,11 @@ const keyCheck = (c) => `CHECK (\nCASE\n    WHEN ((abs(${c}) >= ('90071992547409
 /** Every CHECK a fresh store creates, as the server deparses it. */
 const CHECKS = ['E.E_a_check: CHECK ((a <> \'NaN\'::numeric))', 'E.E_at_check: CHECK ((at <> \'NaN\'::numeric))',
   'E.E_c_check: CHECK ((c <> \'NaN\'::numeric))', 'E.E_e_check: CHECK ((e = ANY (ARRAY[(1)::numeric, (5)::numeric])))',
-  'E.E_i_check: CHECK ((i <> \'NaN\'::numeric))', 'E.E_nid_check: CHECK ((nid <> \'NaN\'::numeric))', `E.E_nid_check1: ${keyCheck('nid')}`,
-  'N.N_id_check: CHECK ((id <> \'NaN\'::numeric))', `N.N_id_check1: ${keyCheck('id')}`, 'N.N_y_check: CHECK ((y <> \'NaN\'::numeric))',
-  'N_T.N_T_N_key_check: CHECK (("N_key" <> \'NaN\'::numeric))', `N_T.N_T_N_key_check1: ${keyCheck('"N_key"')}`,
-  'N_T.N_T_T_key_check: CHECK (("T_key" <> \'NaN\'::numeric))', `N_T.N_T_T_key_check1: ${keyCheck('"T_key"')}`,
-  'T.T_k_check: CHECK ((k <> \'NaN\'::numeric))', `T.T_k_check1: ${keyCheck('k')}`];
+  'E.E_i_check: CHECK ((i <> \'NaN\'::numeric))', 'E.E_nid_check: CHECK ((nid <> \'NaN\'::numeric))', `E.E_nid_jaren_key: ${keyCheck('nid')}`,
+  'N.N_id_check: CHECK ((id <> \'NaN\'::numeric))', `N.N_id_jaren_key: ${keyCheck('id')}`, 'N.N_y_check: CHECK ((y <> \'NaN\'::numeric))',
+  'N_T.N_T_N_key_check: CHECK (("N_key" <> \'NaN\'::numeric))', `N_T.N_T_N_key_jaren_key: ${keyCheck('"N_key"')}`,
+  'N_T.N_T_T_key_check: CHECK (("T_key" <> \'NaN\'::numeric))', `N_T.N_T_T_key_jaren_key: ${keyCheck('"T_key"')}`,
+  'T.T_k_check: CHECK ((k <> \'NaN\'::numeric))', `T.T_k_jaren_key: ${keyCheck('k')}`];
 /** Each number column a writer beside the store could set, by table. */
 const COLUMNS = [['E', 'a'], ['E', 'c'], ['E', 'i'], ['E', 'e'], ['E', 'at'], ['E', 'nid'], ['N', 'id'], ['N', 'y'], ['N_T', 'N_key'], ['N_T', 'T_key'], ['T', 'k']];
 

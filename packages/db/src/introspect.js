@@ -975,10 +975,9 @@ function deriveEntity(dialect, table, report, edges, expressions, temporalHooks 
     // the CHECK a store gives a number column on an engine whose number type holds
     // a NaN: the column's own, which declares nothing beyond its type
     if (check.notNaN === true && check.validated !== false && (property?.type === 'number' || property?.type === 'integer')) continue;
-    // and the one it gives a number column holding a key (its own or a reference's):
-    // the key's, which declares nothing beyond the key
-    if (check.keyCheck === true && check.validated !== false && (property?.type === 'number' || property?.type === 'integer')
-      && (primaryKey.has(check.column) || fkByColumn.has(check.column))) continue;
+    // and the one it gives a number column holding a key (its own or a reference's)
+    const keyCheck = keyCheckRead(dialect, table, check, (column) => primaryKey.has(column) || fkByColumn.has(column), report);
+    if (keyCheck) continue;
     const family = property?.type === 'integer' ? 'number'
       : property?.type === 'string' ? 'string' : property?.type;
     if (check.values === undefined || property === undefined
@@ -1251,6 +1250,47 @@ function reportUnguardedNumbers(dialect, table, report) {
 }
 
 /**
+ * Whether a CHECK of an entity or a join table is the store's own key CHECK
+ * over a column holding a key (`holdsKey`), read by its expression under any
+ * name (`check-read.js` `keyGuardOf`): the CHECK itself, validated, which
+ * declares nothing beyond the key; and the CHECK as the server rewrote it
+ * when the column's type changed, which over a column the decimal type no
+ * longer holds (a `bigint`) refuses nothing, and over one it holds again no
+ * longer holds the key to its double's digits — reported, with what replaces
+ * it. `false` for any other CHECK, which the caller reads on.
+ * @param {any} dialect @param {any} table @param {any} check
+ * @param {(column: string) => boolean} holdsKey @param {(row: any) => void} report
+ * @returns {boolean}
+ */
+function keyCheckRead(dialect, table, check, holdsKey, report) {
+  if (check.keyCheck === undefined || !holdsKey(check.column)) return false;
+  const held = table.columns.find((/** @type {any} */ column) => column.name === check.column);
+  const decimal = held !== undefined && dialect.comparableColumnType(held.type) === dialect.comparableColumnType(dialect.typeFor('number', 'generated'));
+  if (check.keyCheck === true && check.validated === false) return false;
+  if (check.keyCheck === 'rewritten' && decimal) {
+    report(loss('unmapped-constraint', `${table.name}.${check.name}`,
+      'the key CHECK as the server rewrote it when the column\'s type changed, which no longer holds the key '
+      + 'to its double\'s digits — plan --upgrade-columns replaces it'));
+  }
+  return true;
+}
+
+/**
+ * Report each CHECK of a join table, which a model declares none of, but the
+ * ones its store gives a number column holding a key — the CHECK that refuses
+ * a NaN and the key CHECK ({@link keyCheckRead}) — as `unmapped-constraint`.
+ * @param {any} dialect @param {any} table @param {(row: any) => void} report
+ */
+function reportJoinChecks(dialect, table, report) {
+  const keys = new Set(table.foreignKeys.map((/** @type {any} */ fk) => fk.column));
+  for (const check of table.checks ?? []) {
+    if (check.notNaN === true && check.validated !== false && keys.has(check.column)) continue;
+    if (keyCheckRead(dialect, table, check, (column) => keys.has(column), report)) continue;
+    report(loss('unmapped-constraint', `${table.name}.${check.name}`, 'a CHECK over a join table, which a model cannot declare'));
+  }
+}
+
+/**
  * Whether a table is a many-to-many JOIN table: two foreign-key columns,
  * a composite key over exactly those, no document column of its own.
  * @param {any} dialect
@@ -1326,7 +1366,7 @@ export function introspectModel(connection, options = undefined) {
     /** @type {{ child: string, column: string, fk: any }[]} */
     const edges = [];
     for (const table of schema.tables) {
-      if (joinTables.has(table.name)) { reportUnguardedNumbers(dialect, table, add); continue; }
+      if (joinTables.has(table.name)) { reportJoinChecks(dialect, table, add); reportUnguardedNumbers(dialect, table, add); continue; }
       // a collection and an entity are named by an identifier: a model that
       // declared any other name would be refused whole (JD0005)
       if (!IDENTIFIER.test(table.name)) {

@@ -4315,6 +4315,7 @@ export function entityPathRef(node, slot, shape) {
       codec: flavored.codec,
       codecColumn: flavored.codecColumn,
       ...(flavored.holdsKey === true ? { holdsKey: true } : {}),
+      ...(flavored.keyDigits === undefined ? {} : { keyDigits: flavored.keyDigits }),
       ...(flavored.notNull === true ? { notNull: true } : {}),
     };
   }
@@ -4705,8 +4706,12 @@ function crossBindingComparison(node, byName, edge = false) {
   if (family === null || family !== columnFamily(rightBinding, rightRef, edge)) return null;
   const reads = [nullReading(leftRef, leftBinding.shape.schema), nullReading(rightRef, rightBinding.shape.schema)];
   if (edge ? reads.every((read) => read === 'present') : reads.some((read) => read !== 'none')) return null;
-  const holdsKey = (/** @type {any} */ binding, /** @type {any} */ ref) =>
-    binding.shape.entityFlavors.get(canonicalOf(ref.segments))?.holdsKey === true;
+  // a key the open read without its CHECK (`keyDigits: true`) holds a writer's
+  // digits, which compare as the doubles the engine holds, as any number does
+  const holdsKey = (/** @type {any} */ binding, /** @type {any} */ ref) => {
+    const flavored = binding.shape.entityFlavors.get(canonicalOf(ref.segments));
+    return flavored?.holdsKey === true && flavored.keyDigits !== true;
+  };
   const leftKey = holdsKey(leftBinding, leftRef);
   const rightKey = holdsKey(rightBinding, rightRef);
   return {

@@ -197,11 +197,12 @@ describe("reading a generated column's expression back", () => {
 
 describe("comparing a layout index's condition read back", () => {
   /** @type {Record<string, string>} */
-  const TYPES = { s: 'text', v: 'character varying(10)', n: 'integer', sm: 'smallint', bi: 'bigint', m: 'numeric', d: 'double precision', b: 'boolean', dt: 'date' };
+  const TYPES = { s: 'text', v: 'character varying(10)', n: 'integer', sm: 'smallint', bi: 'bigint', m: 'numeric', d: 'double precision', b: 'boolean', dt: 'date',
+    u: 'uuid', ts: 'timestamp without time zone' };
   /** @param {string} column */
   const typeOf = (column) => TYPES[column];
   /** @param {string} stored @param {string} planned @param {boolean} [conforming] */
-  const differs = (stored, planned, conforming = true) => postgresReadBack(undefined).layoutConditionDiffers(stored, planned, typeOf, conforming);
+  const differs = (stored, planned, conforming = true, condition = true) => postgresReadBack(undefined).layoutConditionDiffers(stored, planned, typeOf, conforming, condition);
   // the deparse PostgreSQL 16, 17 and 18 hand back for each condition, beside the PostgreSQL rendering of a declared one
   const SAME = [
     ["(s = ANY (ARRAY['a'::text, 'b'::text]))", "(\"s\" IN ('b', 'a'))"],
@@ -234,11 +235,33 @@ describe("comparing a layout index's condition read back", () => {
     ['(\nCASE\n    WHEN (n > 5) THEN \'big\'::text\n    ELSE NULL::text\nEND IS NOT NULL)', "((CASE WHEN (\"n\" > 5) THEN 'big' ELSE NULL END) IS DISTINCT FROM NULL)"],
     ['((n > 1) AND (n < 9) AND (b OR (s IS NOT NULL)))', '(((("n" > 1) AND ("n" < 9)) AND ("b" OR ("s" IS DISTINCT FROM NULL))))'],
     ['(n > 5)', '(("n" > 5) AND ("n" > 5))'],
+    // `trim`, `btrim`, `ltrim` and `rtrim` as the server writes them
+    ["(TRIM(BOTH FROM s) = 'a'::text)", "(TRIM(\"s\") = 'a')"],
+    ["(TRIM(BOTH FROM s) = 'a'::text)", "(btrim(\"s\") = 'a')"],
+    ["(TRIM(LEADING FROM s) = 'a'::text)", "(ltrim(\"s\") = 'a')"],
+    ["(TRIM(TRAILING 'x'::text FROM s) = 'a'::text)", "(rtrim(\"s\", 'x') = 'a')"],
+    // a literal the server writes by its type: an ISO date, a uuid in lower case
+    ["(dt > '2024-01-01'::date)", "(\"dt\" > '2024-01-01')"],
+    ["(u = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid)", "(\"u\" = 'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11')"],
+    ["(u = ANY (ARRAY['a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid, 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12'::uuid]))",
+      "(\"u\" IN ('A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A12', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'))"],
+    // a truth test, the null-safe comparison with the truth constant the rendering writes, and its negation;
+    // in a condition, where a NULL and false select alike, `IS TRUE` holds for the rows the boolean does
+    ['(b IS NOT TRUE)', '("b" IS DISTINCT FROM true)'],
+    ['(b IS NOT TRUE)', '(NOT ("b" IS TRUE))'],
+    ['(b IS NOT FALSE)', '(NOT ("b" IS NOT DISTINCT FROM false))'],
+    ['(b IS TRUE)', '"b"'],
+    ['(b IS FALSE)', '(NOT "b")'],
+    ["((b IS TRUE) AND (s = 'a'::text))", "(\"b\" AND (\"s\" = 'a'))"],
+    // another quantified comparison over literals: an OR (ANY) or an AND (ALL) of the comparisons with each item
+    ['(n > ANY (ARRAY[6, 7]))', '(("n" > 7) OR ("n" > 6))'],
+    ['(n > 5)', '("n" > ANY (ARRAY[5]))'],
+    ["(s < ALL (ARRAY['b'::text, 'c'::text]))", "((\"s\" < 'c') AND (\"s\" < 'b'))"],
   ];
   it('reads every spelling of one condition into one form', () => {
     for (const [stored, planned] of SAME) {
       assert.notEqual(conditionForm(stored, true, typeOf), null, stored);
-      assert.deepEqual(conditionForm(stored, true, typeOf), conditionForm(planned, true, typeOf), `${stored} beside ${planned}`);
+      assert.deepEqual(conditionForm(stored, true, typeOf, true), conditionForm(planned, true, typeOf, true), `${stored} beside ${planned}`);
       assert.equal(differs(stored, planned), false, stored);
     }
     // a session whose standard_conforming_strings is off doubles the backslash
@@ -253,16 +276,27 @@ describe("comparing a layout index's condition read back", () => {
       ["((n > 5) OR (s = 'a'::text))", "((\"n\" > 5) AND (\"s\" = 'a'))"], ['(sm > 5)', '("n" > 5)'], ["(s = 'A'::text)", "(\"s\" = 'a')"],
       ['(s IS NOT NULL)', '("s" IS NOT DISTINCT FROM NULL)'], ['(NOT b)', '"b"'], ['((m)::integer > 5)', '("m" > 5)'],
       ["(s ~~ 'a%'::text)", "(\"s\" NOT LIKE 'a%')"], ['(5 > n)', '("n" > 5)'],
-    ]) assert.equal(differs(stored, planned), true, `${stored} beside ${planned}`);
-  });
-
-  it('compares nothing it cannot read: a rewritten literal, an unknown type or function, another quantifier', () => {
-    for (const [stored, planned] of [
-      ["(TRIM(BOTH FROM s) = 'a'::text)", "(TRIM(\"s\") = 'b')"],
+      // each form the server rewrites, beside another condition
+      ["(TRIM(BOTH FROM s) = 'a'::text)", "(TRIM(\"s\") = 'b')"], ["(TRIM(LEADING FROM s) = 'a'::text)", "(TRIM(\"s\") = 'a')"],
       ["(dt > '2025-01-01'::date)", "(\"dt\" > '2024-01-01')"],
       ["(u = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12'::uuid)", "(\"u\" = 'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11')"],
-      ['(b IS NOT TRUE)', '"b"'],
-      ['(n > ANY (ARRAY[6, 7]))', '("n" > 5)'],
+      ['(b IS NOT TRUE)', '"b"'], ['(b IS NOT TRUE)', '(NOT "b")'], ['(b IS TRUE)', '(b IS NOT FALSE)'], ['(NOT (b IS TRUE))', '(NOT "b")'],
+      ['(n > ANY (ARRAY[6, 7]))', '("n" > 5)'], ['(n > ANY (ARRAY[6, 7]))', '("n" > ALL (ARRAY[6, 7]))'], ['(n > ANY (ARRAY[6, 7]))', '("n" >= ANY (ARRAY[6, 7]))'],
+    ]) assert.equal(differs(stored, planned), true, `${stored} beside ${planned}`);
+    // a key under an expression term shares the reader, but there `b IS TRUE` is false where `b` is NULL: two keys
+    assert.equal(differs('(b IS TRUE)', '"b"', true, false), true);
+    assert.equal(differs('(b IS NOT TRUE)', '("b" IS DISTINCT FROM true)', true, false), false);
+  });
+
+  it('compares nothing it cannot read: a literal in another spelling of its type, an unknown type or function, a list that is no literals', () => {
+    for (const [stored, planned] of [
+      // a date a session under another DateStyle writes, one that is no day, a timestamp, a uuid in braces
+      ["(dt > '01-01-2025'::date)", "(\"dt\" > '2024-01-01')"],
+      ["(dt > '2025-01-01'::date)", "(\"dt\" > '2024-02-30')"],
+      ["(ts > '2025-01-01 10:00:00'::timestamp without time zone)", "(\"ts\" > '2024-01-01 10:00:00')"],
+      ["(u = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12'::uuid)", "(\"u\" = '{A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11}')"],
+      // a quantified comparison over no list of literals, a truth test of a literal
+      ['(n > ANY (ARRAY[s, 7]))', '("n" > 5)'], ['(n > ANY (ARRAY[NULL::integer, 7]))', '("n" > 5)'],
       ["(jsonb_typeof(j) = 'object'::text)", "(pg_catalog.jsonb_typeof(\"j\") = 'array')"],
       ["(n > 'x'::integer)", "(\"n\" > 'y')"],
       ['(abs(q) > 2)', "(pg_catalog.abs(\"q\") > '3')"],

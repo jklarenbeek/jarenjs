@@ -1341,7 +1341,7 @@ function normalizeQuantifierPhrase(obj, docPath, scope, ctx) {
 
 //#region entry points
 
-const QUERY_OPTIONS = Object.freeze(['compileTypeTest', 'extensions', 'functions', 'collations', 'pathFunctions', 'zoneProvider', 'calendar', 'dateNames', 'decimalFormats', 'limits', 'externals', 'analysis', 'lexicalProviders']);
+const QUERY_OPTIONS = Object.freeze(['compileTypeTest', 'extensions', 'functions', 'collations', 'pathFunctions', 'zoneProvider', 'calendar', 'dateNames', 'decimalFormats', 'limits', 'externals', 'analysis', 'lexicalProviders', 'compareGuard']);
 
 /** Check the common compiler/analyzer host boundary before options are projected.
  * @param {Record<string, any>} options */
@@ -1350,6 +1350,7 @@ function validateQueryOptions(options) {
   refuseUnknownMembers(options, QUERY_OPTIONS, (key, hint) => new TypeError(`unknown query option '${key}'${hint}`));
   if (options.analysis !== undefined && typeof options.analysis !== 'boolean') throw new TypeError('options.analysis must be boolean');
   if (options.compileTypeTest != null && typeof options.compileTypeTest !== 'function') throw new TypeError('options.compileTypeTest must be a function');
+  if (options.compareGuard != null && typeof options.compareGuard !== 'function') throw new TypeError('options.compareGuard must be a function');
 }
 
 // Validate `options.extensions` (package-internal, used by the JSLT

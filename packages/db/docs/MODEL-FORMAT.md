@@ -3318,7 +3318,14 @@ edge is `JD0031` (children share their parent).
 - **many-to-many** — `{ to, many: true, through? }` (no `via`): a
   join table, named `through` when given, otherwise the deterministic
   `<A>_<B>` with the entity names sorted — implicit names are exactly
-  the thing teams later regret, so the explicit name exists. Its two
+  the thing teams later regret, so the explicit name exists. A `through`
+  that is not a string (`through: 42`, `through: { table, columns }`) is
+  `JD0005` at `/…/relation/through` where a store opens or prepares the
+  model: a join table carries its two keys and nothing else, and its name
+  is a string. *Upgrade: such a `through` opened and named the implicit
+  `<A>_<B>` table without a word; a migration plan still reads a model
+  that carries one so, so a history that holds one plans as before, and
+  the declaration now names the table, or leaves `through` out.* Its two
   foreign keys cascade on delete (join rows die with either side; not
   configurable in this version). The name of a collection, an entity or a
   join table is never one of the engine's own tables (`_jaren_migrations`,
@@ -3522,8 +3529,9 @@ equates — a direct operand of `$eq`, `$ne`, `$lt`, `$le`, `$gt`, `$ge`,
 grouping key, a `$fold` accumulator's initial value) and compared through
 it (`$s` after `$let: { s: '$since' }`), or one an operator hands through
 to the comparison as it is (`$head`, `$tail`, `$reverse`, `$subsequence`
-with literal bounds, `$get` with a literal key, each operand of `$seq`,
-each member of an array or object constructor compared whole, the member
+with literal bounds, `$get` with a literal key, each operand of `$seq`
+where no step reads it by position (a position in a `$seq` is the row's
+to decide, below), each member of an array or object constructor compared whole, the member
 pairs of `$entries`), or one an expression picks where the call's
 externals alone decide which (the branch an `$if` condition takes, the
 first operand of `$coalesce` or `$default` that is not empty, the target
@@ -3571,21 +3579,48 @@ and an operand they decide as a whole (a nested phrase filtering an
 external list, `{ $for: { x: '$xs[*]' }, $where: …, $return: '$x' }`), is
 evaluated by the engine over the call's externals before any statement
 runs; one it refuses for them is not followed, and the call answers or is
-refused as it would be. One whose pick a row, the collection or an
-iteration variable decides — an `$if` whose condition, a `$coalesce` or
-`$default` operand after one that, or a `$subsequence` or `$get` whose
-bounds or key reads a row, the input document or a `$for`, quantifier,
-grouping, window or `$fold` variable, or calls a registered function
-(`{ $if: ['$e.flag', '$since', '$e.at'] }`), a nested phrase that does
-so and filters, groups, counts, windows or folds, an array constructor's
-element by index or slice where the constructor reads a row and an
-element of it is not exactly one item, a filter that reads the input
-document (`$xs[?@.k == $[0].k]`) — and one an operator computes a value
-from (a function's result), is not followed and is compared as the engine
-reads it (a `Date` by its instant, so equal to no stored text; a `Map` as
-`{}`): which operand such an expression hands through is decided per row
-or per item, not per call, so a refusal by what the external holds would
-refuse calls whose rows or items never pick it, which answer right.
+refused as it would be. **A row's pick is refused at the row.** An
+operand whose pick a row, the collection or an item decides — an `$if`
+whose condition, a `$coalesce` or `$default` operand after one that, or a
+`$subsequence` or `$get` whose bounds or key reads a row, the input
+document or a `$for`, quantifier, grouping, window or `$fold` variable,
+or calls a registered function (`{ $if: ['$e.flag', '$since', '$e.at'] }`),
+a position in a `$seq` (`{ $tail: { $seq: ['$e.tenant', '$a'] } }`), a
+nested phrase that does so and filters, groups, counts, windows or
+folds, an array constructor's element where the constructor reads a row,
+a filter that reads the input document (`$xs[?@.k == $[0].k]`) — is read
+by the engine row by row: where the call passes an external holding such
+a value, and the conditions the externals decide around the operand hold,
+the call declines pushdown (`explain()` names the construct `external`:
+*a row may hand a comparison an external it reads otherwise than it
+stands for*), the engine runs the document over the collection or the
+entity's rows, and the first row whose comparison, `$distinct`,
+`$index-of` or grouping key reads one of the call's `Date`, `Map` or
+`bigint` values beside a JSON item is refused `JD0041` there, with the
+reason and the `docPath` a direct operand gets. Every row that never
+picks it answers as before, so a call no row picks it for answers what
+its JSON value answers (`$if: [{ $eq: ['$e.id', 'zz'] }, '$since', '$b']`,
+`$coalesce: ['$e.at', '$since']` where every row has `at`, `$get` under
+a key no row names); a `Date` beside a `Date` compares by its instant, as
+the engine reads it; and a value a row returns, or hands to a registered
+function, is the caller's own. A filter that reads the input document
+compares what it reads of each candidate whenever it runs, so a `Date`
+there is read as a direct operand is. `strict: true` refuses such a call
+`JD0010` with that reason, as it refuses any call the engine answers, and
+a profile that refuses a full scan refuses it too; `explain()` reports
+the declined plan and refuses only what a call refuses before any row.
+One an operator computes a value from (a function's result, `$string`)
+is compared as the engine reads it.
+*Upgrade: such a pick was compared as the engine reads it (a `Date` by
+its instant, equal to no stored text; a `Map` as `{}`) and matched no row
+under `$gt`, every row under `$ne`, with no refusal; each row that reads
+one is now refused `JD0041`, and the call runs in the engine. A `$seq`
+operand used to be read with the positions a step selects as if it stood
+alone, so `$head` over `{ $seq: ['$e.at', '$a'] }` was refused for a
+`Date` in `a` it never reads; the engine now maps each position.
+`$reverse` before `$head` or `$tail` read its operand's items in their
+own order, so `$head` over `$reverse` of `[Date, ISO text]` was refused;
+it now reads the reversed order.*
 *Upgrade: an external the externals alone pick — through `$if`,
 `$coalesce`, `$default`, `$subsequence` or `$get` at computed bounds or
 key, `$entries`, a nested phrase's return, a path into a constructor, or a
@@ -4930,12 +4965,22 @@ the rendering, and so is an expression term over another function,
 operator, literal or column, or the plain column (`upper(code)` or `code`
 where the layout declares `lower(code)`); an expression term's direction,
 operator class and collation are not compared, as a plain term's are not.
-A condition or key either side does not read is not compared and verifies
-by the index's shape alone: a literal the server rewrites by its type (a
-date, a uuid), a function outside the relational vocabulary or one the server respells
-(`TRIM`), a quantified comparison other than `= ANY` and `<> ALL`, an
-`IS [NOT] TRUE` test, a table-qualified column (which the server never
-writes), and a declaration PostgreSQL has no rendering of (`GLOB`). An
+A date literal the server writes in ISO form and a uuid in either case
+read as their literal, `TRIM([BOTH | LEADING | TRAILING] … FROM …)` as
+`trim`, `ltrim` or `rtrim` (and `btrim` as `trim`), `IS [NOT] TRUE` and
+`IS [NOT] FALSE` as the null-safe comparison with the constant (`IS NOT
+TRUE` is `IS DISTINCT FROM 't'`; in a condition, where a NULL and false
+select alike, `b IS TRUE` is `b` and `b IS FALSE` is `NOT b`, while under
+an expression term they are other keys), and a quantified comparison over
+a list of non-NULL literals as the `OR` (`ANY`) or `AND` (`ALL`) of its
+comparisons. A condition or key either side does not read is not compared
+and verifies by the index's shape alone: a literal of a type the reader
+does not compare (a timestamp) or a date a session under another
+`DateStyle` writes, a function outside the relational vocabulary, a
+quantified comparison over anything but a list of literals, a
+table-qualified column (which the server never writes), and a declaration
+PostgreSQL has no rendering of (`GLOB`); `introspect()` reports an index
+whose stored condition or key it does not read (`unmapped-index`). An
 index the layout does not declare
 is a physical fact. A unique index over plain column terms without a
 condition keys an existence probe (§13.2). A `kind: "view"` layout declares

@@ -58,6 +58,10 @@ function residualOptions(limits, operators, zoneProvider) {
   return options;
 }
 
+/** Residual options with the engine's comparison guard, where one is given
+ * (a call a row decides, query.js `misreadGuard`). @param {any} options @param {any} compareGuard */
+const guardedOptions = (options, compareGuard) => (compareGuard === undefined ? options : { ...options, compareGuard });
+
 /**
  * Compile the whole document for set-mode evaluation. A profile's
  * engine limits ride into the compilation so the JavaScript portion is
@@ -68,10 +72,11 @@ function residualOptions(limits, operators, zoneProvider) {
  *   the store's registered operators, so the residual can evaluate them
  * @param {any} [zoneProvider] - the injected clock, so a calendar
  *   ladder on a named zone compiles rather than being refused
+ * @param {any} [compareGuard] - the engine's comparison guard
  * @returns {(candidates: any[], externals: any) => any}
  */
-export function compileSetResidual(document, limits, operators, zoneProvider) {
-  const compiled = compileJsonQuery(document, residualOptions(limits, operators, zoneProvider));
+export function compileSetResidual(document, limits, operators, zoneProvider, compareGuard = undefined) {
+  const compiled = compileJsonQuery(document, guardedOptions(residualOptions(limits, operators, zoneProvider), compareGuard));
   return (candidates, externals) => compiled(candidates, externals);
 }
 
@@ -85,10 +90,11 @@ export function compileSetResidual(document, limits, operators, zoneProvider) {
  * @param {any} [limits]
  * @param {{ functions?: any, extensions?: any, calendar?: any } | null} [operators]
  * @param {any} [zoneProvider]
+ * @param {any} [compareGuard] - the engine's comparison guard
  * @returns {(candidates: any[], externals: any) => any[]} the items
  */
-export function compilePackedResidual(document, limits, operators, zoneProvider) {
-  const compiled = compileJsonQuery([document], residualOptions(limits, operators, zoneProvider));
+export function compilePackedResidual(document, limits, operators, zoneProvider, compareGuard = undefined) {
+  const compiled = compileJsonQuery([document], guardedOptions(residualOptions(limits, operators, zoneProvider), compareGuard));
   return (candidates, externals) => /** @type {any[]} */ (compiled(candidates, externals));
 }
 

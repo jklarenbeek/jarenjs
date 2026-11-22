@@ -136,6 +136,18 @@ export function expressionForm(sql, conforming, condition = false) {
     if (Object.hasOwn(of, 'b') && type === 'boolean') return of;
     return { cast: type, of };
   };
+  /** Whether a `TRIM(` at `from` holds a `FROM` of its own parentheses
+   * (`TRIM(BOTH FROM s)`, `TRIM('x' FROM s)`), rather than being a call (`trim(s)`).
+   * @param {number} from @returns {boolean} */
+  const trimFrom = (from) => {
+    if (tokens[from]?.kind !== 'word' || tokens[from].value.toUpperCase() !== 'TRIM' || tokens[from + 1]?.value !== '(') return false;
+    for (let i = from + 2, open = 1; i < tokens.length; i++) {
+      if (tokens[i].kind === 'symbol' && tokens[i].value === '(') open++;
+      else if (tokens[i].kind === 'symbol' && tokens[i].value === ')' && --open === 0) return false;
+      else if (open === 1 && tokens[i].kind === 'word' && tokens[i].value.toUpperCase() === 'FROM') return true;
+    }
+    return false;
+  };
   /** @param {number} depth @returns {any} */
   const primary = (depth) => {
     const token = tokens[at];
@@ -143,6 +155,16 @@ export function expressionForm(sql, conforming, condition = false) {
     if (take('(')) {
       const inner = expression(depth + 1);
       return inner !== undefined && take(')') ? inner : undefined;
+    }
+    // `TRIM([BOTH | LEADING | TRAILING] [characters] FROM x)`, the server's spelling of
+    // `trim`, `ltrim` and `rtrim` (and of `btrim`): the call it is, its characters last
+    if (condition && trimFrom(at)) {
+      at += 2;
+      const side = take('LEADING') ? 'ltrim' : take('TRAILING') ? 'rtrim' : (take('BOTH'), 'trim');
+      const characters = take('FROM') ? undefined : expression(depth + 1);
+      if (characters !== undefined && !take('FROM')) return undefined;
+      const of = expression(depth + 1);
+      return of !== undefined && take(')') ? { call: side, args: characters === undefined ? [of] : [of, characters] } : undefined;
     }
     if (condition && take('CAST')) {
       if (!take('(')) return undefined;
@@ -272,6 +294,9 @@ export function expressionForm(sql, conforming, condition = false) {
       const right = take('FROM') ? infix(depth + 1) : undefined;
       return right === undefined ? undefined : { op: not ? 'not distinct' : 'distinct', args: [left, right] };
     }
+    // a truth test, which a NULL fails (`IS TRUE`) or passes (`IS NOT TRUE`): no spelling of the boolean itself
+    for (const truth of condition ? ['TRUE', 'FALSE'] : [])
+      if (take(truth)) return { op: `is ${not ? 'not ' : ''}${truth.toLowerCase()}`, args: [left] };
     return take('NULL') ? { op: not ? 'is not null' : 'is null', args: [left] } : undefined;
   };
   /** @param {number} depth @returns {any} */
@@ -300,7 +325,22 @@ export function expressionForm(sql, conforming, condition = false) {
 
 /** What a value of each type compares as: a literal beside it is read as one. */
 const CATEGORIES = new Map([...[...STRING_TYPES].map((type) => [type, 'string']), ...[...NUMBER_TYPES].map((type) => [type, 'number']),
-  ['boolean', 'boolean']]);
+  ['boolean', 'boolean'], ['date', 'date'], ['uuid', 'uuid']]);
+/** A date as the server writes one under the ISO `DateStyle` (a session under another writes it otherwise, which is not read). */
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+/** A uuid as the server writes one, in either case. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** The text of a date or uuid literal as the server reads and writes it back — a date in ISO
+ * form that is a day of the calendar, a uuid in lower case — or `null` for one it is not.
+ * @param {string} text @param {'date' | 'uuid'} as @returns {string | null} */
+function typedText(text, as) {
+  if (as === 'uuid') return UUID.test(text) ? text.toLowerCase() : null;
+  const parts = ISO_DATE.exec(text);
+  if (parts === null) return null;
+  const [year, month, day] = parts.slice(1).map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return year > 0 && date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? text : null;
+}
 /**
  * The casts the server writes around a column it compares under a wider type
  * of its own family, by the column's type: the condition the server keeps
@@ -326,6 +366,7 @@ const SWAPPED = new Map([['=', '='], ['<>', '<>'], ['<', '>'], ['>', '<'], ['<='
 const NEGATED = new Map([['=', '<>'], ['<>', '='], ['<', '>='], ['>=', '<'], ['>', '<='], ['<=', '>'],
   ['in', 'not in'], ['not in', 'in'], ['is null', 'is not null'], ['is not null', 'is null'], ['distinct', 'not distinct'], ['not distinct', 'distinct'],
   ['~~', '!~~'], ['!~~', '~~']]);
+
 /** The functions a condition may call, by what each returns: `null` for the type of its arguments. */
 const RETURNS = new Map([['lower', 'string'], ['upper', 'string'], ['ltrim', 'string'], ['rtrim', 'string'], ['trim', 'string'],
   ['length', 'number'], ['octet_length', 'number'], ['abs', null], ['round', null], ['coalesce', null], ['nullif', null]]);
@@ -355,9 +396,11 @@ const byKey = (/** @type {any} */ a, /** @type {any} */ b) => (keyOf(a) < keyOf(
  * @param {string} sql
  * @param {boolean} conforming - how the text spells a backslash in a plain string
  * @param {(column: string) => string | undefined} typeOf - a column's catalog type (`format_type`)
+ * @param {boolean} [condition] - whether `sql` is an index's condition, where a NULL and false select
+ *   alike: there `x IS TRUE` (at its top, or an `AND`'s or `OR`'s operand of it) is `x`, and `x IS FALSE` is `NOT x`
  * @returns {any | null} the form, or `null` for a condition it does not compare
  */
-export function conditionForm(sql, conforming, typeOf) {
+export function conditionForm(sql, conforming, typeOf, condition = false) {
   const read = expressionForm(sql, conforming, true);
   if (read === null) return null;
   const unread = () => { throw UNREAD; };
@@ -388,6 +431,7 @@ export function conditionForm(sql, conforming, typeOf) {
     if (!Object.hasOwn(node, 's') || as === 'string') return node;
     if (as === 'number') { const n = decimalText(node.s); return n === null ? unread() : { n }; }
     if (as === 'boolean') { const b = BOOLEAN_TEXT.get(node.s.toLowerCase()); return b === undefined ? unread() : { b }; }
+    if (as === 'date' || as === 'uuid') { const text = typedText(node.s, as); return text === null ? unread() : { s: text }; }
     return unread();
   };
   /** Values that compare alike: each quoted literal read beside the rest. @param {any[]} nodes */
@@ -423,7 +467,14 @@ export function conditionForm(sql, conforming, typeOf) {
       return membership('in', left, right.args[0].array);
     if (op === '<>' && right.call === 'all' && right.args.length === 1 && Object.hasOwn(right.args[0], 'array'))
       return membership('not in', left, right.args[0].array);
-    // another quantified comparison holds for what its list's bound does, which is no spelling of one condition
+    // another quantified comparison over a list of literals none of which is NULL: an `OR` of the
+    // comparisons with each item (`ANY`), or an `AND` (`ALL`) — the same rows under three-valued logic
+    if ((right.call === 'any' || right.call === 'all') && right.args.length === 1 && Object.hasOwn(right.args[0], 'array')) {
+      const items = right.args[0].array;
+      if (items.length === 0 || items.some((/** @type {any} */ item) => !isLiteral(item) || Object.hasOwn(item, 'null'))) return unread();
+      const each = items.map((/** @type {any} */ item) => comparison(op, left, item));
+      return each.length === 1 ? each[0] : joined(right.call === 'any' ? 'or' : 'and', each);
+    }
     if (right.call === 'any' || right.call === 'all') return unread();
     const [a, b] = unify([left, right]);
     if ((op === '=' || op === '<>') && isLiteral(a) !== isLiteral(b)) return membership(op === '=' ? 'in' : 'not in', isLiteral(a) ? b : a, [isLiteral(a) ? a : b]);
@@ -473,7 +524,9 @@ export function conditionForm(sql, conforming, typeOf) {
         ...(node.else === undefined ? {} : { else: results[branches.length] }) };
     }
     if (Object.hasOwn(node, 'call')) {
-      const name = node.call.startsWith('pg_catalog.') ? node.call.slice('pg_catalog.'.length) : node.call;
+      const qualified = node.call.startsWith('pg_catalog.') ? node.call.slice('pg_catalog.'.length) : node.call;
+      // `btrim` of one argument is the `trim` the server writes `TRIM(BOTH FROM …)`
+      const name = qualified === 'btrim' ? 'trim' : qualified;
       // the list a quantified comparison reads, which the comparison takes apart
       if (name === 'any' || name === 'all') return { call: name, args: node.args.map(form) };
       if (!RETURNS.has(name)) return unread();
@@ -481,6 +534,10 @@ export function conditionForm(sql, conforming, typeOf) {
       const takes = TAKES.get(name) ?? RETURNS.get(name);
       return { call: name, args: takes === null ? unify(args) : args.map((/** @type {any} */ arg) => coerce(arg, takes)) };
     }
+    // a truth test is a null-safe comparison with the truth constant: `IS TRUE` is
+    // `IS NOT DISTINCT FROM true`, `IS NOT FALSE` is `IS DISTINCT FROM false`
+    const truth = /^is (not )?(true|false)$/.exec(node.op);
+    if (truth !== null) return form({ op: truth[1] === undefined ? 'not distinct' : 'distinct', args: [node.args[0], { b: truth[2] === 'true' }] });
     const args = node.args.map(form);
     if (node.op === 'and' || node.op === 'or') return joined(node.op, args);
     if (node.op === 'not') return negate(args[0]);
@@ -494,7 +551,16 @@ export function conditionForm(sql, conforming, typeOf) {
     if (COMPARISONS.has(node.op)) return comparison(/** @type {string} */ (COMPARISONS.get(node.op)), args[0], args[1]);
     return { op: node.op, args: unify(args) };
   };
-  try { return form(read); }
+  /** A condition's form where a NULL and false select alike — the condition itself, and each
+   * operand of an `AND` or an `OR` of it: `x IS NOT DISTINCT FROM true` holds for the rows `x`
+   * does, and `… FROM false` for the rows `NOT x` does. @param {any} node @returns {any} */
+  const selecting = (node) => {
+    if (node.op === 'and' || node.op === 'or') return joined(node.op, node.args.map(selecting));
+    const constant = node.op === 'not distinct' ? node.args.findIndex((/** @type {any} */ arg) => Object.hasOwn(arg, 'b')) : -1;
+    if (constant < 0 || Object.hasOwn(node.args[1 - constant], 'b')) return node;
+    return node.args[constant].b ? node.args[1 - constant] : negate(node.args[1 - constant]);
+  };
+  try { return condition ? selecting(form(read)) : form(read); }
   catch (error) {
     if (error === UNREAD) return null;
     throw error;
@@ -598,11 +664,13 @@ export const postgresReadBack = (schema) => Object.freeze({
    * @param {string} planned - the declared condition or term, rendered for PostgreSQL
    * @param {(column: string) => string | undefined} typeOf - a column's catalog type
    * @param {boolean} conforming - the reading session's `standard_conforming_strings`
+   * @param {boolean} [condition] - whether it is the index's condition, where a NULL and false select alike
+   *   (`b IS TRUE` holds for the rows `b` does), rather than a key, where they are two values
    * @returns {boolean}
    */
-  layoutConditionDiffers(stored, planned, typeOf, conforming) {
-    const have = conditionForm(stored, conforming, typeOf);
-    const want = conditionForm(planned, true, typeOf);
+  layoutConditionDiffers(stored, planned, typeOf, conforming, condition = false) {
+    const have = conditionForm(stored, conforming, typeOf, condition);
+    const want = conditionForm(planned, true, typeOf, condition);
     return have !== null && want !== null && JSON.stringify(have) !== JSON.stringify(want);
   },
   /**

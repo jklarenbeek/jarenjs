@@ -234,7 +234,7 @@ describe('a number key and a reference to one, PostgreSQL', { skip: skipFor('pos
       await store.entity('N').create({ id: 2, tag: 'y' });
       await store.entity('R').create({ id: 'r', nId: 1 });
       // a table without the key's CHECK, as an earlier release created it
-      await pool.query(`ALTER TABLE "${schema}"."N" DROP CONSTRAINT "N_id_check1"; ALTER TABLE "${schema}"."R" DROP CONSTRAINT "R_nId_check1"`);
+      await pool.query(`ALTER TABLE "${schema}"."N" DROP CONSTRAINT "N_id_jaren_key"; ALTER TABLE "${schema}"."R" DROP CONSTRAINT "R_nId_jaren_key"`);
       // another writer re-keys 2 by digits below 1 that round to it, and references it
       await pool.query(`SET search_path TO "${schema}"; UPDATE "N" SET id = 0.99999999999999999999 WHERE id = 2;
         INSERT INTO "R" (id, "nId", doc) VALUES ('s', 0.99999999999999999999, '{}'::jsonb); RESET search_path`);

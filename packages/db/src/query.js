@@ -917,8 +917,11 @@ function comparedExternals(root, predicate, source) {
  * comparison's `docPath`, in the store profile's predicate for the root
  * `predicate`, on one `side` of a two-sided comparison `group`; `indirect`
  * where a condition, a computed key or bound, a constructor, a nested
- * phrase or a `{ $let, $return }` binding was followed to reach it.
- * @typedef {{ name?: string, segments: readonly any[], evaluate?: any, reads?: readonly string[],
+ * phrase or a `{ $let, $return }` binding was followed to reach it — or
+ * `rowPicked`, an operand a row, the collection or an item decides that
+ * `reads` the externals named, which the engine reads row by row
+ * ({@link admittedEntry}).
+ * @typedef {{ name?: string, segments: readonly any[], evaluate?: any, rowPicked?: true, reads?: readonly string[],
  *   guards: readonly { query: any, at: string, holds: boolean | 'empty' }[], indirect: boolean,
  *   docPath: string, predicate: string | null, pair: { group: object, side: number } | undefined }} ComparedExternal
  */
@@ -947,12 +950,16 @@ const HANDED_THROUGH = new Map([
  * after `$let: { s: '$since' }` or in a `{ $let, $return }` phrase, `$q.d`
  * after `$for: { q: '$xs[*]' }`, a quantifier or a `$fold` accumulator
  * over it), through an operator that hands an operand's items through
- * ({@link HANDED_THROUGH}), through each operand of a `$seq`, through each
+ * ({@link HANDED_THROUGH}), through each operand of a `$seq` — at the
+ * positions it stands at, where a step reads positions — through each
  * member of an array or object constructor that is the operand itself,
  * whose value holds them, and through the operand an expression picks
  * where the call's externals alone decide which ({@link pickedOperands}).
  * Any other operand those externals alone decide — a nested phrase among
- * them — is the engine's to evaluate per call ({@link closedQuery}). A
+ * them — is the engine's to evaluate per call ({@link closedQuery}), and
+ * so is one a variable bound to each item of the externals in turn
+ * decides, for every item; one a row or the collection decides is named
+ * with the externals it reads, for the engine to read row by row. A
  * slot is bound once in a tree, and a binding refers only to slots bound
  * before it, so the walk ends; it is iterative, as an operand may nest
  * deep.
@@ -973,6 +980,10 @@ function reachedExternals(operand, scope) {
       ? /** @type {Function} */ (HANDED_THROUGH.get(node.name))(node.args) : null;
     if (node?.kind === 'var' || node?.kind === 'path') {
       const steps = [...(node.segments ?? []), ...after];
+      // a filter that reads the input document selects per call and row
+      if (node.segments !== undefined && segmentsReadInput(node.segments)) {
+        found.push({ rowPicked: true, reads: externalsRead(node, scope), segments: after, guards, indirect: true });
+      }
       if (node.external === true) found.push({ name: node.name, segments: steps, guards, indirect });
       else {
         const binding = scope.bound.get(node.kind === 'var' ? node.slot : node.rootSlot);
@@ -980,6 +991,13 @@ function reachedExternals(operand, scope) {
       }
     }
     else if (node?.kind === 'op' && node.name === '$seq') {
+      // a position past the sequence reads the operand that stands there,
+      // which the engine maps row by row ({@link admittedEntry})
+      if (after.some(isPositional)) {
+        const reads = externalsRead(node, scope);
+        if (reads.length > 0) found.push({ rowPicked: true, reads, segments: after, guards, indirect: true });
+        continue;
+      }
       for (let k = node.args.length - 1; k >= 0; k--) pending.push([node.args[k], after, guards, indirect]);
     }
     else if (step !== null) pending.push([node.args[0], [step, ...after], guards, indirect]);
@@ -992,7 +1010,7 @@ function reachedExternals(operand, scope) {
     }
     else if (node !== null && typeof node === 'object') {
       const picked = pickedOperands(node, after, guards, scope);
-      if (picked !== null) {
+      if (picked !== null && picked.length > 0) {
         for (let k = picked.length - 1; k >= 0; k--) pending.push([...picked[k], true]);
         continue;
       }
@@ -1000,6 +1018,12 @@ function reachedExternals(operand, scope) {
       const closed = node.kind === 'literal' || node.kind === 'raw'
         || (closedReads(node, scope)?.reads.length ?? 0) === 0 ? null : closedQuery(node, scope);
       if (closed !== null) found.push({ evaluate: closed.query, reads: closed.reads, segments: after, guards, indirect: true });
+      else {
+        // what a row, the collection or an item decides is read row by
+        // row, where the engine runs the call ({@link admittedEntry})
+        const reads = externalsRead(node, scope);
+        if (reads.length > 0) found.push({ rowPicked: true, reads, segments: after, guards, indirect: true });
+      }
     }
   }
   return found;
@@ -1016,8 +1040,9 @@ function reachedExternals(operand, scope) {
  * array or object constructor that a path's names, indexes, slices or
  * wildcard select; the return of a nested phrase that drops, groups and
  * folds no item. `[]` where a row or the collection decides it (an `$if`
- * on a row's member, a key a row computes); `null` for any other
- * expression.
+ * on a row's member, a key a row computes, a `$coalesce` operand a row
+ * decides is empty), which the engine reads row by row; `null` for any
+ * other expression.
  * @param {any} node @param {any[]} after @param {any[]} guards @param {any} scope
  * @returns {[any, any[], any[]][] | null}
  */
@@ -1037,8 +1062,10 @@ function pickedOperands(node, after, guards, scope) {
         const empty = [];
         for (const arg of node.args) {
           picked.push([arg, after, [...guards, ...empty]]);
-          const test = picked.length === node.args.length ? null : closedQuery(arg, scope);
-          if (test === null) break;
+          if (picked.length === node.args.length) break;
+          const test = closedQuery(arg, scope);
+          // an operand a row decides is empty: the row picks among the rest
+          if (test === null) return [];
           empty.push({ query: test.query, at: arg.docPath, holds: 'empty' });
         }
         return picked;
@@ -1074,6 +1101,35 @@ function pickedOperands(node, after, guards, scope) {
 /** The cardinality of an expression that always yields exactly one item
  * (QUERY-FORMAT C.2, `CARD_ONE`). */
 const ONE_ITEM = 1;
+
+/**
+ * The externals an expression names, directly or through a variable
+ * bound outside it to one that does.
+ * @param {any} root @param {any} scope @returns {string[]}
+ */
+function externalsRead(root, scope) {
+  /** @type {string[]} */
+  const names = [];
+  const seen = new Set();
+  const pending = [root];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (node === null || typeof node !== 'object' || seen.has(node) || node.kind === 'literal' || node.kind === 'raw') continue;
+    seen.add(node);
+    if (node.external === true) names.push(node.name);
+    if (node.kind === 'var' || node.kind === 'path') pending.push(scope.bound.get(node.kind === 'var' ? node.slot : node.rootSlot)?.expr);
+    for (const key of Object.keys(node)) if (!HOST_MEMBERS.has(key) && key !== 'segments') pending.push(node[key]);
+  }
+  return names;
+}
+
+/** Whether a step reads its items by their positions in the whole
+ * sequence: `$head`, `$tail`, `$subsequence`, and `$get`, which reads one
+ * target alone. @param {any} step @returns {boolean} */
+function isPositional(step) {
+  return 'through' in step && (step.through === '$head' || step.through === '$tail' || step.through === '$subsequence'
+    || step.through === '$get');
+}
 
 /**
  * The members of a constructor that one path segment's selectors select:
@@ -1335,7 +1391,7 @@ function referencedValues(values, segments, read) {
               if (query.reads) read.push(...reached);
             }
           }
-          next.push(...filter.select(item));
+          if (filter.select !== null) next.push(...filter.select(item));
         }
       }
     }
@@ -1347,7 +1403,7 @@ function referencedValues(values, segments, read) {
 /**
  * What an operator that hands items through ({@link HANDED_THROUGH}) keeps
  * of its operand's items: `$head` the first, `$tail` all but the first,
- * `$reverse` all, `$subsequence` those at the positions the engine selects
+ * `$reverse` all in reverse order, `$subsequence` those at the positions the engine selects
  * for the bounds, `$get` the member or element its key names of a single
  * target (an object {@link isOpaque} names standing for it), `$entries` a
  * `{ key, value }` pair for each own member of each object item, as the
@@ -1359,7 +1415,7 @@ function handedThrough(items, step) {
   switch (step.through) {
     case '$head': return items.slice(0, 1);
     case '$tail': return items.slice(1);
-    case '$reverse': return items;
+    case '$reverse': return [...items].reverse();
     case '$entries': return items.flatMap((item) => (item === null || typeof item !== 'object' || Array.isArray(item) ? []
       : isOpaque(item) ? [item] : Object.keys(item).map((key) => ({ key, value: item[key] }))));
     case '$subsequence': {
@@ -1416,11 +1472,12 @@ const FILTERS = new WeakMap();
  * the filter compares their values or hands them to a function, rather
  * than testing only that they exist or counting them. The selection is
  * `@jarenjs/json/path` compiling the filter's own text, which must parse
- * back to the selector the query holds. `null` for a filter that reads the
- * input document (`$`), which no external holds, or one whose text does not
- * parse back to it (a function the store registered).
+ * back to the selector the query holds. A filter that reads the input
+ * document (`$`) selects per row: no `select`, its relative queries still
+ * read. `null` for one whose text does not parse back to it (a function the
+ * store registered).
  * @param {any} selector
- * @returns {{ select: (item: any) => any[], queries: { segments: readonly any[], reads: boolean }[] } | null}
+ * @returns {{ select: ((item: any) => any[]) | null, queries: { segments: readonly any[], reads: boolean }[] } | null}
  */
 function filterSelection(selector) {
   if (FILTERS.has(selector)) return FILTERS.get(selector);
@@ -1439,13 +1496,15 @@ function filterSelection(selector) {
       case 'func': for (const arg of node.args) visit(arg, node.name !== 'count'); return;
       case 'query':
         if (!node.query.relative) absolute = true;
-        queries.push({ segments: node.query.segments, reads });
+        else queries.push({ segments: node.query.segments, reads });
         return;
       default:
     }
   };
   visit(selector.expr, false);
-  let selection = null;
+  // one that reads the input selects per row, but compares what it reads
+  // of each candidate whenever it runs
+  let selection = absolute ? { select: null, queries } : null;
   if (!absolute) {
     const text = `$[?${filterText(selector.expr)}]`;
     try {
@@ -1564,16 +1623,24 @@ export function refuseOpaqueExternals(compared, externals, spelling) {
     if (found === null || sameReference(ref, compared, externals)) continue;
     // the document's comparison is named by its docPath, which the
     // error carries; a profile predicate is the store's, not the caller's
-    const where = ref.predicate === null ? 'a comparison'
-      : `the store profile's predicate for '${ref.predicate}'`;
-    // a bigint is no JSON number: the engine compares it with none
-    const bigint = typeof found.value === 'bigint';
-    throw new DbCompileError('JD0041',
-      `${spelling} external '$${found.name}' holds ${bigint ? 'a bigint' : instanceOf(found.value)}`
-      + `${found.at === '' ? '' : ` at ${found.at}`}, which ${where} reads as `
-      + (bigint ? 'no number — pass the number it stands for, Number(value)' : opaqueReading(found.value)),
-      ref.predicate === null ? ref.docPath : undefined);
+    throw opaqueRefusal(spelling, found, ref.predicate === null ? 'a comparison'
+      : `the store profile's predicate for '${ref.predicate}'`, ref.predicate === null ? ref.docPath : undefined);
   }
+}
+
+/**
+ * The `JD0041` refusal of an external a comparison reads otherwise than it
+ * stands for. @param {string} spelling @param {{ name: string, value: any, at: string }} found
+ * @param {string} where @param {string | undefined} docPath
+ */
+function opaqueRefusal(spelling, found, where, docPath) {
+  // a bigint is no JSON number: the engine compares it with none
+  const bigint = typeof found.value === 'bigint';
+  return new DbCompileError('JD0041',
+    `${spelling} external '$${found.name}' holds ${bigint ? 'a bigint' : instanceOf(found.value)}`
+    + `${found.at === '' ? '' : ` at ${found.at}`}, which ${where} reads as `
+    + (bigint ? 'no number — pass the number it stands for, Number(value)' : opaqueReading(found.value)),
+    docPath);
 }
 
 /**
@@ -1588,15 +1655,17 @@ export function refuseOpaqueExternals(compared, externals, spelling) {
  * operand the engine refuses for these externals (the call then answers,
  * or is refused, as it would be). A reference that only the call's
  * externals decide is evaluated only where one of them holds such a value.
+ * An operand a row picks is no reference this reads ({@link admittedEntry}).
  * @param {ComparedExternal} ref @param {any} externals
  * @returns {{ name: string, value: any, at: string } | null}
  */
 function misread(ref, externals) {
+  if (ref.rowPicked) return null;
   /** @type {any[]} */
   const read = [];
   let values;
-  const names = ref.evaluate === undefined ? [/** @type {string} */ (ref.name)] : /** @type {readonly string[]} */ (ref.reads);
-  if (ref.evaluate === undefined && ref.guards.length === 0 && !ref.segments.some(isComputedStep)) {
+  const names = ref.name !== undefined ? [ref.name] : /** @type {readonly string[]} */ (ref.reads);
+  if (ref.name !== undefined && ref.guards.length === 0 && !ref.segments.some(isComputedStep)) {
     if (!Object.hasOwn(externals, names[0])) return null;
     values = referencedValues([externals[names[0]]], ref.segments, read);
   }
@@ -1629,6 +1698,72 @@ function misread(ref, externals) {
     }
   }
   return null;
+}
+
+/**
+ * The entry a call runs, refused as its externals are: `entryOf(pushdown)`,
+ * or where a comparison reads an operand a row, the collection or an item
+ * decides, its guards holding, that names an external the call passes
+ * holding what a comparison reads otherwise than it stands for
+ * ({@link isOpaque}, or a `bigint`), the entry that declines pushdown, which the engine
+ * runs and refuses at the row that hands a comparison such a value
+ * (`guarded`, {@link guardedRun}).
+ * @param {(pushdown: boolean | 'declined') => any} entryOf @param {any} externals
+ * @param {boolean} pushdown @param {string} spelling
+ * @returns {{ entry: any, guarded: boolean }}
+ */
+function admittedEntry(entryOf, externals, pushdown, spelling) {
+  const entry = entryOf(pushdown);
+  refuseOpaqueExternals(entry.compared, externals, spelling);
+  const guarded = externals !== null && typeof externals === 'object' && entry.compared.some((/** @type {any} */ ref) => ref.rowPicked
+    && ref.reads.some((/** @type {string} */ name) => Object.hasOwn(externals, name) && opaqueWithin(externals[name], true) !== null)
+    && holdsFor(ref.guards, externals));
+  return { entry: guarded && pushdown ? entryOf('declined') : entry, guarded };
+}
+
+/**
+ * The whole document over `docs` as a guarded call runs it
+ * ({@link admittedEntry}): compiled once per entry with the engine's guard
+ * ({@link misreadGuard}), `packed` for a cursor's items, the call's
+ * externals carrying the member that refuses.
+ * @param {any} entry @param {any} document @param {boolean} packed @param {any} context - the store state's
+ *   `operators` and `zoneProvider` @param {any[]} docs @param {any} externals @param {string} spelling
+ */
+function guardedRun(entry, document, packed, context, docs, externals, spelling) {
+  const key = packed ? 'guardedPacked' : 'guardedSet';
+  entry[key] ??= (packed ? compilePackedResidual : compileSetResidual)(document, entry.residualLimits, context.operators,
+    context.zoneProvider, misreadGuard);
+  return entry[key](docs, { ...externals, [GUARDED_CALL]: { externals, spelling, prefix: packed ? '/0' : '' } });
+}
+
+/** The reason a call declines pushdown where a row may hand a comparison an
+ * external it reads otherwise than it stands for ({@link admittedEntry}). */
+const ROW_PICKED = Object.freeze({ construct: 'external',
+  reason: 'a row may hand a comparison an external it reads otherwise than it stands for' });
+
+/** Where a guarded residual finds the call it reads: the caller's
+ * externals, the member a refusal names, and the docPath prefix its
+ * compiled text adds. */
+const GUARDED_CALL = Symbol('guarded call');
+
+/**
+ * The engine's guard over a call a row decides ({@link admittedEntry}):
+ * an item a comparison, `$distinct`, `$index-of` or a grouping key reads
+ * that is, or holds, a value one of the call's externals holds and a
+ * comparison reads otherwise than it stands for, beside an item holding
+ * none, is refused `JD0041` at the row that reads it; a `Date` beside a
+ * `Date` compares by its instant, as the engine reads it.
+ * @param {any} item @param {any} other @param {string} docPath @param {any} ext
+ */
+function misreadGuard(item, other, docPath, ext) {
+  const call = ext?.[GUARDED_CALL];
+  if (call === undefined || item === null || (typeof item !== 'object' && typeof item !== 'bigint')) return;
+  const found = opaqueWithin(item, true);
+  if (found === null || (other !== undefined && opaqueWithin(other, true) !== null)) return;
+  const name = Object.keys(call.externals).find((each) => firstWithin(call.externals[each], (value) => value === found.value) !== null);
+  if (name === undefined) return;
+  throw opaqueRefusal(call.spelling, { name, ...found }, 'a comparison',
+    docPath.startsWith(call.prefix) ? docPath.slice(call.prefix.length) : docPath);
 }
 
 /** Whether a step reads a key or bounds the call's externals compute. @param {any} step @returns {boolean} */
@@ -1677,11 +1812,11 @@ function guardsHold(guards, externals) {
  * @returns {boolean}
  */
 function sameReference(ref, compared, externals) {
-  if (ref.pair === undefined || ref.evaluate !== undefined) return false;
+  if (ref.pair === undefined || ref.name === undefined) return false;
   const group = ref.pair.group;
   const live = compared.filter((other) => other.pair?.group === group && holdsFor(other.guards, externals));
   return live.length === 2 && live[0].pair?.side !== live[1].pair?.side
-    && live.every((other) => other.evaluate === undefined && other.name === ref.name
+    && live.every((other) => other.name === ref.name
       && JSON.stringify(other.segments) === JSON.stringify(ref.segments));
 }
 
@@ -1960,16 +2095,16 @@ export function createQueryEngine(context) {
 
     // no host-side registration under a profile: a foreign document must
     // not cause one, for a predicate fragment or an aggregate alike
-    const registering = profile === null && pushdown;
+    const registering = profile === null && pushdown === true;
     let planned = planQuery(document, shape,
       { udf: registering ? udfHook : undefined,
         aggregate: registering ? aggregateHook : undefined });
-    if (!pushdown) {
+    if (pushdown !== true) {
       planned = {
         ...planned,
         plan: null,
         mode: 'set',
-        reasons: [{ construct: 'pushdown', reason: BIND_REASONS.pushdown }],
+        reasons: [pushdown === false ? { construct: 'pushdown', reason: BIND_REASONS.pushdown } : ROW_PICKED],
         rowReturn: null,
         udfs: [],
         prefilters: [],
@@ -2121,6 +2256,9 @@ export function createQueryEngine(context) {
   };
 
   const statementOf = (entry, use) => useRead(connection, entry, use);
+  /** A call's entry ({@link admittedEntry}). @param {any} document @param {ReturnType<typeof callState>} call @param {string} spelling */
+  const admitted = (document, call, spelling) => admittedEntry((pushdown) => entryFor(document, call.strict, call.profile, pushdown),
+    call.externals, call.pushdown, spelling);
   const setResidualOf = (entry, document) => {
     if (entry.setResidual === null)
       entry.setResidual = compileSetResidual(document, entry.residualLimits, operators,
@@ -2600,9 +2738,9 @@ export function createQueryEngine(context) {
     refuseNonDocument(document, spelling);
     refuseWholeStreaming(options, spelling, 'query()');
     requireCallable(options, state.now);
-    const { externals, strict, profile, pushdown } = callState(options);
-    const entry = entryFor(document, strict, profile, pushdown);
-    refuseOpaqueExternals(entry.compared, externals, spelling);
+    const call = callState(options);
+    const { externals, strict } = call;
+    const { entry, guarded } = admitted(document, call, spelling);
     refuseUnboundPredicate(entry, externals);
 
     return chain(guardScan(entry), () => {
@@ -2613,7 +2751,8 @@ export function createQueryEngine(context) {
         // re-applies its own predicates and ordering (idempotent
         // narrowing: the fetch decided nothing)
         return chain(candidatesOf(entry, externals, diverted), (docs) => {
-          const answer = setResidualOf(entry, document)(docs, externals);
+          const answer = guarded ? guardedRun(entry, document, false, state, docs, externals, spelling)
+            : setResidualOf(entry, document)(docs, externals);
           countSeries(entry, diverted ? 1 : statementCost(entry), docs.length, itemCount(answer));
           return answer;
         });
@@ -2731,9 +2870,9 @@ export function createQueryEngine(context) {
     readCallOptions(options, CURSOR_CALL_OPTIONS, spelling);
     refuseNonDocument(document, spelling);
     requireCallable(options, state.now);
-    const { externals, strict, profile, pushdown } = callState(options);
-    const entry = entryFor(document, strict, profile, pushdown);
-    refuseOpaqueExternals(entry.compared, externals, spelling);
+    const call = callState(options);
+    const { externals, strict } = call;
+    const { entry, guarded } = admitted(document, call, spelling);
     refuseUnboundPredicate(entry, externals, repair);
     const classified = cursorClass(entry, externals);
     refuseBuffered(options, classified, collection.docPath);
@@ -2752,7 +2891,8 @@ export function createQueryEngine(context) {
       return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardScan(entry), () =>
           chain(candidatesOf(entry, externals, diverted), (docs) => {
-            const items = packedResidualOf(entry, document)(docs, externals);
+            const items = guarded ? guardedRun(entry, document, true, state, docs, externals, spelling)
+              : packedResidualOf(entry, document)(docs, externals);
             countSeries(entry, diverted ? 1 : statementCost(entry), docs.length, items.length);
             return items;
           })) });
@@ -2851,9 +2991,9 @@ export function createQueryEngine(context) {
     const spelling = `collection('${collection.name}').explain`;
     readCallOptions(options, CURSOR_CALL_OPTIONS, spelling);
     refuseNonDocument(document, spelling);
-    const { externals, strict, profile, profileSource, pushdown } = callState(options);
-    const entry = entryFor(document, strict, profile, pushdown);
-    refuseOpaqueExternals(entry.compared, externals, spelling);
+    const call = callState(options);
+    const { externals, profile, profileSource } = call;
+    const { entry } = admitted(document, call, spelling);
     // the run this call would make: bound against the externals it was
     // given, a diversion reads the whole collection through the
     // diversion statement and answers in the set residual — so that is
@@ -3321,12 +3461,12 @@ export function createEntityQueryEngine(context) {
     // a narrowing the dialect cannot spell (a member name its JSON path
     // grammar cannot carry, a text the server cannot hold) narrows nothing:
     // the residual fetches every row of the root, as without one
-    if (!pushdown || (planned.narrowing !== undefined && !planned.narrowing.every(spelled))) {
+    if (pushdown !== true || (planned.narrowing !== undefined && !planned.narrowing.every(spelled))) {
       planned = { ...planned, narrowing: undefined, prefilters: undefined };
     }
-    if (!pushdown) {
+    if (pushdown !== true) {
       planned = { ...planned, mode: 'set', plan: null,
-        reasons: [{ construct: 'pushdown', reason: BIND_REASONS.pushdown }] };
+        reasons: [pushdown === false ? { construct: 'pushdown', reason: BIND_REASONS.pushdown } : ROW_PICKED] };
     }
     // the runtime guards of a grouping are qualified on PostgreSQL for one
     // adopted table with no document column, and for no join
@@ -3621,11 +3761,16 @@ export function createEntityQueryEngine(context) {
     return next(0);
   };
 
-  const runResidual = (entry, document, externals) => {
+  const runResidual = (entry, document, externals, guarded = false) => {
+    if (guarded) return chain(fetchRoot(entry, externals), (root) => guardedRun(entry, document, false, state, root, externals, 'entity execute()'));
     if (entry.setResidual === null)
       entry.setResidual = compileSetResidual(document, entry.residualLimits, operators, zoneProvider);
     return chain(fetchRoot(entry, externals), (root) => entry.setResidual(root, externals));
   };
+  /** A call's entry ({@link admittedEntry}). @param {any} document @param {any} externals @param {boolean} pushdown
+   * @param {any} profile @param {string} spelling */
+  const admitted = (document, externals, pushdown, profile, spelling) =>
+    admittedEntry((choice) => entryFor(document, choice, profile), externals, pushdown, spelling);
 
   /**
    * Run the document and answer in the engine's result shape. Its options
@@ -3644,8 +3789,7 @@ export function createEntityQueryEngine(context) {
   const run = (document, options = undefined) => {
     requireCallable(options, state.now);
     const { externals, strict, pushdown, profile } = callState(options);
-    const entry = entryFor(document, pushdown, profile);
-    refuseOpaqueExternals(entry.compared, externals, 'entity execute()');
+    const { entry, guarded } = admitted(document, externals, pushdown, profile, 'entity execute()');
     admitPredicates(entry, externals);
     entry.admitted = { statements: 0, rows: 0, bytes: 0 };
     entry.runtimeReason = null;
@@ -3655,7 +3799,7 @@ export function createEntityQueryEngine(context) {
         throw new DbCompileError('JD0010',
           `strict mode refused a residual: '${forcing.construct}' — ${forcing.reason}`);
       }
-      return runResidual(entry, document, externals);
+      return runResidual(entry, document, externals, guarded);
     }
     // bind-time diversion, exactly the collection engine's: every slot
     // binds through `slotValue` — a derived slot included — and a value
@@ -3827,8 +3971,7 @@ export function createEntityQueryEngine(context) {
     refuseNonDocument(document, 'entity cursor()');
     requireCallable(options, state.now);
     const { externals, strict, pushdown, profile } = callState(options);
-    const entry = entryFor(document, pushdown, profile);
-    refuseOpaqueExternals(entry.compared, externals, 'entity cursor()');
+    const { entry, guarded } = admitted(document, externals, pushdown, profile, 'entity cursor()');
     admitPredicates(entry, externals);
     if (strict && entry.planned.mode !== 'native') {
       const forcing = entry.planned.reasons[0];
@@ -3865,6 +4008,10 @@ export function createEntityQueryEngine(context) {
       return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => {
           entry.admitted = { statements: 0, rows: 0, bytes: 0 };
+          if (guarded) {
+            return chain(fetchRoot(entry, externals), (root) =>
+              guardedRun(entry, document, true, state, root, externals, 'entity cursor()').map(each));
+          }
           return chain(fetchRoot(entry, externals), (root) => packedResidualOf(entry, document)(root, externals).map(each));
         } });
     }
@@ -3914,8 +4061,7 @@ export function createEntityQueryEngine(context) {
     readCallOptions(options, ENTITY_CURSOR_OPTIONS, 'entity explain()');
     refuseNonDocument(document, 'entity explain()');
     const { externals, pushdown, profile, profileSource } = callState(options);
-    const entry = entryFor(document, pushdown, profile);
-    refuseOpaqueExternals(entry.compared, externals, 'entity explain()');
+    const { entry } = admitted(document, externals, pushdown, profile, 'entity explain()');
     // bound against the externals it was given: a value the database
     // cannot take sends the run to the residual over the fetched root,
     // and that is the mode reported, with the diversion named first; no
