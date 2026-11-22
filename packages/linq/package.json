@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/linq",
   "private": false,
-  "version": "0.226.0",
+  "version": "0.227.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./types/index.d.ts",
@@ -108,13 +108,13 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "0.226.0",
-    "@jarenjs/json": "0.226.0"
+    "@jarenjs/core": "0.227.0",
+    "@jarenjs/json": "0.227.0"
   },
   "peerDependencies": {
-    "@jarenjs/db": "0.226.0",
-    "@jarenjs/formats": "0.226.0",
-    "@jarenjs/validate": "0.226.0"
+    "@jarenjs/db": "0.227.0",
+    "@jarenjs/formats": "0.227.0",
+    "@jarenjs/validate": "0.227.0"
   },
   "peerDependenciesMeta": {
     "@jarenjs/db": {
