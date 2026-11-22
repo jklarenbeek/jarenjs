@@ -169,7 +169,7 @@ the table and stale in the paragraph that cites it:
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->26<!--/fact--> kB | text template capture; no renderer |
 | `./project` | <!--fact:bundle.project.kb-->5<!--/fact--> kB | project files; no Studio engine |
 | `./charts` | <!--fact:bundle.charts.kb-->7<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->1207<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->1211<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both
@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->29 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->45 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -278,7 +278,7 @@ included.
 | `./authoring` | 15 | core 8, linq 7 | 1.0 |
 | `./charts` | 15 | core 8, linq 7 | 1.0 |
 | `./contract` | 20 | core 10, linq 10 | 1.2 |
-| `./db` | 288 | core 101, db 87, json 38, validate 28, linq 27, formats 7 | 15.0 |
+| `./db` | 288 | core 101, db 87, json 38, validate 28, linq 27, formats 7 | 15.1 |
 | `./flow` | 19 | linq 11, core 8 | 1.1 |
 | `./forms` | 21 | linq 13, core 8 | 1.2 |
 | `./formula` | 93 | core 62, json 26, linq 5 | 4.3 |
@@ -308,7 +308,7 @@ included.
 | `./patch` | 18 | core 10, json 8 | 1.0 |
 | `./path` | 18 | core 11, json 7 | 1.0 |
 | `./pointer` | 16 | core 10, json 6 | 0.9 |
-| `./query` | 85 | core 62, json 23 | 3.9 |
+| `./query` | 85 | core 62, json 23 | 3.8 |
 | `./query/calendar` | 36 | core 28, json 8 | 1.9 |
 | `./rules` | 90 | core 62, json 28 | 4.0 |
 | `./write` | 20 | core 11, json 9 | 1.1 |
