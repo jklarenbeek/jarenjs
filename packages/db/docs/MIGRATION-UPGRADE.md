@@ -4120,6 +4120,79 @@ release refuses `latenessMs` in `schedule()` and `tick` in `createWorker()`
   that code and fires nothing. Unschedule sub-daily schedules before opening
   with it.
 
+## 79. A PostgreSQL key CHECK is named, and a pick a row decides refuses a non-JSON external
+
+- The key CHECK of a `numeric` key column (§73) is created as
+  `<table>_<column>_jaren_key`. The open reads it by its expression under any
+  name, so an earlier release's unnamed CHECK and the server's cast-rewritten
+  form are the store's own. Gaining `default: 'auto'` drops it by name, and
+  dropping `default: 'auto'` adds the `NaN` CHECK where it is missing and the
+  key CHECK again, where it left the key unguarded.
+- A key without the CHECK, or at or past 2^53, compares as the engine does in a
+  join, a hop's correlation, two references in one row, a literal list and an
+  external list: rows that were dropped are answered. A load's `orderBy` and a
+  page's continuation still read such a key bare ([POSTGRESQL](POSTGRESQL.md)).
+- A CHECK the model does not declare still opens on PostgreSQL and still
+  refuses the writes it governs (`JD2005`, `class: 'constraint'`);
+  `introspect()` now lists it as `unmapped-constraint` on a collection, an
+  entity and a join table.
+- PostgreSQL reads four more layout-index condition forms back (a date or uuid
+  literal, `TRIM(… FROM …)`, `IS [NOT] TRUE|FALSE`, a quantified comparison
+  over a list of literals). An index recreated under another condition of one
+  of those forms is refused `JD0002` at open, where it opened as the declared
+  one; a form still not read is an `unmapped-index` line
+  ([MODEL-FORMAT §12](MODEL-FORMAT.md)).
+- A call whose pick a row decides (`$if` on a row condition, `$coalesce`,
+  `$get` with a row-computed key, a filter over the input) and can reach a
+  `Date`, `Map` or `bigint` external declines pushdown and is refused
+  `JD0041` at the first row that reads one, where it answered `{}` or no row;
+  a row that never picks it answers as before. A position in a `$seq` maps to
+  its operand, so a call that never reads such an external answers where it
+  was refused ([MODEL-FORMAT §10.1](MODEL-FORMAT.md)).
+- A non-string `through` is refused `JD0005` at `/…/relation/through` where a
+  store opens or prepares the model, where it was ignored.
+
+**Downgrade.** The previous release opens, reads, queries and introspects a
+table this release creates: it reads the named key CHECK as the store's own
+and answers as before, dropped rows included. A model with a non-string
+`through` opens under it as before.
+
+## 80. Store-owned programs read back and repair by name, and a collection's first item and one-kind lists seek
+
+- `introspect()` reads a collection's conditional index back with its `where`,
+  read as an entity's is, with the indexes beside it; a model read back
+  reopens the table it was read from, where it was refused `JD0002`.
+- With `introspect({ triggers: sqliteTriggers })` a store-owned table's own
+  SQLite rule programs read back as the rules that plan them (all or nothing
+  per table); PostgreSQL's stay `unmapped-object` rows.
+- A physical layout's SQLite rule trigger is compared formatting aside at open
+  and by `planProgramUpgrade`, as a store-owned one's; `plan --store` and
+  model-only `migrationStatus` on SQLite read a physical layout by its shape,
+  as its open does.
+- PostgreSQL acceptance refuses (`JD0023`) a link over a store-owned rule
+  program no release planned, which it applied before, and
+  `migrationStatus(…, { model, expressions })` names it, where it answered
+  `drift: null`.
+- `planProgramUpgrade(connection, model, { repair: ['<table>.<program>'] })`
+  reinstalls a named drifted or missing program; `report.repaired` is new
+  (`report` always carries it). The open's refusal, on SQLite and PostgreSQL,
+  names the route.
+- `planModelMigration` replaces a changed rule's PostgreSQL function by one
+  `CREATE OR REPLACE FUNCTION` where its trigger stays and the table's own
+  work is its indexes alone, where it dropped and created both.
+- A bare collection root's first item, element or existence is read with a
+  `LIMIT` or a one-row probe, where every document was read
+  ([NATIVE-PLANS](NATIVE-PLANS.md)). On PostgreSQL an external, and an
+  external list of one kind, over a number or string member seeks its index; a
+  list holding both kinds still scans. A column that reads a NULL as a present
+  `null` is planned natively on PostgreSQL, so a load's `orderBy`, a keyset
+  page and a native mutation over it answer where they were refused `JD0032`
+  or `JD0038`, and an external compared with it reads its present `null`.
+- No table, column, index, CHECK or program text changes. Downgrade: the
+  previous release opens every store this one leaves; a link this release
+  planned in place (`CREATE OR REPLACE FUNCTION`) or a `repair` link applies
+  under the previous release as written.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so
