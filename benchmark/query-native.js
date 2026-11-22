@@ -88,7 +88,7 @@ const report = { format: 'jaren-native-measurements/1', at: new Date().toISOStri
   qualification: { nativeReadFamilies: 5, nativeMutationFamilies: 3, retainedSqlFamilies: 1,
     retainedReason: 'receipt-history has no declared primary key',
     scaled: 'catalog prefix bounded to sixteen candidates; first sixteen results; complete grouped sums',
-    postgres: 'physical adoption and mutations refused; no PostgreSQL native-column claim',
+    postgres: 'adopted PostgreSQL column layouts run entity mutate natively; this census, its parity, no-op and rollback proofs and these timings are SQLite-only',
     nativeExecutable: 'pending', downstreamCutover: 'pending', visitedSqlRows: 'unavailable' },
   measurements, peakRssBytes: process.resourceUsage().maxRSS * 1024 };
 writeFileSync(new URL('./query-native-result.json', import.meta.url), JSON.stringify(report, null, 2) + '\n');

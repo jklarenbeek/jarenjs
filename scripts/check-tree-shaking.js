@@ -675,6 +675,13 @@ const clientEngineLeak = Object.entries(clientInputs)
   .filter(([file, info]) => /packages\/(contract|flow|app|forms|emit|refs)\//.test(file) && info.bytesInOutput > 0);
 if (clientEngineLeak.length > 0)
   throw new Error(`The client pulled an unrelated package into the bundle: ${clientEngineLeak.map(([file]) => file).join(', ')}`);
+// The calendar kernel runs only behind the seam a host installs
+// (`@jarenjs/db/temporals`): a store client carries the seam and the
+// declaration's reading, never the kernel itself.
+const clientCalendarLeak = Object.entries(clientInputs)
+  .filter(([file, info]) => /packages\/db\/src\/(temporal|temporals)\.js$/.test(file) && info.bytesInOutput > 0);
+if (clientCalendarLeak.length > 0)
+  throw new Error(`The client pulled the calendar kernel into the bundle: ${clientCalendarLeak.map(([file]) => file).join(', ')}`);
 const clientEdge = ['db', 'validate', 'formats'].filter((name) => Object.entries(clientInputs)
   .some(([file, info]) => file.includes(`packages/${name}/`) && info.bytesInOutput > 0));
 if (clientEdge.length !== 3)
