@@ -245,7 +245,11 @@ describe('an ordering that places the empty key where the index does not', () =>
     const client = await pool.connect();
     try {
       await client.query(`SET search_path TO "${schema}"`);
-      for (const { indexname, indexdef } of (await client.query("SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = $1 AND indexdef LIKE '%NULLS FIRST%'", [schema])).rows) {
+      // filtered here, not in the query: a condition on `indexdef` would let the server deparse an
+      // index of another schema another test is dropping
+      const ordered = (await client.query('SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = $1', [schema])).rows
+        .filter((/** @type {any} */ row) => String(row.indexdef).includes('NULLS FIRST'));
+      for (const { indexname, indexdef } of ordered) {
         await client.query(`DROP INDEX "${indexname}"`);
         if (!indexname.endsWith('$double')) await client.query(String(indexdef).replace(/ NULLS FIRST, rid\)$/, ')'));
       }

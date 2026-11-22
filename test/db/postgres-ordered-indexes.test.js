@@ -99,7 +99,11 @@ async function asEarlier({ pool, schema }) {
   const client = await pool.connect();
   try {
     await client.query(`SET search_path TO "${schema}"`);
-    for (const { indexname } of (await client.query("SELECT indexname FROM pg_indexes WHERE schemaname = $1 AND indexdef LIKE '%NULLS FIRST%'", [schema])).rows) {
+    // the definitions are read for this schema's indexes and filtered here: a condition on `indexdef`
+    // in the query would let the server deparse an index of another schema another test is dropping
+    const ordered = (await client.query('SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = $1', [schema])).rows
+      .filter((/** @type {any} */ row) => String(row.indexdef).includes('NULLS FIRST'));
+    for (const { indexname } of ordered) {
       await client.query(`DROP INDEX "${indexname}"`);
       const plain = EARLIER.find((sql) => sql.includes(` INDEX "${indexname}" `) || sql.includes(` INDEX ${indexname} `));
       if (plain !== undefined) await client.query(plain);
