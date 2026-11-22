@@ -10,13 +10,15 @@
  * back carries none of this module.
  */
 import { DbCompileError } from './errors.js';
-import { DOC_COLUMN, SCALAR_CODECS, planInvariants } from './ddl.js';
+import { DOC_COLUMN, SCALAR_CODECS, MANAGED_SQL_OPTIONS, planInvariants } from './ddl.js';
 import { sqlTokens } from './dialects/check-read.js';
-import { sqliteTriggerRule, triggerTableFacts, triggerEventOf } from './dialects/sqlite-trigger-rules.js';
+import { sqliteTriggerRule, triggerTableFacts, triggerEventOf, storeRuleProgram } from './dialects/sqlite-trigger-rules.js';
 import { foldIdentifier } from './invariants.js';
 import { MODEL_VERSION, IDENTIFIER } from './engine-metadata.js';
 import { loss, reportLossyType } from './introspect.js';
 import { setObjectMember } from '@jarenjs/core/object';
+import { canonicalizeJson } from '@jarenjs/json/canonical';
+import { comparableDeclaredSql } from './schema-sql.js';
 
 /**
  * The column layout an entity table is read back as when its triggers
@@ -195,6 +197,7 @@ function answer(mapped, reasons, layouts) {
         + 'it references a column layout, which declares no relation'));
       return false;
     },
+    storeRules,
     /** @param {string} table @param {string} left @param {string} right @param {(row: any) => void} add */
     keepsJoin(table, left, right, add) {
       if (!layouts.has(left) && !layouts.has(right)) return true;
@@ -204,12 +207,123 @@ function answer(mapped, reasons, layouts) {
   };
 }
 
+const OPS = ['insert', 'update', 'delete'];
+
+/**
+ * The database rules a table the store owns holds as its own programs
+ * (`_jaren_rule_<length>_<table>_<op>`), read back on SQLite: each program's
+ * checks read as candidate rules (`storeRuleProgram`), and the candidates kept
+ * only where `planInvariants` over the derived model with them plans exactly
+ * the programs the table holds — every one of them, compared formatting
+ * aside as the open compares them. A table is read whole or not at all (one
+ * rule spans a program per operation, and a program holds every rule of its
+ * operation); one that is not keeps its programs `unmapped-object` rows, with
+ * the reason. A program on any other table, and another engine's, is not
+ * read back.
+ * @param {any} dialect @param {any} schema
+ * @param {Record<string, any>} entities - the entities derived so far, by table
+ * @returns {Map<string, { invariants: any[], programs: string[] } | { reason: string, programs: string[] }>}
+ */
+function storeRules(dialect, schema, entities) {
+  /** @type {Map<string, any[]>} */
+  const byTable = new Map();
+  for (const object of schema.objects) {
+    if (object.type !== 'trigger' || !String(object.name).startsWith('_jaren_rule_')) continue;
+    byTable.set(object.owner, [...(byTable.get(object.owner) ?? []), object]);
+  }
+  /** @type {Map<string, any>} */
+  const out = new Map();
+  if (dialect.name !== 'sqlite') return out;
+  /** The codec of a derived entity's member, by its column. @param {string} table @param {string} physical */
+  const codecOf = (table, physical) => {
+    const node = Object.hasOwn(entities, table) ? entities[table].schema?.properties?.[physical] : undefined;
+    const types = node === undefined ? [] : Array.isArray(node.type) ? node.type.filter((/** @type {string} */ type) => type !== 'null') : [node.type];
+    return types.length === 1 && node['x-entity']?.relation === undefined ? SCALAR_CODECS.get(types[0]) ?? null : null;
+  };
+  for (const [table, programs] of byTable) {
+    const names = programs.map((program) => program.name);
+    const refuse = (/** @type {string} */ reason) => out.set(table, { reason, programs: names });
+    const entity = Object.hasOwn(entities, table) ? entities[table] : undefined;
+    // a program on a table not laid out as the store owns it (a document column beside the mapped
+    // ones) keeps the reason the reader gave it: a physical layout's programs are its own
+    const held = schema.tables.find((/** @type {any} */ candidate) => candidate.name === table);
+    if (entity === undefined || entity.physical !== undefined
+      || !held?.columns.some((/** @type {any} */ column) => column.name === DOC_COLUMN)) continue;
+    /** Each rule's operations, assertion, and update guard, in the order the programs list them. @type {Map<string, any>} */
+    const rules = new Map();
+    /** @type {string[]} */
+    let order = [];
+    let reason = null;
+    for (const program of [...programs].sort((a, b) => OPS.indexOf(storeOp(a.name, table)) - OPS.indexOf(storeOp(b.name, table)))) {
+      const read = storeRuleProgram(String(program.sql),
+        (record, physical) => { const codec = codecOf(table, physical); return codec === null || !IDENTIFIER.test(physical) ? null : { path: `$.${record}.${physical}`, codec }; },
+        (target, physical) => (codecOf(target, physical) === null ? null : physical));
+      if ('reason' in read) { reason = `'${program.name}': ${read.reason}`; break; }
+      let previous = -1;
+      const listed = read.checks.map((check) => check.rule);
+      for (const check of read.checks) {
+        const known = rules.get(check.rule);
+        const rule = known ?? { on: new Set(), assert: check.assert, columns: [], guarded: undefined };
+        if (canonicalizeJson(rule.assert) !== canonicalizeJson(check.assert) || rule.on.has(read.op)) { reason = `the rule '${check.rule}' reads two ways`; break; }
+        rule.on.add(read.op);
+        if (read.op === 'update') { rule.columns = read.columns; rule.guarded = check.guarded; }
+        rules.set(check.rule, rule);
+        // the declaration order, merged from each program's: an unseen rule after the last one this program
+        // lists before it, else before the first one it lists after it, else last — the order of two rules no
+        // program shares is not recorded, and plans the same programs either way
+        if (!order.includes(check.rule)) {
+          const next = previous >= 0 ? -1 : listed.slice(listed.indexOf(check.rule) + 1).map((rule) => order.indexOf(rule)).find((at) => at >= 0) ?? -1;
+          const at = previous >= 0 ? previous + 1 : next >= 0 ? next : order.length;
+          order = [...order.slice(0, at), check.rule, ...order.slice(at)];
+        }
+        previous = order.indexOf(check.rule);
+      }
+      if (reason !== null) break;
+    }
+    if (reason !== null) { refuse(reason); continue; }
+    const invariants = order.map((name) => {
+      const rule = rules.get(name);
+      return { name, on: OPS.filter((op) => rule.on.has(op)),
+        ...(rule.on.has('update') && rule.columns.length > 0 ? { columns: rule.columns } : rule.on.has('update') && !rule.guarded ? { when: 'assigned' } : {}),
+        enforcement: 'database', assert: rule.assert };
+    });
+    /** @type {Record<string, any>} */
+    const model = {};
+    for (const [name, other] of Object.entries(entities)) {
+      const { invariants: _ignored, ...rest } = other;
+      setObjectMember(model, name, name === table ? { ...rest, invariants } : rest);
+    }
+    /** @type {any[]} */
+    let planned;
+    try { planned = planInvariants({ $model: MODEL_VERSION, entities: model }, { dialect }).filter((item) => item.owner === table); }
+    catch (error) {
+      if (!(error instanceof DbCompileError)) throw error;
+      refuse(`the rules its programs read as are refused: ${/** @type {any} */ (error).reason ?? error.message}`);
+      continue;
+    }
+    const comparable = (/** @type {string} */ sql) => comparableDeclaredSql(sql, MANAGED_SQL_OPTIONS);
+    const same = planned.length === programs.length && planned.every((item) => {
+      const held = programs.find((program) => program.name === item.name);
+      try { return held !== undefined && comparable(String(held.sql)) === comparable(item.sql); }
+      catch { return false; }
+    });
+    if (!same) { refuse('its programs are not the text the rules they read as plan (a hand edit, or a rule the reader reads otherwise)'); continue; }
+    out.set(table, { invariants, programs: names });
+  }
+  return out;
+}
+
+/** The operation a store program's name ends in, after its table. @param {string} name @param {string} table */
+const storeOp = (name, table) => name.slice(`_jaren_rule_${table.length}_${table}_`.length).replace(/_of_.*$/, '');
+
 /**
  * The SQLite trigger reader. Pass it as introspection's `triggers` option:
  * each application trigger whose CREATE text is one of the families the rule
  * lowering expresses exactly is read back as that rule, a `trigger-rule` row
  * naming what the rule does not carry, and every other one keeps its
- * `unmapped-object` row with the `reason` it is not read back.
+ * `unmapped-object` row with the `reason` it is not read back. A table laid
+ * out as the store owns it reads its own rule programs back as the rules
+ * that plan them (`storeRules`).
  * @type {Readonly<{ read: (dialect: any, schema: any, joinTables: Set<string>) => ReturnType<typeof answer> }>}
  */
 export const sqliteTriggers = Object.freeze({ read: readTriggerRules });

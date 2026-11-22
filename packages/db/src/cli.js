@@ -361,6 +361,8 @@ async function commandPlan(options) {
     }
     fromModel = readJson(snapshotFile, 'snapshot');
     toModel = await loadDocument(options.model, 'model', 'model');
+    // nothing is planned, so no from-shape is asserted of the store: a store a
+    // written plan has not been applied to yet is behind its snapshot, rightly
     if (modelIdentity(fromModel) === modelIdentity(toModel)) {
       console.log(`no change — the model matches its snapshot (${snapshotFile}); nothing to plan`);
       return;

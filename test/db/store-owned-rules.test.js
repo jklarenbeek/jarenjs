@@ -252,11 +252,17 @@ describe('the migration planner installs, replaces and drops a store-owned layou
       const changed = reordered({ $lt: ['$.new.startsAt', '$.new.endsAt'] });
       const planned = new Map(planInvariants(changed, { dialect }).map((item) => [`${item.type} ${item.name}`, item.sql]));
       const steps = statements(planModelMigration(bookingModel(), changed, { dialect, id: 'reorder' }).migration);
-      const replaced = name === 'sqlite' ? ['insert', 'update'].map((op) => `trigger _jaren_rule_7_Booking_${op}`)
-        : ['insert', 'update'].flatMap((op) => [`function _jaren_rule_7_Booking_${op}`, `trigger _jaren_rule_7_Booking_${op}`]);
-      assert.deepEqual(steps.slice(-replaced.length), replaced.map((key) => planned.get(key)));
-      assert.equal(steps.length, replaced.length * 2);
-      assert.ok(steps.slice(0, replaced.length).every((sql) => sql.startsWith('DROP ')), steps.join('\n'));
+      if (name === 'sqlite') {
+        const replaced = ['insert', 'update'].map((op) => `trigger _jaren_rule_7_Booking_${op}`);
+        assert.deepEqual(steps.slice(-replaced.length), replaced.map((key) => planned.get(key)));
+        assert.equal(steps.length, replaced.length * 2);
+        assert.ok(steps.slice(0, replaced.length).every((sql) => sql.startsWith('DROP ')), steps.join('\n'));
+      }
+      else {
+        // its triggers stay as they are: each function alone is replaced in place, no trigger dropped
+        assert.deepEqual(steps, ['insert', 'update'].map((op) => /** @type {string} */ (planned.get(`function _jaren_rule_7_Booking_${op}`))
+          .replace(/^CREATE FUNCTION /, 'CREATE OR REPLACE FUNCTION ')));
+      }
       assert.ok(!steps.some((sql) => sql.includes('_delete')), 'the delete program is unchanged');
     });
 

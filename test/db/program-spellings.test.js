@@ -217,7 +217,8 @@ describe('installed programs on PostgreSQL', () => {
       // a text no release planned — a blank line in the source — is refused as before
       await pool.query(fn.sql.replace(/^CREATE FUNCTION /, 'CREATE OR REPLACE FUNCTION ').replace('BEGIN', 'BEGIN\n'));
       await assert.rejects(opened(), { code: 'JD0002', docPath: '/entities/ByKey', message: "JD0002: entity 'ByKey': the existing table does not match the declared "
-        + "model (invariant trigger '_jaren_rule_5_ByKey_insert' is missing or changed (function.source); apply an explicit migration); reshaping a live "
+        + "model (invariant trigger '_jaren_rule_5_ByKey_insert' is missing or changed (function.source); apply an explicit migration (planProgramUpgrade's "
+        + "repair: ['ByKey._jaren_rule_5_ByKey_insert'] plans the link that reinstalls it)); reshaping a live "
         + 'database is the migration story, and nothing was altered at /entities/ByKey' });
     }));
 
@@ -233,7 +234,8 @@ describe('installed programs on PostgreSQL', () => {
       finally { await store.close(); }
       await pool.query(items[0].sql.replace(/^CREATE FUNCTION /, 'CREATE OR REPLACE FUNCTION ').replace('BEGIN', 'BEGIN\n'));
       await assert.rejects(openStore(model, { driver: driver(), adopt: true }), { code: 'JD0002',
-        message: "JD0002: physical 'child': invariant trigger '_jaren_rule_5_child_insert' is missing or changed (function.source); apply an explicit migration" });
+        message: "JD0002: physical 'child': invariant trigger '_jaren_rule_5_child_insert' is missing or changed (function.source); apply an explicit migration "
+        + "(planProgramUpgrade's repair: ['child._jaren_rule_5_child_insert'] plans the link that reinstalls it)" });
     }));
 });
 

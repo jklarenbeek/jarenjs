@@ -2043,20 +2043,27 @@ export interface ProgramUpgradeOptions {
    * plans a link back, after which the release that planned it opens the
    * store. */
   spelling?: number;
+  /** The programs to reinstall over a hand edit, by `<table>.<program>`:
+   * each one the open refuses as missing or changed. A name that is no such
+   * program refuses the plan (`JD0013`); a drift not named still refuses it
+   * (`JD0002`). */
+  repair?: string[];
 }
 export interface ProgramUpgradePlan {
   /** A link from the model to itself; no step when the programs are this
    * release's. A physical layout's carries its preservation plan. */
   migration: ExactMigrationDocument;
-  /** `<table>.<program>`: each program the link replaces, and each one the
+  /** `<table>.<program>`: each program the link replaces, each one the
    * model plans on a table that holds none of it — a planned migration
-   * installs those (MIGRATION-FORMAT §9), not this link. */
-  report: { upgraded: string[]; absent: string[] };
+   * installs those (MIGRATION-FORMAT §9), not this link, unless `repair`
+   * names one — and each drifted one `repair` names, which the link
+   * reinstalls. */
+  report: { upgraded: string[]; absent: string[]; repaired: string[] };
 }
 /** Plan the reviewed link that replaces the database rules' programs a
  * database holds as an earlier release planned them, read from the catalog
  * (MIGRATION-FORMAT §3); a program holding a text no release planned refuses
- * the plan (`JD0002`, naming each).
+ * the plan (`JD0002`, naming each) unless `repair` names it.
  * A value on a synchronous connection, a promise on an asynchronous one. */
 export declare function planProgramUpgrade(connection: unknown, model: unknown,
   options?: ProgramUpgradeOptions): ProgramUpgradePlan | Promise<ProgramUpgradePlan>;
@@ -2077,6 +2084,9 @@ export interface MigrationStatusOptions {
   /** Reference driver required by borrowed model-only comparison. */
   shadowDriver?: Driver;
   registerFunctions?: (connection: unknown) => unknown;
+  /** The host's declared index-expression functions, which the model's
+   * shape is planned with. */
+  expressions?: Record<string, unknown>;
   signal?: AbortSignal;
   deadline?: number;
   runtime?: Partial<Runtime>;

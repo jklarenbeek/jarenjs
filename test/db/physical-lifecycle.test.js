@@ -160,7 +160,9 @@ it('fixture failure closes its owned handle and leaves primary bytes and history
 it('borrowed model-only status needs an independent reference driver and ownership targets cannot mix', async () => fixture(async (db) => {
   seed(db);
   assert.throws(() => migrationStatus({ connection: db }, [], { model }), /shadowDriver/);
-  assert.equal((await migrationStatus({ connection: db }, [], { model, shadowDriver: driver })).upToDate, false);
+  // the layout is read by its shape, as its open adopts it: the application's own spelling of its table is no drift
+  assert.deepEqual(await migrationStatus({ connection: db }, [], { model, shadowDriver: driver }),
+    { applied: [], pending: [], drift: null, upToDate: true, baseline: null });
   for (const target of [{ connection: db, driver }, { connection: db, path: ':memory:' }, { connection: db, busyTimeout: 0 }, { connection: {} }])
     assert.throws(() => migrate(target, [], { baseline: model, shadow: false }), /migration target/);
   assert.throws(() => migrate({ connection: db }, [document('pending')], { baseline: model }), /independent driver/);

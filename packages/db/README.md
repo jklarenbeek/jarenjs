@@ -1458,7 +1458,10 @@ an ON DELETE action the model has no word for (anything but `cascade`,
 `restrict` and `setNull`), to a table that is not an entity — is an
 `unmapped-constraint` row and stays out of the model. `strict: true` refuses rather
 than answering a partial model. The rule programs of a store-owned entity
-([MODEL-FORMAT §13.4](docs/MODEL-FORMAT.md#134-database-enforcement)) are
+([MODEL-FORMAT §13.4](docs/MODEL-FORMAT.md#134-database-enforcement)) are read
+back on SQLite with the trigger reader (`introspect({ triggers: sqliteTriggers })`)
+as the `invariants` that plan exactly the programs the table holds; without the
+reader, on PostgreSQL, and where they read otherwise they are
 reported as `unmapped-object` rows and left as they are: the derived model
 declares no `invariants`, so it neither opens over that table (`JD0002`, an
 undeclared trigger) nor migrates to the authored model (the plan's
@@ -1480,8 +1483,12 @@ expressions })` reads its key back by the declarations. An index no model
 could declare — over any other expression, an unmapped column or the row identity; with an
 `INCLUDE` column, an operator class, a collation or a key order of its own;
 whose name another planned object already takes with ASCII case folded —
-and every collection's partial index is reported as `unmapped-index`,
-never derived as an index it is not. A collection's declared interval comes
+is reported as `unmapped-index`, never derived as an index it is not. A
+collection's partial index comes back with its `where` read as an entity's
+is, over the top-level members of one scalar type the collection maps,
+together with the indexes beside it (another kind of its member on
+PostgreSQL, a container key on SQLite), where the condition renders to
+exactly what the index holds; any other one is reported as `unmapped-index`. A collection's declared interval comes
 back as its `intervals` entry, read from the one CHECK the store writes for
 it, the span's bounds required and typed `integer`; a collection whose
 derived column the store writes (the mapping of PostgreSQL, and of a SQLite

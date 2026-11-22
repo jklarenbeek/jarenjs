@@ -355,9 +355,10 @@ function looksLikeCollection(dialect, table, temporalHooks) {
  * @param {any} table
  * @param {Map<string, { segments: import('./dialect.js').JsonPathSegment[] }>} paths - the members by their generated columns
  * @param {{ type: string, name: string, owner: string, sql: string | null }[]} objects - the schema's objects
+ * @param {Map<string, { rendered: string } | string>} conditions - each conditional index's condition read back, or why not
  * @returns {{ columns: Set<string>, triggers: Set<string>, indexes: Set<string> }}
  */
-function containerKeysHeld(dialect, table, paths, objects) {
+function containerKeysHeld(dialect, table, paths, objects, conditions) {
   const held = { columns: new Set(), triggers: new Set(), indexes: new Set() };
   if (dialect.containerKey === undefined) return held;
   const untyped = dialect.typeFor(undefined, 'generated');
@@ -369,10 +370,11 @@ function containerKeysHeld(dialect, table, paths, objects) {
       type: comparable(column.type) === comparable(untyped) ? untyped : column.type }];
   });
   const indexes = table.indexes.flatMap((/** @type {any} */ index) => {
-    if (!index.unique || index.partial) return [];
-    const columns = kindKeyedColumns(dialect, table, index, paths) ?? index.columns;
+    const condition = conditions.get(index.name);
+    if (!index.unique || typeof condition === 'string') return [];
+    const columns = kindKeyedColumns(dialect, table, index, paths, condition?.rendered) ?? index.columns;
     return columns.some((/** @type {string | null} */ column) => column === null || !paths.has(column)) ? []
-      : [{ name: index.name, unique: true, columns, declared: {} }];
+      : [{ name: index.name, unique: true, columns, declared: {}, ...(condition === undefined ? {} : { where: condition.rendered }) }];
   });
   const planned = containerKeysOf(dialect, table.name, indexes, generated);
   const same = (/** @type {string | null | undefined} */ have, /** @type {string} */ want) =>
@@ -413,9 +415,11 @@ function containerKeysHeld(dialect, table, paths, objects) {
  * @param {any} table
  * @param {Map<string, { type: string | string[] | undefined, segments: import('./dialect.js').JsonPathSegment[], open: boolean,
  *   holdsEvery?: true }>} paths - the members by their generated columns; a folded type is written back
+ * @param {Map<string, { rendered: string } | string>} conditions - each conditional index's condition read back, or why not
+ * @param {{ name: string, physical: string, codec: string }[]} readable - the members a condition reads
  * @returns {Set<string>} the names of the indexes read so
  */
-function kindIndexesOf(dialect, table, paths) {
+function kindIndexesOf(dialect, table, paths, conditions, readable) {
   /** @type {Set<string>} */
   const read = new Set();
   /** The scalar kinds read beside an index over a column that holds every kind. @type {Map<any, Set<string>>} */
@@ -424,12 +428,14 @@ function kindIndexesOf(dialect, table, paths) {
   const doc = dialect.quoteIdentifier(DOC_COLUMN);
   for (const index of table.indexes) {
     const entries = index.columns.map((/** @type {string | null} */ column) => (column === null ? undefined : paths.get(column)));
-    if (index.partial || entries.length === 0 || entries.some((/** @type {any} */ entry) => entry === undefined)
-      || (!index.unique && (entries.length !== 1 || entries[0].open))) continue;
+    const condition = conditions.get(index.name);
+    if (typeof condition === 'string' || entries.length === 0 || entries.some((/** @type {any} */ entry) => entry === undefined)
+      || (!index.unique && (entries.length !== 1 || entries[0].open || condition !== undefined))) continue;
     /** The kind each member of an index beside this one is keyed at, `null` for its column. */
     const matched = [];
     for (const beside of table.indexes) {
-      if (beside === index || beside.partial || beside.unique !== index.unique || beside.columns.length !== entries.length) continue;
+      if (beside === index || beside.partial !== index.partial || beside.unique !== index.unique || beside.columns.length !== entries.length
+        || condition !== undefined && !holdsCondition(dialect, beside, condition.rendered, readable)) continue;
       const kinds = beside.columns.map((/** @type {string | null} */ column, /** @type {number} */ at) => {
         if (column !== null) return column === index.columns[at] ? null : undefined;
         const entry = entries[at];
@@ -492,9 +498,10 @@ function kindIndexesOf(dialect, table, paths) {
  * @param {any} table
  * @param {{ name: string, unique: boolean, columns: (string | null)[], sql: string | null }} index
  * @param {Map<string, { segments: import('./dialect.js').JsonPathSegment[] }>} paths - by column
+ * @param {string} [where] - the condition a conditional index was read back by
  * @returns {string[] | null}
  */
-function kindKeyedColumns(dialect, table, index, paths) {
+function kindKeyedColumns(dialect, table, index, paths, where = undefined) {
   const at = index.columns.indexOf(null);
   if (!index.unique || at <= 0 || dialect.kindKeyTerm === undefined || index.sql === null) return null;
   const columns = /** @type {string[]} */ (index.columns.slice(0, at));
@@ -509,7 +516,7 @@ function kindKeyedColumns(dialect, table, index, paths) {
   });
   const held = comparableDeclaredSql(index.sql);
   return [termsOf(false), termsOf(true)].some((terms) => terms.length > 0
-    && held === comparableDeclaredSql(dialect.ddl.createIndex({ name: index.name, table: table.name, columns, unique: true, terms }))) ? columns : null;
+    && held === comparableDeclaredSql(dialect.ddl.createIndex({ name: index.name, table: table.name, columns, unique: true, terms, where }))) ? columns : null;
 }
 
 /** The schema type each kind an index beside a declared one seeks reads back as. */
@@ -596,7 +603,28 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
       ...(type === undefined && comparable(column.type) === comparable(dialect.typeFor(undefined, 'generated')) ? { holdsEvery: true } : {}) });
   }
 
-  const besides = kindIndexesOf(dialect, table, paths);
+  // a conditional index's condition, read back as an entity's is over the
+  // members a condition may read (`ddl.js`: a top-level member of one
+  // scalar type the collection maps to a generated column), and held by
+  // the index exactly as the open compares it — or why not
+  /** The type each column a condition may read is read at. @type {Map<string, string>} */
+  const conditionTypes = new Map();
+  const conditionColumns = [...paths].flatMap(([column, entry]) => {
+    const codec = typeof entry.type === 'string' ? SCALAR_CODECS.get(entry.type) : undefined;
+    const [segment, ...deeper] = entry.segments;
+    if (codec === undefined || deeper.length > 0 || !('name' in segment)) return [];
+    conditionTypes.set(column, /** @type {string} */ (entry.type));
+    return [{ name: segment.name, physical: column, codec }];
+  });
+  /** @type {Map<string, ReturnType<typeof readIndexCondition>>} */
+  const conditions = new Map();
+  for (const index of table.indexes) {
+    if (!index.partial) continue;
+    const condition = readIndexCondition(dialect, index, conditionColumns, `/collections/${table.name}/indexes`);
+    conditions.set(index.name, typeof condition === 'string' || holdsCondition(dialect, index, condition.rendered, conditionColumns)
+      ? condition : 'the stored condition does not compare equal to the one the derived index plans');
+  }
+  const besides = kindIndexesOf(dialect, table, paths, conditions, conditionColumns);
   // a column that holds every kind, typed once the indexes beside it are read
   for (const column of untyped) {
     const { type } = /** @type {any} */ (paths.get(column.name));
@@ -607,7 +635,7 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
         + (type[0] === 'array' ? 'an array, as a path read unguarded through it by an index says, and whether it lists null is not recorded'
           : 'whose container and whether it lists null are not recorded') + `, so the member is typed ${JSON.stringify(type)}`));
   }
-  const containers = containerKeysHeld(dialect, table, paths, objects);
+  const containers = containerKeysHeld(dialect, table, paths, objects, conditions);
   for (const trigger of containers.triggers) owned.add(trigger);
   for (const column of table.columns) {
     if (column.generated || column.name === KEY_COLUMN || column.name === DOC_COLUMN || column.name === identity
@@ -619,6 +647,8 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
   /** The columns a plain path index covers — what a declaration requires of an interval's bounds. @type {Set<string>} */
   const indexedColumns = new Set();
   const indexes = [];
+  /** The conditional indexes derived, each with the condition it was read by. @type {{ index: any, declared: any, condition: any }[]} */
+  const conditional = [];
   for (const index of table.indexes) {
     if (besides.has(index.name) || containers.indexes.has(index.name)) continue;
     // a declared temporal member's key columns, in the order an index over
@@ -630,16 +660,22 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
       indexes.push(declared);
       continue;
     }
-    const columns = kindKeyedColumns(dialect, table, index, paths) ?? index.columns;
-    if (index.partial || columns.some((/** @type {string | null} */ column) => column === null)) {
+    const condition = conditions.get(index.name);
+    if (typeof condition === 'string') {
+      report(loss('unmapped-index', `${table.name}.${index.name}`, condition));
+      continue;
+    }
+    const columns = kindKeyedColumns(dialect, table, index, paths, condition?.rendered) ?? index.columns;
+    if (columns.some((/** @type {string | null} */ column) => column === null)) {
       report(loss('unmapped-index', `${table.name}.${index.name}`,
-        'a partial predicate or expression term cannot be represented by an unconditional member index'));
+        'an expression term cannot be represented by a member index'));
       continue;
     }
     if (columns.length === 1 && computed.has(columns[0])) {
       const declared = { name: indexName(table.name, index.name),
         expression: computed.get(columns[0]) };
       if (index.unique) declared.unique = true;
+      if (condition !== undefined) conditional.push({ index, declared, condition });
       indexes.push(declared);
       continue;
     }
@@ -653,7 +689,8 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
       ? covered[0].path : covered.map((/** @type {any} */ entry) => entry.path) };
     if (index.unique) declared.unique = true;
     indexes.push(declared);
-    for (const column of columns) indexedColumns.add(column);
+    if (condition !== undefined) conditional.push({ index, declared, condition });
+    else for (const column of columns) indexedColumns.add(column);
   }
 
   // a declared interval: the one CHECK, under the name the store gives it,
@@ -675,6 +712,17 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
   }
   const bounds = new Set(spans.flatMap((span) => [span.start, span.end]));
   for (const column of lossy) if (!bounds.has(column.name)) reportLossyType(dialect, table, column, report);
+  // a condition was read over each member's type as its column gave it: a
+  // member typed otherwise since (an interval's bound, or a kind an index
+  // beside another one reads) renders another condition, so its index is
+  // not the one the derived model plans
+  for (const { index, declared, condition } of conditional) {
+    const read = [...condition.reads].every((column) => !bounds.has(column) && paths.get(column)?.type === conditionTypes.get(column));
+    if (read) { declared.where = condition.where; continue; }
+    indexes.splice(indexes.indexOf(declared), 1);
+    report(loss('unmapped-index', `${table.name}.${index.name}`,
+      'the partial predicate reads a member whose derived type renders another condition'));
+  }
 
   // the key: a database-allocated integer says so in its type; a text
   // one cannot say which member filled it, and the caller may
@@ -1099,6 +1147,53 @@ function conditionText(sql) {
 }
 
 /**
+ * A partial index's condition read back into the query grammar over the
+ * members `readable` maps (the stored CREATE text's where the engine keeps
+ * one, the catalog's condition where it does not), and rendered as a model
+ * declaring it renders it (`ddl.js` `indexCondition`), with the columns it
+ * reads — or why it cannot be (the `unmapped-index` detail). The entity and
+ * the collection read a condition the same way.
+ * @param {any} dialect @param {any} index
+ * @param {{ name: string, physical: string, codec: string }[]} readable - each member by its column
+ * @param {string} docPath - the pointer a refusal of the condition names
+ * @returns {{ where: any, rendered: string, reads: Set<string> } | string}
+ */
+function readIndexCondition(dialect, index, readable, docPath) {
+  const keepsText = dialect.capabilities?.declaredSqlText === true;
+  const text = keepsText ? conditionText(index.sql) : index.predicate;
+  const member = (/** @type {string} */ identifier) => {
+    const column = readable.find((c) => c.physical === identifier);
+    return column === undefined ? null : { path: modelPath([{ name: column.name }]), codec: column.codec };
+  };
+  const where = text === null ? null : keepsText ? readPredicate(text, SQLITE_PREDICATE, member)
+    : dialect.readBack?.read(text, readable, index.conforming) ?? null;
+  if (where === null) return 'the partial predicate is not one the condition reader reads back into the query grammar';
+  /** @type {Set<string>} */
+  const reads = new Set();
+  try { return { where, rendered: indexCondition(where, readable, dialect, docPath, (name) => `'${name}' is not mapped`, reads), reads }; }
+  catch { return 'the partial predicate reads back as a condition the model refuses'; }
+}
+
+/**
+ * Whether an index holds exactly the condition `rendered`, compared as the
+ * open compares it: its stored CREATE text against the same text under that
+ * condition, formatting aside, where the engine keeps one; the catalog's
+ * condition where it does not.
+ * @param {any} dialect @param {any} index @param {string} rendered
+ * @param {{ name: string, physical: string, codec: string }[]} readable
+ * @returns {boolean}
+ */
+function holdsCondition(dialect, index, rendered, readable) {
+  if (dialect.capabilities?.declaredSqlText !== true)
+    return dialect.readBack?.condition(index.predicate, rendered, readable, index.conforming) === null;
+  const text = conditionText(index.sql);
+  if (text === null) return false;
+  const head = index.sql.slice(0, index.sql.length - text.length - 'WHERE'.length);
+  try { return comparableDeclaredSql(index.sql) === comparableDeclaredSql(`${head}WHERE ${rendered}`); }
+  catch { return false; }
+}
+
+/**
  * The `indexes` entry an entity table's declared index derives, or why it
  * cannot (the `unmapped-index` detail). Its terms are columns the entity maps,
  * its name carries the table's prefix, a condition reads back into the query
@@ -1139,21 +1234,13 @@ function entityIndexOf(dialect, table, index, readable, expressions = undefined)
       + 'which are not all scalar columns the entity maps';
   else declared = { name, path: index.columns.length === 1 ? pathOf(index.columns[0]) : index.columns.map(pathOf),
     ...(index.unique ? { unique: true } : {}) };
-  const keepsText = dialect.capabilities?.declaredSqlText === true;
   /** @type {string | undefined} */
   let rendered;
   if (index.partial) {
-    const text = keepsText ? conditionText(index.sql) : index.predicate;
-    const member = (/** @type {string} */ identifier) => {
-      const column = readable.find((c) => c.physical === identifier);
-      return column === undefined ? null : { path: pathOf(column.name), codec: column.codec };
-    };
-    const where = text === null ? null : keepsText ? readPredicate(text, SQLITE_PREDICATE, member)
-      : dialect.readBack?.read(text, readable, index.conforming) ?? null;
-    if (where === null) return 'the partial predicate is not one the condition reader reads back into the query grammar';
-    try { rendered = indexCondition(where, readable, dialect, `/entities/${table.name}/indexes`, (member) => `'${member}' is not mapped`); }
-    catch { return 'the partial predicate reads back as a condition the model refuses'; }
-    declared.where = where;
+    const condition = readIndexCondition(dialect, index, readable, `/entities/${table.name}/indexes`);
+    if (typeof condition === 'string') return condition;
+    rendered = condition.rendered;
+    declared.where = condition.where;
   }
   if (term !== undefined) {
     // the key the derived entry plans, compared with the one the catalog holds
@@ -1402,6 +1489,19 @@ export function introspectModel(connection, options = undefined) {
       reportUnguardedNumbers(dialect, table, add);
     }
     declareEdges(dialect, entities, schema.tables, rules === null ? edges : edges.filter((edge) => rules.keepsEdge(edge, add)), add);
+    // a table the store owns reads its own rule programs back as the rules that plan them, through the same reader
+    for (const [table, read] of rules?.storeRules(dialect, schema, entities) ?? []) {
+      if ('invariants' in read) {
+        setObjectMember(entities[table], 'invariants', read.invariants);
+        for (const program of read.programs) owned.add(program);
+        continue;
+      }
+      for (const row of report) {
+        if (row.code !== 'unmapped-object' || !read.programs.includes(row.object)) continue;
+        row.reason = `the store names a declared rule's program so, and it is not read back as one: ${read.reason}`;
+        row.detail = `${row.detail.split('; it is not read back as a database rule:')[0]}; it is not read back as a database rule: ${row.reason}`;
+      }
+    }
     for (let i = report.length - 1; i >= 0; i--)
       if (report[i].code === 'unmapped-object' && owned.has(report[i].object)) report.splice(i, 1);
 

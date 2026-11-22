@@ -22,8 +22,11 @@ DDL is explicitly `null`. `introspectModel()` also returns an `inventory` with
 `derived` or `preserve` dispositions. A disposition never authorizes a drop.
 Application triggers appear as `unmapped-object` losses with their owner and SQL,
 except a SQLite trigger that the `triggers` option's reader reads back as the
-database rule it equals (§13.6), which is a `trigger-rule` row; the rule programs of a store-owned entity (§13.4) are
-`unmapped-object` losses too: the derived model
+database rule it equals (§13.6), which is a `trigger-rule` row. The rule
+programs of a store-owned entity (§13.4) are read back with the same reader on
+SQLite, as the `invariants` that plan exactly the programs the table holds
+(§13.6); without the reader, on PostgreSQL, and where they read otherwise
+they are `unmapped-object` losses too: the derived model
 declares no `invariants`, so it neither opens over that table (`JD0002`, an
 undeclared trigger) nor migrates to the authored model (the plan's `CREATE`s
 meet the installed programs and fail `JD0023`); the model that declares the
@@ -46,9 +49,10 @@ schema. A number column of an entity or a join table whose type holds a `NaN`
 Repeated inspection is read-only; `strict: true` refuses losses with `JD0002`.
 
 The loss rows are the contract for what the model vocabulary cannot say;
-introspection never infers intent to make one go away. A collection's partial
-index, an entity's partial index whose condition does not read back into the
-query grammar, a direct SQL expression index and a CHECK outside the complete
+introspection never infers intent to make one go away. A partial index — a
+collection's or an entity's — whose condition does not read back into the
+query grammar, or reads back as a condition the index does not hold exactly
+as the open compares it, a direct SQL expression index and a CHECK outside the complete
 scalar enum grammar stay sorted loss rows: such a predicate or expression has
 no equivalent model declaration, and emitting an unconditional index in its
 place would strengthen what the database promises. A boolean stored as an
@@ -5558,7 +5562,8 @@ order, each with the `drop` statement that removes it; for a physical layout
 an explicit migration installs them, one `ddl` step each (MIGRATION-FORMAT,
 "Installing database rules"), a store-owned layout's are the ones its table
 is created with, and opening verifies those programs (`JD0002` names what is
-missing or changed). A program that equals what an earlier release planned
+missing or changed, and the route out: `planProgramUpgrade`'s `repair` plans
+the reviewed link that reinstalls a named program). A program that equals what an earlier release planned
 for the model is not changed: the store opens, the program keeps judging
 writes as that release's did — on PostgreSQL, before the probe's lock, its
 probes lock nothing — and the store reports it in `store.earlierPrograms`
@@ -5571,7 +5576,9 @@ planned is refused as before. One document plans for both engines:
   OF` trigger per distinct `columns` set (`_jaren_rule_<length>_<table>_<op>`,
   `…_update_of_<hash>`; two sets whose hash meets refuse at planning). A
   failure is `RAISE(ABORT, 'jaren invariant:<rule>')`. Opening compares each
-  trigger's stored CREATE text, and refuses a UTF-16 database (`JD0002`),
+  trigger's stored CREATE text with the planned one, formatting and comments
+  aside, quoted bytes exact — for a layout the store owns and a physical one
+  alike — and refuses a UTF-16 database (`JD0002`),
   whose `BINARY` order is not code point order.
 - **PostgreSQL** — per program, a PL/pgSQL trigger function and the row trigger
   that calls it: two items, `type: "function"` then `type: "trigger"`, because a
@@ -5683,7 +5690,11 @@ requiring preservation dispositions.
 
 An application that guards its SQLite tables with hand-written triggers can
 read them back as declared rules, through the reader its own subpath holds, so
-a store that never does carries none of it:
+a store that never does carries none of it. **The reader reads SQLite trigger
+programs only: on PostgreSQL every trigger, an application's PL/pgSQL program
+and a store-owned table's rule program alike, stays an `unmapped-object` row
+whose `reason` is "the reader reads SQLite trigger programs, and this engine's
+are not read back", and the derived model declares no rule for it.**
 
 ```js
 import { sqliteTriggers } from '@jarenjs/db/trigger-rules';
@@ -5823,6 +5834,26 @@ On PostgreSQL the same rules lower to PL/pgSQL functions and row triggers
 (`test/db/postgres-trigger-rules.test.js` replays the streams there).
 PostgreSQL's own trigger programs are not read back: each stays an
 `unmapped-object` row, whose `reason` says so where the reader is passed.
+
+**A store-owned table's own programs.** With the reader, a table laid out as
+the store owns it (§13.4) reads its `_jaren_rule_*` programs back as the
+rules that plan them, so a model read after a reviewed migration installed
+them keeps its rules. Each program's checks are read as candidate rules —
+the rule by its `jaren invariant:<rule>` text, its operations by the programs
+that hold it, an update check without the assignment guard as `when:
+"assigned"`, and its assertion out of the lowering's spelling — and the
+candidates are kept only where `planInvariants` over the derived model with
+them plans exactly the programs the table holds, every one of them, compared
+as the open compares them (formatting and comments aside). The table's
+entity then declares them as `invariants`, and its programs leave the
+report. The reading is all or nothing per table: a hand edit, an assertion
+the reader does not read (arithmetic, a `$seq` that lists `null`), or a rule
+over a member the derivation types otherwise (a `boolean` member, whose
+`INTEGER` column reads back as an `integer` one) keeps every program of the
+table an `unmapped-object` row, whose `reason` names it. The order of two
+rules no program shares is not recorded: they read back in an order that
+plans the same programs. On PostgreSQL these programs stay `unmapped-object`
+rows, as every trigger there does.
 
 ## Native column mutation documents
 

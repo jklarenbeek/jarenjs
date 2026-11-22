@@ -401,11 +401,23 @@ export function physicalOrderable(column, dialect) {
 }
 
 /** A physical layout's rule trigger, on an engine that keeps its CREATE text
- * (SQLite), compared with the planned one as its open compares it: exactly,
- * but for surrounding blanks and a closing semicolon.
+ * (SQLite), compared with the planned one as a store-owned table's is
+ * (`ddl.js` compares it under `MANAGED_SQL_OPTIONS`, whose one policy orders a
+ * CREATE TABLE's columns, which a trigger has none of): token for token,
+ * quoted bytes exact, formatting and comments aside, and a closing
+ * semicolon. A text the comparison cannot read is not the planned one.
  * @param {string} want @param {string | null | undefined} have @returns {boolean} */
 export function sameTriggerText(want, have) {
-  return typeof have === 'string' && have.trim().replace(/;$/, '') === want.trim().replace(/;$/, '');
+  if (typeof have !== 'string') return false;
+  const comparable = (/** @type {string} */ sql) => comparableDeclaredSql(sql.trim().replace(/;$/, ''));
+  try { return comparable(have) === comparable(want); }
+  catch { return false; }
+}
+
+/** The route out of a refused rule program: the reviewed link that reinstalls it.
+ * @param {string} table @param {string} program @returns {string} */
+function repairRoute(table, program) {
+  return `apply an explicit migration (planProgramUpgrade's repair: ['${table}.${program}'] plans the link that reinstalls it)`;
 }
 
 /** The fields at which an installed program departs from the planned one.
@@ -459,7 +471,7 @@ export function verifyRulePrograms(connection, table, triggers, fail, { installe
     for (const { trigger, changed, spelling } of heldPrograms(rows, table, programs, earlier)) {
       if (spelling === CURRENT_SPELLING) continue;
       if (spelling < 0)
-        return `invariant trigger '${trigger.name}' is missing or changed${changed.length ? ` (${changed.join(', ')})` : ''}; apply an explicit migration`;
+        return `invariant trigger '${trigger.name}' is missing or changed${changed.length ? ` (${changed.join(', ')})` : ''}; ${repairRoute(table, trigger.name)}`;
       held.push({ program: trigger.name, spelling });
     }
     const owned = rows.filter((row) => row.owner === table && row.kind !== 'table');
@@ -581,7 +593,7 @@ export function verifyPhysical(connection, mapping, schema, programs = undefined
     // a deparsing server answers with its own text, read field by field below
     if (trigger.type === 'function' || trigger.program !== undefined) continue;
     const actual = schema.objects.find((o) => o.type === 'trigger' && o.name === trigger.name);
-    if (!actual || !sameTriggerText(trigger.sql, actual.sql)) fail(`invariant trigger '${trigger.name}' is missing or changed; apply an explicit migration`);
+    if (!actual || !sameTriggerText(trigger.sql, actual.sql)) fail(`invariant trigger '${trigger.name}' is missing or changed; ${repairRoute(mapping.table, trigger.name)}`);
   }
   const verified = verifyRulePrograms(connection, mapping.table, mapping.triggers ?? [], fail, { namespace: programs, spelled: mapping.triggersAt });
   const read = mapping.kind === 'view'

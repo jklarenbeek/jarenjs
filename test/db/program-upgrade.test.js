@@ -124,7 +124,7 @@ const exec = (file, sql) => {
   try { raw.exec(sql); } finally { raw.close(); }
 };
 const NONE = (/** @type {any} */ model) => ({ migration: { $migration: '0.2', id: `programs-1-${hashOf(model).slice(0, 8)}`, from: hashOf(model), to: hashOf(model),
-  identity: migrationIdentity(model, model), steps: [] }, report: { upgraded: [], absent: [] } });
+  identity: migrationIdentity(model, model), steps: [] }, report: { upgraded: [], absent: [], repaired: [] } });
 
 describe('planProgramUpgrade on SQLite', () => {
   it('plans no step, its programs reading alike at every spelling, and plans none again', async () => {
@@ -134,7 +134,7 @@ describe('planProgramUpgrade on SQLite', () => {
     });
   });
 
-  it('compares each program as the open does: formatting aside where the store owns the table, exactly for a physical layout', async () => {
+  it('compares each program as the open does: formatting aside, on a layout the store owns and a physical one alike', async () => {
     const [insert] = planInvariants(ownedModel, { dialect: sqliteDialect });
     await withSqliteStore(ownedModel, async (_, file) => {
       exec(file, `${insert.drop}; ${insert.sql.replace(' BEGIN ', '\n  BEGIN\n    ')}`);
@@ -143,11 +143,14 @@ describe('planProgramUpgrade on SQLite', () => {
       assert.deepEqual(await planned(file, ownedModel), NONE(ownedModel));
       exec(file, `${insert.drop}; ${insert.sql.replace('WHERE (', 'WHERE (1 AND ')}`);
       await assert.rejects(planned(file, ownedModel), { code: 'JD0002', message: "JD0002: planProgramUpgrade(): the program '_jaren_rule_5_Child_insert' on "
-        + "'Child' holds a text no release planned for this model, which a link would overwrite; restore it, or install it from planInvariants' statements, and plan again" });
+        + "'Child' holds a text no release planned for this model, which a link would overwrite; restore it, or name it in the option repair to reinstall it, and plan again" });
     });
     const [physicalInsert] = planInvariants(physicalModel, { dialect: sqliteDialect });
     await withSqliteStore(physicalModel, async (_, file) => {
       exec(file, `${physicalInsert.drop}; ${physicalInsert.sql.replace(' BEGIN ', '\n  BEGIN\n    ')}`);
+      await (await openStore(physicalModel, { driver: nodeDriver(), path: file })).close();
+      assert.deepEqual(await planned(file, physicalModel), NONE(physicalModel));
+      exec(file, `${physicalInsert.drop}; ${physicalInsert.sql.replace('WHERE (', 'WHERE (1 AND ')}`);
       await assert.rejects(planned(file, physicalModel), { code: 'JD0002', message: /the program '_jaren_rule_5_child_insert' on 'child' holds a text no release planned/ });
     });
   });
@@ -157,7 +160,7 @@ describe('planProgramUpgrade on SQLite', () => {
     await withSqliteStore(ownedModel, async (_, file) => {
       exec(file, insert.drop);
       const { migration, report } = await planned(file, ownedModel);
-      assert.deepEqual([migration.steps, report], [[], { upgraded: [], absent: ['Child._jaren_rule_5_Child_insert'] }]);
+      assert.deepEqual([migration.steps, report], [[], { upgraded: [], absent: ['Child._jaren_rule_5_Child_insert'], repaired: [] }]);
     });
   });
 
@@ -226,7 +229,7 @@ describe('planProgramUpgrade on PostgreSQL', () => {
       assert.deepEqual({ migration, report }, { migration: { $migration: '0.2', id: `programs-1-${hash.slice(0, 8)}`, from: hash, to: hash,
         identity: migrationIdentity(ownedModel, ownedModel), steps: current.map((/** @type {any} */ item) => ({ kind: 'ddl', sql: orReplace(item.sql),
           note: `replace the rule program '${item.name}' on 'Child' as this release plans it: ${LOCK_NOTE}` })) },
-      report: { upgraded: ['Child._jaren_rule_5_Child_insert', 'Child._jaren_rule_5_Child_update'], absent: [] } });
+      report: { upgraded: ['Child._jaren_rule_5_Child_insert', 'Child._jaren_rule_5_Child_update'], absent: [], repaired: [] } });
       const target = { driver: driver() };
       const options = { baseline: ownedModel, model: ownedModel, shadow: false };
       assert.deepEqual((await migrate(target, [migration], options)).applied, [migration.id]);
@@ -259,7 +262,7 @@ describe('planProgramUpgrade on PostgreSQL', () => {
       for (const item of itemsOf(physicalModel, 'Child', postgresDialect({ searchPath: schema }), 0)) await pool.query(item.sql);
       assert.deepEqual(await earlierOf(driver(), physicalModel), ['child._jaren_rule_5_child_insert:0', 'child._jaren_rule_5_child_update:0']);
       const { migration, report } = await plannedOn(driver(), physicalModel);
-      assert.deepEqual(report, { upgraded: ['child._jaren_rule_5_child_insert', 'child._jaren_rule_5_child_update'], absent: [] });
+      assert.deepEqual(report, { upgraded: ['child._jaren_rule_5_child_insert', 'child._jaren_rule_5_child_update'], absent: [], repaired: [] });
       assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.sql.slice(0, 26)), ['CREATE OR REPLACE FUNCTION', 'CREATE OR REPLACE FUNCTION']);
       assert.deepEqual(Object.entries(migration.physical.dispositions).filter(([, disposition]) => disposition === 'replace').map(([key]) => JSON.parse(key)[3]),
         ['_jaren_rule_5_child_insert()', '_jaren_rule_5_child_update()']);
@@ -283,11 +286,11 @@ describe('planProgramUpgrade on PostgreSQL', () => {
       /** @type {any} */ (added.entities.Parent).invariants = [{ name: 'known', on: ['insert'], enforcement: 'database', assert: { $gt: ['$.new.id', 0] } }];
       const { migration, report } = await plannedOn(driver(), added);
       assert.deepEqual([migration.steps.length, report], [2, { upgraded: ['Child._jaren_rule_5_Child_insert', 'Child._jaren_rule_5_Child_update'],
-        absent: ['Parent._jaren_rule_6_Parent_insert'] }]);
+        absent: ['Parent._jaren_rule_6_Parent_insert'], repaired: [] }]);
       const [fn] = itemsOf(ownedModel, 'Child', postgresDialect({ searchPath: schema }), 1);
       await pool.query(orReplace(fn.sql).replace('BEGIN', 'BEGIN\n'));
       await assert.rejects(plannedOn(driver(), ownedModel), { code: 'JD0002', message: "JD0002: planProgramUpgrade(): the program '_jaren_rule_5_Child_insert' on "
-        + "'Child' holds a text no release planned for this model, which a link would overwrite; restore it, or install it from planInvariants' statements, and plan again" });
+        + "'Child' holds a text no release planned for this model, which a link would overwrite; restore it, or name it in the option repair to reinstall it, and plan again" });
     }));
 
   it('replaces a function beside an open writer and reader of its table without waiting for either', { skip }, () =>

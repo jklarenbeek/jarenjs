@@ -775,3 +775,221 @@ function bump(parsed, owner, siblings, base) {
   return { rule: { ...base, enforcement: 'database', assert: true, effects: [{ increment: column.name }] }, owner: owner.name, targets: [],
     timing: parsed.timing, message: null };
 }
+
+/**
+ * The parenthesised tree of a token run: each `(`…`)` one nested array.
+ * `null` where the parentheses do not balance.
+ * @param {{ kind: string, value: string }[]} tokens
+ * @returns {any[] | null}
+ */
+function groupsOf(tokens) {
+  /** @type {any[][]} */
+  const stack = [[]];
+  for (const token of tokens) {
+    if (token.kind === 'symbol' && token.value === '(') { stack.push([]); continue; }
+    if (token.kind === 'symbol' && token.value === ')') {
+      if (stack.length === 1) return null;
+      const group = /** @type {any[]} */ (stack.pop());
+      stack[stack.length - 1].push(group);
+      continue;
+    }
+    stack[stack.length - 1].push(token);
+  }
+  return stack.length === 1 ? stack[0] : null;
+}
+
+/** @param {any} item @param {string} word */
+const isWordItem = (item, word) => !Array.isArray(item) && item?.kind === 'word' && item.value.toUpperCase() === word;
+/** @param {any} item @param {string} symbol */
+const isSymbolItem = (item, symbol) => !Array.isArray(item) && item?.kind === 'symbol' && item.value === symbol;
+
+/**
+ * The items of a run split at each top-level keyword or symbol (`AND`, `OR`,
+ * `,`, `;`).
+ * @param {any[]} items @param {string} at @returns {any[][]}
+ */
+function splitAt(items, at) {
+  /** @type {any[][]} */
+  const parts = [[]];
+  for (const item of items) {
+    if (isSymbolItem(item, at) || isWordItem(item, at)) parts.push([]);
+    else parts[parts.length - 1].push(item);
+  }
+  return parts;
+}
+
+/**
+ * A rule's assertion read back from the text the SQLite rule lowering wrote
+ * for it (`row-predicate.js`, trigger rendering): a candidate for the
+ * re-planning that decides, never the decision itself — a reading is kept
+ * only where the rules it gives plan exactly the stored text. `columns` the
+ * entity's columns by their physical name, with the codec each reads as;
+ * `probed` the same of a table a probe reads.
+ * @param {any[]} items - the assertion's parenthesised tree
+ * @param {(record: string, physical: string) => { path: string, codec: string } | null} member
+ * @param {(table: string, physical: string) => string | null} probed - the member a probe target's column maps
+ * @returns {any} the assertion, `undefined` for a text it does not read
+ */
+function storeAssertion(items, member, probed) {
+  /** A member read `(NEW."x" COLLATE BINARY)`, `NEW."x"` raw, or a literal; `kind` says which. @param {any[]} run */
+  const operand = (run) => {
+    if (run.length === 1 && Array.isArray(run[0])) {
+      const inner = run[0];
+      if (inner.length === 5 && isWordItem(inner[3], 'COLLATE') && isWordItem(inner[4], 'BINARY')) return reference(inner.slice(0, 3));
+      return undefined;
+    }
+    return reference(run) ?? literal(run);
+  };
+  /** @param {any[]} run */
+  const reference = (run) => {
+    if (run.length !== 3 || !(isWordItem(run[0], 'NEW') || isWordItem(run[0], 'OLD')) || !isSymbolItem(run[1], '.') || run[2]?.kind !== 'identifier') return undefined;
+    const read = member(run[0].value.toLowerCase(), run[2].value);
+    return read === null ? undefined : { kind: 'member', ...read };
+  };
+  /** @param {any[]} run */
+  const literal = (run) => {
+    if (run.length === 1 && run[0]?.kind === 'string') return { kind: 'literal', value: run[0].value.startsWith('$') ? `$${run[0].value}` : run[0].value };
+    if (run.length === 1 && isWordItem(run[0], 'NULL')) return { kind: 'literal', value: null };
+    const negative = isSymbolItem(run[0], '-');
+    const digits = run[negative ? 1 : 0];
+    if (run.length !== (negative ? 2 : 1) || digits?.kind !== 'number') return undefined;
+    const value = Number(digits.value);
+    return Number.isFinite(value) ? { kind: 'literal', value: negative ? -value : value, number: true } : undefined;
+  };
+  /** A literal beside a member of a boolean column is its stored `1` or `0`. @param {any} side @param {any} other */
+  const valueOf = (side, other) => {
+    if (side.kind === 'member') return side.path;
+    if (side.number === true && other?.codec === 'boolean') return side.value === 1 ? true : side.value === 0 ? false : undefined;
+    return side.value;
+  };
+  const EQUALITY = /** @type {const} */ ([['IS', 'NOT', '$ne'], ['IS', null, '$eq']]);
+  /** `L IS [NOT] R`, `L op R` or `L IN (…)` @param {any[]} run @returns {any} */
+  const comparison = (run) => {
+    const isAt = run.findIndex((item) => isWordItem(item, 'IS'));
+    if (isAt > 0) {
+      const negated = isWordItem(run[isAt + 1], 'NOT');
+      const key = EQUALITY.find(([, not]) => (not === 'NOT') === negated)?.[2];
+      const left = operand(run.slice(0, isAt)), right = operand(run.slice(isAt + (negated ? 2 : 1)));
+      if (left === undefined || right === undefined || key === undefined) return undefined;
+      const sides = [valueOf(left, right), valueOf(right, left)];
+      return sides.includes(undefined) ? undefined : { [key]: sides };
+    }
+    const inAt = run.findIndex((item) => isWordItem(item, 'IN'));
+    if (inAt > 0 && inAt === run.length - 2 && Array.isArray(run[inAt + 1])) {
+      const left = operand(run.slice(0, inAt));
+      if (left?.kind !== 'member') return undefined;
+      const values = splitAt(run[inAt + 1], ',').map((part) => literal(part));
+      if (values.some((value) => value === undefined)) return undefined;
+      const list = values.map((value) => valueOf(value, left));
+      return list.includes(undefined) ? undefined : { $eq: [left.path, { $seq: list }] };
+    }
+    const opAt = run.findIndex((item) => !Array.isArray(item) && item.kind === 'symbol' && COMPARISONS.has(item.value));
+    if (opAt <= 0) return undefined;
+    const key = COMPARISONS.get(run[opAt].value);
+    const left = operand(run.slice(0, opAt)), right = operand(run.slice(opAt + 1));
+    if (left === undefined || right === undefined || key === '$eq' || key === '$ne') return undefined;
+    const sides = [valueOf(left, right), valueOf(right, left)];
+    return sides.includes(undefined) ? undefined : { [key]: sides };
+  };
+  /** `EXISTS (SELECT 1 FROM "T" AS "_jaren_row" WHERE …)` @param {any[]} select @returns {any} */
+  const probe = (select) => {
+    if (!isWordItem(select[0], 'SELECT') || select[1]?.value !== '1' || !isWordItem(select[2], 'FROM') || select[3]?.kind !== 'identifier'
+      || !isWordItem(select[4], 'AS') || select[5]?.value !== '_jaren_row' || !isWordItem(select[6], 'WHERE')) return undefined;
+    const table = select[3].value;
+    /** @type {Record<string, any>} */
+    const match = {};
+    for (const condition of splitAt(select.slice(7), 'AND')) {
+      const keyed = !isWordItem(condition[0], 'NOT');
+      const run = keyed ? condition : condition.length === 2 && Array.isArray(condition[1]) ? condition[1] : null;
+      if (run === null || run[0]?.kind !== 'identifier' || run[0].value !== '_jaren_row' || !isSymbolItem(run[1], '.') || run[2]?.kind !== 'identifier') return undefined;
+      const name = probed(table, run[2].value);
+      if (name === null || Object.hasOwn(match, name)) return undefined;
+      const rest = keyed ? (isSymbolItem(run[3], '=') ? run.slice(4) : null)
+        : isWordItem(run[3], 'IS') && isWordItem(run[4], 'NOT') && isWordItem(run.at(-2), 'COLLATE') && isWordItem(run.at(-1), 'BINARY') ? run.slice(5, -2) : null;
+      const value = rest === null ? undefined : operand(rest);
+      if (value === undefined) return undefined;
+      match[name] = value.kind === 'member' ? value.path : value.value;
+    }
+    return { '$exists-row': { entity: table, match } };
+  };
+  /** One operand of a conjunction or disjunction. @param {any[]} run @returns {any} */
+  const primary = (run) => {
+    if (run.length === 1 && run[0]?.kind === 'number' && (run[0].value === '1' || run[0].value === '0')) return run[0].value === '1';
+    if (run.length === 1 && Array.isArray(run[0])) return group(run[0]);
+    if (run.length === 2 && isWordItem(run[0], 'COALESCE') && Array.isArray(run[1])) {
+      const [inner, fallback] = splitAt(run[1], ',');
+      return fallback?.length === 1 && fallback[0].value === '0' && inner.length === 1 && Array.isArray(inner[0]) ? comparison(inner[0]) : undefined;
+    }
+    if (run.length === 2 && isWordItem(run[0], 'EXISTS') && Array.isArray(run[1])) return probe(run[1]);
+    return undefined;
+  };
+  /** A parenthesised predicate. @param {any[]} inner @returns {any} */
+  const group = (inner) => {
+    if (inner.length === 1 && Array.isArray(inner[0])) return group(inner[0]);
+    if (inner.length === 2 && isWordItem(inner[0], 'NOT') && Array.isArray(inner[1])) {
+      const negated = group(inner[1]);
+      return negated === undefined ? undefined : { $not: negated };
+    }
+    const ors = splitAt(inner, 'OR');
+    if (ors.length > 1) {
+      const operands = ors.map(primary);
+      return operands.includes(undefined) ? undefined : { $or: operands };
+    }
+    const ands = splitAt(inner, 'AND');
+    // a guard: bare presence tests of the columns an absent member leaves SQL NULL, then the comparison they guard
+    const presence = (/** @type {any[]} */ run) => run.length === 6 && reference(run.slice(0, 3)) !== undefined
+      && isWordItem(run[3], 'IS') && isWordItem(run[4], 'NOT') && isWordItem(run[5], 'NULL');
+    if (ands.length === 1) return presence(ands[0]) ? { $exists: /** @type {any} */ (reference(ands[0].slice(0, 3))).path } : comparison(ands[0]);
+    if (ands.slice(0, -1).every(presence)) {
+      const last = ands[ands.length - 1];
+      return last.length === 1 && Array.isArray(last[0]) ? comparison(last[0]) ?? primary(last) : primary(last);
+    }
+    const operands = ands.map(primary);
+    return operands.includes(undefined) ? undefined : { $and: operands };
+  };
+  return primary(items);
+}
+
+/**
+ * The rule checks a store-owned table's SQLite rule program holds, read from
+ * its CREATE text as candidates (`storeAssertion`): per `SELECT RAISE(ABORT,
+ * 'jaren invariant:<rule>')` statement, the rule, whether its update check is
+ * guarded by an assignment, and its assertion — or a reason.
+ * @param {string} sql - the trigger's CREATE text
+ * @param {(record: string, physical: string) => { path: string, codec: string } | null} member
+ * @param {(table: string, physical: string) => string | null} probed
+ * @returns {{ op: string, columns: string[], checks: { rule: string, guarded: boolean, assert: any }[] } | { reason: string }}
+ */
+export function storeRuleProgram(sql, member, probed) {
+  const tokens = tokensOf(sql);
+  const items = tokens === null ? null : groupsOf(tokens);
+  if (items === null) return { reason: 'its text is not one the reader tokenizes' };
+  const begin = items.findIndex((item) => isWordItem(item, 'BEGIN'));
+  const on = items.findIndex((item) => isWordItem(item, 'ON'));
+  const head = items.slice(0, on);
+  const at = head.findIndex((item) => isWordItem(item, 'AFTER'));
+  if (begin < 0 || on < 0 || at < 0 || !isWordItem(items.at(-1), 'END')) return { reason: 'it is not an AFTER trigger the rule lowering writes' };
+  const op = String(head[at + 1]?.value ?? '').toLowerCase();
+  const columns = isWordItem(head[at + 2], 'OF') ? splitAt(head.slice(at + 3), ',').map((part) => String(part[0]?.value)) : [];
+  /** @type {{ rule: string, guarded: boolean, assert: any }[]} */
+  const checks = [];
+  for (const statement of splitAt(items.slice(begin + 1, -1), ';').filter((part) => part.length > 0)) {
+    const [select, raise, args, where, ...when] = statement;
+    const [abort, message] = Array.isArray(args) ? splitAt(args, ',') : [];
+    if (!isWordItem(select, 'SELECT') || !isWordItem(raise, 'RAISE') || !isWordItem(abort?.[0], 'ABORT') || message?.[0]?.kind !== 'string'
+      || !message[0].value.startsWith('jaren invariant:') || !isWordItem(where, 'WHERE'))
+      return { reason: 'a statement of its program is no check the rule lowering writes (a store-owned layout\'s rules write no row)' };
+    const tail = when.slice(-3);
+    if (tail.length !== 3 || !isWordItem(tail[0], 'IS') || !isWordItem(tail[1], 'NOT') || !isWordItem(tail[2], 'TRUE'))
+      return { reason: 'a check is not the lowering\'s `… IS NOT TRUE`' };
+    const guard = when.slice(0, -3);
+    const guarded = guard.length === 3 && Array.isArray(guard[0]) && isWordItem(guard[1], 'AND') && Array.isArray(guard[2]);
+    const body = guarded ? guard[2] : guard.length === 1 && Array.isArray(guard[0]) ? guard[0] : null;
+    // the domains the reads collect come first; the assertion is the last operand
+    const assertion = body === null ? undefined : splitAt(body, 'AND').at(-1);
+    const assert = assertion === undefined ? undefined : storeAssertion(assertion, member, probed);
+    if (assert === undefined) return { reason: `the check of the rule '${message[0].value.slice('jaren invariant:'.length)}' is not an assertion the reader reads` };
+    checks.push({ rule: message[0].value.slice('jaren invariant:'.length), guarded, assert });
+  }
+  return { op, columns, checks };
+}

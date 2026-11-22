@@ -440,14 +440,6 @@ costs a descriptor plus examples and no UI code at all.
   keep the stated limit, or a design that keeps both (an exclusion constraint
   for uniqueness beside a B-tree over a bounded prefix that range and ordering
   seeks read with an exact recheck; a plan change, a minor).
-- [ ] **`introspect()` reads a collection's conditional index back as no index.**
-  A collection index with `where` (MODEL-FORMAT §2) is read back as
-  `unmapped-index` on both engines, with the indexes beside it and, on SQLite,
-  its container key columns and triggers, so the model read back does not
-  reopen the table (`JD0002`), whatever the member's type; an entity's
-  conditional index is read back where its condition renders exactly.
-  Wanted: the collection condition read back as the entity's is, then the
-  indexes beside it.
 - [ ] **Replication over an entity expression index.** Replication orders an
   envelope's writes by unique columns, never by an expression index's key
   ([MODEL-FORMAT §7A](../packages/db/docs/MODEL-FORMAT.md)): a value the
@@ -472,22 +464,18 @@ costs a descriptor plus examples and no UI code at all.
   its rule (an application's hand-written SQLite triggers are read back as the
   rules they equal with the `triggers` option of `@jarenjs/db/trigger-rules`,
   MODEL-FORMAT §13.6).
-- [ ] **Read the store's own rule programs back.** After a reviewed migration
-  adopts a table's triggers as rules, `introspect()` reports the
-  `_jaren_rule_*` programs as unmapped, so the derived model loses the rules it
-  was read with. Wanted: recognise each program as the text the rule lowering
-  plans for a rule read from it.
-- [ ] **Read PostgreSQL trigger programs back as rules.** `introspect()` reads
-  an application's SQLite triggers back as the database rules they equal
-  (MODEL-FORMAT §13.6); PostgreSQL's PL/pgSQL programs stay `unmapped-object`
-  rows. Wanted: a reader of a function body's bounded shapes
-  (`IF … THEN RAISE EXCEPTION`), with the same differential oracle on both
-  engines.
-- [ ] **`jaren-db plan --store` over a hand-written table.** The CLI compares
-  the CREATE text a store would plan with the text stored, so it refuses any
-  table the application wrote in its own spelling, where `openStore` accepts
-  the same shape. Wanted: the shape comparison `openStore` makes, and a
-  `jaren-db introspect` command that can pass the trigger reader.
+- [ ] **Read the store's own rule programs back on PostgreSQL.** On SQLite,
+  introspect({ triggers: sqliteTriggers }) reads a store-owned table's
+  _jaren_rule_* programs back as the rules that plan them (MODEL-FORMAT
+  §13.6), all or nothing per table; on PostgreSQL they stay unmapped-object
+  rows, so the derived model loses the rules it was read with. Wanted: the
+  same re-planning oracle over the PL/pgSQL function bodies, which needs a
+  reader of their bounded shapes (MODEL-FORMAT §13.6 states that the reader
+  reads SQLite programs only).
+- [ ] **A jaren-db introspect command.** The CLI reads no model back from a
+  database: introspectModel(connection, options) and store.introspect(options)
+  do, with the trigger reader (MIGRATION-FORMAT §11 says none ships). Wanted:
+  a subcommand over introspectModel that can pass the trigger reader.
 - [ ] **Pushdown beyond the proven scalar shapes.** Group keys the schema does
   not declare as scalars alone (untyped, a union that lists an object or an
   array, reached by a negative index),
@@ -853,27 +841,13 @@ costs a descriptor plus examples and no UI code at all.
   where a locked read finds nothing and an unlocked one finds the row, a
   distinct coded refusal that names the policy (the writer may read the row
   but not lock it) instead of the rule's message.
-- [ ] **A physical layout's SQLite program is compared exactly.** The open
-  compares a physical layout's rule trigger by its exact CREATE text where
-  a store-owned one compares it formatting aside, so a formatting-only edit
-  opens a store-owned table and refuses a physical one (`JD0002`).
-- [ ] **PostgreSQL acceptance reads no program an ordinary link leaves.** A
-  link that names no rule program (an index, say) applies over a program no
-  release planned, and the next open refuses the table (`JD0002`), where
-  SQLite refuses the link (`JD0023`); `migrationStatus(…, { model })`
-  reports `drift: null` over it. Wanted: acceptance and status read every
-  store-owned table's programs as the open does.
-- [ ] **A drifted store-owned program has no planned route.** "apply an
-  explicit migration" in a store-owned table's refusal has no planner that
-  plans one for a program no release planned (`planProgramUpgrade` refuses
-  it, by design: it would overwrite a hand edit). Wanted: a reviewed
-  `repair` that reinstalls planned programs over a named drift.
-- [ ] **A changed rule's PostgreSQL program is dropped and created.**
-  `planModelMigration` replaces a rule program whose function source alone
-  changed by `DROP TRIGGER`, `DROP FUNCTION`, `CREATE FUNCTION`,
-  `CREATE TRIGGER`, whose ACCESS EXCLUSIVE lock waits for every open reader
-  and writer of the table. Wanted: `CREATE OR REPLACE FUNCTION` when the
-  trigger stays, as `planProgramUpgrade` plans.
+- [ ] **PostgreSQL migrationStatus compares only rule programs.** On
+  PostgreSQL, migrationStatus(…, { model }) and plan --store's comparison read
+  the rule programs of each ruled store-owned entity table as the open does
+  (MIGRATION-FORMAT §12), and acceptance verifies join tables and collections
+  too, but status compares no column, index, or undeclared trigger of a table,
+  where SQLite compares every stored CREATE text. Wanted: status reads every
+  table the model owns as the open verifies it.
 - [ ] **A ruled update reads its row `FOR UPDATE`, which a probe's
   `FOR KEY SHARE` holds up.** The store's update of a row a store rule
   judges reads it `FOR UPDATE` (MODEL-FORMAT §13.3), so it waits for every

@@ -568,17 +568,35 @@ earlier program as this release plans it:
   transaction, under the writer lock. No SQLite text has changed between
   releases yet, so a SQLite store plans no step.
 - A program that holds a text no release planned refuses the plan (`JD0002`,
-  naming each): a link would overwrite a hand edit. Restore it, or install it
-  from `planInvariants`' statements, and plan again.
+  naming each): a link would overwrite a hand edit. Restore it, or name it in
+  `repair` (below), and plan again. The open compares a program as this plan
+  does: on SQLite by its CREATE text formatting and comments aside — for a
+  table the store owns and a physical layout's alike — and on PostgreSQL field
+  by field from the catalog.
 - A program the model plans on a table that holds none of it — a rule added to
   a populated table — is not this link's: a planned migration installs it (§9),
   and `report.absent` names it. A table the database does not hold is left to
   the open, which creates it with its programs.
+- `repair: ['<table>.<program>', …]` is the reviewed route out of the open's
+  refusal of a program as "missing or changed; apply an explicit migration",
+  which names it. Each named program that holds a text no release planned, or
+  that its table lacks, is reinstalled as the link's spelling plans it, by the
+  steps an upgrade takes — on PostgreSQL its function `CREATE OR REPLACE`d
+  where its trigger's own fields are as planned, its trigger dropped and
+  created otherwise; on SQLite its trigger dropped and created — and
+  `report.repaired` names it. It is an explicit opt-in, by name, to overwrite
+  a hand edit: a drift it does not name still refuses the plan (`JD0002`), and
+  a name that is no drifted or missing program refuses it (`JD0013`). The
+  reinstalled program judges the writes after the link commits; no row stored
+  before it is judged. The command line takes no `repair`: `plan --store`
+  compares the store with the model first, and a drifted program refuses it.
 
 Tables the store owns take a link from the model to itself, applied with
-`{ model }`; its acceptance reads back the programs of every table whose program
-a step names, as the next open reads them, and refuses the link (`JD0023`) before
-it commits where one holds a text no release planned. A link that replaces a
+`{ model }`; its acceptance reads back the programs of every table that
+declares database rules, as the next open reads them, and refuses the link
+(`JD0023`) before it commits where one holds a text no release planned — a
+program the link names, or one an earlier hand edit left that the link does
+not touch. A link that replaces a
 physical layout's program is planned as `planPhysicalMigration` plans one: every
 other source object `preserve`d, the replaced ones `replace`d, and its target the
 host's `physicalTarget`, else the catalog its steps leave — computed from the
@@ -1157,7 +1175,7 @@ database of its own
 | drop mapped column (property removed, or moved into the document) | fold the column back into the document first (`sql` step) when the property survives — a `NULL` column folds to ABSENT, never to JSON `null`, so §9.3's rule survives the fold, in the rebuild copy too, which names the document once however many columns it folds; drop its index, then `DROP COLUMN` where SQLite's conditions hold, else rebuild |
 | change type / enum CHECK / key / epoch flavor | **rebuild** (§10); a type change meets the stored values first: one that the new type cannot hold refuses the migration when it runs (§10) |
 | add, drop or change an index (`unique`/`index`/version, an entry of the entity's `indexes`, its `where`) | plain DDL — a changed index (uniqueness, columns or condition) is a `DROP INDEX` then a `CREATE INDEX`; a rebuild (§10) recreates every index with its condition |
-| add, drop or change a database rule of a store-owned layout (MODEL-FORMAT §13.4) | its programs as plain DDL: an added program is its `CREATE` (on PostgreSQL its function, then its trigger), a removed one its `DROP` (a trigger before its function), a changed one both, an unchanged one nothing. Every `DROP` goes before the table's other steps and every `CREATE` of a table that already exists comes last in the migration, after its transform steps: a renamed or a rebuilt table's programs are dropped before the rename or the rebuild (§10) and created again at the end; a new entity's table is created with its programs |
+| add, drop or change a database rule of a store-owned layout (MODEL-FORMAT §13.4) | its programs as plain DDL: an added program is its `CREATE` (on PostgreSQL its function, then its trigger), a removed one its `DROP` (a trigger before its function), a changed one both, an unchanged one nothing — but on PostgreSQL a changed one whose trigger stays as it is (its function's source alone changed) is replaced by one `CREATE OR REPLACE FUNCTION` at the end of the migration, which takes no table lock, where the table's own work is only its indexes, so no row the link writes meets the program it held. Every `DROP` goes before the table's other steps and every `CREATE` of a table that already exists comes last in the migration, after its transform steps: a renamed or a rebuilt table's programs are dropped before the rename or the rebuild (§10) and created again at the end; a new entity's table is created with its programs |
 | add or drop a relation (foreign-key column, join table) | foreign keys **rebuild** the holder — an inferred foreign-key column the target model no longer declares is folded into the document when the target declares the property, else named in `report.lost` and the plan is destructive; join tables create (with the index over their second key column) and drop directly |
 | entity added / dropped | create / `DROP TABLE` (destructive, named), children before parents so no foreign key dangles mid-migration |
 | entity renamed | declared with `x-rename` on the target entity — never inferred; join tables renamed mechanically with their endpoints, and the index over a join table's second key column dropped where the table has one (`DROP INDEX IF EXISTS`) and created under the name a fresh build gives it; a join table rebuilt in its endpoint order is indexed after it takes its final name |
@@ -1532,7 +1550,18 @@ jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place
   snapshot stays, and the CLI says so. With `--store` it first compares
   the from-model's physical shape with the database itself — never
   with the history, which would refuse every database that has applied
-  a migration.
+  a migration — as `openStore` reads it: a table the store owns by its
+  stored CREATE text, a physical layout (MODEL-FORMAT §12) by its shape,
+  as its open verifies it, so a table the application spelled its own way
+  and the open adopts is not refused for its text. A model that matches
+  its snapshot plans nothing and reads no store: no migration's from-shape
+  is asserted, and a store a written plan has not been applied to yet is
+  rightly behind its snapshot.
+- No `introspect` command ships: a model is read back from a database
+  through the API, `introspectModel(connection, options)` or
+  `store.introspect(options)` (MODEL-FORMAT §1), which also takes the
+  trigger reader (`triggers`, MODEL-FORMAT §13.6) and the host's index
+  functions (`expressions`).
 - `plan --upgrade-columns` plans the link `planColumnUpgrade` plans from the
   catalog (§3, "Upgrading the definitions a table holds"): `--model` is the
   model the database holds, which `--store` is first compared with as
@@ -1670,7 +1699,15 @@ Drift is a database that disagrees with its expected schema. Once the
 chain is fully applied, `migrationStatus` compares the explicit
 `options.physicalTarget`, or the last migration's saved `physical.target`.
 Without either target, `options.model` enables comparison with a fresh
-model build. With neither a target nor a model it reports history only.
+model build (`options.expressions` the host's index-expression functions it
+is built with): on SQLite every stored CREATE text, on PostgreSQL, which
+keeps none, the rule programs of each table the store owns that declares
+database rules, read back as the open reads them, so a program a hand edit
+left is drift on both engines (a table whose plan calls the host's index
+functions is read only with `expressions`). PostgreSQL's status compares no
+other part of the shape. On SQLite a physical layout (MODEL-FORMAT §12) is
+compared by its shape, as its open verifies it, not by its CREATE text: a
+table the application spelled its own way is no drift. With neither a target nor a model it reports history only.
 An already-applied `migrate` call also checks a supplied complete target.
 
 `comparableDeclaredSql` is the single conservative declaration comparator;

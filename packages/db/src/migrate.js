@@ -58,7 +58,7 @@ import { applyTableMigration } from './table-migration.js';
 import { withForeignKeySettings } from './foreign-key-scope.js';
 import { withMigrationConnection, checkMigrationTarget, physicalTargetOf, comparePhysicalTarget, verifyShadowOwnership, physicalObjectKey, migrationOwnerOf, lockMigration, migrationWriterSettings, preservationSchemaOf, verifyPreservation, checkPhysicalPreservation } from './migration-target.js';
 import { readSchema } from './introspect.js';
-import { nonCodePointEncoding, verifyPhysical, verifyRulePrograms, heldPrograms, earlierSpellings, sameTriggerText } from './physical.js';
+import { nonCodePointEncoding, verifyPhysical, verifyRulePrograms, heldPrograms, earlierSpellings, sameTriggerText, namespacePrograms } from './physical.js';
 import { CURRENT_SPELLING, PROGRAM_SPELLINGS } from './dialects/program-spellings.js';
 import { walkPhysicalRows, transformPhysicalRows } from './physical-transform.js';
 import {
@@ -1597,12 +1597,21 @@ export function planColumnUpgrade(connection, model, options = undefined) {
  * which takes no table lock, and otherwise, as on SQLite, by dropping and
  * creating it. A program that holds a text no release planned is refused
  * (`JD0002`, naming each): the link would overwrite a hand edit. A program the
- * model plans on a table that holds none of it is not this plan's to install —
- * a planned migration installs it (MIGRATION-FORMAT §9) — and the report names
- * it. A database whose programs are this release's plans no step, which is
+ * model plans on a table that holds none of it is not this plan's to install
+ * unless `repair` names it — a planned migration installs it (MIGRATION-FORMAT
+ * §9) — and the report names it. A database whose programs are this release's plans no step, which is
  * how a host learns that a store is behind: the plan is the probe.
  * `spelling` plans the link to that spelling instead, a link back after which
- * the release that planned it opens the store. The link goes from the model to
+ * the release that planned it opens the store. `repair` names programs, as
+ * `<table>.<program>`, that hold a text no release planned or that the table
+ * lacks — what the open refuses as "missing or changed" — and the link
+ * reinstalls each named one as the plan's spelling plans it, by the same steps
+ * an upgrade takes (on PostgreSQL its function `CREATE OR REPLACE`d where its
+ * trigger's own fields are as planned; one the table lacks created, its
+ * function `CREATE OR REPLACE`d): an explicit, by-name opt-in to overwrite a
+ * hand edit, which plans nothing for a program it does not name and refuses a
+ * name that is no such program (`JD0013`). A reinstalled program judges the
+ * writes after the link, never a row stored before it. The link goes from the model to
  * itself and is applied by {@link migrate} as the next link of the chain; one
  * that replaces a physical layout's program is planned as
  * {@link planPhysicalMigration} plans one, every other source object
@@ -1611,22 +1620,28 @@ export function planColumnUpgrade(connection, model, options = undefined) {
  * read where it deparses them in a transaction this plan rolls back.
  * @param {any} connection - an open connection to the database, as `migrate` opens one
  * @param {any} model - the model the database holds (its tables open under it)
- * @param {{ id?: string, expressions?: Record<string, any>, physicalTarget?: any, spelling?: number }} [options] -
+ * @param {{ id?: string, expressions?: Record<string, any>, physicalTarget?: any, spelling?: number, repair?: string[] }} [options] -
  *   `id` the link's name (`programs-<spelling>-<hash>` by default, suffixed past the ids
  *   the history holds); `expressions` the host's declared index-expression functions;
  *   `physicalTarget` the reviewed target of a physical link; `spelling` the spelling to
- *   install, this release's by default
- * @returns {any} value-or-promise of `{ migration, report: { upgraded: string[], absent: string[] } }`:
+ *   install, this release's by default; `repair` the drifted programs to reinstall, by
+ *   `<table>.<program>`
+ * @returns {any} value-or-promise of `{ migration, report: { upgraded: string[], absent: string[], repaired: string[] } }`:
  *   `upgraded` names each program the link replaces, `absent` each one the model plans
- *   on a table that holds none of it, `<table>.<program>`
+ *   on a table that holds none of it, `repaired` each drifted one the link reinstalls,
+ *   `<table>.<program>`
  */
 export function planProgramUpgrade(connection, model, options = undefined) {
-  readOptions(options, ['id', 'expressions', 'physicalTarget', 'spelling'], 'planProgramUpgrade()');
+  readOptions(options, ['id', 'expressions', 'physicalTarget', 'spelling', 'repair'], 'planProgramUpgrade()');
   if (options?.id !== undefined && options.id !== null && (typeof options.id !== 'string' || options.id === ''))
     throw refuse('JD0013', `planProgramUpgrade() option 'id' is a non-empty string, the migration's name in the history, got ${JSON.stringify(options.id)}`);
   const wanted = options?.spelling ?? CURRENT_SPELLING;
   if (!Number.isInteger(wanted) || wanted < 0 || wanted > CURRENT_SPELLING)
     throw refuse('JD0013', `planProgramUpgrade() option 'spelling' is a spelling a release planned, 0 to ${CURRENT_SPELLING}, got ${JSON.stringify(options?.spelling)}`);
+  const repair = options?.repair ?? [];
+  if (!Array.isArray(repair) || repair.some((name) => typeof name !== 'string' || !/^[^.]+\..+$/.test(name)) || new Set(repair).size !== repair.length)
+    throw refuse('JD0013', "planProgramUpgrade() option 'repair' is a list of distinct '<table>.<program>' names, each a program the open "
+      + `refuses as missing or changed, got ${JSON.stringify(options?.repair)}`);
   const dialect = connection.dialect;
   // the plan refuses what the model's programs cannot be, as planInvariants does
   planInvariants(model, { dialect, expressions: options?.expressions, temporals: planning().temporals });
@@ -1641,13 +1656,17 @@ export function planProgramUpgrade(connection, model, options = undefined) {
   const deparsed = dialect.introspect.invariantPrograms !== undefined;
   return chain(heldRulePrograms(connection, tables), (held) => {
     /** @type {string[]} */
-    const upgraded = [], absent = [], drifted = [];
+    const upgraded = [], absent = [], drifted = [], repaired = [];
+    /** The names `repair` gives that are no drifted program. */
+    const unrepaired = new Set(repair);
     /** @type {any[]} */
     const steps = [];
     let physical = false;
     // each object a step replaces, by type and name, with the CREATE text it leaves
     /** @type {Map<string, string>} */
     const replaced = new Map();
+    /** The objects a repair creates where the table lacks them. @type {{ type: string, name: string, owner: string, sql: string }[]} */
+    const created = [];
     for (const entry of tables) {
       const programs = held.get(entry.table);
       if (programs === null) continue;
@@ -1659,34 +1678,50 @@ export function planProgramUpgrade(connection, model, options = undefined) {
       };
       for (const { trigger, actual, spelling } of programs) {
         const name = `${entry.table}.${trigger.name}`;
-        if (actual === undefined) { absent.push(name); continue; }
-        if (spelling < 0) { drifted.push(`the program '${trigger.name}' on '${entry.table}'`); continue; }
         const items = (/** @type {number} */ n) => at(n).filter((item) => item.name === trigger.name);
-        const from = items(spelling), to = items(wanted);
-        if (from.length === to.length && from.every((item, i) => item.sql === to[i].sql)) continue;
-        upgraded.push(name);
+        // a named drift is reinstalled: over the program it holds, read as the catalog holds it, or as a new one
+        const repairing = spelling < 0 && unrepaired.delete(name);
+        if (actual === undefined && !repairing) { absent.push(name); continue; }
+        if (spelling < 0 && !repairing) { drifted.push(`the program '${trigger.name}' on '${entry.table}'`); continue; }
+        const to = items(wanted);
+        const from = !repairing ? items(spelling) : actual === undefined ? []
+          : to.map((item) => (item.type === 'function' || item.program === undefined ? item : { ...item, program: actual }));
+        if (!repairing && from.length === to.length && from.every((item, i) => item.sql === to[i].sql)) continue;
+        (repairing ? repaired : upgraded).push(name);
         physical ||= entry.physical;
-        const replacing = programSteps(from, to, programNote(trigger.name, entry.table, spelling, wanted));
+        const replacing = repairing && actual === undefined
+          ? to.map((item) => ({ kind: /** @type {const} */ ('ddl'), sql: item.type === 'function' ? item.sql.replace(/^CREATE FUNCTION /, 'CREATE OR REPLACE FUNCTION ') : item.sql,
+            note: repairNote(trigger.name, entry.table, wanted) }))
+          : programSteps(from, to, repairing ? repairNote(trigger.name, entry.table, wanted) : programNote(trigger.name, entry.table, spelling, wanted));
+        if (repairing && actual === undefined)
+          created.push(...to.filter((item) => item.type === 'trigger').map((item) => ({ type: 'trigger', name: item.name, owner: entry.table, sql: item.sql })));
         steps.push(...replacing);
-        for (const item of replacing.length === 1 ? to.filter((each) => each.type === 'function') : [...from, ...to])
+        // a function replaced in place leaves its trigger as it is
+        const inPlace = replacing.length === 1 && to.some((each) => each.type === 'function');
+        for (const item of inPlace ? to.filter((each) => each.type === 'function') : [...from, ...to])
           replaced.set(item.type === 'function' ? `function:${item.name}()` : `${item.type}:${item.name}`, to.find((each) => each.type === item.type)?.sql);
       }
     }
+    if (unrepaired.size > 0) {
+      throw refuse('JD0013', `planProgramUpgrade() option 'repair' names ${[...unrepaired].map((name) => `'${name}'`).join(', ')}, `
+        + `which ${unrepaired.size > 1 ? 'are' : 'is'} no program of the model the database holds drifted or lacks: a repair reinstalls only a named drift`);
+    }
     if (drifted.length > 0) {
       throw new DbCompileError('JD0002', `planProgramUpgrade(): ${drifted.join(', ')} ${drifted.length > 1 ? 'hold texts' : 'holds a text'} no `
-        + 'release planned for this model, which a link would overwrite; restore it, or install it from planInvariants\' statements, and plan again');
+        + 'release planned for this model, which a link would overwrite; restore it, or name it in the option repair to reinstall it, '
+        + 'and plan again');
     }
     const identity = migrationIdentity(model, model);
     const hash = hashContent(identity.to);
     const named = options?.id ?? null;
     return chain(named !== null ? named : unusedMigrationId(connection, `programs-${wanted}-${hash.slice(0, 8)}`), (id) => {
-      const report = { upgraded, absent };
+      const report = { upgraded, absent, repaired };
       if (!physical) return { migration: { $migration: MIGRATION_VERSION, id, from: hash, to: hash, identity, steps }, report };
       return chain(preservationSchemaOf(connection), (/** @type {any[]} */ source) => {
         const dispositions = Object.fromEntries(source.map((object) => [physicalObjectKey(object),
           replaced.has(`${object.type}:${object.name}`) ? 'replace' : 'preserve']));
         return chain(options?.physicalTarget !== undefined ? options.physicalTarget
-          : deparsed ? reviewedPhysicalTarget(connection, steps) : computedPhysicalTarget(source, replaced),
+          : deparsed ? reviewedPhysicalTarget(connection, steps) : computedPhysicalTarget(source, replaced, created),
         (physicalTarget) => chain(planPhysicalMigration(connection, model, model, { id, steps, dispositions, physicalTarget }),
           (migration) => ({ migration, report })));
       });
@@ -1701,8 +1736,8 @@ export function planProgramUpgrade(connection, model, options = undefined) {
  * ({@link heldPrograms}): on an engine that deparses programs (PostgreSQL) by
  * its catalog row read back field by field, from one read of the namespace; on
  * one that keeps CREATE text (SQLite) by that text, under the comparison the
- * table's open makes — formatting aside for a table the store owns, exact for a
- * physical layout's.
+ * table's open makes — formatting aside, for a table the store owns and a
+ * physical layout's alike.
  * @param {any} connection
  * @param {{ table: string, physical: boolean, items: any[], at: (spelling: number) => any[] }[]} tables
  * @returns {any} value-or-promise of `Map<string, { trigger: any, actual: any, spelling: number }[] | null>`
@@ -1768,11 +1803,13 @@ export function programSteps(from, to, note) {
  * the text they leave.
  * @param {any[]} source - the objects the plan preserves or replaces ({@link preservationSchemaOf})
  * @param {Map<string, string>} replaced - by `<type>:<name>`, the CREATE text a replaced object is left with
+ * @param {{ type: string, name: string, owner: string, sql: string }[]} [created] - the objects the steps create that the source lacks
  * @returns {{ objects: { type: string, name: string, owner: string, sql: string }[] }}
  */
-export function computedPhysicalTarget(source, replaced) {
-  return { objects: source.filter((object) => ['table', 'view', 'index', 'trigger'].includes(object.type))
-    .map((object) => ({ type: object.type, name: object.name, owner: object.owner, sql: replaced.get(`${object.type}:${object.name}`) ?? object.sql })) };
+export function computedPhysicalTarget(source, replaced, created = []) {
+  return { objects: [...source.filter((object) => ['table', 'view', 'index', 'trigger'].includes(object.type))
+    .map((object) => ({ type: object.type, name: object.name, owner: object.owner, sql: replaced.get(`${object.type}:${object.name}`) ?? object.sql })),
+  ...created] };
 }
 
 /**
@@ -1813,6 +1850,28 @@ function reviewedPhysicalTarget(connection, steps) {
  * @returns {string}
  */
 function programNote(program, table, from, to) {
+  return `${programNoteHead(program, table, to)}${programChanges(from, to)}`;
+}
+
+/**
+ * The note of a step that reinstalls a drifted program (`repair`).
+ * @param {string} program @param {string} table @param {number} to
+ * @returns {string}
+ */
+function repairNote(program, table, to) {
+  return `${programNoteHead(program, table, to)}, over a program no release planned (repair)`;
+}
+
+/** @param {string} program @param {string} table @param {number} to @returns {string} */
+function programNoteHead(program, table, to) {
+  return `replace the rule program '${program}' on '${table}' as ${to === CURRENT_SPELLING ? 'this release plans it' : `spelling ${to} planned it`}`;
+}
+
+/**
+ * What changes between two spellings' programs, as a note's tail.
+ * @param {number} from @param {number} to @returns {string}
+ */
+function programChanges(from, to) {
   const was = PROGRAM_SPELLINGS[from], will = PROGRAM_SPELLINGS[to];
   const changes = [];
   if (was.lockedProbe !== will.lockedProbe) {
@@ -1820,8 +1879,7 @@ function programNote(program, table, from, to) {
       + 'and FOR SHARE otherwise, which needs a writer\'s UPDATE privilege on the table it probes'
       : 'each probe locks no row, as releases before the lock planned it');
   }
-  return `replace the rule program '${program}' on '${table}' as ${to === CURRENT_SPELLING ? 'this release plans it' : `spelling ${to} planned it`}`
-    + `${changes.length ? `: ${changes.join('; ')}` : ''}`;
+  return changes.length ? `: ${changes.join('; ')}` : '';
 }
 
 /** An unused id for a link: `base`, or `base-2`, `base-3`, … past the ids the
@@ -2276,7 +2334,29 @@ function keptPrograms(from, to) {
  * @param {{ name: string, type: string, drop: string }[]} programs @param {Set<string>} kept @param {string} table
  */
 const dropPrograms = (programs, kept, table) => [...programs].reverse().filter((item) => !kept.has(item.name))
-  .map((item) => ({ kind: 'ddl', sql: item.drop, note: `drop the ${item.type} '${item.name}' of a rule on '${table}'` }));
+  .map((item) => {
+    const step = { kind: 'ddl', sql: item.drop, note: `drop the ${item.type} '${item.name}' of a rule on '${table}'` };
+    // the program the step drops, which a replacement in place takes back out of the plan
+    Object.defineProperty(step, 'program', { value: item.name });
+    return /** @type {{ kind: string, sql: string, note: string, program: string }} */ (step);
+  });
+
+/**
+ * The changed rule programs of a table that keeps its name and is not rebuilt
+ * which {@link programSteps} replaces in one step, the trigger kept (on
+ * PostgreSQL, a program whose function alone changed): each by its name, with
+ * that step.
+ * @param {any[]} from @param {any[]} to @param {Set<string>} kept @param {string} table
+ * @returns {{ program: string, step: { kind: 'ddl', sql: string, note: string } }[]}
+ */
+function programsInPlace(from, to, kept, table) {
+  const names = [...new Set(to.map((item) => item.name))].filter((name) => !kept.has(name));
+  return names.flatMap((program) => {
+    const replacing = programSteps(from.filter((item) => item.name === program), to.filter((item) => item.name === program),
+      `replace the function of the rule program '${program}' on '${table}', its trigger kept`);
+    return replacing.length === 1 && from.some((item) => item.name === program) ? [{ program, step: replacing[0] }] : [];
+  });
+}
 
 /**
  * The kind a member is extracted from the document as when a column takes
@@ -2608,11 +2688,23 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     // dropped before its rename. No stored row is judged
     const kept = fromName !== name || needsRebuild ? new Set()
       : keptPrograms(fromPlan.programs ?? [], toPlan.programs ?? []);
-    if (fromName === name) steps.push(...dropPrograms(fromPlan.programs ?? [], kept, name));
+    const dropping = fromName === name ? dropPrograms(fromPlan.programs ?? [], kept, name) : [];
+    steps.push(...dropping);
+    /** The steps that create each changed program, by its name. @type {Map<string, any[]>} */
+    const creating = new Map();
     for (const item of toPlan.programs ?? []) {
-      if (!kept.has(item.name))
-        programs.push({ kind: 'ddl', sql: item.sql, note: `create the ${item.type} '${item.name}' of a rule on '${name}'` });
+      if (kept.has(item.name)) continue;
+      const step = { kind: 'ddl', sql: item.sql, note: `create the ${item.type} '${item.name}' of a rule on '${name}'` };
+      creating.set(item.name, [...(creating.get(item.name) ?? []), step]);
+      programs.push(step);
     }
+    // a changed program whose trigger stays as it is (on PostgreSQL, its function
+    // alone changed) is replaced in place instead, as `planProgramUpgrade` replaces
+    // one, which takes no ACCESS EXCLUSIVE lock — where the table's own work is
+    // only its indexes, which write no row the program it held would judge
+    const inPlace = dropping.length === 0 ? [] : programsInPlace(fromPlan.programs ?? [], toPlan.programs ?? [], kept, name);
+    const workStart = steps.length;
+    const allocationsBefore = allocation.length;
 
     if (needsRebuild) {
       steps.push(...renderRebuild(name, fromName, fm, tm, toMapping, dialect, report, expressions));
@@ -2729,6 +2821,14 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
           note: `the document schema of entity '${name}' changed; fill in the transform `
             + '(or delete this step if every stored document already validates) and remove "draft"',
         });
+      }
+    }
+    if (inPlace.length > 0 && allocation.length === allocationsBefore && !report.schemaChanged.includes(name)
+      && steps.slice(workStart).every((step) => step.kind === 'ddl' && /^(create|drop) index '/.test(step.note))) {
+      for (const { program, step } of inPlace) {
+        for (const drop of dropping) if (drop.program === program) steps.splice(steps.indexOf(drop), 1);
+        for (const create of creating.get(program) ?? []) programs.splice(programs.indexOf(create), 1);
+        programs.push(step);
       }
     }
   }
@@ -3612,7 +3712,10 @@ export function schemaShapeOf(connection, options = undefined) {
 /**
  * Compare a migrated database's schema against the shape a fresh
  * `createModelShape(model)` produces, via a throwaway reference
- * database. Returns `null` when equal, or a one-line difference.
+ * database. Returns `null` when equal, or a one-line difference. Where
+ * the engine keeps no CREATE text (PostgreSQL) the store-owned entity
+ * tables' rule programs are read back as the open reads them instead
+ * ({@link programDrift}).
  * @param {any} driver
  * @param {any} connection - the migrated database
  * @param {any} model - the target model
@@ -3622,19 +3725,25 @@ export function schemaShapeOf(connection, options = undefined) {
 export function compareShapeToModel(driver, connection, model, registerFunctions, expressions) {
   // The comparison IS a text comparison: it builds the model's shape in
   // a reference database and compares the two engines' stored CREATE
-  // statements. An engine that keeps none has nothing to compare, and
-  // says so here rather than reading an undefined statement — the
-  // structural drift check (columns, indexes, foreign-key tuples) runs
-  // per collection and per entity either way, and `declaredSqlText` is
-  // what tells a reader which half they got.
-  if (connection.dialect.capabilities.declaredSqlText !== true) return null;
+  // statements. An engine that keeps none has no text to compare: it
+  // reads the store-owned tables' rule programs back as the next open
+  // reads them, field by field, instead of reading an undefined
+  // statement — the structural drift check (columns, indexes,
+  // foreign-key tuples) runs per collection and per entity either way,
+  // and `declaredSqlText` is what tells a reader which half they got.
+  if (connection.dialect.capabilities.declaredSqlText !== true) return programDrift(connection, model, expressions);
   return withMigrationConnection({ driver, path: ':memory:' }, (reference) =>
     chain(chain(registerDeriveFunctions(reference),
-      () => (registerFunctions !== undefined ? registerFunctions(reference) : null)), () => {
-      return chain(legacyShapeOf(connection, model, expressions), (legacy) =>
+      () => (registerFunctions !== undefined ? registerFunctions(reference) : null)), () =>
+      // a physical layout is verified by its shape, as its open verifies it: an
+      // application spells its tables its own way, which no reference text holds
+      chain(physicalLayoutDrift(connection, model, expressions), ({ tables, difference }) => (difference !== null ? difference
+      : chain(legacyShapeOf(connection, model, expressions), (legacy) =>
         chain(createShapeHolding(reference, model, expressions, legacy), () =>
-          chain(schemaShapeOf(reference, { columnOrder: 'ignore' }), (wanted) =>
-            chain(schemaShapeOf(connection, { columnOrder: 'ignore' }), (actual) => {
+          chain(schemaShapeOf(reference, { columnOrder: 'ignore' }), (planned) =>
+            chain(schemaShapeOf(connection, { columnOrder: 'ignore' }), (held) => {
+              const layout = (/** @type {any} */ row) => !tables.has(row.owner) && !tables.has(row.name);
+              const wanted = planned.filter(layout), actual = held.filter(layout);
               const wantedText = JSON.stringify(wanted);
               const actualText = JSON.stringify(actual);
               if (wantedText === actualText) return null;
@@ -3651,8 +3760,42 @@ export function compareShapeToModel(driver, connection, model, registerFunctions
                 if (!wantedMap.has(key)) return `unexpected ${key}`;
               }
               return 'schemas differ in ordering only';
-            }))));
-    }));
+            }))))))));
+}
+
+/**
+ * The physical layouts of a model (MODEL-FORMAT §12) verified as their open
+ * verifies them ({@link verifyPhysical}): their tables, which a text
+ * comparison leaves out, and the first refusal's reason, or `null`. The model
+ * may be history (a from-model), read as history.
+ * @param {any} connection @param {any} model @param {Record<string, any> | undefined} expressions
+ * @returns {any} value-or-promise of `{ tables: Set<string>, difference: string | null }`
+ */
+function physicalLayoutDrift(connection, model, expressions) {
+  const entities = [...asHistory(() => normalizeEntities(model)).values()].filter((entity) => entity.physical !== null);
+  if (entities.length === 0) return { tables: new Set(), difference: null };
+  const plans = asHistory(() => {
+    const mapping = explainMapping(model);
+    return entities.map((entity) => planEntity(entity.name, mapping.entities[entity.name], mapping, connection.dialect, { expressions }).physical);
+  });
+  const tables = new Set(plans.map((plan) => plan.table));
+  /** A layout's refusal as a difference; any other failure is the caller's. @param {any} error */
+  const refused = (error) => {
+    if (error?.code !== 'JD0002') throw error;
+    return String(error.reason ?? error.message);
+  };
+  return chain(readSchema(connection), (schema) => {
+    /** @param {any} error */
+    const settle = (error) => ({ tables, difference: refused(error) });
+    const next = (/** @type {number} */ i) => {
+      if (i >= plans.length) return { tables, difference: null };
+      let verified;
+      try { verified = verifyPhysical(connection, plans[i], schema); }
+      catch (error) { return settle(error); }
+      return isThenable(verified) ? verified.then(() => next(i + 1), settle) : next(i + 1);
+    };
+    return next(0);
+  });
 }
 
 /**
@@ -4189,16 +4332,15 @@ function validateTargetState(connection, model, options) {
   return chain(verifyNext(0), () => verifyEntity(0));
 }
 
-/** One target-model acceptance owner for apply, adoption and the replay boundary;
- * `steps`, the chain's last link's, where it was applied in this run. */
-function acceptMigrationModel(connection, model, options, driver, physical, target, steps = undefined) {
+/** One target-model acceptance owner for apply, adoption and the replay boundary. */
+function acceptMigrationModel(connection, model, options, driver, physical, target) {
   if (model === undefined) return null;
   return chain(validateTargetState(connection, model, options), () => {
     const entities = normalizeEntities(model);
     if (entities.size === 0 || physical || target !== undefined || [...entities.values()].some((entity) => entity.physical)) return null;
     if (typeof driver?.open !== 'function') throw refuse('JD0021', 'borrowed model comparison requires shadowDriver or a complete physicalTarget');
     if (connection.dialect.capabilities.declaredSqlText !== true)
-      return chain(acceptJoinTables(connection, model), () => acceptPrograms(connection, model, options.expressions, steps ?? []));
+      return chain(acceptJoinTables(connection, model), () => acceptPrograms(connection, model, options.expressions));
     return chain(compareShapeToModel(driver, connection, model, options.registerFunctions, options.expressions), (difference) => {
       if (difference !== null) throw refuse('JD0023', `the migrated shape does not equal the target model's: ${difference}`);
     });
@@ -4207,34 +4349,69 @@ function acceptMigrationModel(connection, model, options, driver, physical, targ
 
 /**
  * On an engine that keeps no CREATE text to compare (PostgreSQL), the rule
- * programs of each table the store owns whose programs the chain's last link
- * replaces, creates or drops — a step that names one the model plans — read
- * back as the next open reads them ({@link verifyRulePrograms}): a link that
- * leaves a program no release planned, or a trigger the model does not
- * declare, is refused `JD0023` before it commits, as SQLite's shape
+ * programs of every ruled entity table the store owns and the database holds, read
+ * back as the next open reads them ({@link programDrift}): a link that leaves
+ * a program no release planned — one it names, or one a hand edit left that
+ * an ordinary link (an index, say) does not touch — or a trigger the model
+ * does not declare is refused `JD0023` before it commits, as SQLite's shape
  * comparison refuses it. A program an earlier release planned passes, as the
  * open opens it.
  * @param {any} connection @param {any} model @param {Record<string, any> | undefined} expressions
- * @param {any[]} steps - the last link's steps
  * @returns {any} value-or-promise
  */
-function acceptPrograms(connection, model, expressions, steps) {
-  const dialect = connection.dialect;
-  const statements = steps.flatMap((step) => (['ddl', 'sql'].includes(step?.kind) && typeof step.sql === 'string' ? [step.sql] : []));
-  if (statements.length === 0) return null;
-  const mapping = explainMapping(model);
-  const plans = Object.entries(mapping.entities)
-    .filter(([, entity]) => (entity.invariants ?? []).some((/** @type {any} */ rule) => rule.enforcement === 'database'))
-    .map(([name, entity]) => planEntity(name, entity, mapping, dialect, { expressions }))
-    .filter((plan) => plan.programs.some((/** @type {any} */ item) => statements.some((sql) => sql.includes(dialect.quoteIdentifier(item.name)))));
-  const next = (/** @type {number} */ i) => {
-    if (i >= plans.length) return null;
-    const plan = plans[i];
-    const refusal = (/** @type {string} */ difference) => {
-      throw refuse('JD0023', `the migrated shape does not equal the target model's: entity '${plan.table}': ${difference}; the next open `
+function acceptPrograms(connection, model, expressions) {
+  return chain(programDrift(connection, model, expressions), (difference) => {
+    if (difference !== null) {
+      throw refuse('JD0023', `the migrated shape does not equal the target model's: ${difference}; the next open `
         + 'would refuse the table (JD0002), so nothing was changed');
+    }
+  });
+}
+
+/**
+ * Where an engine deparses rule programs (PostgreSQL), the first way the
+ * programs of the entity tables a model's store owns and declares database
+ * rules on depart from what the next open reads ({@link verifyRulePrograms},
+ * from one read of the namespace): `entity '<table>': <why>`, or `null`. A
+ * table the database does not hold is the open's to create, and a physical
+ * layout's programs are verified with its layout. The model may be history
+ * (a from-model, an adopted one), read as history. On an engine that keeps
+ * CREATE text, `null`: its shape comparison reads the programs as text.
+ * @param {any} connection @param {any} model @param {Record<string, any> | undefined} expressions
+ * @returns {any} value-or-promise of `string | null`
+ */
+function programDrift(connection, model, expressions) {
+  const dialect = connection.dialect;
+  const programs = namespacePrograms(connection);
+  if (programs === undefined || asHistory(() => normalizeEntities(model)).size === 0) return null;
+  const plans = asHistory(() => {
+    const mapping = explainMapping(model);
+    return Object.entries(mapping.entities)
+      .filter(([, entity]) => (entity.invariants ?? []).some((/** @type {any} */ rule) => rule.enforcement === 'database'))
+      .flatMap(([name, entity]) => {
+        // a table whose plan calls the host's index functions is read with them (`expressions`), as its open is;
+        // without them it is not read here, and answers as it did before programs were read
+        try { return [planEntity(name, entity, mapping, dialect, { expressions })]; }
+        catch (error) {
+          const refused = /** @type {any} */ (error);
+          if (expressions === undefined && refused?.code === 'JD0004' && /\/indexes\/\d+\/expression/.test(String(refused.docPath ?? ''))) return [];
+          throw error;
+        }
+      })
+      .filter((plan) => !plan.physical);
+  });
+  /** @type {string | null} */
+  let found = null;
+  const next = (/** @type {number} */ i) => {
+    if (i >= plans.length || found !== null) return found;
+    const plan = plans[i];
+    const departed = (/** @type {string} */ why) => {
+      found ??= `entity '${plan.table}': ${why}`;
+      return [];
     };
-    return chain(verifyRulePrograms(connection, plan.table, plan.programs, refusal, { undeclared: true, spelled: plan.programsAt }), () => next(i + 1));
+    return chain(programs(plan.table), (/** @type {any[] | null} */ rows) => (rows === null ? next(i + 1)
+      : chain(verifyRulePrograms(connection, plan.table, plan.programs ?? [], /** @type {any} */ (departed),
+        { undeclared: true, namespace: programs, spelled: plan.programsAt }), () => next(i + 1))));
   };
   return next(0);
 }
@@ -4456,11 +4633,13 @@ function shadowHosts(hosts) {
  * @param {{ driver?: any, path?: string, connection?: any }} target
  * @param {any[]} migrations - the full ordered list
  * @param {{ model?: any, physicalTarget?: any, shadowDriver?: any,
- *   registerFunctions?: (connection: any) => any,
+ *   registerFunctions?: (connection: any) => any, expressions?: Record<string, any>,
  *   signal?: AbortSignal, deadline?: number,
  *   runtime?: Partial<import('@jarenjs/core/runtime').Runtime> }} options
  *   - `signal`/`deadline` refuse a call already cancelled (`JD2080`) or
- *   past its deadline (`JD2075`) on the runtime record's clock
+ *   past its deadline (`JD2075`) on the runtime record's clock; `expressions`
+ *   the host's declared index-expression functions, which the model's shape
+ *   is planned with
  * @returns {any} value-or-promise of applied/pending/drift/upToDate;
  *   a borrowed synchronous connection stays synchronous with a physical target;
  *   promised when owned, every admission refusal included
@@ -4468,7 +4647,7 @@ function shadowHosts(hosts) {
 export function migrationStatus(target, migrations, options = {}) {
   checkMigrationTarget(target);
   try {
-    readOptions(options, ['model', 'physicalTarget', 'shadowDriver', 'registerFunctions', 'runtime', 'signal', 'deadline'], 'migrationStatus()');
+    readOptions(options, ['model', 'physicalTarget', 'shadowDriver', 'registerFunctions', 'expressions', 'runtime', 'signal', 'deadline'], 'migrationStatus()');
     readMigrationControls(options, 'migrationStatus()');
     if (!Array.isArray(migrations)) throw new TypeError('migrationStatus needs the full ordered migration list');
     [migrations, options] = snapshotMigrationInputs(migrations, options);
@@ -4506,7 +4685,7 @@ export function migrationStatus(target, migrations, options = {}) {
         if (physicalTarget === undefined && typeof driver?.open !== 'function')
           throw refuse('JD0021', 'borrowed model comparison requires shadowDriver or a complete physicalTarget');
         return chain(physicalTarget !== undefined ? comparePhysicalTarget(connection, physicalTarget)
-          : compareShapeToModel(driver, connection, options.model, options.registerFunctions),
+          : compareShapeToModel(driver, connection, options.model, options.registerFunctions, options.expressions),
         (difference) => ({ applied, pending, drift: difference, upToDate: difference === null, baseline }));
       }));
   }), (error) => runFailure(error, 'the migration status could not be read'));
@@ -4730,7 +4909,7 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
           // validation and its shape, against the last link
           const finalChecks = (scope, migration) => acceptMigrationModel(scope, options.model,
             { compileSchema: options.compileSchema, batchSize, expressions: options.expressions,
-              registerFunctions: options.registerFunctions }, referenceDriver, migration.physical, finalTarget, migration.steps);
+              registerFunctions: options.registerFunctions }, referenceDriver, migration.physical, finalTarget);
           const record = (scope, migration) => chain(readMigrationHistory(scope, true), (current) => {
             const rows = current.history.rows, at = expectedRows.length;
             if (rows.length !== at + 1 || rows[at].id !== migration.id
