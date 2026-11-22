@@ -127,6 +127,7 @@ export const DB_CODES = Object.freeze({
   JD2096: 'a persistence invariant rejected the mutation',
   JD2097: 'the supervised operation was cancelled or exceeded its response deadline',
   JD2098: 'the transaction held its connection past its hold limit and was rolled back',
+  JD2099: 'a rule found the row it needs only by a read that could not lock it (row-level security UPDATE policy)',
 });
 
 /**

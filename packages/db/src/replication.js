@@ -5,8 +5,9 @@ import { applyJSONPatch } from '@jarenjs/json/patch';
 import { decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { utf8ByteLength } from '@jarenjs/core/string';
 import { assertItemBytes, createCursor, drainPage } from './cursor.js';
-import { chain, useStatementOnce } from './driver.js';
-import { DbRuntimeError } from './errors.js';
+import { attempt, chain, useStatementOnce } from './driver.js';
+import { DbRuntimeError, wrapDriverError } from './errors.js';
+import { CATALOG_READ } from './namespace-catalog.js';
 import { refuseCancelled } from './cancellation.js';
 import { normalizeReplication, normalizeReplicationSnapshot, normalizeFrontier, replicationIdentity, REPLICATION_DEFAULTS } from './replication-format.js';
 import { REPLICATION_TABLES } from './replication-tables.js';
@@ -14,6 +15,8 @@ import { replicationSchema } from './dialects/replication.js';
 import { readOptions, readOptionsOrNull } from './options.js';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { foreignKeyEdges } from './cascade.js';
+import { canonicalExpression, expressionFunctions } from './expression.js';
+import { memberNames } from './model-path.js';
 
 /** The controls every replication call takes beside its own bounds. */
 const CONTROL_OPTIONS = ['signal', 'deadline'];
@@ -34,6 +37,40 @@ const each = (items, fn) => {
     return null;
   };
   return next();
+};
+
+/**
+ * An expression index's key over one row, as the host's declarations
+ * `apply` it, compiled once per index: a member is the row's value of that
+ * member, a value is itself. `undefined` — no key, which meets no other —
+ * where a member it reads holds none (the server's function answers over a
+ * SQL NULL, which `apply` need not mirror), or where a call throws or answers
+ * no scalar: a missing order only keeps the envelope's own, which the
+ * database's index still judges.
+ * @param {any} node @param {Record<string, any> | undefined} declarations
+ * @returns {(doc: any) => string | number | boolean | undefined}
+ */
+const expressionKey = (node, declarations) => {
+  if (Object.hasOwn(node, 'member')) {
+    const names = memberNames(node.member);
+    const name = names?.length === 1 ? names[0] : undefined;
+    return (doc) => (name === undefined || doc[name] === null ? undefined : doc[name]);
+  }
+  if (Object.hasOwn(node, 'value')) return () => node.value;
+  const args = node.args.map((/** @type {any} */ argument) => expressionKey(argument, declarations));
+  const apply = /** @type {any} */ (declarations)[node.call].apply;
+  return (doc) => {
+    const values = [];
+    for (const argument of args) {
+      const value = argument(doc);
+      if (value === undefined) return undefined;
+      values.push(value);
+    }
+    let value;
+    try { value = apply(...values); }
+    catch { return undefined; }
+    return ['string', 'number', 'boolean'].includes(typeof value) ? value : undefined;
+  };
 };
 
 /** Canonical row order: how every envelope a store exports lists its
@@ -96,7 +133,8 @@ const positions = () => {
  * - the operation that releases a value of an entity's unique slot (a
  *   one-to-one key, a unique member, a unique calendar member — by the text
  *   its key columns hold, so two spellings of one value are one value — a
- *   unique index) runs before the
+ *   unique index, a unique index over an expression by the key its
+ *   declarations' `apply` computes) runs before the
  *   operation that takes it. A partial index holds the rows its condition is
  *   true for as the query engine answers it, which is what both engines'
  *   indexes hold; an edge too many is not harmless, since it can close a
@@ -113,24 +151,28 @@ const positions = () => {
  * @param {(table: string, column: string, value: any) => any} columnValue - a member as its column stores it
  * @param {(table: string, property: string, value: any) => string[] | null} temporalKey - a calendar member
  *   as its key columns hold it, or `null` where they hold none
+ * @param {Record<string, any> | undefined} expressions - the host's function declarations, whose `apply`
+ *   computes an expression index's key over a row
  * @returns {(operations: any[]) => any[]} over `{ table, key, before, after }`, `before` being the replica's row
  */
-const replayOrder = (mapping, columnValue, temporalKey) => {
+const replayOrder = (mapping, columnValue, temporalKey, expressions) => {
   const { outbound } = foreignKeyEdges(mapping);
-  /** @type {Map<string, { cascades: any[], slots: { columns: string[], covers: ((doc: any) => boolean) | null, temporal?: true }[] }>} */
+  /** @typedef {{ columns: string[], covers: ((doc: any) => boolean) | null, temporal?: true, key?: (doc: any) => any }} Slot */
+  /** @type {Map<string, { cascades: any[], slots: Slot[] }>} */
   const tables = new Map();
   for (const [table, entity] of Object.entries(mapping?.entities ?? {})) {
     const cascades = (outbound.get(table) ?? []).filter((edge) => edge.kind === 'fk' && edge.onDelete === 'cascade');
-    /** @type {{ columns: string[], covers: ((doc: any) => boolean) | null, temporal?: true }[]} */
+    /** @type {Slot[]} */
     const slots = [];
     const declared = new Set();
-    /** @param {string[]} columns @param {any} [where] */
-    const slot = (columns, where) => {
-      const id = JSON.stringify([columns, where ?? null]);
+    /** @param {string[]} columns @param {any} [where] @param {any} [expression] */
+    const slot = (columns, where, expression) => {
+      const id = JSON.stringify([columns, where ?? null, expression === undefined ? null : canonicalExpression(expression)]);
       if (declared.has(id)) return;
       declared.add(id);
+      const key = expression === undefined ? {} : { key: expressionKey(expression, expressions) };
       if (where === undefined || where === null) {
-        slots.push({ columns, covers: null });
+        slots.push({ columns, covers: null, ...key });
         return;
       }
       // the index holds a row where the query engine answers its condition
@@ -143,16 +185,23 @@ const replayOrder = (mapping, columnValue, temporalKey) => {
       try { holds = compileJsonQuery(where); }
       catch { holds = null; }
       const condition = holds;
-      slots.push({ columns, covers: (doc) => condition === null || condition(doc) === true });
+      slots.push({ columns, covers: (doc) => condition === null || condition(doc) === true, ...key });
     };
     for (const fk of entity.foreignKeys ?? []) if (fk.unique) slot([fk.column]);
     for (const index of entity.indexes ?? []) if (index.unique) slot([index.property]);
     // a unique calendar member keys the text its key columns hold, which
     // no column of the row carries: its slot reads the member's value
     for (const temporal of entity.temporals ?? []) if (temporal.unique) slots.push({ columns: [temporal.name], covers: null, temporal: true });
-    // an index over an expression keys no column's value: it has no slot, so a
-    // value its function folds together is not ordered by it (MODEL-FORMAT §7A)
-    for (const index of entity.entityIndexes ?? []) if (index.unique && index.expression === undefined) slot(index.columns, index.where);
+    // an index over an expression keys no column's value: its slot holds the
+    // key the declarations' `apply` computes over the row's members, and one
+    // whose functions declare no `apply` has none, so a value its function
+    // folds together is not ordered by it (MODEL-FORMAT §7A)
+    for (const index of entity.entityIndexes ?? []) {
+      if (!index.unique) continue;
+      if (index.expression === undefined) slot(index.columns, index.where);
+      else if (expressionFunctions(index.expression).every((name) => typeof expressions?.[name]?.apply === 'function'))
+        slot([], index.where, index.expression);
+    }
     if (cascades.length > 0 || slots.length > 0) tables.set(table, { cascades, slots });
   }
   /** The rows a row's stored cascading keys name. @param {any} plan @param {any} doc @returns {string[]} */
@@ -168,6 +217,11 @@ const replayOrder = (mapping, columnValue, temporalKey) => {
       if (slot.temporal) {
         const keys = temporalKey(table, slot.columns[0], doc[slot.columns[0]]);
         if (keys !== null) values.add(JSON.stringify([table, at, keys]));
+        continue;
+      }
+      if (slot.key !== undefined) {
+        const key = slot.key(doc);
+        if (key !== undefined) values.add(JSON.stringify([table, at, [key]]));
         continue;
       }
       const tuple = slot.columns.map((column) => (doc[column] === undefined || doc[column] === null ? null
@@ -277,7 +331,7 @@ export function readReplicationOptions(options) {
 export function createReplicationEngine(options) {
   const { connection, rows, capture, model, now, bracket, mapping } = options;
   const config = readReplicationOptions(options.config);
-  const replay = replayOrder(mapping, rows.columnValue, rows.temporalKey);
+  const replay = replayOrder(mapping, rows.columnValue, rows.temporalKey, options.expressions);
   const dialect = connection.dialect;
   const p = (i) => dialect.parameterRef(i, 'replica');
   const schema = replicationSchema(dialect);
@@ -315,16 +369,35 @@ export function createReplicationEngine(options) {
     });
   };
 
-  const ready = bracket(() => chain(dialect.replication?.initialize?.(connection), () =>
+  const verify = () => dialect.replication?.verify?.(connection, schema, options.managedTables ?? []);
+  const identity = (existing) => {
+    const saved = JSON.parse(existing.value);
+    if (saved.replica !== config.replica || saved.model !== model)
+      fail('JD2102', 'the durable replica identity or model revision disagrees with this open');
+    return null;
+  };
+  // Whether every replication table and the identity row are there: read
+  // holding no write lock, so a re-open beside another process's live
+  // writer takes the bracket only where it has a table to create or the
+  // identity to seed.
+  const provisioned = () => {
+    const held = (text, params) => useStatementOnce(connection, text,
+      (statement) => chain(statement.get(params), (row) => row !== undefined && row !== null), CATALOG_READ);
+    const tables = (i) => (i === schema.tables.length
+      ? held(`SELECT 1 AS present FROM ${REPLICATION_TABLES.state} WHERE id = 1`, [])
+      : chain(held(dialect.introspect.tableExists(), [schema.tables[i].name]), (present) => present && tables(i + 1)));
+    return tables(0);
+  };
+  // a provisioned store verifies and checks its identity holding no lock;
+  // a lock the bracket could not take is the store's busy failure,
+  // retryable, through the one classifier
+  const ready = attempt(() => chain(provisioned(), (done) => (done
+    ? chain(verify(), () => chain(sql(`SELECT value FROM ${REPLICATION_TABLES.state} WHERE id = 1`, 'get'), identity))
+    : bracket(() => chain(dialect.replication?.initialize?.(connection), () =>
     chain(each(schema.create, (ddl) => connection.exec(ddl)), () =>
-    chain(dialect.replication?.verify?.(connection, schema, options.managedTables ?? []), () =>
+    chain(verify(), () =>
     chain(sql(`SELECT value FROM ${REPLICATION_TABLES.state} WHERE id = 1`, 'get'), (existing) => {
-    if (existing !== undefined) {
-      const saved = JSON.parse(existing.value);
-      if (saved.replica !== config.replica || saved.model !== model)
-        fail('JD2102', 'the durable replica identity or model revision disagrees with this open');
-      return null;
-    }
+    if (existing !== undefined) return identity(existing);
     return chain(rows.empty(), (empty) => {
       if (!empty) fail('JD2105', 'initialize replication on an empty store, then import an explicit snapshot');
       return chain(each(schema.tables, (table) => chain(sql(`SELECT 1 AS present FROM ${table.name} LIMIT 1`, 'get'), (row) => {
@@ -332,7 +405,10 @@ export function createReplicationEngine(options) {
       })), () => sql(`INSERT INTO ${REPLICATION_TABLES.state} (id, value) VALUES (1, ${p(1)})`, 'run',
         [stableStringify({ replica: config.replica, model, frontier: {} })]));
     });
-  })))));
+  }))))))), (error) => {
+    const wrapped = wrapDriverError(error, { docPath: '/replication' });
+    return /** @type {any} */ (wrapped)?.class === 'busy' ? wrapped : error;
+  });
 
   /** Convert net capture patches against durable before-images, inside commit. */
   const commit = (patch, context) => {

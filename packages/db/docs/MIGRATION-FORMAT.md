@@ -507,7 +507,25 @@ that rebuilds exactly the ones that differ:
   and the `rows` by their key read as text (`[['6.00000000000000000001']]`),
   with the statement that writes each as the number it reads as; where that
   number keys another row, give the row a key of its own, with the rows
-  referencing it, and plan again.
+  referencing it, and plan again;
+- on PostgreSQL, a non-unique index the store creates over columns — of a
+  collection or an entity table — held plain, as an earlier release created
+  it, where this release keys each column `NULLS FIRST` and the row identity
+  after them (POSTGRESQL.md, "Indexes in the order a statement reads"), and a
+  table without the index beside one that declares `doubleOrder` (MODEL-FORMAT
+  §2), which keys its number's double (`c_by_n$double`) and which no earlier
+  release created, or a link gave the declaration without: an ordering over
+  such a member, and a join's equality of two number columns, read every row
+  until the link drops the plain index and creates it again under its name,
+  and creates the index beside. The indexes refuse nothing and key the same
+  columns, so the link refuses no table; `report.upgraded` names each
+  (`c.c_by_s`, `c.c_by_n$double`). Like every index step of a link, the drop
+  takes an `ACCESS EXCLUSIVE` lock of the table and the create a `SHARE` lock,
+  held until the link commits: the table's readers and writers wait for the
+  link. The release before this one refuses a table this release created
+  (`JD0002`, an index it does not declare or reads as not plain), and a model
+  that declares `doubleOrder` (`JD0005`); no link plans the way back, which is
+  SQL the host runs (POSTGRESQL.md, "Indexes in the order a statement reads").
 
 The steps are the ones a model change plans for the same column: drop the
 indexes over it (and the CHECK that reads it), drop the column, add it as a fresh
@@ -587,8 +605,11 @@ earlier program as this release plans it:
   `report.repaired` names it. It is an explicit opt-in, by name, to overwrite
   a hand edit: a drift it does not name still refuses the plan (`JD0002`), and
   a name that is no drifted or missing program refuses it (`JD0013`). The
-  reinstalled program judges the writes after the link commits; no row stored
-  before it is judged. The command line takes no `repair`: `plan --store`
+  reinstalled program judges the writes after the link commits; an insert
+  program a table the store owns lacked also judges, once created, the rows
+  the table holds, as a migration that adds its rules does (§9: `JD0023`,
+  naming the rule and the key of the first row it refuses), where a drifted
+  one reinstalled, and a physical layout's, judges no row stored before it. The command line takes no `repair`: `plan --store`
   compares the store with the model first, and a drifted program refuses it.
 
 Tables the store owns take a link from the model to itself, applied with
@@ -1175,7 +1196,7 @@ database of its own
 | drop mapped column (property removed, or moved into the document) | fold the column back into the document first (`sql` step) when the property survives — a `NULL` column folds to ABSENT, never to JSON `null`, so §9.3's rule survives the fold, in the rebuild copy too, which names the document once however many columns it folds; drop its index, then `DROP COLUMN` where SQLite's conditions hold, else rebuild |
 | change type / enum CHECK / key / epoch flavor | **rebuild** (§10); a type change meets the stored values first: one that the new type cannot hold refuses the migration when it runs (§10) |
 | add, drop or change an index (`unique`/`index`/version, an entry of the entity's `indexes`, its `where`) | plain DDL — a changed index (uniqueness, columns or condition) is a `DROP INDEX` then a `CREATE INDEX`; a rebuild (§10) recreates every index with its condition |
-| add, drop or change a database rule of a store-owned layout (MODEL-FORMAT §13.4) | its programs as plain DDL: an added program is its `CREATE` (on PostgreSQL its function, then its trigger), a removed one its `DROP` (a trigger before its function), a changed one both, an unchanged one nothing — but on PostgreSQL a changed one whose trigger stays as it is (its function's source alone changed) is replaced by one `CREATE OR REPLACE FUNCTION` at the end of the migration, which takes no table lock, where the table's own work is only its indexes, so no row the link writes meets the program it held. Every `DROP` goes before the table's other steps and every `CREATE` of a table that already exists comes last in the migration, after its transform steps: a renamed or a rebuilt table's programs are dropped before the rename or the rebuild (§10) and created again at the end; a new entity's table is created with its programs |
+| add, drop or change a database rule of a store-owned layout (MODEL-FORMAT §13.4) | its programs as plain DDL: an added program is its `CREATE` (on PostgreSQL its function, then its trigger), a removed one its `DROP` (a trigger before its function), a changed one both, an unchanged one nothing — but on PostgreSQL a changed one whose trigger stays as it is (its function's source alone changed) is replaced by one `CREATE OR REPLACE FUNCTION` at the end of the migration, which takes no table lock, where the table's own work is only its indexes, so no row the link writes meets the program it held. Every `DROP` goes before the table's other steps and every `CREATE` of a table that already exists comes last in the migration, after its transform steps: a renamed or a rebuilt table's programs are dropped before the rename or the rebuild (§10) and created again at the end; a new entity's table is created with its programs. After the programs of a table that already exists, one `sql` step per rule that judges an insert and that the link adds or changes (its insert program's check, read from each stored row) judges the rows the table holds: the first row the rule refuses fails the step (`JD0023`, naming the rule and the row's key) and the migration rolls back whole, as an added unique index fails over a duplicate. On PostgreSQL an `ALTER TABLE … ENABLE TRIGGER` of the insert program's trigger, as it is, goes first: it takes the `SHARE ROW EXCLUSIVE` lock a `CREATE TRIGGER` takes, so where the program's function alone was replaced in place the table's writers too wait until the link commits, and no row they commit escapes both the check and the program, while readers go on. Where the link rebuilds the table or transforms its documents, whose rows it writes while the programs are down, every rule that judges an insert judges them. A rule that judges only updates or deletes judges no row, and neither does one the link leaves as it was on a table it neither rebuilds nor transforms |
 | add or drop a relation (foreign-key column, join table) | foreign keys **rebuild** the holder — an inferred foreign-key column the target model no longer declares is folded into the document when the target declares the property, else named in `report.lost` and the plan is destructive; join tables create (with the index over their second key column) and drop directly |
 | entity added / dropped | create / `DROP TABLE` (destructive, named), children before parents so no foreign key dangles mid-migration |
 | entity renamed | declared with `x-rename` on the target entity — never inferred; join tables renamed mechanically with their endpoints, and the index over a join table's second key column dropped where the table has one (`DROP INDEX IF EXISTS`) and created under the name a fresh build gives it; a join table rebuilt in its endpoint order is indexed after it takes its final name |
@@ -1335,9 +1356,8 @@ is refused into each type, though `Number()` reads it as `0` and SQLite's cast
 as `0.0`: it names no number a writer meant, and a retype that turned it into
 `0` would hide every missing value among the zeros. Give such a row the number
 it stands for, or remove the member, before the retype. A key another table's
-foreign key references, and the column that references it, keep the engine's
-cast (below), so there a text led or trailed by a blank only `Number()` trims
-is refused.
+foreign key references, and the column that references it, are read alike, so
+`'\u00a05'` retypes as `5` in both (below).
 
 Where the engines' own casts differ, so do the verdicts: SQLite reads only the
 digits before a fraction or an exponent of a text (`1e3` is `1` there, and is
@@ -1361,14 +1381,26 @@ below `1e21` and with an exponent outside it. An integer keeps its digits, a
 scale a retype from text left on PostgreSQL dropped (`12.0` is `12`); one past
 2^53 that no double holds is not rounded. On PostgreSQL, whose numeric column
 holds what a double does not, `NaN` and the infinities spell as themselves, a
-value past the double range as `Infinity`, and one below it as `0`. Two limits:
-SQLite's formatter rounds the last of 16 or 17 significant digits on its own, so
-such a number can end in another last digit than `String()` writes (the text
-still reads back as the same number); and a key another table's foreign key
-references, with the column that references it, keeps the engine's cast
-(`5.0` on SQLite), so the reference still matches its key while one table is
-rebuilt and the other not yet. The spelled copy costs more than a cast, under
-the rebuild's lock, and most for numbers of 16 or 17 digits.
+value past the double range as `Infinity`, and one below it as `0`. A key
+another table's foreign key references and the column that references it are
+spelled alike (`5` in both). The link rebuilds the key's table first and the
+referencing table after it, and while only the first is rebuilt the reference
+need not match its key (SQLite compares a reference as its key's type reads
+it: the text `5` meets the number `5`, but the number `5` is the text `5.0`).
+So a rebuild's `foreign_key_check` passes over a broken reference from a table
+a later rebuild of the same link spells anew; that reference is judged after
+the later rebuild, against the check taken before the first, and fails the
+link there if the two still do not match. One limit stays: on SQLite a number
+whose shortest spelling takes 16 or 17 significant digits can end in the
+neighbour of `String()`'s last digit, and the text still reads back as the
+same number. The copy chooses among the candidates that read back the one
+SQLite's own formatter rounds to, and that formatter rounds from an inexact
+decimal of its own; an exact choice needs the double's exact decimal in SQL
+(a multi-precision expansion per value) or a function the migration
+registers, which a migration document cannot rely on (`bun:sqlite` registers
+none). PostgreSQL rounds the exact decimal its numeric column holds and spells
+such a number as `String()` does. The spelled copy costs more than a cast,
+under the rebuild's lock, and most for numbers of 16 or 17 digits.
 The plan reads no row, so it cannot know: `report.destructive` stays false, and
 the refusal comes when the migration runs. Correct the values it names and run
 again.
@@ -1451,6 +1483,35 @@ On PostgreSQL the step keeps what the old table held, where a new table can:
   naming the dependent as the server's detail does (`view post_titles depends
   on table "Post"`), and the link rolls back whole. A rebuild of an entity
   nothing depends on applies.
+- **A referenced entity's column changes in place where it can.** For an
+  entity another entity's foreign key references, its own included, the
+  planner makes two changes without a rebuild: a column's `enum` declared,
+  changed or removed, and a column retyped by the cast its copy would make (a
+  text into a number, an integer or a boolean; a number into an integer; an
+  integer into a number; a boolean into any type). Such a column is no key and
+  no foreign key's column, is computed alike on both sides (an epoch column
+  rebuilds), and no index of the table reads it; every other change of the
+  table in the same link must be one an unrebuilt table takes. The steps are
+  `ddl` and `sql` steps: an allocation block (`["lock", table, column]`)
+  locks the table in `ACCESS EXCLUSIVE` mode, so from the link's first
+  statement on until it commits readers wait too, not only writers as under
+  a rebuild's lock; an allocation block (`["uncheck", table, column]`) drops
+  each CHECK that reads the column alone, under whatever name the server or
+  an earlier rebuild gave it; a retype's check of the stored values runs (the
+  same check, and the same refusal, as a rebuild's, above), then `ALTER TABLE
+  … ALTER COLUMN … TYPE … USING` the rebuild's cast; and `ALTER TABLE … ADD
+  CHECK` adds the column's CHECK as the target plans it, which the server
+  validates over the stored rows (a value outside a new `enum` fails the link
+  `JD0023`, `class: 'constraint'`, as the rebuild's copy does). The table's
+  rule programs are dropped before and created after the migration's
+  transform steps, as for a rebuild, and a rule function of a table that
+  references it is compiled again against a retyped column. The referencing
+  rows, their foreign key and its action stay as they are. A retype into text
+  from a number or an integer spells each value through a select of its own,
+  which `ALTER COLUMN … TYPE … USING` cannot hold, so it stays a rebuild and is
+  refused there, as is any change of a referenced entity's key, foreign keys
+  or calendar members (re-pointing a foreign key through a rebuild is not
+  supported). An entity nothing references rebuilds as before.
 - **The temporary names must fit too.** Planning a rebuild names the
   temporary table `<entity>__rebuild` and checks its index names as
   `<entity>__rebuild_<member>` as well, although the step creates the indexes

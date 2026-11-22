@@ -285,22 +285,71 @@ for (const engine of ENGINES) {
 
 // PostgreSQL rebuilds no entity another table references, so the case is SQLite's
 describe('sqlite: a text retyped into a number where a foreign key joins it', () => {
-  it('a key a foreign key references keeps the engine\'s cast, so a blank Number() trims is refused there', async () => {
-    const keyed = (/** @type {string} */ type) => ({ $model: '0.1', entities: {
-      P: { schema: { type: 'object', required: ['id'], properties: { id: { type, 'x-entity': { key: true } },
-        kids: { 'x-entity': { relation: { to: 'C', many: true, via: 'pid', onDelete: 'cascade' } } } } } },
-      C: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', 'x-entity': { key: true } }, pid: { type } } } } } });
+  const keyed = (/** @type {string} */ type) => ({ $model: '0.1', entities: {
+    P: { schema: { type: 'object', required: ['id'], properties: { id: { type, 'x-entity': { key: true } },
+      kids: { 'x-entity': { relation: { to: 'C', many: true, via: 'pid', onDelete: 'cascade' } } } } } },
+    C: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', 'x-entity': { key: true } }, pid: { type } } } } } });
+  /** The link from `from` to `to`, without its draft steps. @param {any} dialect @param {any} from @param {any} to */
+  const link = (dialect, from, to) => {
+    const { migration } = planModelMigration(from, to, { dialect, id: 'retype' });
+    migration.steps = migration.steps.filter((/** @type {any} */ step) => step.draft !== true);
+    return migration;
+  };
+
+  it('a key a foreign key references and its reference are read as Number() reads them, a blank it trims included', async () => {
+    await onEngine('sqlite', async (h) => {
+      const store = await h.open(keyed('string'));
+      await store.entity('P').create({ id: '\u00a05' });
+      await store.entity('P').create({ id: ' 7' });
+      await store.entity('C').create({ id: 'c', pid: '\u00a05' });
+      await store.entity('C').create({ id: 'd', pid: ' 7' });
+      await store.close();
+      await migrate(h.target, [link(h.dialect, keyed('string'), keyed('number'))], { baseline: keyed('string'), model: keyed('number'), shadow: false });
+      assert.deepEqual(await h.text('SELECT "id" FROM "P" ORDER BY "id"'), [{ id: 5 }, { id: 7 }]);
+      assert.deepEqual(await h.text('SELECT "pid" FROM "C" ORDER BY "id"'), [{ pid: 5 }, { pid: 7 }]);
+      const after = await h.open(keyed('number'));
+      try {
+        assert.deepEqual((await after.entity('C').asNoTracking().get('c'))?.pid, 5);
+        assert.deepEqual(await after.foreignKeyCheck(), { ok: true, violations: [] });
+      }
+      finally { await after.close(); }
+    });
+  });
+
+  it('a reference broken between the key\'s rebuild and its referencing table\'s is still refused, and nothing changes', async () => {
+    await onEngine('sqlite', async (h) => {
+      // a no-break space the key's retype trims: the reference matches its key
+      // again only once its own table is rebuilt
+      const store = await h.open(keyed('string'));
+      await store.entity('P').create({ id: '\u00a05' });
+      await store.entity('P').create({ id: '7' });
+      await store.entity('C').create({ id: 'c', pid: '\u00a05' });
+      await store.close();
+      const migration = link(h.dialect, keyed('string'), keyed('number'));
+      assert.deepEqual(migration.steps.map((/** @type {any} */ step) => [step.kind, step.table]), [['rebuild', 'P'], ['rebuild', 'C']]);
+      // a hand-written step between the two removes the row the reference names
+      migration.steps.splice(1, 0, { kind: 'sql', sql: 'DELETE FROM "P" WHERE "id" = 5', note: 'remove a referenced row' });
+      await assert.rejects(() => migrate(h.target, [migration], { baseline: keyed('string'), model: keyed('number'), shadow: false }),
+        (/** @type {any} */ error) => error.code === 'JD0023'
+          && /step 2 \(rebuild\) failed: foreign_key_check found 1 broken reference\(s\) after rebuilding 'C'/.test(error.message));
+      assert.deepEqual(await h.text('SELECT "id" FROM "P" ORDER BY "id"'), [{ id: '7' }, { id: '\u00a05' }]);
+      assert.deepEqual(await h.text('SELECT "pid" FROM "C"'), [{ pid: '\u00a05' }]);
+    });
+  });
+
+  it('a reference a rebuild breaks from a table no later rebuild spells anew is refused at that rebuild', async () => {
     await onEngine('sqlite', async (h) => {
       const store = await h.open(keyed('string'));
       await store.entity('P').create({ id: '\u00a05' });
       await store.entity('C').create({ id: 'c', pid: '\u00a05' });
       await store.close();
-      const { migration } = planModelMigration(keyed('string'), keyed('number'), { dialect: h.dialect, id: 'retype' });
-      migration.steps = migration.steps.filter((/** @type {any} */ step) => step.draft !== true);
+      const migration = link(h.dialect, keyed('string'), keyed('number'));
+      // the referencing table's rebuild taken away: nothing spells its reference anew
+      migration.steps = migration.steps.filter((/** @type {any} */ step) => step.table !== 'C');
       await assert.rejects(() => migrate(h.target, [migration], { baseline: keyed('string'), model: keyed('number'), shadow: false }),
-        (/** @type {any} */ error) => error.code === 'JD0023' && error.message.includes('the member "id" of "P" holds \u00a05, which is not a finite number'));
+        (/** @type {any} */ error) => error.code === 'JD0023'
+          && /step 0 \(rebuild\) failed: foreign_key_check found 1 broken reference\(s\) after rebuilding 'P'/.test(error.message));
       assert.deepEqual(await h.text('SELECT "id" FROM "P"'), [{ id: '\u00a05' }]);
-      assert.deepEqual(await h.text('SELECT "pid" FROM "C"'), [{ pid: '\u00a05' }]);
     });
   });
 });

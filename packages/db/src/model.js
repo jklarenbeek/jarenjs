@@ -38,7 +38,7 @@ const BOOLEAN_MEMBERS = ['key', 'unique', 'index', 'version'];
  * is the migration planner's hint. */
 const DECLARATION_MEMBERS = ['schema', 'indexes', 'physical', 'invariants', 'x-rename'];
 /** The closed members of an entity-level index (MODEL-FORMAT §9.2). */
-const ENTITY_INDEX_MEMBERS = ['name', 'path', 'expression', 'unique', 'where'];
+const ENTITY_INDEX_MEMBERS = ['name', 'path', 'expression', 'unique', 'where', 'doubleOrder'];
 /** The collection index members that need a generated column, which an entity
  * table never has: recognized, and refused by name before any other member. */
 const GENERATED_INDEX_MEMBERS = ['derive', 'precision', 'dims', 'physical'];
@@ -256,6 +256,7 @@ function normalizeEntityIndexes(spec, docPath) {
     names.add(index.name);
     if (index.unique !== undefined && typeof index.unique !== 'boolean')
       throw modelError(`unique is true or false, got ${JSON.stringify(index.unique)}`, `${indexPath}/unique`);
+    refuseDoubleOrder(index, indexPath);
     if (index.expression !== undefined) {
       // the shape only: the host's declarations, and whether the engine
       // computes the function on every connection, are the planner's
@@ -289,8 +290,29 @@ function normalizeEntityIndexes(spec, docPath) {
         throw modelError(`the index path '${path}' is not one member written $.<member> or $['<member>']: ${COLUMN_MAPPED}`, `${indexPath}/path`, 'JD0004');
     }
     return { name: index.name, paths: paths.map(indexMember), unique: index.unique === true,
-      where: index.where, docPath: indexPath };
+      where: index.where, ...(index.doubleOrder === true ? { doubleOrder: true } : {}), docPath: indexPath };
   });
+}
+
+/**
+ * An index's `doubleOrder` (MODEL-FORMAT §2): `true` or `false`, on an index
+ * over member paths that is neither unique nor conditional — the index beside
+ * it keys the first member's double for every row, so an ordering and a
+ * join's equality over it read that index, which a condition or a unique
+ * index's own key does not give. Whether the member holds numbers is the
+ * planner's (`ddl.js` `orderIndexesOf`), which reads the schema.
+ * @param {any} index @param {string} docPath - the index's pointer
+ */
+export function refuseDoubleOrder(index, docPath) {
+  if (index.doubleOrder === undefined) return;
+  if (typeof index.doubleOrder !== 'boolean')
+    throw modelError(`doubleOrder is true or false, got ${JSON.stringify(index.doubleOrder)}`, `${docPath}/doubleOrder`, 'JD0005');
+  if (index.doubleOrder !== true) return;
+  const conflict = index.unique === true ? 'unique' : index.where !== undefined ? 'where'
+    : index.expression !== undefined ? 'expression' : index.derive !== undefined ? 'derive' : null;
+  if (conflict !== null)
+    throw modelError(`doubleOrder keys the double of an index's first member beside a non-unique index over member paths under no condition; this index declares '${conflict}'`,
+      `${docPath}/doubleOrder`, 'JD0004');
 }
 
 /**
@@ -906,7 +928,7 @@ function entityIndexesOf(entity, columns, foreignKeys) {
       `${index.docPath}/path`, 'JD0004');
     }
     return { name: index.name, columns: [...index.paths], unique: index.unique,
-      ...(index.where === undefined ? {} : { where: index.where }) };
+      ...(index.where === undefined ? {} : { where: index.where }), ...(index.doubleOrder === true ? { doubleOrder: true } : {}) };
   });
 }
 

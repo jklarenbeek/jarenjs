@@ -47,6 +47,14 @@ const bookingDrops = (dialect) => (dialect === 'sqlite'
 const statements = (migration) => migration.steps.flatMap((/** @type {any} */ step) => (step.kind === 'rebuild'
   ? [...step.create, step.copy, '<drop and rename>', ...step.indexes] : typeof step.sql === 'string' ? [step.sql] : []));
 
+/** Whether a step judges the rows a table holds: a rule's check, or on PostgreSQL the step that holds the table's writers ahead of the checks. @param {any} step */
+const judges = (step) => step.kind === 'sql' || /^ALTER TABLE "[^"]+" ENABLE TRIGGER /.test(step.sql ?? '');
+/** The steps that judge the rows a table holds, each by its rule, `hold` for the step that holds the writers. @param {any} migration */
+const judged = (migration) => migration.steps.filter(judges)
+  .map((/** @type {any} */ step) => (step.kind === 'sql' ? /** @type {string[]} */ (/'([^']+)'$/.exec(step.note))[1] : 'hold'));
+/** The statements of a migration but the ones that judge the rows a table holds. @param {any} migration */
+const programStatements = (migration) => statements({ steps: migration.steps.filter((/** @type {any} */ step) => !judges(step)) });
+
 describe('a database rule on a store-owned layout, on SQLite', () => {
   it('refuses an inverted span from the store and from an outside writer, and accepts an ordered one', async () => {
     const { dbPath, cleanup } = tempDbPath();
@@ -241,7 +249,10 @@ describe('the migration planner installs, replaces and drops a store-owned layou
     it(`${name}: a rule added plans its programs alone, in install order; the same model plans nothing`, () => {
       const programs = planInvariants(bookingModel(), { dialect }).map((item) => item.sql);
       const { migration, report } = planModelMigration(bookingModel(false), bookingModel(), { dialect, id: 'rules' });
-      assert.deepEqual(statements(migration), programs);
+      assert.deepEqual(programStatements(migration), programs);
+      // then the rows the table holds, judged by the one rule that judges an insert
+      assert.deepEqual(judged(migration), [...(name === 'sqlite' ? [] : ['hold']), 'ordered']);
+      assert.ok(migration.steps.slice(programs.length).every(judges));
       assert.deepEqual(report.schemaChanged, []);
       assert.deepEqual(planModelMigration(bookingModel(), bookingModel(), { dialect, id: 'same' }).migration.steps, []);
       // removed again: each program dropped, the last installed first, a trigger before its function
@@ -251,7 +262,11 @@ describe('the migration planner installs, replaces and drops a store-owned layou
     it(`${name}: a changed rule replaces the programs it changes and keeps the others`, () => {
       const changed = reordered({ $lt: ['$.new.startsAt', '$.new.endsAt'] });
       const planned = new Map(planInvariants(changed, { dialect }).map((item) => [`${item.type} ${item.name}`, item.sql]));
-      const steps = statements(planModelMigration(bookingModel(), changed, { dialect, id: 'reorder' }).migration);
+      const reorder = planModelMigration(bookingModel(), changed, { dialect, id: 'reorder' }).migration;
+      const steps = programStatements(reorder);
+      // the changed insert rule judges the rows again, after its programs
+      assert.deepEqual(judged(reorder), [...(name === 'sqlite' ? [] : ['hold']), 'ordered']);
+      assert.ok(reorder.steps.slice(-judged(reorder).length).every(judges));
       if (name === 'sqlite') {
         const replaced = ['insert', 'update'].map((op) => `trigger _jaren_rule_7_Booking_${op}`);
         assert.deepEqual(steps.slice(-replaced.length), replaced.map((key) => planned.get(key)));
@@ -279,9 +294,11 @@ describe('the migration planner installs, replaces and drops a store-owned layou
       // the old table's triggers go with it; on PostgreSQL its functions stay, so they are dropped first
       const before = steps.slice(0, copied);
       assert.deepEqual(before.filter((sql) => sql.startsWith('DROP ')), bookingDrops(name));
-      // the draft transform sits between the rebuild and the programs
+      // the draft transform sits between the rebuild and the programs; the rows the copy and the transform wrote
+      // while the programs were down are judged after them
       const kinds = migration.steps.map((/** @type {any} */ step) => step.kind);
-      assert.deepEqual(kinds.slice(kinds.indexOf('rebuild')), ['rebuild', 'jslt', ...programs.map(() => 'ddl')]);
+      assert.deepEqual(kinds.slice(kinds.indexOf('rebuild')), ['rebuild', 'jslt', ...programs.map(() => 'ddl'), ...(name === 'sqlite' ? [] : ['ddl']), 'sql']);
+      assert.deepEqual(judged(migration), [...(name === 'sqlite' ? [] : ['hold']), 'ordered']);
     });
 
     it(`${name}: a rule added beside a document transform creates its programs after the transform, however the transform is given`, () => {
@@ -289,8 +306,9 @@ describe('the migration planner installs, replaces and drops a store-owned layou
       for (const transform of [BOOKING_TRANSFORM, [BOOKING_TRANSFORM], { Booking: BOOKING_TRANSFORM }]) {
         const { migration, report } = planModelMigration(bookingModel(false), narrowedBookingModel(), { dialect, id: 'carry', transform });
         assert.deepEqual(report.transformed, ['Booking']);
-        assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.kind), ['jslt', ...programs.map(() => 'ddl')]);
-        assert.deepEqual(statements(migration), programs);
+        assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.kind),
+          ['jslt', ...programs.map(() => 'ddl'), ...(name === 'sqlite' ? [] : ['ddl']), 'sql']);
+        assert.deepEqual(programStatements(migration), programs);
       }
     });
 
@@ -306,7 +324,7 @@ describe('the migration planner installs, replaces and drops a store-owned layou
 });
 
 describe('a planned migration of a store-owned layout\'s rules, on SQLite', () => {
-  it('adds, replaces and drops the rules in place, judges no stored row, and every result reopens', async () => {
+  it('adds, replaces and drops the rules in place, judges the rows the table holds, and every result reopens', async () => {
     const { dbPath, cleanup } = tempDbPath();
     try {
       const target = { driver: nodeDriver(), path: dbPath };
@@ -332,9 +350,16 @@ describe('a planned migration of a store-owned layout\'s rules, on SQLite', () =
         }
         return out;
       };
+      // the row the new rule refuses fails the link, which leaves it stored; corrected, the link applies
+      await assert.rejects(migrate(target, migrations.slice(0, 1), { baseline: models[0], model: models[1] }),
+        { code: 'JD0023', message: /the rule "ordered" of "Booking" refuses the stored row whose key id is old/ });
+      const earlier = await open(models[0]);
+      try {
+        assert.deepEqual(await earlier.entity('Booking').get('old'), { id: 'old', startsAt: 5, endsAt: 1 });
+        await earlier.entity('Booking').update('old', { endsAt: 9 });
+      }
+      finally { await earlier.close(); }
       let ruledStore = await run(1);
-      // the row the new rule would refuse stays
-      assert.deepEqual(await ruledStore.entity('Booking').get('old'), { id: 'old', startsAt: 5, endsAt: 1 });
       assert.deepEqual(await verdicts(ruledStore), ['ok', 'JD2096']);
       await ruledStore.close();
       ruledStore = await run(2);
@@ -352,7 +377,7 @@ describe('a planned migration of a store-owned layout\'s rules, on SQLite', () =
 });
 
 describe('a migration that adds a rule beside a document transform, on SQLite', () => {
-  it('runs the transform before the programs: a row it carries into conformance is kept, one it leaves violating stays', async () => {
+  it('runs the transform before the programs and the check: a row it carries into conformance is kept, one it leaves violating fails the link', async () => {
     const { dbPath, cleanup } = tempDbPath();
     try {
       const target = { driver: nodeDriver(), path: dbPath };
@@ -363,15 +388,21 @@ describe('a migration that adds a rule beside a document transform, on SQLite', 
       const to = narrowedBookingModel();
       const { migration } = planModelMigration(bookingModel(false), to, { dialect: sqliteDialect, id: 'carry', transform: BOOKING_TRANSFORM });
       const options = { baseline: bookingModel(false), model: to };
+      // the row the transform leaves violating fails the link, judged after the transform, which rolls back with it
+      await assert.rejects(migrate(target, [migration], options),
+        { code: 'JD0023', message: /the rule "ordered" of "Booking" refuses the stored row whose key id is stay/ });
+      const earlier = await openStore(bookingModel(false), target);
+      try {
+        assert.deepEqual(await earlier.entity('Booking').get('fix'), { id: 'fix', startsAt: 5, endsAt: 1 });
+        await earlier.entity('Booking').delete('stay');
+      }
+      finally { await earlier.close(); }
       assert.deepEqual((await migrate(target, [migration], options)).applied, ['carry']);
       assert.deepEqual((await migrate(target, [migration], options)).applied, []);
       const ruled = await openStore(to, target);
       try {
         const bookings = ruled.entity('Booking');
         assert.deepEqual(await bookings.get('fix'), { id: 'fix', startsAt: 1, endsAt: 1 });
-        assert.deepEqual(await bookings.get('stay'), { id: 'stay', startsAt: 1, endsAt: 0 });
-        // the row the transform left violating meets the rule when it is next written
-        await assert.rejects(bookings.update('stay', { room: 'x' }), { code: 'JD2096' });
         assert.deepEqual(await bookings.update('fix', { room: 'x' }), { id: 'fix', startsAt: 1, endsAt: 1, room: 'x' });
       }
       finally { await ruled.close(); }

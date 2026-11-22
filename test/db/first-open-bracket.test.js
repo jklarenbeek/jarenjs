@@ -1,8 +1,9 @@
 //@ts-check
 /**
- * @file The job tables' and the change log's first-open bracket is taken
- * only to create or upgrade one: a re-open whose tables, indexes, columns
- * and state row are all there verifies them holding no write lock, so it
+ * @file The job tables', the change log's and the replication tables'
+ * first-open bracket is taken only to create or upgrade one: a re-open
+ * whose tables, indexes, columns and state row are all there verifies them
+ * holding no write lock, so it
  * opens beside another process's live writer. Where the bracket is needed
  * and its lock cannot be taken, the open fails as the store's busy failure
  * (`JD2005`, `class: 'busy'`, retryable), not as a model it cannot open
@@ -16,11 +17,13 @@ import { spawn } from 'node:child_process';
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 
+import { POSTGRES_LOCK_CLASSES, transactionLock } from '../../packages/db/src/dialects/postgres-locks.js';
 import { tempDbPath } from './helpers.js';
 import { PG_URL, withPostgres } from './store-core-engines.js';
 
 const MODEL = { $model: '0.1', collections: { docs: { identity: 'integer', schema: { type: 'object' } } } };
-const FIRST_OPEN = /** @type {const} */ ({ jobs: { jobs: true }, capture: { capture: { mode: 'journal', log: true } } });
+const FIRST_OPEN = /** @type {const} */ ({ jobs: { jobs: true }, capture: { capture: { mode: 'journal', log: true } },
+  replication: { capture: { mode: 'journal' }, replication: { replica: 'r' } } });
 
 /**
  * A second process that holds a write lock until it is released: on SQLite
@@ -115,7 +118,8 @@ describe('the first-open bracket on SQLite', () => {
       finally { cleanup(); }
     });
 
-    it(`${label}: a read-only open of a file without its tables still refuses JD0002`, async () => {
+    // replication refuses a read-only store before any table is read
+    if (label !== 'replication') it(`${label}: a read-only open of a file without its tables still refuses JD0002`, async () => {
       const { dbPath, cleanup } = tempDbPath();
       try {
         await (await openStore(MODEL, { driver: nodeDriver(), path: dbPath })).close();
@@ -144,6 +148,25 @@ describe('the first-open bracket on PostgreSQL', { skip: !PG_URL && 'JAREN_PG_UR
       assert.strictEqual(await outcome(openStore(MODEL, { driver: driver({ lockTimeoutMs: 300 }), ...FIRST_OPEN.capture })), 'opened');
     }
     finally { await writer.release(); }
+  }));
+
+  it('replication: a re-open opens while another process holds the journal write lock', () => withPostgres(async ({ schema, driver }) => {
+    await (await openStore(MODEL, { driver: driver(), ...FIRST_OPEN.replication })).close();
+    const writer = await postgresWriter(schema, transactionLock(POSTGRES_LOCK_CLASSES.capture));
+    try {
+      assert.strictEqual(await outcome(openStore(MODEL, { driver: driver({ lockTimeoutMs: 300 }), ...FIRST_OPEN.replication })), 'opened');
+    }
+    finally { await writer.release(); }
+  }));
+
+  it('replication: an open that must create its tables past the lock timeout on a live write fails busy and retryable, then opens', () => withPostgres(async ({ schema, driver }) => {
+    await (await openStore(MODEL, { driver: driver() })).close();
+    const writer = await postgresWriter(schema, transactionLock(POSTGRES_LOCK_CLASSES.capture));
+    try {
+      assert.deepStrictEqual(await outcome(openStore(MODEL, { driver: driver({ lockTimeoutMs: 300 }), ...FIRST_OPEN.replication })), BUSY);
+    }
+    finally { await writer.release(); }
+    assert.strictEqual(await outcome(openStore(MODEL, { driver: driver(), ...FIRST_OPEN.replication })), 'opened');
   }));
 
   it('jobs: an upgrade that waits past the lock timeout on a live write fails busy and retryable, then opens', () => withPostgres(async ({ pool, schema, driver }) => {

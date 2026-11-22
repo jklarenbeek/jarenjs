@@ -108,6 +108,11 @@ export const DIALECT_CAPABILITIES = Object.freeze({
    * table it creates. A collection is a sequence; without one, its
    * order is whatever the engine answers in. */
   rowIdentity: false,
+  /** An ascending index places an empty key last unless it says
+   * otherwise, where a statement orders one first: the store's non-unique
+   * indexes key each column `NULLS FIRST` and the row identity after them
+   * (`ddl.js` `ordersIndex`). */
+  orderedIndexes: false,
 });
 
 /**
@@ -479,14 +484,19 @@ export function createDialect(spec) {
      * as SQL over the table's own columns, which the row-predicate
      * lowering renders with every literal inlined (an engine keeps no
      * parameter in a schema object). `terms` are expressions keyed after
-     * the columns ({@link kindKeyTerm}).
+     * the columns ({@link kindKeyTerm}). An `ordered` index keys each column
+     * `NULLS FIRST` and the row identity after them: the order a statement
+     * reads a member by, an empty key least and the row identity breaking
+     * ties (`ddl.js` `ordersIndex`).
      * @param {{ name: string, table: string, columns: string[],
-     *   unique: boolean, where?: string, terms?: string[] }} shape
+     *   unique: boolean, where?: string, terms?: string[], ordered?: boolean }} shape
      * @returns {string}
      */
-    createIndex({ name, table, columns, unique, where, terms }) {
+    createIndex({ name, table, columns, unique, where, terms, ordered }) {
+      const keys = ordered === true && spec.identityColumn !== undefined
+        ? [...columns.map((column) => `${q(column)} NULLS FIRST`), q(spec.identityColumn.name)] : columns.map(q);
       return `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${q(name)} `
-        + `ON ${q(table)} (${[...columns.map(q), ...(terms ?? [])].join(', ')})${where === undefined ? '' : ` WHERE ${where}`}`;
+        + `ON ${q(table)} (${[...keys, ...(terms ?? [])].join(', ')})${where === undefined ? '' : ` WHERE ${where}`}`;
     },
     /**
      * Add one virtual generated column to an existing table (a new

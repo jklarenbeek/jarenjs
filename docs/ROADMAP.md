@@ -398,10 +398,13 @@ costs a descriptor plus examples and no UI code at all.
 - [ ] **A backlog read from the tick backwards is not counted.** A tick whose backlog is longer than one search reads
   under the limits fires exactly what `missed` says, but counts as skipped only the occurrences of the span it read;
   `counts.uncounted` says a tick did so. Wanted: the passed occurrences counted without enumerating them.
-- [ ] **The client bundle carries calendar-member plumbing without the seam.** The calendar code and the keying run
-  only when a host installs `@jarenjs/db/temporals`, but the declaration's reading, its DDL and introspection terms and
-  its refusals ship in every store client, about 11 KB of the client bundle that a store declaring no calendar member
-  never runs. Wanted: the declaration read behind the seam too, so a store without it keeps only the refusal.
+- [ ] **The client bundle carries calendar-member plumbing without the seam.**
+  The calendar kernel runs only when a host installs `@jarenjs/db/temporals`,
+  and the tree-shaking gate keeps it out of the store client, but the
+  declaration's reading, its DDL and introspection terms and its refusals ship
+  in every store client, about 11 KB of the client bundle that a store
+  declaring no calendar member never runs. Wanted: the declaration read behind
+  the seam too, so a store without it keeps only the refusal.
 - [ ] **A CHECK the model does not declare is read back as a declaration where
   the format has one.** On PostgreSQL a CHECK of someone else's opens, still
   refuses the writes it governs (`JD2005`) and is an `unmapped-constraint`
@@ -411,30 +414,6 @@ costs a descriptor plus examples and no UI code at all.
   a collection — is read into `introspect()`'s derived model rather than
   reported, and `jaren-db plan --store` reaches SQLite alone. Wanted:
   `store.introspect()` naming each CHECK its own model does not declare.
-- [ ] **Replication over an entity expression index.** Replication orders an
-  envelope's writes by unique columns, never by an expression index's key
-  ([MODEL-FORMAT §7A](../packages/db/docs/MODEL-FORMAT.md)): a value the
-  host's function folds together, taken by one write before another releases
-  it, refuses `JD2005` where a plain unique column applies. Wanted: the slot
-  keyed by the declaration's `apply`.
-- [ ] **Database invariants over a store-owned layout, beyond its scalar
-  columns.** A store-owned entity takes `enforcement: "database"` rules over
-  the scalar and foreign-key columns its table maps, `$exists-row` probes of
-  another table among them (a rule about a related row probes it by its
-  foreign-key column), installed with the table and verified at every open
-  (MODEL-FORMAT §13.4). Still refused (`JD0005`): a rule that reads an epoch
-  member, whose column holds milliseconds while the rule compares the member's
-  text, or a member the document holds; and an `audit` or `effects`, whose
-  trigger writes journal capture cannot see. Wanted: those — the epoch member
-  needs the text it reads back rebuilt from milliseconds in SQL on both
-  engines, the document member a JSON read inside the trigger with the
-  engine's missing/null/type semantics, each with an oracle of its own.
-  Introspection reports such a table's rule programs as unmapped objects, so a
-  model derived from the database neither reopens nor migrates to the
-  authored one: no reader turns the store's own installed program back into
-  its rule (an application's hand-written SQLite triggers are read back as the
-  rules they equal with the `triggers` option of `@jarenjs/db/trigger-rules`,
-  MODEL-FORMAT §13.6).
 - [ ] **Read the store's own rule programs back on PostgreSQL.** On SQLite,
   introspect({ triggers: sqliteTriggers }) reads a store-owned table's
   _jaren_rule_* programs back as the rules that plan them (MODEL-FORMAT
@@ -506,19 +485,24 @@ costs a descriptor plus examples and no UI code at all.
   tables — whose application triggers and cascades the store does not write —
   remain refused until their complete writer population has an executable
   oracle.
-- [ ] **Broader database invariant lowering.** Rules lower to verified triggers
-  on SQLite and PostgreSQL alike ([MODEL-FORMAT §13](../packages/db/docs/MODEL-FORMAT.md#13-persistence-invariants)),
-  over comparisons, membership, existence probes keyed by a verified key or
-  index and integer `$add`/`$sub`/`$neg` inside the safe-integer domain.
-  Still outside: `$mul`, `$div`, `$idiv`, `$mod` and arithmetic over a
-  `number` operand (the engine's double rounding and division are not SQL's);
-  `$starts-with` (a code-point prefix spelling and an oracle of its own on each
-  engine); and the stored-row walk of a migration that adds a rule (it judges
-  no stored row today). Store-only rules retain their explicit writer
-  qualification. SQLite's change test compares each column under its declared
-  collation and stored spelling (§13.4), where PostgreSQL and the store compare
-  by codec; comparing by code point would change the text of every installed
-  update program, so it waits for a reviewed migration of installed programs.
+- [ ] **Broader database invariant lowering.** Rules lower to verified
+  triggers on SQLite and PostgreSQL alike ([MODEL-FORMAT
+  §13](../packages/db/docs/MODEL-FORMAT.md#13-persistence-invariants)), over
+  comparisons, membership, existence probes keyed by a verified key or index
+  and integer `$add`/`$sub`/`$neg` inside the safe-integer domain, and a
+  migration that adds or changes a rule on a table the store owns judges the
+  rows the table holds by it (`JD0023`, MIGRATION-FORMAT §9). The operators
+  refused at the member (`JD0005`) are the stated boundary: `$mul`, `$div`,
+  `$idiv`, `$mod` and arithmetic over a `number` operand (the engine's double
+  rounding and division are not SQL's) and `$starts-with` (a code-point prefix
+  spelling and an oracle of its own on each engine). A physical layout's
+  programs, which the host installs (`planInvariants`) or `planProgramUpgrade`
+  reinstalls, and a drifted store-owned program `repair` reinstalls, judge no
+  stored row. Store-only rules retain their explicit writer qualification.
+  SQLite's change test compares each column under its declared collation and
+  stored spelling (§13.4), where PostgreSQL and the store compare by codec;
+  comparing by code point would change the text of every installed update
+  program, so it waits for a reviewed migration of installed programs.
 - [ ] **A linq transaction that reads a handle builds a record of every
   name.** A transaction client builds its `entities` and `collections` records
   when its body first reads them, so a body that reads no handle costs the
@@ -527,25 +511,16 @@ costs a descriptor plus examples and no UI code at all.
   as its own members (DB-CLIENT §2.1). A shared prototype holding the getters
   would make it constant, and would make `Object.keys` of a transaction's
   record answer no names.
-- [ ] **The replication tables' first-open bracket.** An open with
-  `replication` creates or verifies its replication tables under the store's
-  immediate bracket on every open, so on SQLite a re-open beside another
-  process's write lock rejects (`JD0002`, `class: 'busy'`) after the busy
-  timeout, where the job tables and the change log are read first holding no
-  lock and bracketed only to create one; the same read-first probe would open
-  it beside a live writer.
-- [ ] **Broader native authoring for legacy SQL.** The executable census now
-  proves five adopted-column read families and three SQLite mutation families
-  ([native contracts](../packages/db/docs/NATIVE-PLANS.md)). Receipt history
-  retains SQL because its table has no declared primary key. The explicit SQLite surface now supports correlated/computed selections,
-  cross-table insert-select and partial/expression conflicts. Entity `mutate`
-  also admits adopted PostgreSQL column layouts, but the frozen census, its
-  parity, no-op and rollback proofs and the benchmark are SQLite-only: the same
-  three families on PostgreSQL, with PostgreSQL reference SQL, remain open, as
-  do promotions into the JSON query semantic contract and store-invariant bulk
-  preimages. Additional promotions need retained SQL/decoded-row parity, no-op
-  and rollback proofs, and explicit work costs; fluent syntax alone is not
-  evidence.
+- [ ] **The native SQL census's mutation families on PostgreSQL.** The
+  executable census proves five adopted-column read families and three SQLite
+  mutation families ([native contracts](../packages/db/docs/NATIVE-PLANS.md)),
+  and entity `mutate` also runs natively over adopted PostgreSQL column
+  layouts, but the census's parity, no-op and rollback proofs and its
+  benchmark run on SQLite only. Wanted: the three mutation families on
+  PostgreSQL with PostgreSQL reference SQL, the same proofs, and the
+  benchmark's PostgreSQL row. Receipt history retains SQL because its table
+  has no declared primary key; promotions into the JSON query semantic
+  contract and store-invariant bulk preimages wait on the same proofs.
 - [ ] **Relational recovery beyond the qualified SQLite hosts.** Waits on
   outside evidence: a power-cut rig for power-loss durability; macOS and
   Windows machines for the worker-hosted Bun backup
@@ -560,35 +535,32 @@ costs a descriptor plus examples and no UI code at all.
   independent-database shadow replay of exact qualified programs, and
   [separate managed-data oracles](../packages/db/docs/POSTGRESQL.md) for
   coherent dump/restore and archived-WAL recovery.
-- [ ] **PostgreSQL entity changes beyond an unreferenced table.** A change
-  the planner expresses as a rebuild (a key declaration, an `enum`, a type, a
-  relation) rebuilds the table on PostgreSQL under a table lock, which holds for
-  an entity no foreign key references, its own included: a referenced or
-  self-referencing entity is refused at the drop (`JD0023`, naming what depends
-  on it) and the link rolls back whole
-  ([MIGRATION-FORMAT §10](../packages/db/docs/MIGRATION-FORMAT.md)). A rename
-  of a referenced entity plans such a rebuild for every table that references
-  it, so a rename alone is refused when one of those is itself referenced. Wanted:
-  foreign keys re-pointed through the rebuild, or in-place `ALTER`s where
-  PostgreSQL has them.
-- [ ] **A rebuild that spells a number as text can end in another last digit
-  on SQLite, and keeps the cast for a referenced key.** A number retyped into
-  text is copied as `String()` spells it on both engines, except that on
-  SQLite a number whose shortest spelling takes 16 or 17 significant digits
-  can end in the neighbour of `String()`'s last digit (the text reads back as
-  the same number): the copy chooses among the candidates that read back the
-  one SQLite's own formatter rounds to, and that formatter rounds from an
-  inexact decimal of its own. An exact choice needs the double's exact decimal
-  in SQL (multi-precision per value) or a registered function, which a
-  migration document cannot rely on (`bun:sqlite` registers none). A key
-  another table's foreign key references, with the column that references it,
-  keeps the engine's cast (`5.0` on SQLite) so the reference matches while one
-  table is rebuilt and the other not yet; for the same reason a text led or
-  trailed by a blank only `Number()` trims (a no-break space) is refused there
-  when retyped into a number. Wanted: exact last digits on SQLite, and a
-  referenced key spelled and read as `String()` and `Number()` do (the
-  referencing table rebuilt ahead of the key's check, or the check taken after
-  both).
+- [ ] **PostgreSQL entity changes beyond an unreferenced table.** A change the
+  planner expresses as a rebuild (a key declaration, a type, a relation, a
+  calendar member) rebuilds the table on PostgreSQL under a table lock, which
+  holds for an entity no foreign key references, its own included: a
+  referenced or self-referencing entity is refused at the drop (`JD0023`,
+  naming what depends on it) and the link rolls back whole ([MIGRATION-FORMAT
+  §10](../packages/db/docs/MIGRATION-FORMAT.md)). Such an entity's column
+  whose `enum` changes, or whose type changes by a cast (a text into a number,
+  an integer or a boolean; a number into an integer; an integer into a number;
+  a boolean into any type), and that is no key, no foreign key's column and
+  read by no index, changes in place instead, under an `ACCESS EXCLUSIVE`
+  lock. A number or an integer retyped into text (its spelled copy is a
+  select, which `ALTER COLUMN … TYPE … USING` cannot hold), an indexed column,
+  a key and a foreign key still rebuild and are refused. A rename of a
+  referenced entity plans such a rebuild for every table that references it,
+  so a rename alone is refused when one of those is itself referenced. Wanted:
+  foreign keys re-pointed through the rebuild, and an in-place retype into
+  text.
+- [ ] **A retyped key that an inferred foreign key or a join table
+  references.** A key retyped (a number into text, for one) rebuilds its table
+  and each table whose declared `via` property references it, but not a table
+  whose foreign key column the relation infers (no property of its own) nor a
+  many-to-many join table: their column keeps the key's old type, so the link
+  is refused `JD0023` at the key's rebuild (the reference no longer matches
+  its key) and rolls back whole, on SQLite; on PostgreSQL the key's rebuild is
+  refused at the drop. Wanted: those tables rebuilt in the same link.
 - [ ] **A join table carries no column beyond its two keys.** A many-to-many
   join table is a read-only root (`$.<JoinTable>[*]`, MODEL-FORMAT §10.7)
   whose rows are its two keys, so "which pairs were attached since Friday" has
@@ -654,16 +626,24 @@ costs a descriptor plus examples and no UI code at all.
   keys a bounded image of the value (a hash index, or an expression over a
   digest, with the comparison spelled to read it) so no write is refused, read
   back by `introspect()`.
-- [ ] **On PostgreSQL an ordering over an indexed collection member is sorted,
-  never read in index order.** The statement orders `ASC NULLS FIRST` beside
-  `"rid"` (a number member by its double's `CASE`), which an ascending B-tree
-  index over the generated column does not provide (`Sort` over `Seq Scan`).
-  Measured on 20,000 rows, a ten-row window: 10.8 ms by a string member, 14.4
-  ms by a number; with an index `(column NULLS FIRST, rid)` 0.24 ms, and with
-  an expression index over the double `NULLS FIRST` 0.27 ms. Wanted: those
-  indexes as the store's own (a DDL change: `introspect()` must read them back
-  as the declared index and `planColumnUpgrade` must replace an earlier
-  release's).
+- [ ] **On PostgreSQL an ordering an index the store creates does not key is
+  sorted.** A non-unique index the store creates over a column a statement
+  orders bare keys it `NULLS FIRST` with the row identity after it, and an
+  index led by a number column that declares `doubleOrder` has one beside it
+  over the double, so a window, a load's `orderBy` and a keyset page read
+  them; an ascending ordering with `$empty: 'greatest'` (descending with
+  `'least'`) places an empty key last, which those indexes do not give, and
+  sorts every row where the plain index an earlier release created served it
+  (measured: 20,000 rows, a ten-row window 0.23 ms with the plain index,
+  11.2-12.7 ms now; two ordered, limited branches over the `NULLS FIRST`
+  index, the non-empty rows then the empty ones by `rid`, measured 0.33 ms
+  with equal answers, but keep a sort of the branches' rows and are spelled
+  for no window, load or keyset page yet); an ordering over a unique member,
+  whose index keeps its plain spelling, and over a number member whose index
+  declares no `doubleOrder`, sorts as before; and a keyset page's continuation
+  is a filter over the index, so a page deep into the order walks the index
+  from its start. Wanted: the empty-last orderings read in index order, and a
+  keyset continuation the index seeks.
 - [ ] **On PostgreSQL a load's scalar `after` over a `numeric` key without the
   store's key CHECK, and such a key at or past 2^53, still compare bare.** A
   table an earlier release created holds a writer's digits until
@@ -679,17 +659,6 @@ costs a descriptor plus examples and no UI code at all.
   so a pair and an ordering compare such a key exactly where another writer
   may have spelled it otherwise. Wanted: a scalar `after` that resumes exactly
   over such a key, and the order of a key past 2^53 read as the double.
-- [ ] **On PostgreSQL an entity's ordering over a column that may hold NULL
-  never reads an index.** A term over a reference or an indexed column is `ASC
-  NULLS FIRST` (descending `DESC NULLS LAST`), which a default B-tree does not
-  give, so a window, a load's `orderBy` and a keyset page sort every row (a
-  key and a column the catalog declares `NOT NULL` read their index). Measured
-  on 20,000 rows: a ten-row window by a string column 2.8 ms, a load `orderBy
-  … take 10` 4.2 ms; with an index `(column NULLS FIRST, rid)` 0.14-0.15 ms; a
-  number column (ordered by the double) 5.9 ms, 0.21 ms with an expression
-  index over the double `NULLS FIRST`. Wanted: indexes the store creates
-  declared so (a DDL change with its read-back in `introspect()` and its
-  upgrade in `planColumnUpgrade`).
 - [ ] **On PostgreSQL an external list holding both strings and numbers reads
   every document.** Each branch of a membership in an external list stands
   beside whether the list holds its kind, so a list of one kind seeks the
@@ -700,14 +669,6 @@ costs a descriptor plus examples and no UI code at all.
   reads the document, so it scans (measured: 20,000 documents, a two-number
   list 35.6 ms before, 1.3 ms now). Wanted: the branch of the other kind as
   its own index read (a `UNION` of the two seeks).
-- [ ] **On PostgreSQL a join's equality over two non-key number columns no
-  longer seeks.** It reads both columns as the doubles (bounded by ranges of
-  each around the other), which the planner cannot estimate, so it hashes on
-  the doubles. Measured (20 × 20,000 rows): 4.3 ms; the doubles' equality
-  through an expression index over the inner column's double 0.22 ms, and the
-  bare equality, exact where both columns hold only shortest-digit spellings,
-  0.25 ms. Wanted: the store's expression index over the double (with item
-  35's read-back and upgrade) and the equality spelled to read it.
 - [ ] **On SQLite an empty window over an indexed `integer` member the schema
   does not bound is read twice.** The order key reads the double (`CAST("gx_v"
   AS REAL)`) so two spellings of one double past 2^53 tie as the engine's do.
@@ -741,15 +702,16 @@ costs a descriptor plus examples and no UI code at all.
   another such condition or key opens as the declared one, where SQLite
   compares the CREATE text (MODEL-FORMAT §12); `introspect()` reports such an
   index (`unmapped-index`). Wanted: read those forms into the condition form.
-- [ ] **A locking probe's refusal under row-level security reads as the
-  rule's.** On PostgreSQL a probe that locks the row it finds reads it
-  through the table's UPDATE policy as well as its SELECT policy, so for a
-  writer whose UPDATE policy is narrower a row it may read but not lock is
-  missed, and the write is refused in the rule's name (`JD2096`, `jaren
-  invariant:<rule>`) though the row exists (MODEL-FORMAT §13.3). Wanted:
-  where a locked read finds nothing and an unlocked one finds the row, a
-  distinct coded refusal that names the policy (the writer may read the row
-  but not lock it) instead of the rule's message.
+- [ ] **A database rule's locking probe under row-level security refuses in
+  the rule's name.** On PostgreSQL a probe that locks the row it finds reads
+  it through the table's UPDATE policy as well as its SELECT policy. A store
+  rule whose locked probe misses a row an unlocked read finds refuses
+  `JD2099`, which names the policy (MODEL-FORMAT §13.3); a database rule's
+  program still refuses such a write in the rule's name (`JD2096`, `jaren
+  invariant:<rule>`) though the row exists. Wanted: the program's own unlocked
+  probe on that failure path and a refusal the store reports as `JD2099` — new
+  text for every installed program, so a program spelling of its own and a
+  reviewed upgrade link.
 - [ ] **PostgreSQL migrationStatus compares only rule programs.** On
   PostgreSQL, migrationStatus(…, { model }) and plan --store's comparison read
   the rule programs of each ruled store-owned entity table as the open does
@@ -757,15 +719,6 @@ costs a descriptor plus examples and no UI code at all.
   too, but status compares no column, index, or undeclared trigger of a table,
   where SQLite compares every stored CREATE text. Wanted: status reads every
   table the model owns as the open verifies it.
-- [ ] **A ruled update reads its row `FOR UPDATE`, which a probe's
-  `FOR KEY SHARE` holds up.** The store's update of a row a store rule
-  judges reads it `FOR UPDATE` (MODEL-FORMAT §13.3), so it waits for every
-  open transaction whose probe found that row by key columns, and two
-  transactions that each probe a row and then update it through a ruled
-  update deadlock (one fails `JD2005`), where `FOR NO KEY UPDATE` — the lock
-  the `UPDATE` itself takes when it changes no key column — would let both
-  through, as PostgreSQL's foreign keys do. Wanted: that read locks
-  `FOR NO KEY UPDATE` when the update assigns no key column.
 
 ## @jarenjs/josl
 

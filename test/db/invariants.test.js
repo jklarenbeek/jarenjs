@@ -141,7 +141,7 @@ it('a database rule on a layout the store owns reads a missing member as absent,
   assert.equal(verdicts.length, 4 + (HYBRID_GRID_PREDICATES.length - 4) * 9);
 });
 
-it('a store-owned layout\'s rules hold for every writer, installed by its open or by a planned migration that judges no stored row', async () => {
+it('a store-owned layout\'s rules hold for every writer, installed by its open or by a planned migration that judges the rows it holds', async () => {
   const fresh = await hybridLifecycle(sqliteEngine(), false);
   assert.equal(await hybridLifecycle(sqliteEngine(), true), fresh);
   assert.deepEqual(JSON.parse(fresh), {

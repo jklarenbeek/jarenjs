@@ -35,6 +35,58 @@ export const SQLITE = {
   table: (table, q) => q(table),
 };
 
+/** The refusal of a rule the lowering cannot read (`JD0005`). @param {string} why @returns {never} */
+const refuseRule = (why) => { throw new DbCompileError('JD0005', `database invariant: ${why}`); };
+
+/**
+ * A rule's `$exists-row` lowering: a probe of another table, keyed as the
+ * model check keyed it (the target's key, or an index its open verifies
+ * covering the match), its match values read as the rule reads them: a keyed
+ * one may read a column whose SQL NULL is a missing member, which matches no
+ * row as the store's probe answers. Where writers do not serialize and
+ * `locks` says so, a probe that an even number of `$not`s encloses locks the
+ * row it finds as the store's does (`keyColumnsOnly`): that row decides that
+ * the write passes. A negated probe's found row refuses the write, and no lock
+ * holds an absence, so it reads unlocked, through the writer's SELECT policy.
+ * SQLite spells no lock.
+ * @param {any} all @param {any} dialect @param {(why: string) => never} fail @param {boolean} locks
+ * @returns {(args: any, value: (expression: any, keyed: boolean) => string, positive: boolean) => string}
+ */
+const prober = (all, dialect, fail, locks) => (args, value, positive) => {
+  const target = probeTarget(all.entities[args.entity]);
+  const matched = Object.keys(args.match);
+  const keys = probeKeys(target.keys, target.indexes, matched, args.entity, fail);
+  const lock = !locks || !positive ? ''
+    : keyColumnsOnly(target.keys, target.indexes, matched) ? dialect.rowKeyShareLockSuffix : dialect.rowShareLockSuffix;
+  return existsRowSql({ match: args.match, target, keys }, dialect, (expression, column) => value(expression, keys.includes(column.name)), lock);
+};
+
+/** The alias a stored row is read under when a link judges it (`storedRowChecks`). */
+export const STORED_ROW = '_jaren_stored';
+
+/**
+ * What a link that gives a table a database rule over rows it already holds
+ * judges each of them by: per rule that judges an insert, the condition its
+ * insert program refuses a row on — the same lowering, its domains and its
+ * assertion — read from a row of the table under the alias `STORED_ROW`
+ * instead of `NEW`, its probes unlocked (the link's own transaction reads
+ * them). A stored row was inserted; an update or delete rule judges a change,
+ * which no stored row is.
+ * @param {any} mapping @param {any} all @param {any} dialect @param {any} flavor
+ * @returns {{ rule: string, when: string }[]}
+ */
+export function storedRowChecks(mapping, all, dialect, flavor) {
+  const q = dialect.quoteIdentifier;
+  const fail = refuseRule;
+  const resolve = rulePaths(mapping.columns, 'insert', q, q(STORED_ROW));
+  const probe = prober(all, dialect, fail, false);
+  return (mapping.invariants ?? []).filter((rule) => rule.enforcement === 'database' && rule.on.includes('insert')).map((rule) => {
+    const lowering = rowPredicate({ flavor, dialect, resolve, fail, probe, releasedText: true });
+    const assertion = lowering.predicate(rule.assert);
+    return { rule: rule.name, when: `(${[...lowering.domains, assertion].join(' AND ')}) IS NOT TRUE` };
+  });
+}
+
 /**
  * Compile one table's database rules into programs, one per operation and
  * `UPDATE OF` column set, in insert, update, delete order: the checks (each a
@@ -51,28 +103,10 @@ export const SQLITE = {
 export function compileInvariants(mapping, all, dialect, flavor, spelling = CURRENT_SPELLING) {
   const q = dialect.quoteIdentifier;
   const spelled = PROGRAM_SPELLINGS[spelling];
-  /** @param {string} why @returns {never} */
-  const fail = (why) => { throw new DbCompileError('JD0005', `database invariant: ${why}`); };
+  const fail = refuseRule;
   const rules = mapping.invariants ?? [];
   const columns = mapping.columns;
-  /** A probe of another table, keyed as the model check keyed it (the target's
-   * key, or an index its open verifies covering the match), its match values
-   * read as the rule reads them: a keyed one may read a column whose SQL NULL
-   * is a missing member, which matches no row as the store's probe answers.
-   * Where writers do not serialize, a probe that an even number of `$not`s
-   * encloses locks the row it finds as the store's does (`keyColumnsOnly`):
-   * that row decides that the write passes. A negated probe's found row
-   * refuses the write, and no lock holds an absence, so it reads unlocked,
-   * through the writer's SELECT policy. SQLite spells no lock.
-   * @param {any} args @param {(expression: any, keyed: boolean) => string} value @param {boolean} positive */
-  const probe = (args, value, positive) => {
-    const target = probeTarget(all.entities[args.entity]);
-    const matched = Object.keys(args.match);
-    const keys = probeKeys(target.keys, target.indexes, matched, args.entity, fail);
-    const lock = !spelled.lockedProbe || !positive ? ''
-      : keyColumnsOnly(target.keys, target.indexes, matched) ? dialect.rowKeyShareLockSuffix : dialect.rowShareLockSuffix;
-    return existsRowSql({ match: args.match, target, keys }, dialect, (expression, column) => value(expression, keys.includes(column.name)), lock);
-  };
+  const probe = prober(all, dialect, fail, spelled.lockedProbe);
   // an incremented member is the database's, like a version: never a change;
   // a store-owned table's document column holds the rest of the row
   const incremented = new Set(rules.flatMap((rule) => rule.enforcement === 'database' ? (rule.effects ?? []).map((e) => e.increment) : []));
@@ -140,7 +174,9 @@ export function compileInvariants(mapping, all, dialect, flavor, spelling = CURR
 
 /** An increment is the trigger's last statement, a guarded update of its own
  * row: a trigger never fires itself while `recursive_triggers` is off, which
- * the store asserts at open. Each program carries the statement that drops it.
+ * the store asserts at open. Each program carries the statement that drops it,
+ * and the list its `storedRows()`: the rules' checks of a stored row
+ * (`storedRowChecks`), which a link that adds a rule runs.
  * @param {any} mapping @param {any} all @param {any} dialect @param {number} [spelling] @returns {any[]} */
 export function sqliteInvariantTriggers(mapping, all, dialect, spelling = CURRENT_SPELLING) {
   const q = dialect.quoteIdentifier;
@@ -150,7 +186,7 @@ export function sqliteInvariantTriggers(mapping, all, dialect, spelling = CURREN
     const column = q(/** @type {any} */ (mapping.columns.find((c) => c.name === key)).physical);
     return `${column} = NEW.${column}`;
   }).join(' AND ');
-  return compileInvariants(mapping, all, dialect, SQLITE, spelling).map((program) => {
+  return withStoredRows(compileInvariants(mapping, all, dialect, SQLITE, spelling).map((program) => {
     const bodies = [
       ...program.checks.map((check) => `SELECT RAISE(ABORT, ${sl(`${INVARIANT_MARKER}${check.rule}`)}) WHERE ${check.when};`),
       ...program.audits.map((audit) => `INSERT INTO ${audit.table} (${audit.names.join(', ')}) SELECT ${audit.values.join(', ')}${audit.when ? ` WHERE ${audit.when}` : ''};`),
@@ -162,5 +198,16 @@ export function sqliteInvariantTriggers(mapping, all, dialect, spelling = CURREN
       ...(program.increments.length ? { selfUpdate: true } : {}),
       sql: `CREATE TRIGGER ${q(name)} AFTER ${event} ON ${q(mapping.table)} BEGIN ${bodies.join(' ')} END`,
       drop: `DROP TRIGGER ${q(name)}` };
-  });
+  }), mapping, all, dialect, SQLITE);
+}
+
+/**
+ * A table's program items, carrying `storedRows()`, the checks of its stored
+ * rows under `flavor` (`storedRowChecks`), compiled when a link asks for
+ * them; not an item, so no list of the programs counts or compares it.
+ * @param {any[]} items @param {any} mapping @param {any} all @param {any} dialect @param {any} flavor
+ * @returns {any[]}
+ */
+export function withStoredRows(items, mapping, all, dialect, flavor) {
+  return Object.defineProperty(items, 'storedRows', { value: () => storedRowChecks(mapping, all, dialect, flavor) });
 }

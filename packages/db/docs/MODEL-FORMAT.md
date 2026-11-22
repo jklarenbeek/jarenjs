@@ -371,6 +371,29 @@ without that check (ARCHITECTURE.md, "An ordering, a group key and a
 distinct read a number as the double"). Which shapes are pushed, and the reason each
 refinement is one, are in ARCHITECTURE.md's "The temporal plan".
 
+**`doubleOrder` — an ordering over a number member read from an index.** An
+index over a member that holds numbers alone (`number` or `integer`, perhaps
+`null`) may declare that it also keys the member as the double the query
+engine holds, which an ordering over the member (a window, a load's
+`orderBy`, a keyset page) and a join's or a hop's equality of it with another
+number read:
+
+```json
+{ "name": "by_price", "path": "$.price", "doubleOrder": true }
+```
+
+On PostgreSQL, whose number column holds the digits a writer spelled, the
+store creates beside the index one that keys that double (`<table>_<name>$double`,
+POSTGRESQL.md, "Indexes in the order a statement reads"); on SQLite the
+column holds the double, the index is its own, and the declaration changes
+nothing. It is one more index every write that sets the member keeps, which
+is why it is declared and not the default. `doubleOrder` is `true` or `false`
+(`JD0005` otherwise, `false` by default), on a collection's or an entity's
+`indexes` entry over member paths; on a unique index, one with a `where`, an
+`expression` or a `derive`, or one whose first member holds another kind, it is
+`JD0004`. A link that declares it on a kept index creates the index beside, and
+one that takes it away drops it (MIGRATION-FORMAT §3).
+
 ### 2.1 Derived indexes (spatial and vector storage)
 
 A generated column must be a scalar (§3), and a GeoJSON position is an
@@ -2131,6 +2154,7 @@ undefined`, as on every coded error.*
 | `JD2096` | persistence invariant rejected the mutation; constraint class |
 | `JD2097` | supervised native operation cancelled or past its response deadline; owner exit and transaction fate are reported separately |
 | `JD2098` | the transaction held its connection past its hold limit and was rolled back |
+| `JD2099` | a store rule's locking probe missed a row an unlocked read finds and the rule passes on: the writer may read the row but not lock it (row-level security UPDATE policy); constraint class |
 | `JD0060` | a replication envelope or snapshot is invalid |
 | `JD2100` | a replica sequence or causal dependency has a gap |
 | `JD2101` | an envelope identity names different content or an unknown local origin |
@@ -2378,10 +2402,13 @@ reads the key back into the expression, a number constant the server
 keeps cast (`'-1'::integer`, `(5)::numeric`) included; without the
 declarations it is an `unmapped-index` row. Of two declarations that
 name one server function, introspection reads the one spelled as the
-server spells it. Replication orders an envelope's writes by the
-columns of a unique index, never by an expression's key: a value the
-function folds together, taken by one write before another releases it,
-keeps the envelope's order and is refused `JD2005`
+server spells it. Replication orders an envelope's writes by a unique
+expression index's key as the declarations' `apply` computes it over the
+row's members, so a value the function folds together, released by one
+write and taken by another, replays the release first; where a function
+declares no `apply` the store has no key to order by, and such a value,
+taken before another write releases it, keeps the envelope's order and is
+refused `JD2005`
 ([REPLICATION-FORMAT](REPLICATION-FORMAT.md#applying-and-exporting)).
 
 **On SQLite an entity index over an expression stays `JD0004`** at its
@@ -5363,8 +5390,9 @@ entity with store rules. Each rule is checked at its own statement, inside the
 write's transaction, so a tracked save's rule sees what the statements ahead of
 it wrote. A physical row's insert and update rules are checked after the write,
 against the row as it was — read just before the statement, not the copy a unit
-of work holds, and on PostgreSQL locked (`FOR UPDATE`) for the rest of the
-transaction, so a concurrent writer's change lands before that read, never
+of work holds, and on PostgreSQL locked for the rest of the transaction
+(`FOR NO KEY UPDATE` for an `update()` that assigns no key column, and a
+save that changes none, else `FOR UPDATE`), so a concurrent writer's change lands before that read, never
 between it and the statement — and the row now stored: an update that changes nothing a
 database rule counts runs no `changed` rule, and a `columns` rule runs when the
 statement assigns one of them (§13.1). A delete rule is checked after the
@@ -5404,21 +5432,33 @@ which `FOR KEY SHARE` lets through. A row that many
 probing writes find, under `FOR SHARE`, takes its updates only between their
 transactions: each update waits for the probing transactions open on it, so
 the longer they stay open the fewer updates the row takes. The store's own
-update or delete of a row a store rule judges reads it `FOR UPDATE` (above),
-which waits for either lock. A wait may end in a lock timeout, where the
-session sets one, or in a deadlock — two transactions that each probe a row
-and then update it, under `FOR SHARE`, or under either lock when the update
-is such a ruled one — which fails one of them with `JD2005` (`busy`,
-retryable) while the other commits. The lock needs the `UPDATE` privilege on
+delete of a row a store rule judges reads it `FOR UPDATE` (above), which
+waits for either lock; its `update()` of such a row reads it
+`FOR NO KEY UPDATE` — the lock the `UPDATE` itself then takes — where the
+update assigns no key column (the key, or a member of a unique index), so a
+probe's `FOR KEY SHARE` lets it through, and `FOR UPDATE` where it assigns
+one; a unit of work's save of such a row does the same by the members it
+changes. A wait
+may end in a lock timeout, where the session sets one, or in a deadlock —
+two transactions that each probe a row and then update it, under
+`FOR SHARE`, or under either lock when the update is a ruled one that reads
+`FOR UPDATE` — which fails one of them with `JD2005` (`busy`, retryable)
+while the other commits. The lock needs the `UPDATE` privilege on
 at least one column of the target: a role that may only read the target
 fails the probing write with `JD2083` (`readonly`) — a database rule's
 program with PostgreSQL's `42501`, which a store write reports as `JD2083`.
 Row-level security reads a locking read through the table's UPDATE policy
 as well as its SELECT policy, so a writer references only rows it may also
 lock: where its UPDATE policy is narrower than its SELECT policy, a locking
-probe misses a row the writer may read, and the write is refused in the
-rule's name (`JD2096`, `jaren invariant:<rule>`) though the row exists. A
-negated probe, which reads unlocked, sees every row the SELECT policy shows.
+probe misses a row the writer may read. A store rule that such a miss
+refuses asks each of its probes that found nothing once more, unlocked —
+only then, so a write that passes runs no second statement — and where that
+read finds the row and the rule passes on it, the write is refused
+`JD2099` (`constraint`, not retryable), whose message names the rule, the
+probed entity and its row-level security UPDATE policy: the writer may read
+the row but not lock it. A database rule's program refuses such a write in
+the rule's name (`JD2096`, `jaren invariant:<rule>`) though the row exists.
+A negated probe, which reads unlocked, sees every row the SELECT policy shows.
 SQLite's probe takes no lock.
 
 ### 13.4 Database enforcement
@@ -5473,9 +5513,15 @@ statements (`planInvariants`; the trigger items' `drop` fail, their table being
 gone), or, instead of the hand drop, drop the entity through a planned
 migration, which removes them with the table. A table that exists without a
 rule's programs is drift too: a rule added to a populated table is a planned migration
-(MIGRATION-FORMAT §9), which judges no stored row and creates the programs
-after its transform steps, so a transform can carry stored rows into
-conformance before the rule arrives. A rule's change test there
+(MIGRATION-FORMAT §9), which creates the programs after its transform steps,
+so a transform can carry stored rows into conformance before the rule
+arrives, and then judges every row the table holds by each rule that judges
+an insert and that the link adds or changes — by every such rule where the
+link rebuilds the table or transforms its documents — as the insert program would
+judge the row: a row it refuses fails the link (`JD0023`, naming the rule and
+the row's key) and the link rolls back whole, as an added unique index fails
+over a duplicate. A rule that judges only updates or deletes judges a change,
+which no stored row is. A rule's change test there
 counts the document column too (§13.1). A store rule on such a layout still
 covers the store's own writes only.
 

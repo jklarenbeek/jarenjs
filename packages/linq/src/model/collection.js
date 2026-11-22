@@ -23,7 +23,7 @@ import { captureQuery } from '../schema/check.js';
 import { DOCUMENT_SCOPE, refuseStrandedIndexes, refuseStrandedRename } from './entity.js';
 
 /** The index options the grammar names beside `name` and `path`. */
-const INDEX_OPTIONS = new Set(['name', 'unique', 'derive', 'precision', 'dims', 'physical', 'where']);
+const INDEX_OPTIONS = new Set(['name', 'unique', 'derive', 'precision', 'dims', 'physical', 'doubleOrder', 'where']);
 
 /** The options an EXPRESSION index takes: it names the members it reads
  * itself, so nothing that describes a member's storage belongs here. */
@@ -32,7 +32,7 @@ const EXPRESSION_OPTIONS = new Set(['name', 'unique']);
 /** Every member an index entry carries — a path index's or an expression
  * index's: a raw entry handed to `collection()` is held to this set. */
 const ENTRY_MEMBERS = Object.freeze(['name', 'path', 'expression', 'unique', 'derive', 'precision',
-  'dims', 'physical', 'where']);
+  'dims', 'physical', 'doubleOrder', 'where']);
 
 /** The entry members an ENTITY index cannot carry: each needs a generated
  * column, which an entity table never has. An `expression` it carries: the
@@ -44,7 +44,7 @@ const GENERATED_MEMBERS = Object.freeze(['derive', 'precision', 'dims', 'physica
  * `true` as unique, so a `unique: 1` would open a NON-unique index.
  * @type {Readonly<Record<string, string>>} */
 const OPTION_TYPES = Object.freeze({
-  __proto__: null, unique: 'boolean', derive: 'string', physical: 'string', precision: 'number',
+  __proto__: null, unique: 'boolean', doubleOrder: 'boolean', derive: 'string', physical: 'string', precision: 'number',
   dims: 'number', where: 'object',
 });
 
@@ -166,7 +166,7 @@ function defaultName(path) {
  * One index declaration.
  * @param {((doc: any) => any) | string | readonly (((doc: any) => any) | string)[]} path
  * @param {{ name?: string, unique?: boolean, derive?: 'geohash' | 'bbox' | 'vector',
- *   precision?: number, dims?: number, physical?: 'columns' | 'rtree',
+ *   precision?: number, dims?: number, physical?: 'columns' | 'rtree', doubleOrder?: boolean,
  *   where?: ((doc: any) => any) | object }} [options] - `where` is the condition
  *   of a partial index: a predicate lambda or a query document
  * @returns {any} the frozen index document
@@ -178,7 +178,7 @@ export function index(path, options = {}) {
   for (const key of Object.keys(options)) {
     if (!INDEX_OPTIONS.has(key)) {
       throw new LinqBuildError('JL0101',
-        `index() does not take '${key}' — the options are name, unique, derive, precision, dims, physical, where`);
+        `index() does not take '${key}' — the options are name, unique, derive, precision, dims, physical, doubleOrder, where`);
     }
   }
   const resolved = indexPath(path, 'index()');
@@ -186,7 +186,7 @@ export function index(path, options = {}) {
     name: options.name === undefined ? defaultName(resolved) : requireName(options.name, 'index() name'),
     path: resolved,
   };
-  for (const key of ['unique', 'derive', 'precision', 'dims', 'physical']) {
+  for (const key of ['unique', 'derive', 'precision', 'dims', 'physical', 'doubleOrder']) {
     if (options[key] !== undefined) out[key] = indexOption(options[key], key, 'index()');
   }
   if (options.where !== undefined) out.where = condition(options.where, 'index()');

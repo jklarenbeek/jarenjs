@@ -330,20 +330,24 @@ describe('an entity index over a declared expression on PostgreSQL', { skip: !PG
     });
   });
 
-  it('replication orders a value a unique column passes between rows, and keeps the envelope order for an expression key', async () => {
+  it('replication orders a value a unique column or an expression key passes between rows, and keeps the envelope order without apply', async () => {
     const { default: pg } = await import('pg');
     const pool = new pg.Pool({ connectionString: PG_URL, max: 3 });
     const outcomes = [];
     try {
-      for (const [label, index] of [['a column', { name: 'by_email', path: '$.email', unique: true }],
-        ['an expression', { ...BY_LOWER_EMAIL, name: 'by_email' }]]) {
+      // without `apply` the store has no key of its own to order an expression's value by
+      const unapplied = Object.fromEntries(Object.entries(EXPRESSIONS).map(([name, { arity, deterministic, sql }]) => [name, { arity, deterministic, sql }]));
+      for (const [label, index, expressions] of /** @type {[string, any, any][]} */ ([
+        ['a column', { name: 'by_email', path: '$.email', unique: true }, EXPRESSIONS],
+        ['an expression', { ...BY_LOWER_EMAIL, name: 'by_email' }, EXPRESSIONS],
+        ['an expression without apply', { ...BY_LOWER_EMAIL, name: 'by_email' }, unapplied]])) {
         const schemas = [0, 1].map((at) => `jaren_expr_repl_${process.pid}_${outcomes.length}_${at}`);
         /** @type {any[]} */
         const stores = [];
         try {
           for (const [at, schema] of schemas.entries()) {
             await pool.query(`CREATE SCHEMA "${schema}"`);
-            stores.push(await openStore(userModel([index]), { driver: postgresDriver(pool, { schema }), expressions: EXPRESSIONS,
+            stores.push(await openStore(userModel([index]), { driver: postgresDriver(pool, { schema }), expressions,
               capture: { mode: 'journal' }, replication: { replica: `r${at}` } }));
           }
           const [origin, replica] = stores;
@@ -367,6 +371,6 @@ describe('an entity index over a declared expression on PostgreSQL', { skip: !PG
       }
     }
     finally { await pool.end(); }
-    assert.deepEqual(outcomes, ['applied', 'JD2005 true']);
+    assert.deepEqual(outcomes, ['applied', 'applied', 'JD2005 true']);
   });
 });

@@ -292,6 +292,8 @@ describe('PostgreSQL: a profile reads the plan the database chooses for the type
   /** @type {any} */
   let store;
   const schema = `jaren_typed_scan_${process.pid}`;
+  /** The plans the store's own EXPLAINs answered, in order. @type {string[]} */
+  const checked = [];
 
   before(async () => {
     const pg = (await import('pg')).default;
@@ -299,7 +301,18 @@ describe('PostgreSQL: a profile reads the plan the database chooses for the type
     await admin.connect();
     await admin.query(`CREATE SCHEMA "${schema}"`);
     pool = new pg.Pool({ connectionString: url, max: 1 });
-    pool.on('connect', (/** @type {any} */ client) => { client.query('SET statement_timeout = 30000').catch(() => {}); });
+    pool.on('connect', (/** @type {any} */ client) => {
+      client.query('SET statement_timeout = 30000').catch(() => {});
+      // the plan each EXPLAIN the store sends answers: what its profile's scan check reads
+      const query = client.query.bind(client);
+      client.query = (/** @type {any[]} */ ...args) => {
+        const text = typeof args[0] === 'string' ? args[0] : args[0]?.text;
+        const result = query(...args);
+        if (/^EXPLAIN /.test(String(text)) && typeof result?.then === 'function')
+          result.then((/** @type {any} */ answer) => checked.push(answer.rows.map((/** @type {any} */ row) => row['QUERY PLAN']).join('\n')), () => {});
+        return result;
+      };
+    });
     store = await openStore(SKEW, { driver: postgresDriver(pool, { schema }) });
     await store.transaction(async (/** @type {any} */ tx) => {
       for (let i = 0; i < ROWS; i++)
@@ -325,7 +338,7 @@ describe('PostgreSQL: a profile reads the plan the database chooses for the type
     return rows.map((/** @type {any} */ row) => row['QUERY PLAN']).find((/** @type {string} */ line) => /Scan/.test(line)) ?? '';
   };
 
-  it('a common value is refused as the sequential scan it is; a rare value seeks the index', async () => {
+  it('a common value or prefix the server scans is refused, one it reads through the index is answered as the engine answers it; a rare value seeks the index', async (t) => {
     const skew = store.collection('skew');
     const profile = { refuseFullScan: true };
     const hot = overCollection({ $eq: ['$it.sku', 'hot'] });
@@ -336,8 +349,24 @@ describe('PostgreSQL: a profile reads the plan the database chooses for the type
     assert.match(await scanLine(rare), /Index Scan using .* on skew/);
     assert.equal(sorted(await skew.execute(hot)).length, HOT);
     assert.deepEqual(sorted(await skew.execute(hot)), sorted(await skew.execute(hot, { pushdown: false })));
-    await assert.rejects(() => skew.execute(hot, { profile }), { code: 'JD0011' });
-    await assert.rejects(() => skew.execute(overCollection({ '$starts-with': ['$it.sku', 'ho'] }), { profile }), { code: 'JD0011' });
+    // the profile reads the plan of the statement it runs, a page of the rows (LIMIT): an
+    // equality may read them in the row order from the index, which keys the row identity
+    // after the column, or scan them, as the server prices the two — refused where the plan
+    // it read scans, the engine's rows where it reads the index. A prefix over the same rows
+    // has no such order: scanned and refused
+    for (const query of [hot, overCollection({ '$starts-with': ['$it.sku', 'ho'] })]) {
+      const from = checked.length;
+      const guarded = await skew.execute(query, { profile }).catch((/** @type {any} */ error) => error);
+      await new Promise((resolve) => setImmediate(resolve));
+      const plan = checked.slice(from).join('\n');
+      if (/Seq Scan on skew/.test(plan)) assert.equal(guarded?.code, 'JD0011', plan);
+      else {
+        assert.match(plan, /Index Scan using .* on skew/);
+        assert.deepEqual(sorted(guarded), sorted(await skew.execute(query, { pushdown: false })), plan);
+      }
+      if (query !== hot) assert.match(plan, /Seq Scan on skew/, 'a prefix over 40% of the rows is scanned');
+      t.diagnostic(`profiled plan: ${plan.split('\n').find((line) => /Scan/.test(line))?.trim()}`);
+    }
     assert.deepEqual(sorted(await skew.execute(rare, { profile })), ['d1999']);
   });
 });

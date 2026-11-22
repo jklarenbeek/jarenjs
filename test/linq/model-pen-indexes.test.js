@@ -50,6 +50,14 @@ describe('entity indexes in the model pen', () => {
       [{ name: 'by_employeeId_day', path: ['$.employeeId', '$.day'], where }, { name: 'by_day', path: '$.day', unique: false }]);
   });
 
+  it('carries doubleOrder as a boolean, and refuses any other value', () => {
+    const entry = m.index((d) => d.get('n'), { doubleOrder: true });
+    assert.deepStrictEqual(entry, { name: 'by_n', path: "$['n']", doubleOrder: true });
+    const model = m.defineModel({ entities: { A: m.object({ id: m.string().key(), n: m.number() }).indexes([entry]) } });
+    assert.deepStrictEqual(model.entities.A.indexes, [{ name: 'by_n', path: '$.n', doubleOrder: true }]);
+    assert.equal(codeOf(() => m.index((d) => d.get('n'), { doubleOrder: /** @type {any} */ ('yes') })), 'JL0101');
+  });
+
   it('reads a member named like a surface method, through get(), as the path the store reads', () => {
     const entry = m.index((d) => d.get('at'), { where: (d) => d.get('at').eq('x') });
     // a collection keeps the path as captured; a condition reads members as $.<member>

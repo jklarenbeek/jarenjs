@@ -336,20 +336,29 @@ describe('the PostgreSQL mapping', () => {
 
   it('the same model produces correspondingly different SQL from the SQLite one', () => {
     const sqlite = planCollection('users', users, sqliteDialect);
-    assert.strictEqual(sqlite.createSql.length, plan.createSql.length);
+    const own = plan.createSql;
+    assert.strictEqual(sqlite.createSql.length, own.length);
     // the TABLE differs in every part that is a spelling — the document
     // type, the storage word, the column types, the extraction. The
-    // INDEXES do not: `CREATE INDEX <name> ON <table> (<columns>)` is the
-    // same statement in both engines, over the same declared names, which
-    // is exactly what portability means — but a unique one, which SQLite
-    // keys after its typed column by the member's kind (its column holds a
-    // value of another kind as its own type reads it)
-    assert.notStrictEqual(plan.createSql[0], sqlite.createSql[0]);
-    assert.deepStrictEqual(plan.createSql.slice(2), sqlite.createSql.slice(2));
-    assert.deepStrictEqual([plan.createSql[1], sqlite.createSql[1]], ['CREATE UNIQUE INDEX "users_by_email" ON "users" ("gx_email")',
+    // INDEXES do not, but for the order of their keys: `CREATE INDEX <name>
+    // ON <table> (<columns>)` is the same statement in both engines, over the
+    // same declared names, which is exactly what portability means — where
+    // PostgreSQL keys each column of a non-unique one a statement orders by
+    // bare NULLS FIRST, the row identity after them (an empty key orders
+    // first, as SQLite's index holds it), and SQLite keys a unique one after
+    // its typed column by the member's kind (its column holds a value of
+    // another kind as its own type reads it)
+    const ordered = new Set(plan.expected.indexes.filter((/** @type {any} */ index) => index.ordered).map((/** @type {any} */ index) => index.name));
+    assert.deepStrictEqual([...ordered], ['users_by_extra']);
+    assert.notStrictEqual(own[0], sqlite.createSql[0]);
+    assert.deepStrictEqual(own.slice(2), sqlite.createSql.slice(2).map((/** @type {string} */ sql) =>
+      sql.replace(/^(CREATE INDEX "([^"]+)" .*) \((.*)\)$/, (whole, head, name, keys) => (!ordered.has(name) ? whole
+        : `${head} (${keys.split(', ').map((/** @type {string} */ key) => `${key} NULLS FIRST`).join(', ')}, "rid")`))));
+    assert.deepStrictEqual([own[1], sqlite.createSql[1]], ['CREATE UNIQUE INDEX "users_by_email" ON "users" ("gx_email")',
       `CREATE UNIQUE INDEX "users_by_email" ON "users" ("gx_email", ${kindKey('email', 'TEXT')})`]);
     // and the same declared indexes, by name and covered columns
-    assert.deepStrictEqual(plan.expected.indexes, sqlite.expected.indexes.map(({ terms: _terms, ...index }) => index));
+    assert.deepStrictEqual(plan.expected.indexes.map(({ ordered: _ordered, ...index }) => index),
+      sqlite.expected.indexes.map(({ terms: _terms, ...index }) => index));
     assert.deepStrictEqual(
       plan.expected.columns.map((column) => column.name).sort(),
       [...sqlite.expected.columns.map((column) => column.name), 'rid'].sort());

@@ -44,7 +44,7 @@ import { modelIdentity, migrationIdentity } from './migration-identity.js';
 import { migrationChecksum, historyStatements, readMigrationHistory, checkHistoryObservation, checkAppliedRows,
   historyHeader, identityRows, checkHistoryIdentity, checkHistoryChain, writeIdentityRows } from './migration-history.js';
 export { HISTORY_TABLE, ENGINE_TABLES };
-import { DOC_COLUMN, keyCheckName, planCollection, withoutContainerKeys, verifyShape, legacyColumnTypes, earlierIndexesHeld, planEntity as planEntityTable, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder, kindIndexSql, kindIndexTerms, kindIndexDropSql, numberCheckOf, planInvariants, MANAGED_SQL_OPTIONS } from './ddl.js';
+import { DOC_COLUMN, keyCheckName, planCollection, withoutContainerKeys, verifyShape, legacyColumnTypes, earlierIndexesHeld, planEntity as planEntityTable, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder, kindIndexSql, kindIndexTerms, kindIndexDropSql, orderIndexSql, numberCheckOf, planInvariants, MANAGED_SQL_OPTIONS } from './ddl.js';
 import { normalizeEntities as normalizeModelEntities, explainMapping as explainModelMapping, asHistory } from './model.js';
 import { storeTemporals } from './temporals.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
@@ -61,6 +61,7 @@ import { readSchema, namespaceSchema } from './introspect.js';
 import { withNamespaceCatalog } from './namespace-catalog.js';
 import { nonCodePointEncoding, verifyPhysical, verifyRulePrograms, heldPrograms, earlierSpellings, sameTriggerText, namespacePrograms } from './physical.js';
 import { CURRENT_SPELLING, PROGRAM_SPELLINGS } from './dialects/program-spellings.js';
+import { STORED_ROW } from './dialects/invariant-sql.js';
 import { walkPhysicalRows, transformPhysicalRows } from './physical-transform.js';
 import {
   MIGRATION_VERSION, isPerDocumentAssertion, compileDocumentStep, checkMigrationDocument, checkReplacement,
@@ -1114,6 +1115,7 @@ function collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping)
           note: `drop index '${indexName}' on '${name}'` });
       }
     }
+    steps.push(...orderIndexDrops(dialect, name, fromPlan, toPlan, (of) => indexNeedsRebuild(of, fromIndexes.get(of))));
     // an index beside a declared one that seeks another kind of its member leaves with
     // it, when the member no longer holds that kind, and when the link reads the member
     // otherwise (a guarded path whose container the model declares the other way); a
@@ -1175,11 +1177,12 @@ function collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping)
         steps.push({
           kind: 'ddl',
           sql: dialect.ddl.createIndex({ name: indexName, table: name, columns: toIndex.columns,
-            unique: toIndex.unique, where: toIndex.where, terms: toIndex.terms }),
+            unique: toIndex.unique, where: toIndex.where, terms: toIndex.terms, ordered: toIndex.ordered }),
           note: `create index '${indexName}' on '${name}'`,
         });
       }
     }
+    steps.push(...orderIndexCreates(dialect, name, fromPlan, toPlan, createdIndexes));
     // an index beside a declared one arrives with it, again where the link reads its member
     // otherwise, and a unique one also where the link gives a kept index's member the kind
     // (it refuses that kind's duplicates); one a table lacks beside an index it keeps is
@@ -1501,7 +1504,12 @@ export const planModelMigration = planMigration;
  * ({@link refuseStoredNaN}); and so does a number column holding a key (its
  * own, a reference's, a join table's side) without the key's CHECK (`ddl.js`
  * `keyCheckOf`), refused `JD0023` naming the rows another writer spelled
- * otherwise than the double's digits ({@link refuseStoredKeyDigits}). Where such an index is unique and the table holds
+ * otherwise than the double's digits ({@link refuseStoredKeyDigits}); and on an
+ * engine whose store keys an index in the order a statement reads
+ * (`ddl.js` `ordersIndex`), an index of a collection or an entity table held
+ * plain is dropped and created again so, and the index beside one over a
+ * number that keys its double, which no earlier release created, is created
+ * ({@link heldOrderSpellings}). Where such an index is unique and the table holds
  * documents that duplicate one another at its kind (an earlier release's
  * unique index keyed the member's first kind alone), the plan refuses
  * `JD0023` (`class: 'constraint'`) naming them, before any step. Every
@@ -1534,6 +1542,7 @@ export function planColumnUpgrade(connection, model, options = undefined) {
   return chain(heldDefinitionsOf(connection, collections.map(({ plan }) => plan)), (held) =>
     chain(missingJoinIndexes(connection, joinPlansOf(model, dialect)), (missing) =>
     chain(missingKindIndexes(connection, collections.map(({ plan }) => plan)), (besides) =>
+    chain(heldOrderSpellings(connection, [...collections.map(({ plan }) => plan), ...(dialect.capabilities.orderedIndexes === true ? entityPlansOf(model, dialect, true) : [])]), (spellings) =>
     chain(missingNumberChecks(connection, dialect.numberCheck === undefined ? []
       : [...entityPlansOf(model, dialect), ...joinPlansOf(model, dialect)]), (unchecked) => {
       const steps = [];
@@ -1558,6 +1567,15 @@ export function planColumnUpgrade(connection, model, options = undefined) {
         if (planned.has(sql)) continue;
         upgraded.push(`${table}.${index}`);
         steps.push({ kind: 'ddl', sql, note: `create the ${kind} index '${index}' beside '${of}' on '${table}', as a fresh store creates it` });
+      }
+      // an index an earlier release created plain, which this release keys `NULLS FIRST`
+      // with the row identity after its columns, and the index beside one over a number
+      // that keys its double, which no earlier release created
+      for (const { table, index, drop, sql, note } of spellings) {
+        if (planned.has(sql)) continue;
+        upgraded.push(`${table}.${index}`);
+        if (drop !== undefined) steps.push({ kind: 'ddl', sql: drop, note: `drop the index '${index}' on '${table}' an earlier release created plain` });
+        steps.push({ kind: 'ddl', sql, note });
       }
       for (const { table, column, sql } of unchecked.nan) {
         upgraded.push(`${table}.${column}`);
@@ -1584,7 +1602,7 @@ export function planColumnUpgrade(connection, model, options = undefined) {
           chain(refuseStoredNaN(connection, unchecked.nan), () =>
           chain(refuseStoredKeyDigits(connection, unchecked.key.filter((entry) => entry.sql !== undefined)), () => ({ migration, report: { upgraded } }))));
       });
-    }))));
+    })))));
 }
 
 /**
@@ -1612,7 +1630,11 @@ export function planColumnUpgrade(connection, model, options = undefined) {
  * function `CREATE OR REPLACE`d): an explicit, by-name opt-in to overwrite a
  * hand edit, which plans nothing for a program it does not name and refuses a
  * name that is no such program (`JD0013`). A reinstalled program judges the
- * writes after the link, never a row stored before it. The link goes from the model to
+ * writes after the link; an insert program a table the store owns lacks,
+ * once reinstalled, also judges the rows the table holds, as a link that adds
+ * its rules does (`JD0023`, naming the rule and the key of the first row that
+ * breaks it), where a drifted one reinstalled, and a physical layout's,
+ * judges none of them. The link goes from the model to
  * itself and is applied by {@link migrate} as the next link of the chain; one
  * that replaces a physical layout's program is planned as
  * {@link planPhysicalMigration} plans one, every other source object
@@ -1651,8 +1673,8 @@ export function planProgramUpgrade(connection, model, options = undefined) {
     .filter(([, entity]) => (entity.invariants ?? []).some((/** @type {any} */ rule) => rule.enforcement === 'database'))
     .map(([name, entity]) => {
       const plan = planEntity(name, entity, mapping, dialect, { expressions: options?.expressions });
-      return plan.physical ? { table: plan.physical.table, physical: true, items: plan.physical.triggers, at: plan.physical.triggersAt }
-        : { table: plan.table, physical: false, items: plan.programs, at: plan.programsAt };
+      return plan.physical ? { table: plan.physical.table, physical: true, items: plan.physical.triggers, at: plan.physical.triggersAt, keys: entity.keys }
+        : { table: plan.table, physical: false, items: plan.programs, at: plan.programsAt, keys: entity.keys };
     });
   const deparsed = dialect.introspect.invariantPrograms !== undefined;
   return chain(heldRulePrograms(connection, tables), (held) => {
@@ -1697,6 +1719,11 @@ export function planProgramUpgrade(connection, model, options = undefined) {
         if (repairing && actual === undefined)
           created.push(...to.filter((item) => item.type === 'trigger').map((item) => ({ type: 'trigger', name: item.name, owner: entry.table, sql: item.sql })));
         steps.push(...replacing);
+        // a missing insert program of a table the store owns, repaired, judges
+        // the rows the table holds, as the link that adds its rules does, once
+        // its trigger is created (on PostgreSQL holding the table's writers)
+        if (repairing && actual === undefined && !entry.physical && trigger.name.endsWith('_insert'))
+          steps.push(...storedRowSteps(dialect, entry.table, entry.keys, [], entry.items));
         // a function replaced in place leaves its trigger as it is
         const inPlace = replacing.length === 1 && to.some((each) => each.type === 'function');
         for (const item of inPlace ? to.filter((each) => each.type === 'function') : [...from, ...to])
@@ -1900,15 +1927,17 @@ function unusedMigrationId(connection, base) {
  * The columns of the model's entity tables the store creates (not a physical
  * mapping's), each planned as a fresh store creates it: its declared indexes
  * and rules left out, which add no column and whose host functions this plan
- * does not need.
- * @param {any} model @param {any} dialect
+ * does not need — or, with `indexes`, its declared indexes but those over an
+ * expression, which hold no column's order.
+ * @param {any} model @param {any} dialect @param {boolean} [indexes]
  * @returns {any[]}
  */
-function entityPlansOf(model, dialect) {
+function entityPlansOf(model, dialect, indexes = false) {
   if (asHistory(() => normalizeEntities(model)).size === 0) return [];
   const mapping = asHistory(() => explainMapping(model));
   return Object.entries(mapping.entities).filter(([, entity]) => entity.document !== false)
-    .map(([name, entity]) => planEntity(name, { ...entity, entityIndexes: [], invariants: [] }, mapping, dialect));
+    .map(([name, entity]) => planEntity(name, { ...entity, invariants: [],
+      entityIndexes: indexes ? (entity.entityIndexes ?? []).filter((/** @type {any} */ index) => index.expression === undefined) : [] }, mapping, dialect));
 }
 
 /**
@@ -2135,6 +2164,38 @@ function missingJoinIndexes(connection, plans) {
 }
 
 /**
+ * The steps that drop the indexes beside a from-plan's `ordered` indexes that
+ * key a number's double (`ddl.js` `orderIndexesOf`) where the declared index
+ * they stand beside is dropped (`dies`) or the target plans none of that name;
+ * a table an earlier release created may not hold one.
+ * @param {any} dialect @param {string} table @param {any} fromPlan @param {any} toPlan
+ * @param {(of: string) => boolean} dies - whether the link drops the declared index of that name
+ * @returns {any[]}
+ */
+function orderIndexDrops(dialect, table, fromPlan, toPlan, dies) {
+  const kept = new Set((toPlan.orderIndexes ?? []).map((/** @type {any} */ index) => index.name));
+  return (fromPlan.orderIndexes ?? []).filter((/** @type {any} */ index) => !kept.has(index.name) || dies(index.of))
+    .map((/** @type {any} */ index) => ({ kind: 'ddl', sql: kindIndexDropSql(dialect, index.name),
+      note: `drop index '${index.name}' beside '${index.of}' on '${table}', which keys its number's double` }));
+}
+
+/**
+ * The steps that create the indexes beside a target plan's declared indexes
+ * that key a number's double (`doubleOrder`), with the declared index each
+ * stands beside (`created`) and where the link declares it on an index it
+ * keeps; one a table lacks beside an index both models declare it on is
+ * `planColumnUpgrade`'s to add.
+ * @param {any} dialect @param {string} table @param {any} fromPlan @param {any} toPlan @param {Set<string>} created
+ * @returns {any[]}
+ */
+function orderIndexCreates(dialect, table, fromPlan, toPlan, created) {
+  const held = new Set((fromPlan.orderIndexes ?? []).map((/** @type {any} */ index) => index.name));
+  return (toPlan.orderIndexes ?? []).filter((/** @type {any} */ index) => created.has(index.of) || !held.has(index.name))
+    .map((/** @type {any} */ index) => ({ kind: 'ddl', sql: orderIndexSql(dialect, table, index),
+      note: `create index '${index.name}' beside '${index.of}' on '${table}', which keys its number's double` }));
+}
+
+/**
  * The indexes a fresh store creates beside a declared index over a member of
  * several kinds (`kindIndexes`) that a collection table lacks — one an
  * earlier release created, or one a link gave the kind without rebuilding
@@ -2148,6 +2209,50 @@ function missingKindIndexes(connection, plans) {
   const dialect = connection.dialect;
   return missingIndexes(connection, plans, (plan) => (plan.kindIndexes ?? []).map((/** @type {any} */ index) =>
     ({ table: plan.table, index: index.name, sql: kindIndexSql(dialect, plan.table, index), kind: index.kind, of: index.of })));
+}
+
+/**
+ * The indexes a table the database holds keys otherwise than this release
+ * creates them for its plan (`ddl.js` `ordersIndex`, `orderIndexesOf`): an
+ * `ordered` index an earlier release created plain, with the statements that
+ * drop it and create it again `ordered` under its name, and an index beside
+ * one over a number that keys its double that the table lacks, with the
+ * statement that creates it. One catalog read per table that plans either.
+ * A table the database does not hold has nothing to upgrade.
+ * @param {any} connection
+ * @param {any[]} plans - from `planCollection` or `planEntity`, one per table
+ * @returns {any} value-or-promise of `{ table: string, index: string, drop?: string, sql: string, note: string }[]`
+ */
+function heldOrderSpellings(connection, plans) {
+  const dialect = connection.dialect;
+  /** @type {{ table: string, index: string, drop?: string, sql: string, note: string }[]} */
+  const found = [];
+  const next = (/** @type {number} */ i) => {
+    if (i >= plans.length) return found;
+    const plan = plans[i];
+    const ordered = plan.expected.indexes.filter((/** @type {any} */ index) => index.ordered === true);
+    if (ordered.length === 0 && (plan.orderIndexes ?? []).length === 0) return next(i + 1);
+    return chain(connection.prepare(dialect.introspect.tableExists()), (exists) =>
+      chain(exists.get([plan.table]), (row) => (row === undefined ? next(i + 1)
+        : chain(connection.prepare(dialect.introspect.indexes(plan.table)), (statement) =>
+          chain(statement.all([]), (rows) => {
+            const held = new Map(rows.map((/** @type {any} */ candidate) => [String(candidate.name), candidate]));
+            for (const index of ordered) {
+              const have = held.get(index.name);
+              if (have === undefined || Number(have.plain) !== 1) continue;
+              found.push({ table: plan.table, index: index.name, drop: dialect.ddl.dropIndex(index.name),
+                sql: dialect.ddl.createIndex({ ...index, table: plan.table }),
+                note: `create the index '${index.name}' on '${plan.table}' again with each column NULLS FIRST and the row identity after them, as a fresh store creates it` });
+            }
+            for (const index of plan.orderIndexes ?? []) {
+              if (held.has(index.name)) continue;
+              found.push({ table: plan.table, index: index.name, sql: orderIndexSql(dialect, plan.table, index),
+                note: `create the index '${index.name}' beside '${index.of}' on '${plan.table}', which keys its number's double, as a fresh store creates it` });
+            }
+            return next(i + 1);
+          })))));
+  };
+  return next(0);
 }
 
 /**
@@ -2381,6 +2486,45 @@ function failingStatement(dialect, name, source, message) {
   const q = dialect.quoteIdentifier;
   return `WITH ${q(name)} AS (${source}) SELECT ${dialect.typedExtract === true
     ? `(${message})::bigint` : `json_extract('{}', ${message})`} FROM ${q(name)}`;
+}
+
+/**
+ * The steps that judge the rows a table already holds by each rule that
+ * judges an insert and that the link gives the table or changes — every
+ * check of `to` (`storedRows()`, the condition its insert program refuses a
+ * row on, read from a stored row) whose text `from` does not hold; the caller
+ * passes no `from` where the link rebuilds or transforms the table — as an
+ * added unique index judges them: one statement per rule that fails, naming
+ * the rule and the key of the first row that breaks it, so the step fails
+ * (`JD0023`) and the link rolls back whole. They run in the link's
+ * transaction after its transform steps ran and after the table's programs
+ * are in place: on PostgreSQL a step first enables the insert program's
+ * trigger, as it is, which takes the `SHARE ROW EXCLUSIVE` lock a
+ * `CREATE TRIGGER` takes — readers go on — and holds the table's writers until
+ * the link commits, where the program's function alone was replaced in place,
+ * so no row another session commits after the check read the table escapes
+ * both the check and the program.
+ * @param {any} dialect @param {string} table @param {string[]} keys - the key columns
+ * @param {any} from - the programs the table held (`[]` for none) @param {any} to - the programs it takes
+ * @returns {{ kind: 'sql', sql: string, note: string }[]}
+ */
+function storedRowSteps(dialect, table, keys, from, to) {
+  const held = new Map((from.storedRows?.() ?? []).map((/** @type {any} */ check) => [check.rule, check.when]));
+  const judged = (to.storedRows?.() ?? []).filter((/** @type {any} */ check) => held.get(check.rule) !== check.when);
+  if (judged.length === 0) return [];
+  const q = dialect.quoteIdentifier, literal = dialect.stringLiteral, row = q(STORED_ROW);
+  // SQLite spells a bad path's text back with its quotes doubled, so its names are quoted the other way
+  const mark = dialect.name === 'postgres' ? "'" : '"';
+  const key = keys.map((column) => `CAST(${row}.${q(column)} AS TEXT)`).join(` || ', ' || `);
+  const checks = judged.map((/** @type {any} */ check) => ({ kind: /** @type {const} */ ('sql'),
+    note: `check that no row '${table}' holds breaks the rule '${check.rule}'`,
+    sql: failingStatement(dialect, '_jaren_stored_row',
+      `SELECT ${key} AS ${q('key')} FROM ${q(table)} AS ${row} WHERE ${check.when} LIMIT 1`,
+      `${literal(`the rule ${mark}${check.rule}${mark} of ${mark}${table}${mark} refuses the stored row whose key ${keys.join(', ')} is `)} || ${q('key')} || `
+      + literal(': correct the stored rows first, or carry them into conformance with a transform step')) }));
+  const trigger = to.find((/** @type {any} */ item) => item.type === 'trigger' && item.name.endsWith('_insert'));
+  return dialect.name !== 'postgres' ? checks : [{ kind: /** @type {const} */ ('ddl'), sql: `ALTER TABLE ${q(table)} ENABLE TRIGGER ${q(trigger.name)}`,
+    note: `hold the writers of '${table}' until the link commits (its insert program's trigger enabled, as it is), so the checks read every row` }, ...checks];
 }
 
 /**
@@ -2682,11 +2826,21 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
 
     const fromPlan = planEntity(fromName, fm, fromMapping, dialect, { expressions });
     const toPlan = planEntity(name, tm, toMapping, dialect, { expressions });
+    // the columns a rebuild would change that change in place instead: on an
+    // engine that alters a column, for a table another table references,
+    // which a rebuild could not drop (§10)
+    const altered = needsRebuild && keysEqual && fksEqual && fromName === name && temporalFacts(fm) === temporalFacts(tm)
+      && !addedColumns.some((columnName) => toColumns.get(columnName).check !== undefined)
+      && (keyBefore === undefined || keyAfter === undefined || allocated(keyBefore) === allocated(keyAfter))
+      && referencesTo(fromName).length > 0
+      ? alteredInPlace(dialect, name, tm, fromColumns, toColumns, changedColumns, [fromPlan, toPlan]) : null;
+    const rebuilt = needsRebuild && altered === null;
     // the rules' programs: one that changes, and all of a rebuilt table (whose
     // triggers its DROP takes, but not a PostgreSQL function), are dropped
     // before the table's own work and created again last of all, after the
     // migration's transform steps (`programs`); a renamed table's were
-    // dropped before its rename. No stored row is judged
+    // dropped before its rename. The rows the table holds are judged after
+    // them (`storedRowSteps`)
     const kept = fromName !== name || needsRebuild ? new Set()
       : keptPrograms(fromPlan.programs ?? [], toPlan.programs ?? []);
     const dropping = fromName === name ? dropPrograms(fromPlan.programs ?? [], kept, name) : [];
@@ -2707,10 +2861,16 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     const workStart = steps.length;
     const allocationsBefore = allocation.length;
 
-    if (needsRebuild) {
+    if (rebuilt) {
       steps.push(...renderRebuild(name, fromName, fm, tm, toMapping, dialect, report, expressions));
     }
     else {
+      if (altered !== null) {
+        steps.push(...altered);
+        // a rule function of a table that references this one, compiled against the old type
+        if (changedColumns.some((columnName) => fromColumns.get(columnName).storage !== toColumns.get(columnName).storage))
+          steps.push(...recompiled(referencesTo(fromName).map((reference) => reference.table).filter((table) => table !== name)));
+      }
       // index diff first (a column cannot drop under a live index);
       // from-side index NAMES survive a rename with the OLD prefix
       const fromPlanIndexes = fromPlan.expected.indexes;
@@ -2727,6 +2887,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
             note: `drop index '${index.name}' on '${name}'` });
         }
       }
+      steps.push(...orderIndexDrops(dialect, name, fromPlan, toPlan, (of) => indexDies(fromIndexByName.get(of))));
       // dropped columns: fold survivors back into the document first
       for (const columnName of droppedColumns) {
         const column = fromColumns.get(columnName);
@@ -2789,15 +2950,19 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
             note: `move '${columnName}' out of the document into its column` });
         }
       }
+      /** The declared indexes this link creates. @type {Set<string>} */
+      const createdIndexes = new Set();
       for (const index of toPlanIndexes) {
         const source = fromIndexByName.get(index.name);
         if (source === undefined || indexDies(source)) {
+          createdIndexes.add(index.name);
           steps.push({ kind: 'ddl',
             sql: dialect.ddl.createIndex({ name: index.name, table: name,
-              columns: index.columns, unique: index.unique, where: index.where, terms: index.terms }),
+              columns: index.columns, unique: index.unique, where: index.where, terms: index.terms, ordered: index.ordered }),
             note: `create index '${index.name}' on '${name}'` });
         }
       }
+      steps.push(...orderIndexCreates(dialect, name, fromPlan, toPlan, createdIndexes));
     }
 
     // the stripped document-change rule (§9)
@@ -2832,6 +2997,12 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
         programs.push(step);
       }
     }
+    // the rules the rows it holds must keep: each insert rule the table gains
+    // or changes judges them, once its programs are in place — every one where
+    // the link rebuilds or transforms the table, whose rows it writes while
+    // the programs are down
+    const rewritten = needsRebuild || report.transformed.includes(name) || report.drafts.includes(name);
+    programs.push(...storedRowSteps(dialect, name, tm.keys, rewritten ? [] : fromPlan.programs ?? [], toPlan.programs ?? []));
   }
 
   steps.splice(loopStart, 0, ...allocation);
@@ -3017,11 +3188,14 @@ function wholeKeySql(dialect, table, column) {
  * session, readers included; `ensure` gives the key a sequence it owns, unless
  * it owns one, and makes it the key's default, unless it is an identity;
  * `release` drops the sequence the key owns, unless it owns none. The last two
- * find the sequence at run time, whatever it is called. `guard`, over a key
+ * find the sequence at run time, whatever it is called. `uncheck` drops each
+ * CHECK that reads the column alone, whatever the engine named it (a table
+ * created by a rebuild names it after the temporary table): a column's own
+ * CHECK that a change in place replaces. `guard`, over a key
  * or a column referencing one that became a `numeric` again, adds the CHECK
  * that refuses a NaN (`dialect.numberCheck`) unless the column holds it, as
  * a column created a `numeric` does and one created a `bigint` does not.
- * @param {any} dialect @param {'lock' | 'ensure' | 'release' | 'guard'} action @param {string} table @param {string} column
+ * @param {any} dialect @param {'lock' | 'ensure' | 'release' | 'guard' | 'uncheck'} action @param {string} table @param {string} column
  * @returns {string}
  */
 function allocationBlock(dialect, action, table, column) {
@@ -3050,6 +3224,12 @@ function allocationBlock(dialect, action, table, column) {
       + `AND pg_catalog.pg_get_expr(conbin, conrelid) = ${literal('(')} || pg_catalog.quote_ident(${literal(column)}) `
       + `|| ${literal(" <> 'NaN'::numeric)")}) THEN`,
     `    ALTER TABLE ${q(table)} ADD CHECK (${dialect.numberCheck(q(column))});`, '  END IF;', 'END;'],
+    uncheck: ['DECLARE', '  k record;', 'BEGIN',
+      '  FOR k IN SELECT c.conname FROM pg_catalog.pg_constraint c WHERE c.conrelid = '
+      + `pg_catalog.to_regclass(${literal(q(table))}) AND c.contype = 'c' AND c.conkey = ARRAY[(SELECT a.attnum `
+      + `FROM pg_catalog.pg_attribute a WHERE a.attrelid = c.conrelid AND a.attname = ${literal(column)})] LOOP`,
+      `    EXECUTE ${literal(`ALTER TABLE ${q(table)} DROP CONSTRAINT `)} || pg_catalog.quote_ident(k.conname);`,
+      '  END LOOP;', 'END;'],
   }[action];
   let tag = '$jaren_allocation$';
   for (let i = 1; body.some((line) => line.includes(tag)); i++) tag = `$jaren_allocation_${i}$`;
@@ -3059,14 +3239,14 @@ function allocationBlock(dialect, action, table, column) {
 /**
  * What an allocation block's first line names: its action, table and key, or
  * `null` for any other statement.
- * @param {unknown} sql @returns {['lock' | 'ensure' | 'release' | 'guard', string, string] | null}
+ * @param {unknown} sql @returns {['lock' | 'ensure' | 'release' | 'guard' | 'uncheck', string, string] | null}
  */
 function allocationBlockOf(sql) {
   const header = typeof sql === 'string' ? /^DO \$[A-Za-z_0-9]*\$\n-- (\[[^\n]*\])\n/.exec(sql) : null;
   if (header === null) return null;
   try {
     const [action, table, column] = JSON.parse(header[1]);
-    return (action === 'lock' || action === 'ensure' || action === 'release' || action === 'guard') && typeof table === 'string' && typeof column === 'string'
+    return ['lock', 'ensure', 'release', 'guard', 'uncheck'].includes(action) && typeof table === 'string' && typeof column === 'string'
       ? [action, table, column] : null;
   }
   catch { return null; }
@@ -3322,10 +3502,9 @@ function retypedSql(dialect, ref, from, to, type) {
  * saturates, an integer past 2^53 rounds into a double, and `0.5` or `81` is no
  * boolean. A spelling the cast reads right (`007`, `+5`, ` 12`, `12.0`, `.5`)
  * is no change. A text is judged as the copy casts it, without the blanks
- * `Number()` trims around a number (a no-break space, U+FEFF), except in a
- * column a foreign key joins, which the copy casts as it is; a text blank once
- * they are gone names no number and is refused, though `Number()` reads it as
- * `0`. The statement fails, naming the member and the first value in
+ * `Number()` trims around a number (a no-break space, U+FEFF); a text blank
+ * once they are gone names no number and is refused, though `Number()` reads
+ * it as `0`. The statement fails, naming the member and the first value in
  * order that would change, as `wholeKeySql` does; no such value, no failure,
  * and a missing member (SQL NULL) is no value. Both engines refuse a value
  * whose number the cast would not keep, with three exceptions of the engines'
@@ -3339,15 +3518,14 @@ function retypedSql(dialect, ref, from, to, type) {
  * @param {string} from - the column's storage now
  * @param {string} to - the storage it is retyped to
  * @param {boolean} instant - the column is an epoch column, which stays within a double's exact range
- * @param {boolean} joined - a foreign key joins the column, which the copy casts as it is
  * @returns {string | null}
  */
-function retypeCheckSql(dialect, table, column, from, to, instant, joined) {
+function retypeCheckSql(dialect, table, column, from, to, instant) {
   const q = dialect.quoteIdentifier, literal = dialect.stringLiteral, ref = q(column);
   const postgres = dialect.name === 'postgres';
   const text = from === 'string';
-  // a text is judged as the copy casts it: without the blanks Number() trims, but where a foreign key joins it
-  const read = text && !joined ? numberTextOf(dialect, ref) : ref;
+  // a text is judged as the copy casts it: without the blanks Number() trims
+  const read = text ? numberTextOf(dialect, ref) : ref;
   const int64 = '-9223372036854775808 AND 9223372036854775807';
   // the spellings PostgreSQL's numeric cast reads as JavaScript's Number() does: blanks around a sign,
   // digits with an optional point and an exponent (bounded, so that no digit string reaches an overflow
@@ -3407,6 +3585,72 @@ function retypeCheckSql(dialect, table, column, from, to, instant, joined) {
 }
 
 /**
+ * The steps that change a table's columns in place of its rebuild (§10), or
+ * `null` where one of them has no such form: a column whose `enum` changes,
+ * or whose type changes by a cast (a text into a number, an integer or a
+ * boolean, a number into an integer, an integer into a number, a boolean into
+ * anything), where the column is no key and no foreign key's, is computed
+ * alike on both sides, and no index reads it. A retype into text from a number
+ * or an integer is spelled by a select of its own (`numberTextSql`), which an
+ * `ALTER COLUMN … TYPE … USING` cannot hold, and so is rebuilt. The steps lock
+ * the table against every other session, readers included, drop the column's
+ * own CHECK, check the stored values a retype would change and retype the
+ * column, as the rebuild's copy casts it, then add the CHECK the target plans.
+ * @param {any} dialect @param {string} holder - the table @param {any} tm - the target entity's mapping
+ * @param {Map<string, any>} fromColumns @param {Map<string, any>} toColumns
+ * @param {string[]} changed - the columns whose storage, source or `enum` changes
+ * @param {any[]} plans - the table's plans on both sides, whose indexes a changed column must not be read by
+ * @returns {any[] | null}
+ */
+function alteredInPlace(dialect, holder, tm, fromColumns, toColumns, changed, plans) {
+  if (dialect.capabilities.alterTableFull !== true || dialect.migration === undefined) return null;
+  const q = dialect.quoteIdentifier;
+  // the statements after the table's own that read a column: its indexes, not its rule programs
+  const indexed = plans.flatMap((plan) => plan.createSql.slice(1, plan.createSql.length - (plan.programs?.length ?? 0)));
+  const fromStorage = (/** @type {string} */ name) => fromColumns.get(name).storage;
+  const toStorage = (/** @type {string} */ name) => toColumns.get(name).storage;
+  const cast = (/** @type {string} */ from, /** @type {string} */ to) => from === to || to !== 'string' || from === 'boolean';
+  for (const name of changed) {
+    const from = fromColumns.get(name), to = toColumns.get(name);
+    if (to.key || from.key || tm.foreignKeys.some((/** @type {any} */ fk) => fk.column === name)
+      || from.source !== to.source || to.source === 'epoch(document)' || !cast(from.storage, to.storage)
+      || indexed.some((sql) => sql.includes(q(name)))) return null;
+  }
+  const type = (/** @type {string} */ storage) => dialect.typeFor(storage, 'generated');
+  const steps = [{ kind: 'ddl', sql: allocationBlock(dialect, 'lock', holder, changed[0]),
+    note: `lock '${holder}' against every other session while its columns change in place` }];
+  for (const name of changed) {
+    steps.push({ kind: 'ddl', sql: allocationBlock(dialect, 'uncheck', holder, name),
+      note: `drop the CHECK of column '${name}' on '${holder}'` });
+    if (fromStorage(name) !== toStorage(name)) {
+      const check = retypeCheckSql(dialect, holder, name, fromStorage(name), toStorage(name), false);
+      if (check !== null) steps.push({ kind: 'sql', sql: check, note: `check that no value of '${name}' on '${holder}' changes in the retype` });
+      steps.push({ kind: 'ddl', sql: `ALTER TABLE ${q(holder)} ALTER COLUMN ${q(name)} TYPE ${type(toStorage(name))} USING `
+        + retypedSql(dialect, q(name), fromStorage(name), toStorage(name), dialect.comparableColumnType(type(toStorage(name)))),
+      note: `retype column '${name}' on '${holder}' from ${fromStorage(name)} to ${toStorage(name)} in place` });
+    }
+    const check = columnCheckSql(dialect, name, toColumns.get(name), type(toStorage(name)));
+    if (check !== undefined) steps.push({ kind: 'ddl', sql: dialect.ddl.addCheck({ table: holder, sql: check }),
+      note: `add the CHECK of column '${name}' on '${holder}'` });
+  }
+  return steps;
+}
+
+/**
+ * A column's own CHECK as an entity's table plans it: its `enum`'s list, or
+ * where it declares none the number column's own (`numberCheckOf`).
+ * @param {any} dialect @param {string} name @param {any} column - its mapping column
+ * @param {string} type - its declared type
+ * @returns {string | undefined}
+ */
+function columnCheckSql(dialect, name, column, type) {
+  if (column.check === undefined) return numberCheckOf(dialect, name, type);
+  const values = column.check.map((/** @type {any} */ value) => (typeof value === 'string' ? dialect.stringLiteral(value)
+    : typeof value === 'boolean' ? (value ? '1' : '0') : String(value)));
+  return `${dialect.quoteIdentifier(name)} IN (${values.join(', ')})`;
+}
+
+/**
  * Render one rebuild step (§10): self-contained SQL — the temporary
  * table, the column-mapped copy, the final-name indexes. The table's rule
  * programs are not the step's: the old ones were dropped before it, the new
@@ -3434,13 +3678,6 @@ function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report, expre
   const fromHas = (columnName) =>
     fromColumns.has(columnName) || fromFkOnly.includes(columnName);
   const storageType = (storage) => dialect.typeFor(storage, 'generated');
-  /** Whether a foreign key joins the column: one of this table's, or another
-   * table's (a join table's included) that references it. @param {string} columnName */
-  const joined = (columnName) => tm.foreignKeys.some((/** @type {any} */ fk) => fk.column === columnName)
-    || Object.values(toMapping.entities).some((/** @type {any} */ mapping) => mapping.foreignKeys
-      .some((/** @type {any} */ fk) => fk.references === name && fk.referencesKey === columnName))
-    || Object.values(toMapping.joinTables ?? {}).some((/** @type {any} */ join) => [join.left, join.right]
-      .some((side) => side.entity === name && side.referencesKey === columnName));
   /** The storage an inferred foreign-key column holds: the key it references. */
   const referencedStorage = (/** @type {any} */ mapping, /** @type {string} */ columnName) =>
     mapping.foreignKeys.find((/** @type {any} */ fk) => fk.column === columnName)?.referencesType;
@@ -3480,8 +3717,10 @@ function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report, expre
     targets.push(q(columnName));
     if (fromHas(columnName)) {
       const fromColumn = fromColumns.get(columnName);
-      const sameStorage = column === null || fromColumn === undefined
-        || fromColumn.storage === column.storage;
+      // a foreign key's column holds what the key it references holds
+      const fromStorage = fromColumn?.storage ?? referencedStorage(fm, columnName);
+      const toStorage = column?.storage ?? referencedStorage(tm, columnName);
+      const sameStorage = fromStorage === undefined || toStorage === undefined || fromStorage === toStorage;
       if (column !== null && column.source === 'epoch(document)'
         && fromColumn !== undefined && fromColumn.source !== 'epoch(document)') {
         // plain text column becomes a derived instant: derive from the
@@ -3505,15 +3744,14 @@ function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report, expre
       }
       else {
         // the type's name alone: a collation belongs to the column, and
-        // `CAST(x AS text COLLATE "C")` is not a cast. A column a foreign key
-        // joins keeps the engine's cast, into text and out of it, so the
-        // reference matches the key it names while one side is rebuilt and the
-        // other not yet
-        const type = dialect.comparableColumnType(storageType(column.storage));
-        sources.push(joined(columnName) ? `CAST(${q(columnName)} AS ${type})`
-          : retypedSql(dialect, q(columnName), fromColumn.storage, column.storage, type));
-        const check = retypeCheckSql(dialect, name, columnName, fromColumn.storage, column.storage,
-          fromColumn.source === 'epoch(document)', joined(columnName));
+        // `CAST(x AS text COLLATE "C")` is not a cast. A key a foreign key
+        // references and the column that references it are spelled alike, so
+        // the reference matches its key once both tables are rebuilt; the
+        // runner judges such a link's references after the last of them
+        const type = dialect.comparableColumnType(storageType(toStorage));
+        sources.push(retypedSql(dialect, q(columnName), fromStorage, toStorage, type));
+        const check = retypeCheckSql(dialect, name, columnName, fromStorage, toStorage,
+          fromColumn?.source === 'epoch(document)');
         if (check !== null) retypeChecks.push(check);
       }
       continue;
@@ -3637,7 +3875,8 @@ export function createModelShape(connection, model, expressions = undefined) {
  * holds them in, some join tables without the index over their second
  * key column, (`bareKinds`) every collection without the indexes beside
  * its declared ones over a member of several kinds and without its container
- * key columns, (`earlierKeys`) some unique indexes without some of the kind
+ * key columns, and every table with its indexes plain and without those
+ * beside them that key a number's double ({@link earlierOrders}), (`earlierKeys`) some unique indexes without some of the kind
  * keys after their columns, and (`containers`) some collections without some
  * container key columns, their triggers and the indexes over them, as an
  * earlier release created them.
@@ -3662,11 +3901,13 @@ function createShapeHolding(connection, model, expressions, legacy) {
       ? new Set((planned.containerKeys ?? []).map((/** @type {any} */ key) => key.column))
       : legacy.containers?.get(collection.name) ?? new Set());
     const beside = new Set(legacy.bareKinds === true ? plan.kindIndexes.map((/** @type {any} */ index) => kindIndexSql(dialect, plan.table, index)) : []);
+    for (const sql of legacy.bareKinds === true ? earlierOrders(dialect, plan).beside : []) beside.add(sql);
     const earlierKeys = legacy.earlierKeys?.get(plan.table);
     /** @type {Map<string, string>} */
-    const spelled = new Map(plan.expected.indexes.filter((/** @type {any} */ index) => earlierKeys?.has(index.name))
+    const spelled = new Map([...plan.expected.indexes.filter((/** @type {any} */ index) => earlierKeys?.has(index.name))
       .map((/** @type {any} */ index) => [dialect.ddl.createIndex({ ...index, table: plan.table }),
-        dialect.ddl.createIndex({ ...index, table: plan.table, terms: earlierKeys?.get(index.name) })]));
+        dialect.ddl.createIndex({ ...index, table: plan.table, terms: earlierKeys?.get(index.name) })]),
+    ...(legacy.bareKinds === true ? earlierOrders(dialect, plan).spelled : [])]);
     statements.push(...plan.createSql.filter((/** @type {string} */ sql) => !beside.has(sql)).map((/** @type {string} */ sql) => spelled.get(sql) ?? sql));
   }
   // a shape is built for a baseline too, which is history
@@ -3674,7 +3915,12 @@ function createShapeHolding(connection, model, expressions, legacy) {
   if (entities.size > 0) {
     const mapping = asHistory(() => explainMapping(model));
     const plans = Object.keys(mapping.entities).map((name) => planEntity(name, mapping.entities[name], mapping, dialect, { deferCycles: true, expressions }));
-    for (const plan of plans) statements.push(...plan.createSql);
+    for (const plan of plans) {
+      // as the earliest release created it: every index plain, none beside one that keys a double
+      const earlier = legacy.bareKinds === true ? earlierOrders(dialect, plan) : { beside: new Set(), spelled: [] };
+      const spelled = new Map(earlier.spelled);
+      statements.push(...plan.createSql.filter((/** @type {string} */ sql) => !earlier.beside.has(sql)).map((/** @type {string} */ sql) => spelled.get(sql) ?? sql));
+    }
     for (const name of Object.keys(mapping.joinTables)) {
       const created = planJoinTable(name, mapping.joinTables[name], mapping, dialect).createSql;
       statements.push(...(legacy.bareJoins === 'all' || legacy.bareJoins.has(name) ? created.slice(0, 1) : created));
@@ -3685,6 +3931,23 @@ function createShapeHolding(connection, model, expressions, legacy) {
     ? null
     : chain(connection.exec(statements[i]), () => run(i + 1)));
   return run(0);
+}
+
+/**
+ * A table's planned statements an earlier release spelled otherwise (`ddl.js`
+ * `ordersIndex`, `orderIndexesOf`): each `ordered` index's CREATE beside its
+ * plain one, which an earlier release created, and the CREATE of each index
+ * beside one over a number that keys its double, which none created.
+ * @param {any} dialect @param {any} plan - from `planCollection` or `planEntity`
+ * @returns {{ beside: Set<string>, spelled: [string, string][] }}
+ */
+function earlierOrders(dialect, plan) {
+  return {
+    beside: new Set((plan.orderIndexes ?? []).map((/** @type {any} */ index) => orderIndexSql(dialect, plan.table, index))),
+    spelled: plan.expected.indexes.filter((/** @type {any} */ index) => index.ordered === true)
+      .map((/** @type {any} */ index) => [dialect.ddl.createIndex({ ...index, table: plan.table }),
+        dialect.ddl.createIndex({ ...index, table: plan.table, ordered: false })]),
+  };
 }
 
 /**
@@ -4000,15 +4263,17 @@ function renamesOf(steps) {
  * its child's `REFERENCES` clause spells, and a rename made with
  * `legacy_alter_table` on (the setting a link that rebuilds runs under)
  * leaves that clause spelling the old name until the child is rebuilt.
- * The rows answered are `after`'s own.
+ * The rows answered are `after`'s own. `byTable` compares a row by its table
+ * and parent alone: a table rebuilt between the two reads numbers its rows
+ * and its foreign keys anew.
  * @param {any[] | null} before @param {any[]} after
- * @param {{ table?: (name: any) => any, parent: (name: any) => any }} names
+ * @param {{ table?: (name: any) => any, parent: (name: any) => any, byTable?: boolean }} names
  * @returns {any[]}
  */
 function introducedViolations(before, after, names) {
-  const { table = (/** @type {any} */ name) => name, parent } = names;
-  const keyOf = (/** @type {any} */ row, /** @type {boolean} */ earlier) =>
-    JSON.stringify({ ...row, table: earlier ? table(row.table) : row.table, parent: parent(row.parent) });
+  const { table = (/** @type {any} */ name) => name, parent, byTable = false } = names;
+  const keyOf = (/** @type {any} */ row, /** @type {boolean} */ earlier) => JSON.stringify({ ...(byTable ? {} : row),
+    table: earlier ? table(row.table) : row.table, parent: parent(row.parent) });
   const seen = new Map();
   for (const row of before ?? []) {
     const key = keyOf(row, true);
@@ -4034,6 +4299,11 @@ function introducedViolations(before, after, names) {
 function runSteps(connection, migration, options) {
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
+  /** The references a rebuild left broken for a table a later rebuild of the
+   * link spells anew (a retyped key's referencing table): the violations read
+   * before that rebuild, and its step, against which a later rebuild's
+   * references are judged. @type {{ before: any[], at: number } | null} */
+  let held = null;
   const step = (i) => {
     if (i >= migration.steps.length) return null;
     // the cancellation boundary between steps: a refusal here rolls the
@@ -4091,16 +4361,25 @@ function runSteps(connection, migration, options) {
           cause), verdictOf(cause)));
         /** @type {any[] | null} */
         let before = null;
+        // a reference from a table a later rebuild of the link spells anew is
+        // judged after that rebuild: a key and the column that references it
+        // are retyped in two steps, and match again only once both are
+        const later = new Set(migration.steps.slice(i + 1).filter((/** @type {any} */ s) => s.kind === 'rebuild')
+          .map((/** @type {any} */ s) => tableNameKey(s.table)));
+        const since = held;
         const runNext = (j) => {
           if (j >= statements.length) {
             if (before === null) return dialect.name === 'postgres' ? nameRebuiltKey(connection, current.table) : null;
             return chain(foreignKeyViolations(connection), (after) => {
-              const violations = introducedViolations(before, /** @type {any[]} */ (after), { parent: renamedSoFar });
+              const introduced = introducedViolations(before, /** @type {any[]} */ (after), since === null
+                ? { parent: renamedSoFar } : { table: renamesOf(migration.steps.slice(since.at, i)), parent: renamedSoFar, byTable: true });
+              const violations = introduced.filter((/** @type {any} */ row) => !later.has(tableNameKey(String(row.table))));
               if (violations.length > 0) {
                 fail(`foreign_key_check found ${violations.length} broken reference(s) `
                   + `after rebuilding '${current.table}' `
                   + `(first: ${JSON.stringify(violations[0])})`, undefined, { class: 'constraint', retryable: false });
               }
+              held = introduced.length > 0 ? since ?? { before: /** @type {any[]} */ (before), at: i } : null;
               return null;
             });
           }
@@ -4116,6 +4395,10 @@ function runSteps(connection, migration, options) {
           }
           return chain(ran, () => runNext(j + 1));
         };
+        if (since !== null) {
+          before = since.before;
+          return runNext(0);
+        }
         return chain(foreignKeyViolations(connection), (rows) => { before = rows; return runNext(0); });
       }
       if (current.kind === 'derive') {

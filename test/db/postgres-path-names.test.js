@@ -98,8 +98,8 @@ describe('the dialect text a digit in a path writes', () => {
       + '"gx_tags_1" text COLLATE "C" GENERATED ALWAYS AS (((CASE WHEN jsonb_typeof(("doc" #> \'{"tags","1"}\')) = \'string\' '
       + 'THEN "doc" #>> \'{"tags","1"}\' END) COLLATE "C")) STORED)',
       'CREATE INDEX "spans_by_start" ON "spans" ("gx_spans_0_start")',
-      'CREATE INDEX "spans_by_zero" ON "spans" ("gx_0")',
-      'CREATE INDEX "spans_by_tag" ON "spans" ("gx_tags_1")',
+      'CREATE INDEX "spans_by_zero" ON "spans" ("gx_0" NULLS FIRST, "rid")',
+      'CREATE INDEX "spans_by_tag" ON "spans" ("gx_tags_1" NULLS FIRST, "rid")',
     ]);
   });
 

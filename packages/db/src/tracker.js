@@ -1102,6 +1102,12 @@ export function createTracker(context) {
    * @param {any[]} statements @param {any} report
    * @param {Map<any, (() => any)[]>} deferred @param {any[]} joinOnly
    */
+  /** The top-level members a tracked update changes, from its snapshot to
+   * what it writes, as `update()`'s changes name them: a change of the whole
+   * row names every key member. @param {any} record @returns {Record<string, true>} */
+  const changedMembers = (record) => Object.fromEntries(createJSONPatch(record.snapshot, record.stamped)
+    .flatMap((op) => (op.path === '' ? coreFor(record.entity).plan.keys : [parseJSONPointer(op.path)[0]]))
+    .map((member) => [member, true]));
   const runStatements = (statements, report, deferred, joinOnly) => {
     const recordsOf = (statement) => (statement.kind === 'insert' ? statement.records
       : statement.kind === 'update' ? [statement.record] : []);
@@ -1110,9 +1116,11 @@ export function createTracker(context) {
       const core = ['insert', 'update', 'delete'].includes(statement.kind) ? coreFor(statement.entity) : null;
       if (core === null) return null;
       const runs = recordsOf(statement).flatMap((record) => deferred.get(record) ?? []);
-      // the row a rule judges, locked for the save's transaction (see `getLocked`)
+      // the row a rule judges, locked for the save's transaction (see `getLocked`):
+      // an update by the members it changes, so one that changes no key column
+      // locks as its UPDATE does
       const read = statement.kind === 'update' && core.plan.document === false && core.plan.ruled('update')
-        ? core.getLocked(statement.record.snapshot)
+        ? core.getLocked(statement.record.snapshot, changedMembers(statement.record))
         : statement.kind === 'delete' && core.plan.ruled('delete')
           ? core.getLocked(keyArgument(core.plan, statement.removal.parts)) : undefined;
       return chain(read, (row) => {

@@ -357,6 +357,8 @@ export interface IndexOptions<D = unknown> {
   precision?: number;
   dims?: number;
   physical?: 'columns' | 'rtree';
+  /** On PostgreSQL, an index beside a number-led index over the number's double, which orderings and joins read (POSTGRESQL.md). */
+  doubleOrder?: boolean;
   /** The condition of a partial index (MODEL-FORMAT §2). */
   where?: IndexCondition<D>;
 }
@@ -371,6 +373,7 @@ export interface IndexSpec<D = unknown> {
   readonly precision?: number;
   readonly dims?: number;
   readonly physical?: 'columns' | 'rtree';
+  readonly doubleOrder?: boolean;
   readonly where?: { readonly [operator: string]: unknown };
 }
 

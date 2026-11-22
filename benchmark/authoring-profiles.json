@@ -3,16 +3,16 @@
   "rows": [
     {
       "grammar": "model",
-      "sourceHash": "42b07975d8b1956511a80326a41e9b8cf57a7bdec84d22755e484c7eeec1d32a",
+      "sourceHash": "ae5d53fe36f8609c59e5da94bd416335619f2883ce587ff75c41efa2712c9404",
       "seamHash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-      "profileHash": "4fbd32e15089e6e9813f0b1d11d956f880dc33ba8f787f4b745e45c092bc8626",
+      "profileHash": "910a2a77f2df3f4de2ae01872a2a0a78e14d06b26c44132a230e0a68fc1f4ab0",
       "open": [],
       "full": {
-        "bytes": 17979,
+        "bytes": 19217,
         "branches": 15
       },
       "profile": {
-        "bytes": 18038,
+        "bytes": 19276,
         "branches": 15
       }
     },

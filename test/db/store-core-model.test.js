@@ -149,7 +149,7 @@ describe('the model document is one closed vocabulary', () => {
 
   it('the refusal names the members of the declaration and the nearest one', () => {
     assert.throws(() => normalizeModel(collectionModel({ ...COLLECTION, indexes: [{ name: 'a', path: '$.a', uniqe: true }] })),
-      { code: 'JD0005', message: /unknown index member 'uniqe' — did you mean 'unique'\? \(an index declares name, path, expression, unique, where, derive, precision, dims, physical\)/ });
+      { code: 'JD0005', message: /unknown index member 'uniqe' — did you mean 'unique'\? \(an index declares name, path, expression, unique, where, derive, precision, dims, physical, doubleOrder\)/ });
     assert.throws(() => normalizeModel({ ...collectionModel(COLLECTION), zzz: 1 }),
       { code: 'JD0005', message: /unknown model member 'zzz' \(a model declares \$model, collections, entities\)/ });
     assert.throws(() => normalizeEntities(entityModel({ schema: KEYED, invariants: [{ ...storeRule, enforcment: 'store' }] })),

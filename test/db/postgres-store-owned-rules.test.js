@@ -290,7 +290,7 @@ describe('store rules judge the rows a foreign-key action removes or nulls, on P
 });
 
 describe('a planned migration of a store-owned layout\'s rules, on PostgreSQL', { skip }, () => {
-  it('adds, replaces and drops the programs in place, rebuilds with them, judges no stored row, and every result reopens', () =>
+  it('adds, replaces and drops the programs in place, rebuilds with them, judges the rows the table holds, and every result reopens', () =>
     withPostgres(async ({ pool, schema, driver }) => {
       const dialect = postgresDialect({ searchPath: schema });
       const target = { driver: driver() };
@@ -326,10 +326,17 @@ describe('a planned migration of a store-owned layout\'s rules, on PostgreSQL', 
       };
       const functions = async () => (await pool.query('SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace '
         + 'WHERE n.nspname = $1 ORDER BY 1', [schema])).rows.map((row) => row.proname);
+      // the row the added rule refuses fails the first link, which installs nothing; corrected, the chain applies
+      await assert.rejects(migrate(target, migrations.slice(0, 1), { baseline: models[0], model: models[1], shadow: false }),
+        { code: 'JD0023', message: /the rule 'ordered' of 'Booking' refuses the stored row whose key id is old/ });
+      assert.deepEqual(await functions(), []);
+      const earlier = await openStore(models[0], { driver: driver() });
+      try { await earlier.entity('Booking').update('old', { endsAt: 9 }); }
+      finally { await earlier.close(); }
       for (const [to, expected] of /** @type {[number, string[]][]} */ ([[1, ['ok', 'JD2096']], [2, ['JD2096', 'JD2096']], [3, ['JD2096', 'JD2096']], [4, ['ok', 'ok']]])) {
         const ruled = await run(to);
         try {
-          assert.deepEqual(await ruled.entity('Booking').get('old'), { id: 'old', startsAt: 5, endsAt: 1 });
+          assert.deepEqual(await ruled.entity('Booking').get('old'), { id: 'old', startsAt: 5, endsAt: 9 });
           assert.deepEqual(await verdicts(ruled), expected, `m${to - 1}`);
         }
         finally { await ruled.close(); }
@@ -337,7 +344,7 @@ describe('a planned migration of a store-owned layout\'s rules, on PostgreSQL', 
       }
     }));
 
-  it('runs a transform before the programs a rule adds: a row it carries into conformance is kept, one it leaves violating stays', () =>
+  it('runs a transform before the programs a rule adds and their check: a row it carries into conformance is kept, one it leaves violating fails the link', () =>
     withPostgres(async ({ schema, driver }) => {
       const dialect = postgresDialect({ searchPath: schema });
       const store = await openStore(bookingModel(false), { driver: driver() });
@@ -347,16 +354,23 @@ describe('a planned migration of a store-owned layout\'s rules, on PostgreSQL', 
       const to = narrowedBookingModel();
       const { migration } = planModelMigration(bookingModel(false), to, { dialect, id: 'carry', transform: BOOKING_TRANSFORM });
       const programs = planInvariants(to, { dialect });
-      assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.kind), ['jslt', ...programs.map(() => 'ddl')]);
+      // the programs, the step that holds the table's writers, then the check of the rows the transform left
+      assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.kind), ['jslt', ...programs.map(() => 'ddl'), 'ddl', 'sql']);
       const options = { baseline: bookingModel(false), model: to, shadow: false };
+      await assert.rejects(migrate({ driver: driver() }, [migration], options),
+        { code: 'JD0023', message: /the rule 'ordered' of 'Booking' refuses the stored row whose key id is stay/ });
+      const earlier = await openStore(bookingModel(false), { driver: driver() });
+      try {
+        assert.deepEqual(await earlier.entity('Booking').get('fix'), { id: 'fix', startsAt: 5, endsAt: 1 });
+        await earlier.entity('Booking').delete('stay');
+      }
+      finally { await earlier.close(); }
       assert.deepEqual((await migrate({ driver: driver() }, [migration], options)).applied, ['carry']);
       assert.deepEqual((await migrate({ driver: driver() }, [migration], options)).applied, []);
       const ruled = await openStore(to, { driver: driver() });
       try {
         const bookings = ruled.entity('Booking');
         assert.deepEqual(await bookings.get('fix'), { id: 'fix', startsAt: 1, endsAt: 1 });
-        assert.deepEqual(await bookings.get('stay'), { id: 'stay', startsAt: 1, endsAt: 0 });
-        await assert.rejects(bookings.update('stay', { room: 'x' }), { code: 'JD2096' });
         assert.deepEqual(await bookings.update('fix', { room: 'x' }), { id: 'fix', startsAt: 1, endsAt: 1, room: 'x' });
       }
       finally { await ruled.close(); }

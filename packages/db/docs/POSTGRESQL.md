@@ -131,6 +131,53 @@ lists no `object`, which would guard that path. Beside a composite such a member
 column, has none, and reads back untyped. A bulk load writes the extra
 indexes; a single write's cost is the round trip it already pays.
 
+Indexes in the order a statement reads. A window, a load's `orderBy` and a
+keyset page order a member ascending with an empty key first (`NULLS FIRST`),
+ties broken by the row identity (a keyset page's by the key), and an ascending
+B-tree places NULL last. A non-unique index the store creates over columns a
+statement orders bare — a collection's declared index, an entity's index over
+a column, a reference or a declared `indexes` entry, conditional or not —
+keys each column `NULLS FIRST` and the row identity after them (`CREATE INDEX
+"c_by_s" ON "c" ("gx_s" NULLS FIRST, "rid")`): ascending, the statement reads
+it forward and stops after its window; descending (`DESC NULLS LAST`) it reads
+it backward, the row identity sorted again within one value. A number member
+or column holds the digits a writer spelled and is ordered as the double the
+engine holds: its own index, which a comparison seeks, keeps its plain
+spelling, and such an ordering is sorted unless the index declares
+`doubleOrder` (MODEL-FORMAT §2): beside an index led by a number column, under
+no condition, that declares it, the store creates `"<index>$double"`, keying
+that double `NULLS FIRST` and the row identity, which an ordering and a
+join's or a hop's equality of two number columns read. It is declared because
+it is the cost: the respelled index keys the columns it held before and one
+more, and costs a write next to nothing more, where the index beside is one
+more index every write that sets the member keeps. A unique index keeps its plain spelling
+(the row identity would key its columns apart), and so does an index over a
+column that holds no NULL (a composite key's member, ordered with the default
+placement), over a calendar member's key columns, a derived column or a
+declared expression, and a join table's: an ordering over a unique member is
+sorted, and so is an ascending ordering with `$empty: 'greatest'` (`ASC NULLS
+LAST`, descending with `'least'`) over any indexed member, which a plain index
+served. A table an
+earlier release created holds its indexes plain and none beside: it opens and
+answers as before, sorting those rows, and `planColumnUpgrade` drops each
+index it holds plain where this release keys it so and creates it again, and
+creates each one beside that the table lacks (MIGRATION-FORMAT §3).
+`introspect()` reads such an index back as the plain index it was declared
+as, and an index beside one as its index's `doubleOrder`. An index under one of
+those names in another spelling — another key order, another key or read,
+unique, or under a condition — is refused `JD0002` at open. The release before
+this one refuses a table this release creates, `JD0002` naming the first index
+beside it finds (`the database has c_by_n$double, which the model does not
+declare`) or, without one, the first index keyed so (`index 'c_by_s' covers
+(gx_s, rid) in that order, the model declares (gx_s)`), and a model that
+declares `doubleOrder` (`JD0005`, an unknown index member). The way back is SQL
+no link plans: in one transaction, `DROP INDEX` each `"<index>$double"`, and
+drop each index the store keyed `NULLS FIRST` with the row identity and create
+it again under its name over its columns alone (its `pg_get_indexdef` without
+` NULLS FIRST` and `, rid`, its condition kept); with `doubleOrder` taken out of
+the model, the earlier release opens the store, and this release reopens it as
+an earlier release's, which `planColumnUpgrade` respells again.
+
 A path step `#>` could read off the wrong kind of container is guarded. `#>`
 takes the element `0` of an array and the key `0` of an object for the one path
 step, and the array branch reads any text `strtol` accepts as an index (`00`,
@@ -313,10 +360,14 @@ projected text, so neither the database's collation nor the digits of a number
 decide the order. An identity term over a column that holds no NULL (a key,
 or a column the catalog declares `NOT NULL`) is spelled with the default null
 placement, the order its index provides in either direction, so a page over
-the key reads the rows past the row value in index order. What does not seek:
-a term over a column that may hold NULL spells the engine's empty-first
-placement (`ASC NULLS FIRST`, `DESC NULLS LAST`), which is not the order a
-default index provides, so its rows are sorted. A text keyset requires the `UTF8` database encoding, read at open — no
+the key reads the rows past the row value in index order. A term over a
+column that may hold NULL spells the engine's empty-first placement (`ASC
+NULLS FIRST`, `DESC NULLS LAST`), which is the order of the indexes the store
+creates over such a column (above, "Indexes in the order a statement reads"),
+so a window, a load's `orderBy` and a keyset page read it from the index, the
+row identity or the key ordering a tie after it; a table an earlier release
+created, whose indexes are plain, sorts those rows until `planColumnUpgrade`
+respells them. A text keyset requires the `UTF8` database encoding, read at open — no
 per-row byte proof runs here — and refuses `JD0032` naming any other. An
 explicit `orderBy` over a uuid column with the `null` NULL policy stays
 refused, as every such column is for the typed path. A text, integer, number
@@ -409,9 +460,13 @@ numbers compared with each other — two members, an entity's two columns, a
 join's or a hop's columns — are read as the doubles, so they cost the `CASE`
 over each where the bare `numeric`s compared; a join or a hop's equality over
 two number columns bounds each by the other beside the doubles' equality, so
-either column's index still finds the other's rows, but the planner, which
-cannot estimate those bounds, may hash or merge on the doubles instead of
-seeking. Two key columns (a key and a reference to one) compare exactly. A
+either column's index still finds the other's rows, and the index beside a
+number column's own that keys its double (above, declared by `doubleOrder`)
+serves the doubles' equality itself, which the planner estimates from that
+index's statistics and seeks per outer row; without it — an index that does
+not declare it, or a table an earlier release created, until
+`planColumnUpgrade` adds it — the planner, which cannot estimate the
+bounds, may hash or merge on the doubles instead of seeking. Two key columns (a key and a reference to one) compare exactly. A
 number column joined to a key column, or correlated with one in a hop, compares
 the key exactly with the shortest decimal of the column's double (its
 `double precision` text, the digits the store writes a key by), an equality on

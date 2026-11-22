@@ -79,6 +79,10 @@ const driftPostgres = async (pool, schema) => {
     WHERE n.nspname = $1 AND p.proname = '_jaren_rule_5_Child_insert'`, [schema]);
   await pool.query(rows[0].def.replace(/\nBEGIN\n/, '\nBEGIN\n  PERFORM 1;\n'));
 };
+/** A step's statement, a check of the rows a table holds named `check`. @param {any} step */
+const stepSql = (step) => (step.kind === 'sql' && /breaks the rule/.test(step.note) ? 'check' : step.sql);
+/** On PostgreSQL, the step that holds `Child`'s writers ahead of the check of its rows. */
+const HOLD_CHILD = 'ALTER TABLE "Child" ENABLE TRIGGER "_jaren_rule_5_Child_insert"';
 /** @param {any} target @param {any} model @param {any} [options] */
 const plannedOn = async (target, model, options) => {
   const connection = await (target.path === undefined ? target.driver.open() : target.driver.open(target.path, {}));
@@ -242,7 +246,8 @@ describe('planProgramUpgrade({ repair })', () => {
       const target = { driver: nodeDriver(), path: file };
       assert.deepEqual((await plannedOn(target, model)).report.absent, ['Child._jaren_rule_5_Child_insert']);
       const { migration } = await plannedOn(target, model, { repair: ['Child._jaren_rule_5_Child_insert'] });
-      assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.sql), [insert.sql]);
+      // the program the table lacked, then the check of the rows it holds
+      assert.deepEqual(migration.steps.map(stepSql), [insert.sql, 'check']);
       await migrate(target, [migration], { baseline: model, model, shadow: false });
       await opensEnforcing(target, model);
     });
@@ -297,7 +302,7 @@ describe('planProgramUpgrade({ repair })', () => {
       await pool.query(trigger.drop);
       const target = { driver: driver() };
       const { migration } = await plannedOn(target, model, { repair: ['Child._jaren_rule_5_Child_insert'] });
-      assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.sql), [fn.sql.replace(/^CREATE FUNCTION /, 'CREATE OR REPLACE FUNCTION '), trigger.sql]);
+      assert.deepEqual(migration.steps.map(stepSql), [fn.sql.replace(/^CREATE FUNCTION /, 'CREATE OR REPLACE FUNCTION '), trigger.sql, HOLD_CHILD, 'check']);
       await migrate(target, [migration], { baseline: model, model, shadow: false });
       await opensEnforcing(target, model);
     })));
@@ -321,7 +326,8 @@ describe('planModelMigration over a rule whose function source alone changes', (
   it('on SQLite drops and creates the trigger, applied', async () => {
     const { migration } = planModelMigration(from, to, { dialect: sqliteDialect, id: 'rule-1' });
     const [before] = planInvariants(from, { dialect: sqliteDialect }), [after] = planInvariants(to, { dialect: sqliteDialect });
-    assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.sql), [/** @type {any} */ (before).drop, /** @type {any} */ (after).sql]);
+    // the changed insert rule judges the rows the table holds after its program
+    assert.deepEqual(migration.steps.map(stepSql), [/** @type {any} */ (before).drop, /** @type {any} */ (after).sql, 'check']);
     await withSqlite(from, false, async (file) => {
       const target = { driver: nodeDriver(), path: file };
       assert.deepEqual((await migrate(target, [migration], { baseline: from, model: to, shadow: false })).applied, ['rule-1']);
@@ -334,7 +340,8 @@ describe('planModelMigration over a rule whose function source alone changes', (
       const dialect = postgresDialect({ searchPath: schema });
       const { migration } = planModelMigration(from, to, { dialect, id: 'rule-1' });
       const [fn] = planInvariants(to, { dialect });
-      assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.sql), [fn.sql.replace(/^CREATE FUNCTION /, 'CREATE OR REPLACE FUNCTION ')]);
+      // in place, then the step that holds the writers and the check of the rows the table holds
+      assert.deepEqual(migration.steps.map(stepSql), [fn.sql.replace(/^CREATE FUNCTION /, 'CREATE OR REPLACE FUNCTION '), HOLD_CHILD, 'check']);
       await (await openStore(from, { driver: driver() })).close();
       const target = { driver: driver() };
       assert.deepEqual((await migrate(target, [migration], { baseline: from, model: to, shadow: false })).applied, ['rule-1']);
@@ -346,8 +353,8 @@ describe('planModelMigration over a rule whose function source alone changes', (
       other.entities.Child.schema.properties.note = { type: 'string' };
       const beside = planModelMigration(from, widened, { dialect, id: 'rule-2' }).migration.steps.map((/** @type {any} */ step) => String(step.sql));
       assert.ok(beside.some((sql) => sql.startsWith('DROP TRIGGER')) && beside.some((sql) => sql.startsWith('CREATE TRIGGER')), beside.join('\n'));
-      assert.deepEqual(planModelMigration(other, widened, { dialect, id: 'rule-3' }).migration.steps.map((/** @type {any} */ step) => String(step.sql).slice(0, 26)),
-        ['CREATE OR REPLACE FUNCTION']);
+      assert.deepEqual(planModelMigration(other, widened, { dialect, id: 'rule-3' }).migration.steps.map((/** @type {any} */ step) => String(stepSql(step)).slice(0, 26)),
+        ['CREATE OR REPLACE FUNCTION', HOLD_CHILD.slice(0, 26), 'check']);
       // a member moved from its column into the document, the schema unchanged: the fold writes every row, so the program is dropped first
       const folded = /** @type {any} */ (structuredClone(widened));
       folded.entities.Child.schema.properties.note = { type: 'string', 'x-entity': { column: 'json' } };

@@ -190,35 +190,43 @@ for (const engine of ENGINES) {
   });
 }
 
-describe('sqlite: a key a foreign key joins, and the column that joins it, keep the cast into text', () => {
-  it('the child still finds its parent, and a plain number of the same table spells as String() does', async () => {
+describe('sqlite: a key a foreign key references, and the column that references it, spell as String() does', () => {
+  it('the child still finds its parent once both tables are rebuilt, and the cascade still holds', async () => {
     const model = (/** @type {string} */ type) => ({ $model: '0.1', entities: {
       P: { schema: { type: 'object', required: ['id'], properties: { id: { type, 'x-entity': { key: true } }, n: { type },
         kids: { 'x-entity': { relation: { to: 'C', many: true, via: 'pid', onDelete: 'cascade' } } } } } },
       C: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', 'x-entity': { key: true } }, pid: { type } } } } } });
     await onEngine('sqlite', async (h) => {
       const store = await h.open(model('number'));
-      await store.entity('P').create({ id: 5, n: 5 });
+      for (const id of [5, 2.5, 1e21]) await store.entity('P').create({ id, n: id });
       await store.entity('C').create({ id: 'c', pid: 5 });
+      await store.entity('C').create({ id: 'd', pid: 1e21 });
       await store.close();
-      await migrate(h.target, [planned(h.dialect, model('number'), model('string'))], { baseline: model('number'), model: model('string'), shadow: false });
-      // SQLite compares a reference by the key column's type, so the key and the
-      // reference keep the text the cast writes, `5.0`, and still match
-      assert.deepEqual(await h.rows('SELECT "id", "n" FROM "P"'), [{ id: '5.0', n: '5' }]);
-      assert.deepEqual(await h.rows('SELECT "pid" FROM "C"'), [{ pid: '5.0' }]);
+      const migration = planned(h.dialect, model('number'), model('string'));
+      assert.deepEqual(migration.steps.map((/** @type {any} */ step) => [step.kind, step.table]), [['rebuild', 'P'], ['rebuild', 'C']]);
+      await migrate(h.target, [migration], { baseline: model('number'), model: model('string'), shadow: false });
+      // the key and the reference are both spelled anew, `5` where the cast wrote
+      // `5.0`: rebuilt one at a time they differ, so the references are judged
+      // after the second rebuild
+      assert.deepEqual(await h.rows('SELECT "id", "n" FROM "P" ORDER BY "n"'),
+        [{ id: '1e+21', n: '1e+21' }, { id: '2.5', n: '2.5' }, { id: '5', n: '5' }]);
+      assert.deepEqual(await h.rows('SELECT "pid" FROM "C" ORDER BY "id"'), [{ pid: '5' }, { pid: '1e+21' }]);
       const after = await h.open(model('string'));
       try {
-        assert.deepEqual((await after.entity('C').asNoTracking().get('c'))?.pid, '5.0');
-        assert.deepEqual((await after.entity('P').asNoTracking().get('5.0'))?.n, '5');
+        assert.deepEqual((await after.entity('C').asNoTracking().get('c'))?.pid, '5');
+        assert.deepEqual((await after.entity('P').asNoTracking().get('5'))?.n, '5');
         assert.deepEqual(await after.foreignKeyCheck(), { ok: true, violations: [] });
+        await after.entity('P').delete('5');
+        assert.equal(await after.entity('C').asNoTracking().get('c'), undefined);
+        assert.deepEqual((await after.entity('C').asNoTracking().get('d'))?.pid, '1e+21');
       }
       finally { await after.close(); }
     });
   });
 });
 
-describe('sqlite: a key a join table references keeps the cast into text', () => {
-  it('plans the cast for the key, and refuses the retype as before, the join table being no part of the rebuild', async () => {
+describe('sqlite: a key a join table references', () => {
+  it('spells the key as String() does, and refuses the retype as before, the join table being no part of the rebuild', async () => {
     const model = (/** @type {string} */ type) => ({ $model: '0.1', entities: {
       P: { schema: { type: 'object', required: ['id'], properties: { id: { type, 'x-entity': { key: true } }, n: { type },
         tags: { 'x-entity': { relation: { to: 'Tag', many: true } } } } } },
@@ -231,9 +239,11 @@ describe('sqlite: a key a join table references keeps the cast into text', () =>
       await h.run('INSERT INTO "P_Tag" ("P_key", "Tag_key") VALUES (5, \'t\')');
       const migration = planned(h.dialect, model('number'), model('string'));
       assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.kind), ['rebuild']);
-      assert.match(migration.steps[0].copy, /SELECT CAST\("id" AS TEXT\), CASE WHEN "n" IS NULL/);
+      assert.doesNotMatch(migration.steps[0].copy, /CAST\("id" AS TEXT\)/);
+      // the join table keeps the number it references, which the key no longer spells
       await assert.rejects(() => migrate(h.target, [migration], { baseline: model('number'), model: model('string'), shadow: false }),
-        (/** @type {any} */ error) => error.code === 'JD0023' && /the migrated shape does not equal the target model's: table:P_Tag differs/.test(error.message));
+        (/** @type {any} */ error) => error.code === 'JD0023'
+          && /foreign_key_check found 1 broken reference\(s\) after rebuilding 'P' \(first: \{"table":"P_Tag"/.test(error.message));
       assert.deepEqual(await h.rows('SELECT "P_key", "Tag_key" FROM "P_Tag"'), [{ P_key: 5, Tag_key: 't' }]);
       assert.deepEqual(await h.rows('SELECT "id", "n" FROM "P"'), [{ id: 5, n: 5 }]);
     });

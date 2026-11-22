@@ -4236,6 +4236,86 @@ and answers as before, dropped rows included. A model with a non-string
   previous release opens every store this one leaves; a continuation carrying a
   key's digits replays under it as that key and resumes past the same row.
 
+## 82. A rule added to a populated table judges its rows, and PostgreSQL indexes keep the order a statement reads
+
+- A migration `planModelMigration` plans that adds a database rule to a table
+  the store owns, or changes one, now judges every row the table holds by each
+  rule that judges an insert, after the migration's transform steps: a row the
+  rule refuses fails the migration (`JD0023`, naming the rule and the row's
+  key) and it rolls back whole, where the rule used to arrive over it
+  silently. Correct such rows, or give the link a transform that carries them
+  into conformance, and plan again; an applied link is never re-planned
+  ([MIGRATION-FORMAT §1](MIGRATION-FORMAT.md)).
+  `planProgramUpgrade({ repair })` judges the rows the same way when it
+  creates an insert program the table lacked. On PostgreSQL a store rule's
+  `update()`, and a unit of work's save, read their row `FOR NO KEY UPDATE`
+  where they change no key column, so they no longer deadlock (`JD2005`) with
+  a transaction whose probe holds the row `FOR KEY SHARE`; and a store rule
+  whose locking probe misses a row the writer may read but not lock refuses
+  `JD2099` instead of `JD2096`.
+- On PostgreSQL a non-unique index the store creates over a column a statement
+  orders bare is created `(column NULLS FIRST, "rid")`, so a window, a load's
+  `orderBy` and a keyset page read it in index order instead of sorting every
+  row (measured on 20,000 rows: a ten-row window 11.9–12.6 ms to 0.22–0.24 ms
+  by a string member, an entity load 4.1–5.2 ms to 0.15–0.17 ms), at about no
+  write cost. An index led by a number member or column that declares
+  `doubleOrder: true` gets an index beside it over the double
+  (`<index>$double`), which number orderings and a join's equality over two
+  non-key number columns read (a window 14.7–16.5 ms to 0.26–0.28 ms, the join
+  4.5 ms to 0.40–0.54 ms); it costs about 20–40% per write of such a row, so
+  it follows the declaration ([POSTGRESQL](POSTGRESQL.md)).
+  `planColumnUpgrade` respells an earlier release's indexes and creates the
+  declared `$double` ones. An ascending ordering with `$empty: 'greatest'`
+  (descending with `'least'`) over an indexed member, which the plain index
+  served, now sorts (0.23 ms to 11.2–12.7 ms on a ten-row window); a unique
+  index keeps its plain spelling.
+- SQLite's DDL and plans are unchanged.
+
+**Downgrade.** The previous release refuses a PostgreSQL store this release
+creates or upgrades: an index the store keys `NULLS FIRST` with the row
+identity reads to it as not the declared index (`JD0002: collection 'c': …
+(index 'c_by_s' covers (gx_s, rid) in that order, the model declares (gx_s));
+…`), an index beside one that declares `doubleOrder` as an undeclared index
+(`JD0002: … the database has c_by_n$double, which the model does not declare);
+…`), and a model that declares `doubleOrder` is refused (`JD0005: unknown
+index member 'doubleOrder' …`). No link plans the way back. In one
+transaction, drop each `<table>_<index>$double` and drop each index whose
+definition ends `NULLS FIRST, rid)` and create it again under its name over
+its columns alone, its condition kept (its `pg_get_indexdef` without ` NULLS
+FIRST` and `, rid`); take `doubleOrder` out of the model. The previous release
+then opens, reads, queries and migrates the store; this release opens it again
+as a table an earlier release created, which `planColumnUpgrade` respells.
+SQLite stores are unchanged and open in both.
+
+## 83. A referenced entity's enum and cast changes in place, and replication orders by an expression index
+
+- A rebuild that retypes a key another table's declared foreign key references
+  now spells the key and the reference as `String()` and `Number()` do (`"5"`
+  where SQLite wrote `"5.0"`), and judges the link's references after both
+  rebuilds; a text key led or trailed by a blank `Number()` trims retypes into
+  a number there too. On SQLite a number whose shortest spelling takes 16 or
+  17 significant digits can still end in the neighbour of `String()`'s last
+  digit, and reads back as the same number ([MIGRATION-FORMAT
+  §10](MIGRATION-FORMAT.md)).
+- On PostgreSQL a referenced entity's column whose `enum` changes, or whose
+  type changes by the cast its copy would make, and that is no key, no foreign
+  key's column and read by no index, is changed in place under an `ACCESS
+  EXCLUSIVE` lock, where the rebuild was refused `JD0023` at the drop.
+- Replication orders writes by a unique entity expression index's key as its
+  declaration's `apply` computes it, so a swap the source accepted applies on
+  the target, where it was stuck refused `JD2005`; an expression whose
+  functions declare no `apply` keeps the envelope's order
+  ([REPLICATION-FORMAT](REPLICATION-FORMAT.md)).
+- An open with `replication` reads its tables holding no write lock and takes
+  its bracket only to create or upgrade them, so a re-open beside a live
+  writer opens; where the bracket is needed and its lock cannot be taken, it
+  rejects `JD2005` busy and retryable.
+
+**Downgrade.** No table, column or index text changes. The previous release
+opens and reads every store this release leaves, but refuses a migration
+document whose step this release planned in place (`JD0021`): apply such a
+link under this release, or plan it again under the previous one.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

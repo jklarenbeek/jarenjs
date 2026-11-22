@@ -31,7 +31,7 @@ import { chain, useStatementOnce } from './driver.js';
 import { catalogRows, withNamespaceCatalog } from './namespace-catalog.js';
 import { DbCompileError } from './errors.js';
 import { readOptionsOrNull } from './options.js';
-import { KEY_COLUMN, DOC_COLUMN, SCALAR_CODECS, indexCondition, canonicalOf, kindIndexName, containerKeysOf, kindIndexSql,
+import { KEY_COLUMN, DOC_COLUMN, SCALAR_CODECS, indexCondition, canonicalOf, kindIndexName, containerKeysOf, kindIndexSql, keyOrderOf, readOrderedIndexes,
   entityIndexTerm } from './ddl.js';
 import { columnKindFor } from './scalar-types.js';
 import { readPredicate, readIntervalCheck, sqlTokens, SQLITE_PREDICATE, guardsByColumn } from './dialects/check-read.js';
@@ -122,10 +122,14 @@ function readTable(connection, table, objects) {
                 // the index's shape from its catalog, as the open reads them
                 predicate: declared[i].predicate == null ? null : String(declared[i].predicate),
                 plain: declared[i].plain == null || Number(declared[i].plain) === 1,
+                ...keyOrderOf(declared[i]),
                 conforming: declared[i].conforming == null || String(declared[i].conforming) === 'on',
               }])));
           };
-          return chain(withColumns(0, []), (indexes) =>
+          // an `ordered` index reads back as the plain index it was declared as,
+          // and the index beside one that keys its number's double as nothing a
+          // model declares: the plan of the index creates it
+          return chain(chain(withColumns(0, []), (held) => readOrderedIndexes(dialect, held)), (indexes) =>
             chain(keyIndex === undefined
               ? []
               : all('indexColumns', String(keyIndex.name)), (keyRows) =>
@@ -691,6 +695,8 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
     const declared = { name: indexName(table.name, index.name), path: covered.length === 1
       ? covered[0].path : covered.map((/** @type {any} */ entry) => entry.path) };
     if (index.unique) declared.unique = true;
+    // the index beside it that keys its number's double (`ddl.js` `readOrderedIndexes`)
+    if (index.doubleOrder === true) declared.doubleOrder = true;
     indexes.push(declared);
     if (condition !== undefined) conditional.push({ index, declared, condition });
     else for (const column of columns) indexedColumns.add(column);
@@ -954,7 +960,7 @@ function deriveEntity(dialect, table, report, edges, expressions, temporalHooks 
       continue;
     }
     const [only] = index.columns;
-    const flag = !index.partial && index.columns.length === 1 && index.name === `${table.name}_${only}`
+    const flag = !index.partial && index.doubleOrder !== true && index.columns.length === 1 && index.name === `${table.name}_${only}`
       && readable.some((c) => c.physical === only) && plannedDifference(dialect, table, index, undefined, readable) === null;
     (flag ? flags : others).push(index);
   }
@@ -1236,7 +1242,7 @@ function entityIndexOf(dialect, table, index, readable, expressions = undefined)
     return `the index covers (${index.columns.map((/** @type {string | null} */ column) => column ?? '<expression>').join(', ')}), `
       + 'which are not all scalar columns the entity maps';
   else declared = { name, path: index.columns.length === 1 ? pathOf(index.columns[0]) : index.columns.map(pathOf),
-    ...(index.unique ? { unique: true } : {}) };
+    ...(index.unique ? { unique: true } : {}), ...(index.doubleOrder === true ? { doubleOrder: true } : {}) };
   /** @type {string | undefined} */
   let rendered;
   if (index.partial) {

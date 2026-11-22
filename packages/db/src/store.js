@@ -44,7 +44,7 @@ import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas, P
 import { createMaintenance } from './maintenance.js';
 import { createBackup } from './backup.js';
 import { normalizeProfile, assertProfileRoots, pointReadFilter, boundedJoinSides } from './profile.js';
-import { compileEntityModel, joinTableRoots } from './model.js';
+import { compileEntityModel, joinTableRoots, refuseDoubleOrder } from './model.js';
 import { entityCore, insertAttempt } from './entity.js';
 import { requireCodePointText, verifyPhysical, namespacePrograms } from './physical.js';
 import { trustedSql, synchronousBody, RELEASE } from './sql.js';
@@ -84,7 +84,7 @@ const IDENTITIES = new Set(['uuid', 'integer']);
  * the runtime agrees. `x-rename` is the migration planner's hint. */
 const MODEL_MEMBERS = ['$model', 'collections', 'entities'];
 const COLLECTION_MEMBERS = ['schema', 'key', 'identity', 'indexes', 'intervals', 'temporals', 'x-rename'];
-const INDEX_MEMBERS = ['name', 'path', 'expression', 'unique', 'where', 'derive', 'precision', 'dims', 'physical'];
+const INDEX_MEMBERS = ['name', 'path', 'expression', 'unique', 'where', 'derive', 'precision', 'dims', 'physical', 'doubleOrder'];
 const INTERVAL_MEMBERS = ['name', 'path', 'maxDuration'];
 
 /** The bytes a constraint name may take on either engine (PostgreSQL's identifier limit), so a model opens on both. */
@@ -345,6 +345,7 @@ export function normalizeModel(model, expressions = undefined, temporals = null)
         throw modelError('JD0005',
           `unique is true or false, got ${JSON.stringify(index.unique)}`, `${indexDocPath}/unique`);
       }
+      refuseDoubleOrder(index, indexDocPath);
       // an EXPRESSION index names what it computes, not which member it
       // reads, so it is mutually exclusive with both of the other two
       // ways an index is declared: an index cannot be over a member AND
@@ -401,6 +402,7 @@ export function normalizeModel(model, expressions = undefined, temporals = null)
         precision: derive.precision,
         physical: derive.physical,
         dims: derive.dims,
+        ...(index.doubleOrder === true ? { doubleOrder: true } : {}),
         docPath: indexDocPath,
       });
     }
@@ -5899,7 +5901,7 @@ export function openStore(model, options) {
           if (options.replication !== undefined) {
             replicationEngine = createReplicationEngine({ connection, capture, mapping,
               managedTables: [...captureShapes.keys()],
-              config: options.replication, model: shapeHash(modelDocument), now: runtime.now, bracket: firstOpen,
+              config: options.replication, model: shapeHash(modelDocument), now: runtime.now, bracket: firstOpen, expressions,
               rows: createLogicalRows({ connection, shapes: captureShapes, capture,
                 collectionCore: coreFor, entityCore: entityCoreFor, captureCascade, recordCascade }),
             });

@@ -199,17 +199,17 @@ no relations (MODEL-FORMAT §9.1); one physical engine sits under both.
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
 | `collection(schema, { key?, identity?, indexes?, intervals?, renamedFrom? })` | `{ schema, key?, identity?, indexes?, intervals?, 'x-rename'? }` — `key` is an RFC 6901 pointer, a captured member path (`(d) => d.id` → `/id`) or `null` (the store allocates, `identity` says how); the other options ride verbatim, an `indexes` entry written by hand rather than by `index()` is held to what `index()` writes, and an `intervals` entry is closed to `name`, `path` and `maxDuration` (two strings and a number) | `CollectionSpec<Infer<B>>`, carrying the document shape its paths are checked against | native; an option outside the five, a key that is neither pointer nor lambda nor `null`, an `indexes` that is not an array of `index()` entries, an entry member outside the index grammar or of the wrong type, an `intervals` that is not an array of objects, an interval member outside the three or of the wrong type, all `JL0101` |
-| `index(path, options?)` | `{ name, path, unique?, derive?, precision?, dims?, physical?, where? }` — `path` is a captured lambda (`(p) => p.cell` → `$.cell`), a non-empty array of them (a composite), or a JSONPath string; `name` defaults to `by_<segments>`; each of the rest is the JSON type the grammar declares — `unique` a boolean, `derive` and `physical` strings, `precision` and `dims` numbers, `where` a query document — and rides verbatim for the store's model walk to judge its value (§2.1); a `where` lambda is captured into the query grammar (`(d) => d.status.in(['active', 'pending'])` → `{ $eq: ['$.status', { $seq: ['active', 'pending'] }] }`) | `IndexPath<D>` and `IndexCondition<D>` over the collection's or the entity's shape: a member the shape lacks does not compile, nor does a `where` that is neither a predicate nor a query document | native; an option outside the seven, or of the wrong type, is `JL0101`; a lambda that answers an operator result or a surface method is `JL0102`, and so is a `where` lambda that answers no predicate |
+| `index(path, options?)` | `{ name, path, unique?, derive?, precision?, dims?, physical?, doubleOrder?, where? }` — `path` is a captured lambda (`(p) => p.cell` → `$.cell`), a non-empty array of them (a composite), or a JSONPath string; `name` defaults to `by_<segments>`; each of the rest is the JSON type the grammar declares — `unique` and `doubleOrder` booleans, `derive` and `physical` strings, `precision` and `dims` numbers, `where` a query document — and rides verbatim for the store's model walk to judge its value (§2.1); a `where` lambda is captured into the query grammar (`(d) => d.status.in(['active', 'pending'])` → `{ $eq: ['$.status', { $seq: ['active', 'pending'] }] }`) | `IndexPath<D>` and `IndexCondition<D>` over the collection's or the entity's shape: a member the shape lacks does not compile, nor does a `where` that is neither a predicate nor a query document | native; an option outside the eight, or of the wrong type, is `JL0101`; a lambda that answers an operator result or a surface method is `JL0102`, and so is a `where` lambda that answers no predicate |
 
 | `expressionIndex(expression, options?)` | `{ name, expression, unique? }` — an index over a COMPUTED value: a `{ call, args }` node whose arguments are member lambdas, JSONPath strings, JSON scalars or further calls; `name` defaults to `by_<call>_<members>` | the expression's member lambdas are checked against the collection's shape | native; a node outside the vocabulary, an option outside the two, a `unique` that is not a boolean, and anything that looks like SQL text are all `JL0101`; a scalar that is not JSON (`NaN`, `±Infinity`, `-0`) is `JL0101` too |
 
 The option set for `index()` is exactly `name`, `unique`, `derive`,
-`precision`, `dims`, `physical`, `where` (`INDEX_OPTIONS` in
+`precision`, `dims`, `physical`, `doubleOrder`, `where` (`INDEX_OPTIONS` in
 `src/model/collection.js`); the default name is `by_` plus the path's
 member segments, identifier-safe (`defaultName`) — `by_series_t`,
 `by_x_y`. Each typed option is checked for the JSON type the grammar
-declares — `unique` a boolean, `derive` and `physical` strings,
-`precision` and `dims` numbers — and its VALUE is left to the store's
+declares — `unique` and `doubleOrder` booleans, `derive` and `physical`
+strings, `precision` and `dims` numbers — and its VALUE is left to the store's
 model walk (`JD0004` names a `derive` outside its set, a precision out of
 range). `unique: 1` or `'true'` used to be emitted verbatim, and the
 store, which reads only `true` as unique, opened a NON-unique index and
@@ -836,7 +836,7 @@ This section is the vocabulary this pen adds.
 | `m.rel.hasMany(42, { … })` | `rel.hasMany() takes a definition name (letters, digits, '_', '.', '-', not starting with a digit), got 42` | an entity name |
 | `m.index(42)`, `m.index([])` | `index() takes a path lambda, a JSONPath string, or a non-empty array of them` | `m.index((p) => p.cell)` |
 | `m.index([42])` | `index()[0] is neither a path lambda nor a JSONPath string` | a lambda or a path string per position |
-| `m.index((p) => p.a, { derived: 'bbox' })` | `index() does not take 'derived' — the options are name, unique, derive, precision, dims, physical, where` | `{ derive: 'bbox' }` |
+| `m.index((p) => p.a, { derived: 'bbox' })` | `index() does not take 'derived' — the options are name, unique, derive, precision, dims, physical, doubleOrder, where` | `{ derive: 'bbox' }` |
 | `m.index((p) => p.a, { where: '"a" = 1' })` | `index() where takes a query document, got a string` | `{ where: (p) => p.a.eq(1) }`, or `{ where: { $eq: ['$.a', 1] } }` |
 | `m.object({ … }).indexes({})` | `indexes() takes an array of index() entries` | an array |
 | `m.index((p) => p.a, null)` | `index() takes an options object` | `{}`, or no second argument |

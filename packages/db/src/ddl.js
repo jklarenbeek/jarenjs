@@ -750,12 +750,15 @@ export function planCollection(name, collection, dialect, options = undefined) {
         name: `${name}_${index.name}`,
         unique: index.unique,
         columns: [columnName],
+        plainOrder: true,
         declared: index,
       });
       continue;
     }
     const columns = [];
     let noBtree = false;
+    // an index over a calendar member's key columns keeps its plain spelling
+    let calendar = false;
     for (let i = 0; i < index.paths.length; i++) {
       const pathDocPath = `${index.docPath}/path`;
       const { segments, canonical } = compileIndexPath(index.paths[i], pathDocPath);
@@ -767,6 +770,7 @@ export function planCollection(name, collection, dialect, options = undefined) {
       }
       const keyed = index.derive || temporalPlan === null ? null : temporalPlan.indexColumns(canonical, index);
       if (keyed !== null) {
+        calendar = true;
         columns.push(...keyed);
         continue;
       }
@@ -830,6 +834,7 @@ export function planCollection(name, collection, dialect, options = undefined) {
       columns,
       ...(terms.length === 0 ? {} : { terms }),
       ...(earlier.length === 0 || earlier.length === terms.length ? {} : { earlierTerms: earlier }),
+      ...(calendar || index.derive ? { plainOrder: true } : {}),
       declared: index,
     });
   }
@@ -856,6 +861,29 @@ export function planCollection(name, collection, dialect, options = undefined) {
     index.where = indexCondition(index.declared.where, conditionColumns, dialect, `${index.declared.docPath}/where`, unreadable, reads);
     index.reads = [...reads];
   }
+  // an index over a calendar member's key columns, a derived column or a declared expression
+  // orders no statement; one led by a number column keeps its plain spelling, which its
+  // comparisons seek, since a statement orders such a member as its double
+  const numericColumns = new Set(generated.filter((g) => g.type === dialect.typeFor('number', 'generated')).map((g) => g.name));
+  const orderable = indexes.filter((index) => ordersIndex(dialect, index) && index.plainOrder !== true);
+  for (const index of orderable) if (!numericColumns.has(index.columns[0])) index.ordered = true;
+  // a member read at the number kind holds its digits, and is ordered as its double;
+  // one of several kinds is ordered by the engine
+  const numbersOnly = (/** @type {any} */ index) => {
+    const path = Array.isArray(index.declared.paths) ? index.declared.paths[0] : undefined;
+    const type = path === undefined ? undefined : schemaNodeAt(collection.schema, compileIndexPath(path, `${index.declared.docPath}/path`).segments)?.type;
+    return (Array.isArray(type) ? type : [type]).every((kind) => kind === 'number' || kind === 'integer' || kind === 'null');
+  };
+  const numberColumns = new Set(generated.filter((g) => numericColumns.has(g.name) && g.kind === 'number').map((g) => g.name));
+  // the index beside is the declaration's (`doubleOrder`): one more index every write keeps
+  const declaredDouble = indexes.filter((index) => index.declared.doubleOrder === true);
+  for (const index of declaredDouble) {
+    if (!numbersOnly(index) || !numberColumns.has(index.columns[0])) {
+      throw new DbCompileError('JD0004', `index '${index.declared.name}' declares doubleOrder, which keys the double of a member that holds numbers alone; `
+        + `its first member '${index.declared.paths?.[0]}' holds another kind`, `${index.declared.docPath}/doubleOrder`);
+    }
+  }
+  const orderIndexes = orderIndexesOf(dialect, declaredDouble, numberColumns);
   // a declared interval: the two bound columns the collection's plain
   // indexes give its span member (held at normalization), and the one
   // CHECK that makes every stored span a half-open one for every writer
@@ -924,7 +952,9 @@ export function planCollection(name, collection, dialect, options = undefined) {
       unique: index.unique,
       ...(index.where === undefined ? {} : { where: index.where }),
       ...(index.terms === undefined ? {} : { terms: index.terms }),
+      ...(index.ordered === true ? { ordered: true } : {}),
     })),
+    ...orderIndexes.map((index) => orderIndexSql(dialect, name, index)),
     ...kindIndexes.map((index) => kindIndexSql(dialect, name, index)),
     ...containerKeys.flatMap((key) => key.triggers.map((trigger) => trigger.sql)),
     ...virtualTables.flatMap((virtual) =>
@@ -939,6 +969,8 @@ export function planCollection(name, collection, dialect, options = undefined) {
     ...indexes.map((index) => ({ name: index.name, what: `index '${index.declared.name}'`, docPath: `${index.declared.docPath}/name`, rename: 'the index' })),
     ...kindIndexes.map((index) => ({ name: index.name, what: `the ${index.kind} index beside '${index.declared.name}'`,
       docPath: `${index.declared.docPath}/name`, rename: 'the index' })),
+    ...orderIndexes.map((index) => ({ name: index.name, what: `the double index beside '${index.of}'`,
+      docPath: `${collectionPath}/indexes`, rename: 'the index' })),
     ...containerKeys.flatMap((key) => key.triggers.map((trigger) => ({ name: trigger.name,
       what: `the trigger that writes the container key '${key.column}'`, docPath: collectionPath }))),
     ...virtualTables.flatMap((virtual) => [virtual, ...virtual.triggers].map((object) => ({ name: object.name,
@@ -1001,6 +1033,11 @@ export function planCollection(name, collection, dialect, options = undefined) {
      * read back as an expression; a table an earlier release created goes
      * without them and opens as it is. */
     kindIndexes,
+    /** The indexes beside an `ordered` declared index over a number member
+     * that key the double it is ordered by ({@link orderIndexesOf}): each
+     * one's name, its declared index's (`of`) and its keys. A table an
+     * earlier release created goes without them and opens as it is. */
+    orderIndexes,
     /** The plain columns a unique index keys a container by on an engine whose
      * generated column holds it as written ({@link containerKeysOf}): each
      * one's name (`column`), the generated column of its member (`of`), the
@@ -1049,6 +1086,9 @@ export function planCollection(name, collection, dialect, options = undefined) {
           // over untyped columns alone (`earlierTerms`)
           ...(index.terms === undefined ? {} : { terms: [...index.terms] }),
           ...(index.earlierTerms === undefined ? {} : { earlierTerms: [...index.earlierTerms] }),
+          // keyed `NULLS FIRST` with the row identity after the columns; a table
+          // an earlier release created holds it plain ({@link ordersIndex})
+          ...(index.ordered === true ? { ordered: true } : {}),
           // the columns a condition reads, for a migration that changes one of them
           ...(index.where === undefined ? {} : { where: index.where, reads: index.reads }),
         }))
@@ -1380,6 +1420,64 @@ export function kindIndexTerms(dialect, index, reading = false) {
  */
 export function kindIndexDropSql(dialect, name) {
   return `DROP INDEX IF EXISTS ${dialect.quoteIdentifier(name)}`;
+}
+
+/**
+ * Whether a planned index may be created `ordered` (`dialect.ddl.createIndex`):
+ * on an engine that orders an empty key first only where an index says so
+ * (`capabilities.orderedIndexes`), a non-unique index over columns alone keys
+ * each `NULLS FIRST` and the row identity after them — the order a window, a
+ * load's `orderBy` and a keyset page read a member by (ascending, the empty
+ * key least; descending, the index read backward), ties broken by the row.
+ * A unique index keeps its plain spelling: the row identity would key its
+ * columns apart. So does one no statement orders by: led by a number column
+ * (ordered as its double, {@link orderIndexesOf}), over a column that holds no
+ * NULL, or over a calendar member's key columns, a derived column or a
+ * declared expression; the plans decide those.
+ * @param {any} dialect @param {{ unique?: boolean, terms?: string[] }} index
+ * @returns {boolean}
+ */
+export function ordersIndex(dialect, index) {
+  return dialect.capabilities.orderedIndexes === true && dialect.identityColumn !== undefined
+    && index.unique !== true && (index.terms ?? []).length === 0;
+}
+
+/**
+ * The indexes beside each declared index that declares `doubleOrder`
+ * (MODEL-FORMAT §2), led by a number column ({@link ordersIndex}: non-unique,
+ * over columns alone), on an engine whose column holds the digits a writer
+ * spelled (`decimalDigits`): a statement orders such a member as the double
+ * the engine holds (`doubleRead`), and a join compares it so, which the
+ * column's own index (what a comparison seeks, kept plain) does not key. Each
+ * keys that double `NULLS FIRST` and the row identity after it, named
+ * `<of>$double`; it is one more index every write keeps, so it is declared,
+ * and a table an earlier release created, or one a link gave the declaration
+ * without rebuilding the index, goes without it (`planColumnUpgrade` creates
+ * it). An index under a condition has none: a statement that reads no
+ * condition reads none.
+ * @param {any} dialect
+ * @param {{ name: string, columns: string[], unique?: boolean, terms?: string[], where?: string }[]} indexes - the planned declared indexes
+ * @param {Set<string>} numberColumns - the columns that hold a number by its digits
+ * @returns {{ name: string, of: string, column: string, keys: ({ expression: string, nullsFirst: true } | { column: string })[] }[]}
+ */
+export function orderIndexesOf(dialect, indexes, numberColumns) {
+  if (dialect.capabilities.orderedIndexes !== true || dialect.decimalDigits !== true) return [];
+  return indexes.filter((index) => ordersIndex(dialect, index) && index.where === undefined && numberColumns.has(index.columns[0]))
+    .map((index) => ({ name: kindIndexName(dialect, index.name, 'double'), of: index.name, column: index.columns[0],
+      keys: [{ expression: dialect.doubleRead(dialect.quoteIdentifier(index.columns[0])), nullsFirst: /** @type {true} */ (true) },
+        { column: /** @type {string} */ (dialect.identityColumn?.name) }] }));
+}
+
+/**
+ * The statement that creates an index {@link orderIndexesOf} plans.
+ * @param {any} dialect @param {string} table
+ * @param {{ name: string, keys: ({ expression: string, nullsFirst?: boolean } | { column: string })[] }} index
+ * @returns {string}
+ */
+export function orderIndexSql(dialect, table, index) {
+  return `CREATE INDEX ${dialect.quoteIdentifier(index.name)} ON ${dialect.quoteIdentifier(table)} (${index.keys
+    .map((key) => ('column' in key ? dialect.quoteIdentifier(key.column) : `${key.expression}${key.nullsFirst === true ? ' NULLS FIRST' : ''}`))
+    .join(', ')})`;
 }
 
 /**
@@ -1723,11 +1821,14 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
           // an index beside a declared one that seeks another kind of its member is
           // compared on its own, and a table an earlier release created goes without it
           const kindIndexes = new Map((plan.kindIndexes ?? []).map((/** @type {any} */ index) => [index.name, index]));
+          // and so is one beside an `ordered` index that keys its number's double
+          const orderIndexes = new Map((plan.orderIndexes ?? []).map((/** @type {any} */ index) => [index.name, index]));
           const created = indexRows
-            .filter((row) => String(row.origin) === 'c' && !kindIndexes.has(String(row.name)))
+            .filter((row) => String(row.origin) === 'c' && !kindIndexes.has(String(row.name)) && !orderIndexes.has(String(row.name)))
             .map((row) => ({ name: String(row.name), unique: Number(row.uniq) !== 0,
               predicate: row.predicate === null || row.predicate === undefined ? null : String(row.predicate),
               plain: row.plain === undefined || row.plain === null || Number(row.plain) === 1,
+              ...keyOrderOf(row),
               conforming: readsConforming(row) }))
             .sort((a, b) => (a.name < b.name ? -1 : 1));
           // an index a table an earlier release created goes without
@@ -1759,6 +1860,13 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
             const want = wantedIndexes[i];
             if (have.name !== want.name || have.unique !== want.unique)
               disagree(`index '${have.name}'${have.unique ? ' (unique)' : ''} does not match the declared '${want.name}'`);
+            const verifyIndexCondition = () => {
+              const difference = readBack !== undefined
+                ? readBack.condition(have.predicate, want.where, plan.conditionColumns ?? [], have.conforming)
+                : have.predicate === null ? null : `has the condition ${have.predicate}, which the model does not declare`;
+              if (difference !== null) disagree(`index '${have.name}' ${difference}`);
+              return null;
+            };
             return chain(catalogRead(connection, 'indexColumns', have.name), (statement) =>
               chain(statement.all([]), (rows) => {
                 // NOT sorted: `(a,b)` and `(b,a)` are different indexes —
@@ -1769,6 +1877,9 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
                 // release created goes without or holds over its untyped columns
                 // alone (the CREATE text is compared below)
                 const haveColumns = rows.map((row) => (row.name === null || row.name === undefined ? null : String(row.name)));
+                // an `ordered` index held as this release creates it; one an earlier
+                // release created holds it plain, and is compared so below
+                if (heldOrdered(dialect, have, haveColumns, want)) return chain(verifyIndexCondition(), () => collectColumns(i + 1));
                 const keyed = (/** @type {readonly string[]} */ terms) => haveColumns.length === want.columns.length + terms.length
                   && haveColumns.every((column, at) => column === (at < want.columns.length ? want.columns[at] : null));
                 if (![[], want.terms ?? [], want.earlierTerms ?? []].some(keyed))
@@ -1778,10 +1889,7 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
                 // as a key column here and keys nothing), not deferred — each changes
                 // what a unique index refuses
                 if (!have.plain) disagree(`index '${have.name}' is not the plain ascending B-tree the model declares (NULLS NOT DISTINCT, a key order, collation or operator class of its own, an INCLUDE column, or a deferred check)`);
-                const difference = readBack !== undefined
-                  ? readBack.condition(have.predicate, want.where, plan.conditionColumns ?? [], have.conforming)
-                  : have.predicate === null ? null : `has the condition ${have.predicate}, which the model does not declare`;
-                if (difference !== null) disagree(`index '${have.name}' ${difference}`);
+                verifyIndexCondition();
                 // an expression key, where the engine keeps no CREATE text, is read
                 // back from the catalog and compared as the model plans it
                 return chain(readBack === undefined || (want.terms ?? []).length === 0 ? null
@@ -1795,7 +1903,8 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
           // an engine that keeps CREATE text compares theirs below
           const besides = () => (dialect.capabilities.declaredSqlText === true ? null
             : verifyKindIndexes(connection, kindIndexes, heldKindIndexes, plan.conditionColumns ?? [], disagree));
-          return chain(collectColumns(0), () => chain(besides(), () =>
+          const heldOrderIndexes = indexRows.filter((row) => String(row.origin) === 'c' && orderIndexes.has(String(row.name)));
+          return chain(collectColumns(0), () => chain(besides(), () => chain(verifyOrderIndexes(connection, orderIndexes, heldOrderIndexes, disagree), () =>
             chain(verifyIntervalChecks(connection, plan, disagree), () =>
               chain(verifyRulePrograms(connection, plan.table, plan.programs ?? [], disagree,
                 { installed: dialect.capabilities.declaredSqlText !== true, undeclared: true, namespace: programs, spelled: plan.programsAt }),
@@ -1803,9 +1912,116 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
                 // the programs it holds as an earlier release planned them, which the store reports
                 plan.earlierPrograms = held;
                 return verifyDeclaredSql(connection, plan, disagree);
-              }))));
+              })))));
         }));
     })));
+}
+
+/**
+ * Each key's order as the catalog reads an index (`shaped`: its shape but
+ * for the order of its keys; `options`: the engine's flags per key), on an
+ * engine that reports them.
+ * @param {any} row - a catalog row of `dialect.introspect.indexes`
+ * @returns {{ shaped?: boolean, options?: string }}
+ */
+export function keyOrderOf(row) {
+  return row.key_options === undefined || row.key_options === null ? {}
+    : { shaped: Number(row.shaped) === 1, options: String(row.key_options) };
+}
+
+/** The per-key flags of an `ordered` index over `count` columns: each column
+ * ascending `NULLS FIRST` (2), the row identity ascending (0).
+ * @param {number} count @returns {string} */
+const orderedOptions = (count) => [...Array(count).fill('2'), '0'].join(',');
+
+/**
+ * Whether a table holds a planned `ordered` index ({@link ordersIndex}) as
+ * this release creates it: of its shape, its columns `NULLS FIRST` in their
+ * declared order and the row identity after them.
+ * @param {any} dialect
+ * @param {{ shaped?: boolean, options?: string }} have - the catalog's index ({@link keyOrderOf})
+ * @param {(string | null)[]} columns - the columns it keys, in order
+ * @param {{ columns: string[], ordered?: boolean }} want - the planned index
+ * @returns {boolean}
+ */
+export function heldOrdered(dialect, have, columns, want) {
+  if (want.ordered !== true || have.shaped !== true) return false;
+  const keys = [...want.columns, dialect.identityColumn?.name];
+  return columns.length === keys.length && columns.every((column, at) => column === keys[at])
+    && have.options === orderedOptions(want.columns.length);
+}
+
+/**
+ * A table's declared indexes as introspection reads them back: an `ordered`
+ * one ({@link heldOrdered}) as the plain index over its columns it was
+ * declared as, and one beside a number's that keys its double
+ * ({@link orderIndexesOf}) as that index's `doubleOrder`, which plans it
+ * again: named for it, a non-unique B-tree of the model's
+ * shape under no condition, keying the double of its first column `NULLS
+ * FIRST` and the row identity. Any other index is read as it is held.
+ * @param {any} dialect
+ * @param {{ name: string, unique: boolean, partial: boolean, columns: (string | null)[], terms?: (string | null)[],
+ *   plain: boolean, shaped?: boolean, options?: string, conforming: boolean }[]} indexes
+ * @returns {any[]}
+ */
+export function readOrderedIndexes(dialect, indexes) {
+  if (dialect.capabilities.orderedIndexes !== true) return indexes;
+  const identity = dialect.identityColumn?.name;
+  const read = indexes.map((index) => {
+    const columns = index.columns.slice(0, -1);
+    return !index.unique && columns.length > 0 && columns.every((column) => column !== null)
+      && heldOrdered(dialect, index, index.columns, { columns: /** @type {string[]} */ (columns), ordered: true })
+      ? { ...index, columns, plain: true, ordered: true } : index;
+  });
+  /** The indexes an index beside keys the double of, by name. @type {Set<string>} */
+  const doubled = new Set();
+  const kept = read.filter((index) => {
+    if (index.unique || index.partial || index.shaped !== true || index.options !== orderedOptions(1)
+      || index.columns.length !== 2 || index.columns[0] !== null || index.columns[1] !== identity) return true;
+    const of = read.find((candidate) => !candidate.unique && !candidate.partial && candidate.columns[0] !== null
+      && kindIndexName(dialect, candidate.name, 'double') === index.name);
+    const term = index.terms?.[0];
+    if (of === undefined || typeof term !== 'string'
+      || dialect.readBack?.indexKey(term, dialect.doubleRead(dialect.quoteIdentifier(/** @type {string} */ (of.columns[0]))), index.conforming) !== null) return true;
+    doubled.add(of.name);
+    return false;
+  });
+  return kept.map((index) => (doubled.has(index.name) ? { ...index, doubleOrder: true } : index));
+}
+
+/**
+ * The indexes beside an `ordered` index that key its number's double
+ * ({@link orderIndexesOf}) that a table holds: each a non-unique B-tree of
+ * the model's shape, under no condition, keying the double `NULLS FIRST`
+ * and the row identity, read back from the catalog.
+ * @param {any} connection
+ * @param {Map<string, any>} planned - by name
+ * @param {any[]} rows - the table's catalog rows of those names
+ * @param {(difference: string) => any} disagree
+ * @returns {any} value-or-promise
+ */
+function verifyOrderIndexes(connection, planned, rows, disagree) {
+  const dialect = connection.dialect;
+  const step = (/** @type {number} */ i) => {
+    if (i >= rows.length) return null;
+    const row = rows[i];
+    const name = String(row.name);
+    const want = planned.get(name);
+    const order = keyOrderOf(row);
+    if (Number(row.uniq) !== 0 || order.shaped !== true || order.options !== orderedOptions(1)
+      || (row.predicate !== null && row.predicate !== undefined))
+      disagree(`index '${name}' is not the B-tree the model creates beside '${want.of}' (its double NULLS FIRST, then the row identity, under no condition)`);
+    return chain(catalogRead(connection, 'indexKeyColumns', name), (statement) =>
+      chain(statement.all([]), (keys) => {
+        const [double, identity] = keys;
+        const difference = keys.length !== 2 || typeof double?.term !== 'string' || (double.name !== null && double.name !== undefined)
+          || identity.name !== want.keys[1].column ? `keys (${keys.map((key) => key.term ?? key.name).join(', ')})`
+          : dialect.readBack.indexKey(double.term, want.keys[0].expression, readsConforming(row));
+        if (difference !== null) disagree(`index '${name}' ${difference}`);
+        return step(i + 1);
+      }));
+  };
+  return step(0);
 }
 
 /**
@@ -2369,16 +2585,32 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
     refuseLongName(dialect, `${name}_${temporal.name}`, `the index over '${temporal.name}'`, at);
     indexUnique.set(temporal.name, temporal.unique === true);
   }
+  // a number column holds the digits a writer spelled, and is ordered as its double;
+  // a foreign key's holds a key's, and an epoch column's member is ordered by its
+  // document text: an index led by either, or over a column that holds no NULL (a
+  // statement orders it with the default placement), keeps its plain spelling
+  const epochs = new Set(entityMapping.columns.filter((/** @type {any} */ column) => column.source === 'epoch(document)')
+    .map((/** @type {any} */ column) => column.name));
+  const numberColumns = new Set(columns.filter((column) => column.references === undefined && column.primaryKey !== true && column.notNull !== true
+    && !epochs.has(column.name) && column.type === storageType('number')).map((column) => column.name));
+  const notNull = new Set(columns.filter((column) => column.primaryKey === true || column.notNull === true).map((column) => column.name));
+  /** @param {{ unique?: boolean, terms?: string[], columns: string[] }} index */
+  const orderedIndex = (index) => ordersIndex(dialect, index) && !numberColumns.has(index.columns[0]) && !epochs.has(index.columns[0])
+    && !index.columns.some((column) => notNull.has(column));
+  /** The declared indexes that declare `doubleOrder`. @type {any[]} */
+  const doubled = [];
   for (const [column, unique] of indexUnique) {
     const indexName = `${name}_${column}`;
     const temporal = declaredTemporals.find((/** @type {any} */ declared) => declared.name === column);
     const indexed = temporal === undefined ? [column] : /** @type {string[]} */ (temporalPlan?.indexColumns(temporal.canonical,
       { name: indexName, unique, docPath: `${entityPath}/schema/properties/${column}/x-entity` }));
     objects.push({ name: indexName, what: `the index over '${column}'`, docPath: memberPath(column), rename: `the member '${column}'` });
+    // an index over a calendar member's key columns orders no statement
+    const ordered = temporal === undefined && orderedIndex({ unique, columns: indexed }) ? { ordered: true } : {};
     createSql.push(dialect.ddl.createIndex({
-      name: indexName, table: name, columns: indexed, unique,
+      name: indexName, table: name, columns: indexed, unique, ...ordered,
     }));
-    expectedIndexes.push({ name: indexName, unique, columns: indexed });
+    expectedIndexes.push({ name: indexName, unique, columns: indexed, ...ordered });
   }
   // the entity-level indexes: composite, unique or partial, over the columns
   // the table maps; a condition reads them as their columns hold them
@@ -2403,11 +2635,24 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
     const where = index.where === undefined ? undefined : indexCondition(index.where, conditionColumns, dialect, `${indexPath}/where`, unreadable);
     const declared = { name: indexName, unique: index.unique, columns: [...index.columns],
       ...(terms === undefined ? {} : { terms, reads: [...index.reads] }), ...(where === undefined ? {} : { where }) };
+    if (orderedIndex(declared)) Object.assign(declared, { ordered: true });
+    if (index.doubleOrder === true) {
+      if (!numberColumns.has(declared.columns[0])) {
+        throw new DbCompileError('JD0004', `index '${index.name}' declares doubleOrder, which keys the double of a number column; `
+          + `its first member '${declared.columns[0]}' holds another kind`, `${indexPath}/doubleOrder`);
+      }
+      doubled.push(declared);
+    }
     objects.push({ name: indexName, what: `index '${index.name}'`, docPath: `${indexPath}/name`, rename: 'the index' });
     createSql.push(dialect.ddl.createIndex({ ...declared, table: name }));
     if (terms !== undefined) declaredCalls.set(createSql[createSql.length - 1], { index: index.name, term: terms[0], docPath: `${indexPath}/expression` });
     expectedIndexes.push(declared);
   });
+  const orderIndexes = orderIndexesOf(dialect, doubled, numberColumns);
+  for (const index of orderIndexes) {
+    objects.push({ name: index.name, what: `the double index beside '${index.of}'`, docPath: `${entityPath}/indexes`, rename: 'the index' });
+    createSql.push(orderIndexSql(dialect, name, index));
+  }
   // the database rules' programs, created with the table and verified with it
   const programs = (entityMapping.invariants ?? []).some((/** @type {any} */ rule) => rule.enforcement === 'database')
     ? rulePrograms(name, entityMapping, entities, dialect, columns, conditionColumns) : [];
@@ -2433,6 +2678,10 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
     /** The CHECKs of the columns holding a key (`keyCheckOf`). */
     keyChecks: keyChecksOf(columns),
     keys: [...entityMapping.keys],
+    /** The indexes beside an `ordered` index over a number column that key
+     * its double ({@link orderIndexesOf}); a table an earlier release created
+     * goes without them and opens as it is. */
+    orderIndexes,
     /** The statements that add the cycle's foreign keys, run after every table of the cycle exists. */
     deferredForeignKeys: columns.filter((column) => deferred.has(column.name))
       .map((column) => dialect.ddl.addForeignKey({ table: name, column: column.name, references: column.references })),

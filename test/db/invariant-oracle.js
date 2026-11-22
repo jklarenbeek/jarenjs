@@ -1292,8 +1292,10 @@ const migrationOptions = (engine, baseline, model) => ({ baseline, model, shadow
 /**
  * The store-owned lifecycle: the rules installed by the store's own open
  * (fresh) or by a planned migration over a table that already holds a row
- * they would refuse (upgraded: the migration adds the programs alone, runs
- * twice applying nothing the second time, and judges no existing row). Then
+ * they would refuse (upgraded: the migration adds the programs and then
+ * judges the rows the table holds, so that row fails it and leaves the table
+ * as it was; with the row corrected it applies, and the second time applies
+ * nothing). Then
  * every writer — create, update, a tracked save, a refused write inside a
  * transaction that goes on to commit, a raw SQL writer — meets the same
  * rules. Returns the outcomes and the rows left, read back through the store.
@@ -1309,24 +1311,28 @@ export async function hybridLifecycle(engine, upgraded) {
       try { await earlier.entity('Booking').create({ id: 'old', startsAt: 5, endsAt: 1 }); }
       finally { await earlier.close(); }
       const { migration } = planModelMigration(bookingModel(false), model, { dialect: fixture.dialect, id: 'install-rules' });
-      // the rules' programs and nothing else: no table work, no data step
-      assert.notEqual(migration.steps.length, 0);
-      assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.kind), migration.steps.map(() => 'ddl'));
-      assert.deepEqual(migration.steps.map((/** @type {any} */ step) => /^CREATE (TRIGGER|FUNCTION) /.test(step.sql)), migration.steps.map(() => true));
+      // the rules' programs, then the check of the stored rows by the one insert rule (on PostgreSQL after the step
+      // that holds the table's writers, its insert trigger enabled as it is): no table work, no other data step
+      const programs = migration.steps.filter((/** @type {any} */ step) => /^CREATE (TRIGGER|FUNCTION) /.test(step.sql));
+      assert.notEqual(programs.length, 0);
+      assert.deepEqual(migration.steps.slice(0, programs.length), programs);
+      assert.deepEqual(migration.steps.slice(programs.length).map((/** @type {any} */ step) => step.kind), [...(engine.name === 'sqlite' ? [] : ['ddl']), 'sql']);
       const options = migrationOptions(engine, bookingModel(false), model);
+      // the row the rule refuses fails the link, which leaves the table without the programs
+      await assert.rejects(migrate(fixture.target, [migration], options),
+        { code: 'JD0023', message: /the rule .ordered. of .Booking. refuses the stored row whose key id is old/ });
+      const corrected = await openStore(bookingModel(false), { driver: fixture.target.driver });
+      try {
+        assert.deepEqual(await corrected.entity('Booking').get('old'), { id: 'old', startsAt: 5, endsAt: 1 });
+        await corrected.entity('Booking').delete('old');
+      }
+      finally { await corrected.close(); }
       assert.deepEqual((await migrate(fixture.target, [migration], options)).applied, ['install-rules']);
       assert.deepEqual((await migrate(fixture.target, [migration], options)).applied, []);
     }
     const store = await openStore(model, { driver: fixture.driver });
     try {
       const bookings = store.entity('Booking');
-      if (upgraded) {
-        // a row the new rule would refuse stays, and is judged only when written again
-        assert.deepEqual(await bookings.get('old'), { id: 'old', startsAt: 5, endsAt: 1 });
-        await fixture.exec('UPDATE "Booking" SET doc = doc, "startsAt" = "startsAt" WHERE id = \'old\'');
-        assert.equal(await outcome(() => bookings.update('old', { endsAt: 0 })), 'refused ordered');
-        await bookings.delete('old');
-      }
       const writes = [];
       for (const span of [{ id: 'a', startsAt: 5, endsAt: 1 }, { id: 'b', startsAt: 1, endsAt: 5 }, { id: 'h', startsAt: 1, endsAt: 2, room: 'held' }])
         writes.push(await outcome(() => bookings.create(span)));

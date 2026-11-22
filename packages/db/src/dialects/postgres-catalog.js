@@ -141,6 +141,17 @@ export function postgresCatalog(namespace) {
 /** How the reading session spells a backslash in a plain string, as the dialect's per-table reads report it. */
 const CONFORMING = "(SELECT s.setting FROM pg_settings AS s WHERE s.name = 'standard_conforming_strings')";
 
+/** An index's shape apart from each key's order, as a model declares one: a
+ * B-tree keyed under its columns' own collations and their types' default
+ * operator classes, every column a key (an INCLUDE column is carried, not
+ * keyed), nulls distinct, checked at once — what the plan creates. A plain
+ * index also keys every column ascending, `NULLS LAST`. */
+export const INDEX_SHAPE = "am.amname = 'btree' AND NOT i.indnullsnotdistinct AND i.indimmediate AND i.indnkeyatts = i.indnatts "
+  + 'AND NOT EXISTS (SELECT 1 FROM unnest(i.indclass::oid[]) AS c(opclass) '
+  + 'JOIN pg_opclass oc ON oc.oid = c.opclass WHERE NOT oc.opcdefault) '
+  + 'AND NOT EXISTS (SELECT 1 FROM unnest(i.indcollation::oid[], i.indkey::int2[]) AS k(coll, attnum) '
+  + 'JOIN pg_attribute ka ON ka.attrelid = i.indrelid AND ka.attnum = k.attnum WHERE k.coll <> ka.attcollation)';
+
 /**
  * PostgreSQL's catalog reads over a set of tables at once: each answers the
  * rows its per-table twin in the dialect's `introspect` answers, in the same
@@ -183,13 +194,13 @@ export function postgresNamespaceReads(namespace) {
       + 'CASE WHEN i.indpred IS NULL THEN 0 ELSE 1 END AS partial, '
       + 'pg_get_expr(i.indpred, i.indrelid) AS predicate, '
       + `${CONFORMING} AS conforming, `
-      + "CASE WHEN am.amname = 'btree' AND NOT i.indnullsnotdistinct AND i.indimmediate AND i.indnkeyatts = i.indnatts "
-      + 'AND NOT EXISTS (SELECT 1 FROM unnest(i.indoption::int2[]) AS o(flags) WHERE o.flags <> 0) '
-      + 'AND NOT EXISTS (SELECT 1 FROM unnest(i.indclass::oid[]) AS c(opclass) '
-      + 'JOIN pg_opclass oc ON oc.oid = c.opclass WHERE NOT oc.opcdefault) '
-      + 'AND NOT EXISTS (SELECT 1 FROM unnest(i.indcollation::oid[], i.indkey::int2[]) AS k(coll, attnum) '
-      + 'JOIN pg_attribute ka ON ka.attrelid = i.indrelid AND ka.attnum = k.attnum WHERE k.coll <> ka.attcollation) '
-      + 'THEN 1 ELSE 0 END AS plain '
+      + `CASE WHEN ${INDEX_SHAPE} AND NOT EXISTS (SELECT 1 FROM unnest(i.indoption::int2[]) AS o(flags) WHERE o.flags <> 0) `
+      + 'THEN 1 ELSE 0 END AS plain, '
+      // the same index but for each key's order (`key_options`, the engine's
+      // flags per key: 0 ascending, 2 ascending `NULLS FIRST`), which an index
+      // the store creates `ordered` keys its columns by
+      + `CASE WHEN ${INDEX_SHAPE} THEN 1 ELSE 0 END AS shaped, `
+      + "pg_catalog.array_to_string(i.indoption::int2[], ',') AS key_options "
       + 'FROM pg_index i JOIN pg_class ci ON ci.oid = i.indexrelid JOIN pg_am am ON am.oid = ci.relam '
       + 'JOIN pg_class ct ON ct.oid = i.indrelid '
       + 'JOIN pg_namespace n ON n.oid = ct.relnamespace '

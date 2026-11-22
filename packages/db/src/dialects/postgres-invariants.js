@@ -7,7 +7,7 @@
  * ahead of `pg_catalog` can supply its operators, casts or collations. */
 import { hashContent, utf8ByteLength } from '@jarenjs/core/string';
 import { DbCompileError, INVARIANT_MARKER, INVARIANT_SQLSTATE } from '../errors.js';
-import { compileInvariants } from './invariant-sql.js';
+import { compileInvariants, withStoredRows } from './invariant-sql.js';
 import { CURRENT_SPELLING } from './program-spellings.js';
 import { safeRange } from './row-predicate.js';
 
@@ -144,7 +144,7 @@ export function postgresInvariantTriggers(mapping, all, dialect, limit, spelling
       '  RETURN NULL;', 'END;', ''].join('\n'));
   // an increment rewrites the row before it is written, so every AFTER
   // program of the statement reads the revision it will keep
-  return [...programs.flatMap((program) => {
+  return withStoredRows([...programs.flatMap((program) => {
     const name = programName(mapping.table, program.name, limit);
     const event = program.op.toUpperCase();
     const rule = program.rules.join(',');
@@ -165,5 +165,5 @@ export function postgresInvariantTriggers(mapping, all, dialect, limit, spelling
     const increments = [...new Set(program.increments.map((increment) => increment.rule))].join(',');
     return [...triggerFunction(dialect, mapping.table, programName(mapping.table, `${program.name}_before`, limit), increments,
       { timing: 'BEFORE', event, columns: [] }, before), ...after];
-  }), ...truncate];
+  }), ...truncate], mapping, all, dialect, POSTGRES);
 }

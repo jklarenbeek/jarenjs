@@ -2031,7 +2031,15 @@ declared rule programs — SQLite triggers, PostgreSQL trigger functions
 installation through that boundary. On a layout the store owns, the store
 installs a database rule's programs with the table and verifies them on every
 open, and `planModelMigration` adds, replaces and drops them as the rules
-change ([§13.4](docs/MODEL-FORMAT.md#134-database-enforcement)).
+change, judging the rows a table already holds by each rule it adds or
+changes (a row the rule refuses fails the link, `JD0023`). A rule there reads
+the table's scalar and foreign-key columns only: one that reads an epoch
+member or a member the document holds, and an `audit` or `effects`, is
+refused at the member (`JD0005`); a member mapped as a column (a top-level
+scalar property) lowers, and a rule the store enforces (`enforcement:
+"store"`) reads such a member in its assertion but judges the store's own
+writes alone
+([§13.4](docs/MODEL-FORMAT.md#134-database-enforcement)).
 
 Native column reads and bounded mutation documents are specified in [NATIVE-PLANS](docs/NATIVE-PLANS.md), including SQL census coverage, resource accounting and refusals.
 

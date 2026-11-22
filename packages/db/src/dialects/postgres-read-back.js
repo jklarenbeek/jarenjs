@@ -24,6 +24,8 @@ import { POSTGRES_PREDICATE, POSTGRES_PREDICATE_ESCAPED, READ_DEPTH, decimalText
 const STRING_TYPES = new Set(['text', 'character varying', 'varchar', 'character', 'bpchar', 'name', 'unknown']);
 /** The type names a deparse writes in two words, by their first. */
 const TWO_WORD_TYPES = new Map([['double', 'PRECISION'], ['character', 'VARYING']]);
+/** The type names a planned text spells by an alias the server deparses by its name. */
+const TYPE_ALIASES = new Map([['float8', 'double precision']]);
 /** The numeric types a literal keeps its value under. */
 const NUMBER_TYPES = new Set(['integer', 'bigint', 'smallint', 'numeric', 'real', 'double precision']);
 
@@ -122,7 +124,8 @@ export function expressionForm(sql, conforming, condition = false) {
     const second = first.kind === 'word' ? TWO_WORD_TYPES.get(words[0]) : undefined;
     if (second !== undefined && take(second)) words.push(second.toLowerCase());
     if (take('[')) { if (!take(']')) return undefined; words.push('[]'); }
-    return words.join(' ');
+    const type = words.join(' ');
+    return TYPE_ALIASES.get(type) ?? type;
   };
   /** A cast, its literal operand read as the value it keeps. @param {any} of @param {string} type */
   const cast = (of, type) => {

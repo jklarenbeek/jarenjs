@@ -288,22 +288,24 @@ describe('postgres: a rebuild keeps what the old table held',
     });
 
     it('a rebuild of an entity another object depends on is refused, naming the dependent as the server does', async () => {
+      // a number retyped into text, which only a rebuild spells as String() does
+      // (an enum's change, or a retype a cast makes, changes such a table in place)
       const comments = { 'x-entity': { relation: { to: 'Comment', many: true, via: 'postId', onDelete: 'cascade' } } };
       const comment = { schema: { type: 'object', properties: {
         cid: { type: 'integer', 'x-entity': { key: true, default: 'auto' } }, postId: { type: 'integer' }, body: { type: 'string' } } } };
-      const referenced = (/** @type {string[] | undefined} */ values) =>
-        ({ $model: '0.1', entities: { Post: postEntity(values, { comments }), Comment: comment } });
+      const referenced = (/** @type {string} */ type) =>
+        ({ $model: '0.1', entities: { Post: postEntity(undefined, { comments, n: { type } }), Comment: comment } });
       const children = { 'x-entity': { relation: { to: 'Category', many: true, via: 'parentId', onDelete: 'cascade' } } };
-      const tree = (/** @type {string[] | undefined} */ values) => ({ $model: '0.1', entities: { Category: { schema: {
+      const tree = (/** @type {string} */ type) => ({ $model: '0.1', entities: { Category: { schema: {
         type: 'object', properties: { cid: { type: 'integer', 'x-entity': { key: true, default: 'auto' } },
-          name: values === undefined ? { type: 'string' } : { type: 'string', enum: values }, parentId: { type: 'integer' }, children } } } } });
+          name: { type: 'string' }, n: { type }, parentId: { type: 'integer' }, children } } } } });
       /** @type {[any, any, string, (store: any, pool: any, schema: string) => Promise<void>, string][]} */
       const cases = [
-        [referenced(), referenced(['x', 'y']), 'Post', async (store) => {
+        [referenced('number'), referenced('string'), 'Post', async (store) => {
           await store.entity('Post').create({ title: 'x' });
           await store.entity('Comment').create({ postId: 1, body: 'c' });
         }, 'constraint Comment_postId_fkey on table "Comment" depends on table "Post"'],
-        [tree(), tree(['a', 'b']), 'Category', async (store) => {
+        [tree('number'), tree('string'), 'Category', async (store) => {
           await store.entity('Category').create({ name: 'a' });
           await store.entity('Category').create({ name: 'b', parentId: 1 });
         }, 'constraint Category__rebuild_parentId_fkey on table "Category__rebuild" depends on table "Category"'],

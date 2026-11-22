@@ -24,7 +24,7 @@ import { setObjectMember, isJsonObject } from '@jarenjs/core/object';
 import { DbRuntimeError, wrapDriverError, wrapHeldKey, keyUndecided } from './errors.js';
 import { chain, isThenable, attempt, useStatementOnce, releaseStatements as releasePrepared } from './driver.js';
 import { createCursor, createSyncCursor, rowClassOf } from './cursor.js';
-import { checkInvariants, existsRowSql, recordPath, ruleLiteral } from './invariants.js';
+import { checkInvariants, existsRowSql, keyColumnsOnly, probeTarget, recordPath, ruleLiteral } from './invariants.js';
 import { columnCodec, physicalRead, integerParameter } from './physical.js';
 import { mergeEntityRow } from './graph.js';
 import { namesNoNumber, noNumberKeyReason, numericKeyValue } from './key-text.js';
@@ -609,10 +609,15 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
    * the row a strictly positive probe finds where writers do not serialize —
    * `FOR KEY SHARE` when the probe compares key columns only, else
    * `FOR SHARE` (§13.2); any other probe reads unlocked. A key member with no
-   * value, or one its column cannot hold, matches no row.
-   * @param {any} spec a resolved probe @param {any} record `{ old, new, op }`
+   * value, or one its column cannot hold, matches no row. `unlocked` asks
+   * again without the lock, after a locked probe found nothing and its rule
+   * refused the write: `false` without a statement where the probe takes no
+   * lock, since its answer stands.
+   * @param {any} spec a resolved probe @param {any} record `{ old, new, op }` @param {boolean} [unlocked]
    */
-  const probe = (spec, record) => {
+  const probe = (spec, record, unlocked = false) => {
+    const lock = !spec.positive ? '' : spec.keyShare ? dialect.rowKeyShareLockSuffix : dialect.rowShareLockSuffix;
+    if (unlocked && lock === '') return false;
     const params = [];
     let none = false;
     const sql = existsRowSql(spec, dialect, (expression, column) => {
@@ -624,11 +629,19 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       if (encoded === null && spec.keys.includes(column.name)) none = true;
       params.push(encoded);
       return dialect.parameterRef(params.length, 'v');
-    }, !spec.positive ? '' : spec.keyShare ? dialect.rowKeyShareLockSuffix : dialect.rowShareLockSuffix);
+    }, unlocked ? '' : lock);
     if (none) return false;
     return attempt(() => chain(prepared(`probe:${sql}`, `SELECT ${sql} AS ${q('hit')}`), (statement) =>
       chain(statement.get(params), (row) => row?.hit === true || Number(row?.hit) === 1)),
     (error) => wrapDriverError(error, { docPath, collection: entity.name }));
+  };
+  /** Whether an update's `changes` assign a column PostgreSQL counts as a key
+   * column — the key, or a member of a plain unique index, as a probe's lock
+   * counts them (`keyColumnsOnly`) — so that its `UPDATE` takes `FOR UPDATE`.
+   * @param {any} changes */
+  const assignsKey = (changes) => {
+    const target = probeTarget(entityMapping);
+    return Object.keys(changes).some((member) => keyColumnsOnly(target.keys, target.indexes, [member]));
   };
   const ruledOps = new Set(entity.invariants.flatMap((rule) => (rule.enforcement === 'store' ? rule.on : [])));
   /** Whether a store rule judges `op`. @param {string} op */
@@ -786,13 +799,19 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     },
     /**
      * The row a store rule judges as `$.old`, read inside the write's
-     * transaction and locked for the rest of it where the engine locks rows
-     * (`FOR UPDATE`): a concurrent writer's change waits or lands before the
-     * read, never between the read and the statement (§13.3).
-     * @param {any} key
+     * transaction and locked for the rest of it where the engine locks rows:
+     * a concurrent writer's change waits or lands before the read, never
+     * between the read and the statement (§13.3). The lock is `FOR UPDATE`,
+     * which a delete takes, unless `changes` is an update's that assigns no
+     * key column (the key, or a member of a unique index PostgreSQL counts
+     * as a key column): then `FOR NO KEY UPDATE`, the lock that `UPDATE`
+     * itself takes, which a probe's `FOR KEY SHARE` admits.
+     * @param {any} key @param {any} [changes] - the update's members, absent for a delete
      */
-    getLocked(key) {
-      return readRow(key, 'getLocked', dialect.rowLockSuffix);
+    getLocked(key, changes = undefined) {
+      if (changes === undefined || dialect.rowNoKeyLockSuffix === '' || assignsKey(changes))
+        return readRow(key, 'getLocked', dialect.rowLockSuffix);
+      return readRow(key, 'getLockedNoKey', dialect.rowNoKeyLockSuffix);
     },
     /**
      * The rows whose `column` holds one of `values` — the rows a foreign key
@@ -843,7 +862,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       requireObject(changes, 'update() takes an object of the members to change');
       const parts = keyParts(key);
       refuseProjections(changes, 'update', false);
-      const update = () => chain(ruled('update') ? this.getLocked(key) : this.get(key), (current) => {
+      const update = () => chain(ruled('update') ? this.getLocked(key, changes) : this.get(key), (current) => {
         if (current === undefined) {
           throw new DbRuntimeError('JD2006',
             `no '${entity.name}' to update under that key`,

@@ -59,12 +59,15 @@ const isOp = (names) => names?.length === 1 && names[0] === 'op';
 /**
  * A rule's paths for one operation: `$.old.<member>` and `$.new.<member>` read
  * a column of the old or the new row (a member of any name also written
- * `$.new['<member>']`), and `$.op` is the operation's name.
+ * `$.new['<member>']`), and `$.op` is the operation's name. `row` reads the new
+ * record from a row of the table under that (quoted) alias instead of the
+ * trigger's `NEW`: a stored row judged as its insert was.
  * @param {any[]} columns the layout's mapped columns @param {string} op
  * @param {(name: string) => string} q the dialect's identifier quoting
+ * @param {string} [row] - the alias a stored row is read under
  * @returns {PathResolver}
  */
-export function rulePaths(columns, op, q) {
+export function rulePaths(columns, op, q, row = undefined) {
   return (path) => {
     if (isOp(memberNames(path))) return { text: op };
     const read = recordPath(path);
@@ -75,7 +78,8 @@ export function rulePaths(columns, op, q) {
       column: columns.find((c) => c.name === path.slice(path.indexOf('.', 2) + 1)) };
     const { record, name } = read;
     const column = columns.find((c) => c.name === name);
-    return { name, column, ref: column === undefined ? undefined : `${record.toUpperCase()}.${q(column.physical)}`,
+    const source = row !== undefined && record === 'new' ? row : record.toUpperCase();
+    return { name, column, ref: column === undefined ? undefined : `${source}.${q(column.physical)}`,
       unavailable: (op === 'insert' && record === 'old') || (op === 'delete' && record === 'new') };
   };
 }

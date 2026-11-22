@@ -570,6 +570,22 @@ function invariantFailure(name) {
 }
 
 /**
+ * The refusal of a write whose rule a locked probe failed while the same
+ * probe read unlocked finds the row and passes it: on PostgreSQL a locking
+ * read sees a row through the table's row-level security UPDATE policy as
+ * well as its SELECT policy, so the writer may read the row but not lock it.
+ * @param {string} name - the rule @param {string} target - the probed entity
+ * @returns {DbRuntimeError}
+ */
+function unlockableRow(name, target) {
+  const error = new DbRuntimeError('JD2099', `persistence invariant '${name}' found the '${target}' row it needs only by an unlocked read: `
+    + `the writer may read the row but not lock it, which the row-level security UPDATE policy of '${target}' refuses`);
+  error.class = 'constraint';
+  error.retryable = false;
+  return error;
+}
+
+/**
  * Store enforcement. An update rule with `columns` is checked when the write
  * assigns one of them (`assigned` names the members a statement sets; absent,
  * it sets them all); a rule that judges changes (neither `when: "assigned"`
@@ -577,9 +593,12 @@ function invariantFailure(name) {
  * a database rule counts. A probe is answered by `probe(probe, record)`, a
  * value-or-promise of a boolean, so a synchronous driver stays synchronous; a
  * caller that checks before its transaction opens passes `defer`, and a rule
- * that reads another row is handed to it to run inside that transaction.
+ * that reads another row is handed to it to run inside that transaction. A
+ * rule its probes refuse asks each that found nothing once more with
+ * `probe(probe, record, true)`, unlocked: where the row is found then and the
+ * rule passes, the refusal is `JD2099`, a row the writer may read but not lock.
  * @param {any[]} rules @param {string} op @param {any} before @param {any} after
- * @param {{ assigned?: Iterable<string>, unchanged?: boolean, probe?: (probe: any, record: any) => any,
+ * @param {{ assigned?: Iterable<string>, unchanged?: boolean, probe?: (probe: any, record: any, unlocked?: boolean) => any,
  *   defer?: (run: () => any) => void }} [context]
  * @returns {any} value-or-promise
  */
@@ -603,7 +622,19 @@ export function checkInvariants(rules, op, before, after, context = {}) {
         const answer = (j) => j >= rule.probes.length ? null
           : chain(probe(rule.probes[j], record), (found) => { answers.push(found === true); return answer(j + 1); });
         return chain(answer(0), () => {
-          if (!withinDomain(rule, record) || rule.evaluate({ ...record, probes: answers }) !== true) throw invariantFailure(rule.name);
+          if (!withinDomain(rule, record)) throw invariantFailure(rule.name);
+          if (rule.evaluate({ ...record, probes: answers }) === true) return null;
+          // refused: each probe that found nothing asks once more unlocked (one
+          // that takes no lock answers as it did, without a statement), and a
+          // row only that read finds which would pass the rule names the lock
+          const unlocked = [];
+          const again = (j) => j >= rule.probes.length ? null
+            : chain(answers[j] ? true : probe(rule.probes[j], record, true), (found) => { unlocked.push(found === true); return again(j + 1); });
+          return chain(again(0), () => {
+            const hidden = rule.probes.find((_, j) => unlocked[j] && !answers[j]);
+            if (hidden !== undefined && rule.evaluate({ ...record, probes: unlocked }) === true) throw unlockableRow(rule.name, hidden.entity);
+            throw invariantFailure(rule.name);
+          });
         });
       };
       if (context.defer !== undefined) { context.defer(run); continue; }
