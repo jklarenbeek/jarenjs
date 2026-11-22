@@ -703,7 +703,7 @@ costs a descriptor plus examples and no UI code at all.
   that comparison reads every row. The same index beside those seeks
   (measured: Seq Scan to Index Scan on all three), but it keys the member at
   its other kind, so a write the declared index stores today — a string past
-  the B-tree entry limit (about 2.7 kB), or another writer's number of
+  the B-tree entry limit (2,704 bytes), or another writer's number of
   thousands of digits, which the declared column holds as NULL — would be
   refused `JD2005`, and `introspect()` reads such an index back beside no
   non-unique composite, conditional or guarded index. Wanted: an index that
