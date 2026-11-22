@@ -1,6 +1,6 @@
 {
   "format": "jaren-migration-identity-cost/1",
-  "measuredAt": "2026-11-22T04:10:35.720Z",
+  "measuredAt": "2026-11-22T06:28:29.885Z",
   "runtime": {
     "name": "node",
     "version": "24.22.1",
@@ -9,9 +9,9 @@
     "arch": "x64",
     "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics",
     "loadavg": [
-      2.13,
-      4.41,
-      5.63
+      2.65,
+      3.14,
+      4.35
     ]
   },
   "sourceHashes": {
@@ -21,14 +21,14 @@
     "packages/json/src/canonical.js": "8b68e33f7264f4064085259cda50d68c07ed83b663939054c140f3b9ba79211a",
     "packages/linq/src/migration/define.js": "b2f8b1c2700d24224e7dbb47996cc8246f1b5c560354290c79f5c047e4030ff6",
     "packages/linq/src/migration/steps.js": "a4a21b3d61f05fba8b5adfb07f828e0e0dc574f1f2abbd474bf99641d5c52311",
-    "packages/db/src/migrate.js": "c0dda8edb4cddb10137454fb028ad801d3df163ba3583a19e08d3423ae7d21c0",
+    "packages/db/src/migrate.js": "52b232d4b0c60a5d2cf74a8ccd589cc02ca3fb2f7b8c4c56d2e113ebcd664f11",
     "packages/db/src/migration-history.js": "1ebe6baa64f73d40a8191f5f929dce75785bc58163c80b7866e8cac6de6d6400",
     "packages/db/src/model.js": "28b3179fbcdfa1ba5181d675f8fab390efa693830bb546d41369cc2c8bd3d9dc",
     "packages/db/src/migration-target.js": "2a083fab968f6807ec10db982f4fc9ec83b9da7dde3744239149f6e9e18c7cb4",
     "packages/db/src/document-steps.js": "de0167d29b60e48ccad5e292711bbb9d8518a631a30b3a418702f9f8f15a3d2f",
     "packages/db/src/schema-positions.js": "04c7ae34365fdc06ecb76c6e08c6813bab77e49ff0f38285d1081e731a0725c1",
     "packages/validate/src/schema-keywords.js": "dc7d685577c09603fc8b267136325d242ceffb044073c457c85a12396305033b",
-    "packages/db/src/driver.js": "46f4c27e7224bb7896fd64c4a8148cac2c2c28085308505b8cef924edaaf8b7c",
+    "packages/db/src/driver.js": "26144529eaec3df5d151728302870ef19cc8b28ee7750206d73bb36be22a77a3",
     "packages/db/src/drivers/node.js": "aa83e4442b81ef1f02689b243ff16526e4bd113a325b9ecf9ed5a2af63367604"
   },
   "rounds": 5,
@@ -43,41 +43,41 @@
   },
   "samples": [
     {
-      "applyMs": 29.936440000000005,
-      "statusMs": 265.59625400000004,
-      "repeatMs": 244.88514400000003,
-      "observationMs": 78.85886800000003
+      "applyMs": 29.110647999999998,
+      "statusMs": 273.478964,
+      "repeatMs": 248.78947899999997,
+      "observationMs": 83.14593500000001
     },
     {
-      "applyMs": 10.545450999999957,
-      "statusMs": 252.83477399999992,
-      "repeatMs": 240.86968100000013,
-      "observationMs": 72.00991999999997
+      "applyMs": 10.599366000000032,
+      "statusMs": 241.105731,
+      "repeatMs": 243.180474,
+      "observationMs": 80.53467999999998
     },
     {
-      "applyMs": 9.790058999999928,
-      "statusMs": 235.643051,
-      "repeatMs": 245.53493700000013,
-      "observationMs": 71.00366299999996
+      "applyMs": 11.039569000000029,
+      "statusMs": 255.67153199999984,
+      "repeatMs": 257.945248,
+      "observationMs": 72.17620699999998
     },
     {
-      "applyMs": 9.69982600000003,
-      "statusMs": 236.5645930000003,
-      "repeatMs": 246.3651279999999,
-      "observationMs": 72.02989400000024
+      "applyMs": 10.051539999999932,
+      "statusMs": 242.66239899999982,
+      "repeatMs": 250.16861400000016,
+      "observationMs": 70.64419100000032
     },
     {
-      "applyMs": 9.679082999999991,
-      "statusMs": 236.56612899999982,
-      "repeatMs": 238.15303799999992,
-      "observationMs": 66.90034199999991
+      "applyMs": 9.993223999999827,
+      "statusMs": 247.22778199999993,
+      "repeatMs": 248.42644900000005,
+      "observationMs": 73.01638400000002
     }
   ],
   "medianMs": {
-    "applyMs": 9.790058999999928,
-    "statusMs": 236.56612899999982,
-    "repeatMs": 244.88514400000003,
-    "observationMs": 72.00991999999997
+    "applyMs": 10.599366000000032,
+    "statusMs": 247.22778199999993,
+    "repeatMs": 248.78947899999997,
+    "observationMs": 73.01638400000002
   },
   "checks": {
     "exactRows": true,
