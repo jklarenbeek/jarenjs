@@ -394,7 +394,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 259,600 (measured 259579): the zone provider carried into a chain through from()'s runtime and zoneProvider options (runtime 1369, provider 951, option-variants 113, series 29, query index 23), $instant and $wall in the query language with their catalog messages and the calendar seam's brand (messages 803, operators 568, normalize 285, calendar-seam 52), unit factors held as exact definitions (convert registry 828, convert 473) and the captured expression's instantOf and wallClock (expression 107), net of the zone module's 52 saved.
 // Raised to 259,800 (measured 259715): a message value holding a bigint wrapper object rendered as its digits, and an unserialisable value rendered by the fallback text instead of throwing (message 136).
 // Raised to 260,500 (measured 260405): a store's compare guard on a call a row decides, which each comparison, $distinct, $index-of and grouping key hands its items to, with no equality bucket skipping a pair (operators 235, runtime 176, normalize 137, compile 83, index 59).
-if (chainBytes > 260500)
+// Raised to 260,600 (measured 260598): an entity handle read as the chain over it as a join's inner side (async 193).
+if (chainBytes > 260600)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -864,7 +865,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,183,900 (measured 1183788): a collecting validation keeps each distinct error once, in the order it first met it (index 1622).
 // Raised to 1,188,200 (measured 1188151): a row-decided pick of a Date, Map or bigint external refused at the row and each $seq position mapped to its operand (query 2136, model 205, residual 79, the query engine's compare guard ~650), and PostgreSQL keys read by their named CHECK with foreign CHECKs reported (introspect 718, ddl 307, plan 84, dialect 64, emit 42).
 // Raised to 1,192,600 (measured 1192523): a collection's conditional index read back with the indexes beside it and the store's own rule programs read back (introspect 1985), a physical layout's trigger compared formatting aside with the repair route named (physical 142, ddl 79), a bare collection root's first item, element and existence planned as the scan's LIMIT and a one-row probe, and PostgreSQL's external and external-list comparisons bound as numeric edges beside whether the list holds each kind (emit 1257, plan 615, query 245, live 102, store 62).
-if (clientBytes > 1192600)
+// Raised to 1,198,900 (measured 1198896): one shared catalog read per namespace at open and in a migration's validation (sqlite-catalog 1610, namespace-catalog 1379, store 274, migrate 166, sqlite 75, physical-transform 14, net of ddl 103 and introspect 11), the job tables and the change log read before any bracket with a lock failure answered busy (jobs 559, capture 286, dialects/jobs 63), linq transaction records built on first read (open 314), and a page over an earlier release's re-keyed key carrying its digits, a windowed count and a reversal native, and a $ne chain over one column as one list (query 770, plan 574, algebra 536, emit 230, async 109, dialect 26).
+if (clientBytes > 1198900)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
