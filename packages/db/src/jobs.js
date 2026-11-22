@@ -42,12 +42,13 @@ export { JOBS_TABLE, JOB_CHECKPOINTS_TABLE, JOB_SCHEDULES_TABLE };
 
 import { resolveRuntime } from '@jarenjs/core/runtime';
 import { backoffDelay } from '@jarenjs/core/retry';
-import { chain, attempt, iterateStatementOnce } from './driver.js';
+import { chain, attempt, iterateStatementOnce, useStatementOnce } from './driver.js';
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { createCursor, rowClassOf, PAGE_LIMIT_DEFAULT } from './cursor.js';
 import { refuseCancelled } from './cancellation.js';
 import { readOptions, readOptionsOrNull, readYieldEvery } from './options.js';
 import { jobStatements } from './dialects/jobs.js';
+import { CATALOG_READ } from './namespace-catalog.js';
 /** What `enqueue` reads from its options (§2). */
 const ENQUEUE_OPTIONS = ['id', 'runAt', 'maxAttempts'];
 /** What `claim`, `renew` and `createWorker` read from theirs (§3, §6). */
@@ -331,13 +332,45 @@ export function createJobEngine(options) {
         throw new Error(`existing job object ${name} needs an explicit schema migration`);
     }
   }));
-  const ready = attempt(() => bracket(() => options.adopt === true
-    ? verifyExisting() : chain(connection.dialect.jobs?.initialize?.(connection),
-      () => chain(connection.exec(schema.create), upgradeColumns))),
-    (error) => new DbCompileError('JD0002',
+  /**
+   * Whether the first-open DDL would change nothing: every job table, every
+   * index and every column an upgrade adds is there by name. Read holding
+   * no write lock, so an open beside a live writer takes the bracket only
+   * where it has a table, an index or a column to create.
+   * @returns {any} value-or-promise of a boolean
+   */
+  const provisioned = () => {
+    const dialect = connection.dialect;
+    const rows = (/** @type {string} */ sql) => useStatementOnce(connection, sql, (statement) => statement.all([]), CATALOG_READ);
+    const tables = (/** @type {number} */ i) => {
+      if (i >= schema.tables.length) return indexes(0);
+      const table = schema.tables[i].name;
+      return chain(rows(dialect.introspect.columns(table)), (columns) => {
+        const held = new Set(columns.map((/** @type {any} */ row) => String(row.name)));
+        return held.size > 0 && schema.added.every((/** @type {any} */ column) => column.table !== table || held.has(column.name))
+          && tables(i + 1);
+      });
+    };
+    const indexes = (/** @type {number} */ i) => (i >= schema.indexes.length ? true
+      : chain(rows(dialect.introspect.indexes(schema.indexes[i].table)), (held) =>
+        held.some((/** @type {any} */ row) => String(row.name) === schema.indexes[i].name) && indexes(i + 1)));
+    return tables(0);
+  };
+  // an adopted queue is verified and never provisioned; any other is created
+  // or upgraded under the bracket, which a provisioned one does not take. A
+  // lock the bracket could not take is the store's busy failure, retryable,
+  // and not a model it cannot open
+  const ready = attempt(() => (options.adopt === true ? verifyExisting()
+    : chain(provisioned(), (done) => (done ? null : bracket(() => chain(connection.dialect.jobs?.initialize?.(connection),
+      () => chain(connection.exec(schema.create), upgradeColumns)))))),
+  (error) => {
+    const wrapped = wrapJobs(error);
+    if (/** @type {any} */ (wrapped)?.class === 'busy') return wrapped;
+    return new DbCompileError('JD0002',
       `the job tables could not be opened (${error?.message ?? String(error)}) — `
       + 'a read-only store creates nothing; open it read-write once, or without jobs',
-      '/jobs', error));
+      '/jobs', error);
+  });
 
   const enqueue = (kind, payload, enqueueOptions) => {
     if (typeof kind !== 'string' || kind === '') {

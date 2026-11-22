@@ -397,11 +397,13 @@ export function planOrder(plan) {
   if (plan.alg === 'entity-select' || plan.alg === 'entity-join') {
     if (plan.aggregate !== null) return null;
     const bindings = plan.bindings;
-    const ties = bindings.flatMap((binding) => binding.keys === undefined
+    const forward = bindings.flatMap((binding) => binding.keys === undefined
       ? [identityTerm(binding.name)] : binding.keys.map((column) => ({
         source: 'column', binding: binding.name, column, path: null,
         desc: false, nullsFirst: true, tieBreaker: true,
       })));
+    // a `$reverse` reads every row identity descending
+    const ties = plan.reverse === true ? forward.map((term) => ({ ...term, desc: true })) : forward;
     if (plan.group) {
       const group = plan.group;
       const terms = group.order === 'first-seen' ? [] : group.order.map((term) => ({
@@ -437,6 +439,39 @@ export function planOrder(plan) {
  * @param {{ left: PlanRef, right: PlanRef }} comparison - a `refCmp` node
  * @returns {'number' | 'text' | null}
  */
+/**
+ * The member a conjunction's `$ne` leaf tests, as a key equal for two leaves
+ * over one member, where a dialect that bounds a statement's terms spells
+ * two or more such leaves as the member's presence and ONE negated
+ * membership in their list (emit.js `regroupInequalities`, which counts them
+ * as one term: `predicateTerms`), or `null` for a leaf left as it is: a
+ * literal a list cannot carry (`holds`: a string the server holds in no JSON
+ * value, or a number JSON cannot spell, an infinity), a column whose
+ * membership list is not the same comparison as its `<>` (a `number` column
+ * compares a double there, and the list a `numeric`), and an external
+ * anywhere but over a string column that reads a NULL as no member (whose
+ * `<>` against an external is the list's: an external of another type
+ * differs from every string). An epoch member's `$ne` and list both read its
+ * document. A literal's key and an external's are apart: each folds into a
+ * list of its own kind.
+ * @param {any} pred @param {(literal: string) => boolean} holds
+ * @returns {string | null}
+ */
+export function inequalityKey(pred, holds) {
+  if (pred.p !== 'cmp' || pred.op !== 'ne') return null;
+  const { flavor, storage, codec } = pred.ref;
+  if ('ext' in pred.operand) {
+    return flavor === 'entity-column' && storage === 'string' && (codec === undefined || codec === 'text')
+      && pred.ref.nullPolicy !== 'null' ? `ext:${JSON.stringify(pred.ref)}` : null;
+  }
+  if (!('lit' in pred.operand)) return null;
+  const lit = pred.operand.lit;
+  if (typeof lit === 'string' ? !holds(lit) : !Number.isFinite(lit)) return null;
+  if (flavor === 'entity-column' && !((storage === 'integer' && (codec === undefined || codec === 'integer'))
+    || (storage === 'string' && (codec === undefined || codec === 'text')))) return null;
+  return JSON.stringify(pred.ref);
+}
+
 export function plainFamily(comparison) {
   const left = comparison.left.families;
   const right = comparison.right.families;

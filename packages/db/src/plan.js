@@ -45,7 +45,7 @@ import {
 import { compareJsonScalarLt } from '@jarenjs/core/object';
 import { compileBuckets, resampleSeries, toEpoch } from '@jarenjs/core/series';
 
-import { selectPlan, conjoin, plainFamily, PLAN_VERSION, bindsText, ranksGroupsApart } from './algebra.js';
+import { selectPlan, conjoin, plainFamily, PLAN_VERSION, bindsText, ranksGroupsApart, inequalityKey } from './algebra.js';
 import { typeOfPath, isNumericType } from './types.js';
 import { schemaNodeAt, canonicalOf, unpinnedStep } from './ddl.js';
 import { columnKindFor } from './scalar-types.js';
@@ -1589,8 +1589,23 @@ function termsOf(value, negated) {
   if (value === null || value === undefined) return 0;
   if (typeof value.p === 'string') {
     switch (value.p) {
-      case 'and': case 'or':
+      case 'or':
         return value.items.reduce((/** @type {number} */ sum, /** @type {any} */ item) => sum + termsOf(item, negated), 0);
+      case 'and': {
+        // two or more `$ne` over one member are one negated membership in
+        // their list ({@link inequalityKey}), one term however long; the
+        // server's refusal of a string it holds in no JSON value is the
+        // literal's own, whatever it counts
+        const keys = value.items.map((/** @type {any} */ item) => inequalityKey(item, () => true));
+        const counted = new Set();
+        return value.items.reduce((/** @type {number} */ sum, /** @type {any} */ item, /** @type {number} */ i) => {
+          const key = keys[i];
+          if (key === null || keys.indexOf(key) === keys.lastIndexOf(key)) return sum + termsOf(item, negated);
+          if (counted.has(key)) return sum;
+          counted.add(key);
+          return sum + 1;
+        }, 0);
+      }
       case 'not': return termsOf(value.item, true);
       case 'binding': return termsOf(value.filter, false);
       // two paths decided one family at a time cost a term for each family
@@ -5044,20 +5059,28 @@ function planEntityQueryCore(document, entities, mapping, operators, zoneStamp) 
 
   // peel literal windows exactly as the collection planner does
   const windows = [];
-  while (root.kind === 'op' && root.name === '$subsequence') {
-    const [inner, start, length] = root.args;
-    if (start?.kind !== 'literal' || !isWindowBound(start.value)
-      || (length !== undefined && (length.kind !== 'literal' || !isWindowBound(length.value))))
-      return residual('$subsequence', PLAN_REASONS.windowBounds);
-    windows.push({ offset: start.value, limit: length === undefined ? null : length.value });
-    root = inner;
-    assertDecidedKind(root);
-  }
+  /** Peel the literal windows at `root`; `false` where a bound is not one. */
+  const peelWindows = () => {
+    while (root.kind === 'op' && root.name === '$subsequence') {
+      const [inner, start, length] = root.args;
+      if (start?.kind !== 'literal' || !isWindowBound(start.value)
+        || (length !== undefined && (length.kind !== 'literal' || !isWindowBound(length.value))))
+        return false;
+      windows.push({ offset: start.value, limit: length === undefined ? null : length.value });
+      root = inner;
+      assertDecidedKind(root);
+    }
+    return true;
+  };
+  if (!peelWindows()) return residual('$subsequence', PLAN_REASONS.windowBounds);
   let aggregate = null;
   if (root.kind === 'op' && ['$count', '$sum', '$avg', '$min', '$max'].includes(root.name) && windows.length === 0) {
     aggregate = root.name.slice(1);
     root = root.args[0];
     assertDecidedKind(root);
+    // a count over a window counts the window's rows: the windowed
+    // statement, counted (`COUNT(*)` over its LIMIT/OFFSET)
+    if (aggregate === 'count' && !peelWindows()) return residual('$subsequence', PLAN_REASONS.windowBounds);
   }
   // `$some`/`$every` over one entity array tests its rows: some row
   // satisfies, or no row fails to (a planned predicate is total, so its
@@ -5077,6 +5100,17 @@ function planEntityQueryCore(document, entities, mapping, operators, zoneStamp) 
   // a `$distinct` over a FLWOR groups the leaves of its return
   const distinct = root.kind === 'op' && root.name === '$distinct' && aggregate === null && quantifier === null;
   if (distinct) {
+    root = root.args[0];
+    assertDecidedKind(root);
+  }
+  // a `$reverse` over a FLWOR is the FLWOR in its order inverted: every
+  // term and every row identity the other way, which reverses the
+  // engine's order exactly, its ties included (`ORDER BY` the row identity
+  // descending where it declares none); a count reads no order
+  let reversed = false;
+  if (root.kind === 'op' && root.name === '$reverse' && root.args[0]?.kind === 'flwor'
+    && root.args[0].groupby === null && !distinct && quantifier === null && (aggregate === null || aggregate === 'count')) {
+    reversed = aggregate === null;
     root = root.args[0];
     assertDecidedKind(root);
   }
@@ -5376,7 +5410,7 @@ function planEntityQueryCore(document, entities, mapping, operators, zoneStamp) 
       }
       terms.push({ binding, ref, hop, desc: spec.desc === true, emptyGreatest: spec.emptyGreatest === true });
     }
-    if (orderPushed) order = terms;
+    if (orderPushed) order = reversed ? terms.map((term) => ({ ...term, desc: !term.desc })) : terms;
   }
 
   const fullyPushed = whereFullyPushed && orderPushed
@@ -5441,6 +5475,7 @@ function planEntityQueryCore(document, entities, mapping, operators, zoneStamp) 
       })),
       window,
       aggregate,
+      ...(reversed ? { reverse: true } : {}),
       ...(quantifier === null ? {} : { quantifier }),
       ...(scalarAggregate === null ? {} : { scalarAggregate }),
       group,

@@ -550,6 +550,9 @@ export function fullDoubleDialect(createDialect) {
       dataVersion: () => 'GET data-version',
       schemaDump: () => 'GET schema-dump',
       objects: () => 'GET objects',
+      // the per-table reads over a set of tables at once
+      namespace: Object.freeze(Object.fromEntries(['tableExists', 'columns', 'indexes', 'indexColumns', 'foreignKeyList',
+        'generated', 'checks', 'declaredSql'].map((kind) => [kind, () => `GET namespace ${kind} @p1`]))),
     },
   });
 }

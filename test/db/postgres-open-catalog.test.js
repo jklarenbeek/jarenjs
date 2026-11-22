@@ -1,8 +1,8 @@
 //@ts-check
 /**
  * @file An open of physical entities on PostgreSQL reads its namespace's
- * catalog once for all of them, and each mapped table's own catalog rows
- * once: its statements grow with the entities, not with entities × tables.
+ * catalog once for all of them, and each catalog of the mapped tables
+ * once for all of them: its statements do not grow with the entities.
  * Runs against the server `JAREN_PG_URL` names, in a schema of its own.
  */
 import { describe, it } from 'node:test';
@@ -47,19 +47,61 @@ describe('a PostgreSQL open reads the catalog once for its physical entities', {
       const during = statements.slice(0, opened);
       return {
         tableLists: during.filter((sql) => sql === dialect.introspect.tables()).length,
-        columnReads: during.filter((sql) => columns.has(sql)).length,
-        indexLists: during.filter((sql) => indexes.has(sql)).length,
+        // a table's own read, or the one read of the catalog for every table
+        columnReads: during.filter((sql) => columns.has(sql) || sql === dialect.introspect.namespace.columns()).length,
+        indexLists: during.filter((sql) => indexes.has(sql) || sql === dialect.introspect.namespace.indexes()).length,
         total: opened,
       };
     }
     finally { await store.close(); }
   });
 
-  it('3 physical entities over 12 tables: one table list, each mapped table read once, as many statements as over 3 tables', async () => {
+  it('3 physical entities over 12 tables: one table list, one read of each catalog, as many statements as over 3 tables', async () => {
     const wide = await reads(3, 12);
     const narrow = await reads(3, 3);
-    assert.deepStrictEqual({ ...wide, total: wide.total - narrow.total }, { tableLists: 1, columnReads: 3, indexLists: 3, total: 0 });
+    assert.deepStrictEqual({ ...wide, total: wide.total - narrow.total }, { tableLists: 1, columnReads: 1, indexLists: 1, total: 0 });
   });
+
+  it('a store-owned table whose index a rival restores after the one read of the indexes is read again on its own, and opens', () =>
+    withPostgres(async ({ pool, schema, driver }) => {
+      const model = { $model: '0.1', collections: { notes: { identity: 'integer',
+        schema: { type: 'object', properties: { s: { type: 'string' } } }, indexes: [{ name: 'by_s', path: '$.s' }] } } };
+      await (await openStore(model, { driver: driver() })).close();
+      const { rows: [{ definition }] } = await pool.query(`SELECT pg_get_indexdef(i.indexrelid) AS definition FROM pg_index i
+        JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = $1 AND NOT i.indisprimary`, [schema]);
+      await pool.query(`DROP INDEX "${schema}".${definition.match(/INDEX (\S+) ON/)[1]}`);
+      let restored = 0;
+      const base = driver();
+      // the index comes back once the open's one read of the indexes has its rows, without it
+      const racing = { ...base, open: async (/** @type {any[]} */ ...args) => {
+        const connection = await base.open(...args);
+        const indexes = connection.dialect.introspect.namespace.indexes();
+        return { ...connection, prepare: async (/** @type {string} */ sql, /** @type {any} */ metadata) => {
+          const statement = await connection.prepare(sql, metadata);
+          if (sql !== indexes || restored > 0) return statement;
+          return { ...statement, all: async (/** @type {any[]} */ params) => {
+            const rows = await statement.all(params);
+            restored++;
+            await pool.query(definition);
+            return rows;
+          } };
+        } };
+      } };
+      const store = await openStore(model, { driver: racing });
+      try {
+        assert.strictEqual(restored, 1);
+        await store.collection('notes').put({ s: 'a' });
+      }
+      finally { await store.close(); }
+      // without the rival the difference is refused, read again on its own
+      await pool.query(`DROP INDEX "${schema}".${definition.match(/INDEX (\S+) ON/)[1]}`);
+      await assert.rejects(openStore(model, { driver: driver() }), (/** @type {any} */ error) => {
+        assert.strictEqual(error.code, 'JD0002');
+        assert.match(error.message, /the model declares/);
+        return true;
+      });
+    }));
 
   it('a mapped table a rival commits after the open read the catalog is verified by a read of its own, and opens', () =>
     withPostgres(async ({ pool, schema, driver }) => {

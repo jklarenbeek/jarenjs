@@ -62,8 +62,10 @@ const chain = (count, plusOne = false) => ({ $or: [
 /** The rows `chain(count, plusOne)` selects. @param {number} count @param {boolean} [plusOne] */
 const expectedFor = (count, plusOne = false) =>
   sorted([...IDS.slice(0, count).map((id) => `i${id.slice(1)}`), ...(plusOne ? ['i1'] : [])]);
-/** A top-level conjunction of `count` inequalities, one leaf each. @param {number} count */
-const inequalities = (count) => ({ $and: Array.from({ length: count }, (_, i) => ({ $ne: ['$it.n', i] })) });
+/** A top-level conjunction of `count` inequalities, one leaf each (`n >= i + 1`, the rows from `count` on:
+ * an ordering comparison, which nothing regroups, where a chain of `$ne` over one member is one list and one term).
+ * @param {number} count */
+const inequalities = (count) => ({ $and: Array.from({ length: count }, (_, i) => ({ $ge: ['$it.n', i + 1] })) });
 const AT_BOUND = chain(BOUND / 2);
 const ABOVE = chain(BOUND / 2, true);
 /** @param {any} explanation */

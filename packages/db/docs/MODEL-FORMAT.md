@@ -1114,12 +1114,20 @@ table departing from its model, then takes the immediate bracket
 judges the catalog under the writer, after a migration in flight commits. On
 SQLite a store that creates nothing (read-only, or `adopt: true`) verifies
 under the read transaction alone. The job tables (`jobs`) and the change log
-(`capture`) are still created or verified in short immediate brackets of
-their own. PostgreSQL's bracket takes no lock (a plain `BEGIN`), and its shape
-work runs there as it did. On both engines the open reads the catalog once
-for all the physical layouts it maps — the namespace's tables, objects and
-catalog rows once, and each mapped table's columns, indexes and foreign keys
-once — so its statements grow with the entities, not with entities × tables.
+(`capture`) are read first holding no write lock — every table, index and
+column the release adds, and the log's state row — and only an open that
+must create or upgrade one of them takes a short immediate bracket of its
+own; where that bracket's lock cannot be taken (a writer holds it past the
+busy timeout, or past PostgreSQL's lock timeout) the open rejects as the
+store's busy failure (`JD2005`, `class: 'busy'`, retryable), not `JD0002`.
+PostgreSQL's bracket takes no lock (a plain `BEGIN`), and its shape
+work runs there as it did. On both engines the open reads each catalog once
+for every table it verifies — the namespace's tables, objects and catalog
+rows, and the tables' existence, columns, indexes and their columns, foreign
+keys, CHECKs and generated expressions, each one plain query over all of
+them (never a cursor) — so its statements do not grow with its tables; a
+table it finds departing from its model is read again on its own before it
+is refused. A migration's target validation reads them the same way.
 
 **Maintenance is a typed operation, never raw SQL.** Four store members
 run what an operator runs on a production database, each under the
@@ -1482,9 +1490,9 @@ counted against `holdTimeoutMs`. The default `'deferred'` is unchanged,
 `unitOfWork` behave the same; the synchronous twin reads the same options
 (`unitOfWork: 'own'` gives its body a tracker of its own, as the
 asynchronous root's does) and refuses thenable callbacks. On SQLite the
-open path already brackets every first-open object — collection, entity
-and join tables, indexes, the change log and its state row, the job
-tables — the same way (§2.4).
+open path already brackets every first-open object it must create —
+collection, entity and join tables, indexes, the change log and its state
+row, the job tables — the same way (§2.4).
 
 **`isolation` is a floor.** `openStore(model, { isolation })` sets the
 default of every `store.transaction` and `store.sync.transaction`, and a

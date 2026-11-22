@@ -1,8 +1,9 @@
 //@ts-check
 /**
  * @file What an open reads and locks while it verifies tables that exist:
- * one read of the catalog serves every physical entity it maps, so its
- * statements grow with the entities and not with entities × tables, and
+ * one read of each catalog serves every table it verifies, so its
+ * statements do not grow with its tables (nor a migration's target
+ * validation with its entities × tables), and
  * the verification holds no write lock — it runs under a read transaction,
  * and only an open that must create a table, or that found a difference to
  * refuse, takes the immediate bracket and verifies again inside it.
@@ -13,7 +14,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 
-import { openStore } from '@jarenjs/db';
+import { openStore, planPhysicalMigration, migrate, readSchema } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 
 import { tempDbPath } from './helpers.js';
@@ -79,8 +80,9 @@ describe('an open reads the catalog once for its physical entities', () => {
       finally { await store.close(); }
       return {
         tableLists: statements.filter((sql) => /FROM sqlite_schema WHERE type IN \('table', 'view'\)/.test(sql)).length,
-        columnReads: statements.filter((sql) => sql.includes('FROM pragma_table_xinfo(')).length,
-        indexLists: statements.filter((sql) => sql.includes('FROM pragma_index_list(')).length,
+        // a table's own read, or the one read of the catalog for every table
+        columnReads: statements.filter((sql) => sql.includes('pragma_table_xinfo(')).length,
+        indexLists: statements.filter((sql) => sql.includes('pragma_index_list(') && !sql.includes('pragma_index_info(')).length,
         total: statements.length,
       };
     }
@@ -88,17 +90,17 @@ describe('an open reads the catalog once for its physical entities', () => {
   };
 
   for (const adopt of [true, false]) {
-    it(`3 physical entities over 12 tables: one table list, each mapped table read once, as many statements as over 3 tables (adopt: ${adopt})`, async () => {
+    it(`3 physical entities over 12 tables: one table list, one read of each catalog, as many statements as over 3 tables (adopt: ${adopt})`, async () => {
       const wide = await reads(3, 12, adopt);
       const narrow = await reads(3, 3, adopt);
-      assert.deepStrictEqual({ ...wide, total: wide.total - narrow.total }, { tableLists: 1, columnReads: 3, indexLists: 3, total: 0 });
+      assert.deepStrictEqual({ ...wide, total: wide.total - narrow.total }, { tableLists: 1, columnReads: 1, indexLists: 1, total: 0 });
     });
   }
 
-  it('each further physical entity adds the reads of its own table only', async () => {
+  it('a further physical entity adds no read of the catalog', async () => {
     const three = await reads(3, 12, false);
     const six = await reads(6, 12, false);
-    assert.deepStrictEqual([six.columnReads - three.columnReads, six.tableLists - three.tableLists], [3, 0]);
+    assert.deepStrictEqual([six.columnReads - three.columnReads, six.tableLists - three.tableLists], [0, 0]);
   });
 
   it('two entities mapping one table read it once', async () => {
@@ -110,7 +112,7 @@ describe('an open reads the catalog once for its physical entities', () => {
       const statements = /** @type {string[]} */ ([]);
       const store = await openStore(model, { driver: noting((sql) => statements.push(sql)), path: dbPath });
       await store.close();
-      assert.strictEqual(statements.filter((sql) => sql.includes('FROM pragma_table_xinfo(')).length, 1);
+      assert.strictEqual(statements.filter((sql) => sql.includes('pragma_table_xinfo(')).length, 1);
     }
     finally { cleanup(); }
   });
@@ -133,6 +135,45 @@ describe('an open reads the catalog once for its physical entities', () => {
       finally { db.close(); }
     }
     finally { cleanup(); }
+  });
+});
+
+describe("a migration's target validation reads the catalog once for its physical entities", () => {
+  /** The statements a reviewed baseline migration of `count` physical entities runs. @param {number} count */
+  const migration = async (count) => {
+    const { dbPath, cleanup } = tempDbPath();
+    try {
+      createTables(dbPath, count);
+      const connection = await nodeDriver().open(dbPath, {});
+      let baseline;
+      try {
+        const objects = readSchema(connection).objects.filter((/** @type {any} */ o) => /^t\d+$/.test(o.owner ?? ''));
+        baseline = planPhysicalMigration(connection, physicalModel(count), physicalModel(count), { id: '0000-baseline', steps: [],
+          dispositions: Object.fromEntries(objects.map((/** @type {any} */ o) => [`${o.type}:${o.name}`, 'preserve'])),
+          physicalTarget: { objects }, scope: { tables: Array.from({ length: count }, (_, i) => `t${i}`) } });
+      }
+      finally { connection.close(); }
+      // every statement any connection of the run prepares or executes
+      let statements = 0;
+      const { prepare, exec } = DatabaseSync.prototype;
+      DatabaseSync.prototype.prepare = function (...args) { statements++; return prepare.apply(this, args); };
+      DatabaseSync.prototype.exec = function (...args) { statements++; return exec.apply(this, args); };
+      try {
+        const applied = await migrate({ driver: nodeDriver(), path: dbPath }, [baseline],
+          { baseline: physicalModel(count), model: physicalModel(count), shadow: false });
+        assert.deepStrictEqual(applied.applied, ['0000-baseline']);
+      }
+      finally { Object.assign(DatabaseSync.prototype, { prepare, exec }); }
+      return statements;
+    }
+    finally { cleanup(); }
+  };
+
+  it('2 and 16 physical entities: the statements grow with the entities, not with entities × tables', async () => {
+    const two = await migration(2);
+    const sixteen = await migration(16);
+    // a read of the whole database per entity, twice, made it about 25 times over this 8x step
+    assert.ok(sixteen < two * 12, `the migration ran ${sixteen} statements over 16 physical entities, ${two} over 2`);
   });
 });
 
@@ -214,8 +255,8 @@ describe('an open holds no write lock while it verifies tables that exist', () =
         console.log(JSON.stringify({ immediate, open }));`;
       let outcome = null;
       const store = await openStore(model, { path: dbPath, driver: noting((sql) => {
-        // halfway through the verification: the third mapped table's columns
-        if (outcome !== null || sql !== `SELECT name, type, hidden, pk, "notnull" AS not_null, dflt_value AS default_value FROM pragma_table_xinfo('t2') ORDER BY cid`) return;
+        // halfway through the verification: the one read of the mapped tables' columns
+        if (outcome !== null || !sql.includes('JOIN pragma_table_xinfo(m.name)')) return;
         const run = spawnSync(process.execPath, ['--no-warnings=ExperimentalWarning', '--input-type=module', '-e', child, dbPath],
           { cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, FORCE_COLOR: '0' } });
         outcome = run.stdout.trim() || run.stderr;

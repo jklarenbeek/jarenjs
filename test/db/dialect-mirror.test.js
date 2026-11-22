@@ -235,8 +235,14 @@ function corpusOf(dialect) {
     walCheckpoint: ['passive'], integrityCheck: [5], optimize: [] };
   for (const [key, value] of Object.entries(dialect.pragma))
     out[`pragma.${key}`] = String(value(.../** @type {any} */ (pragmaArgs)[key]));
-  for (const [key, value] of Object.entries(dialect.introspect))
+  for (const [key, value] of Object.entries(dialect.introspect)) {
+    // the reads over a set of tables at once are a group of statements
+    if (typeof value !== 'function') {
+      for (const [kind, read] of Object.entries(value)) out[`introspect.${key}.${kind}`] = read();
+      continue;
+    }
     out[`introspect.${key}`] = value('rows');
+  }
 
   for (const [label, document] of Object.entries(DOCUMENTS))
     out[`emit[${label}]`] = emitPlan(planQuery(document, shape).plan, dialect, physical).sql;

@@ -289,6 +289,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   boundMutation?: (sql: string, limit: number) => string,
  *   codepoint?: (value: string) => string,
  *   inList?: (valueSql: string, listSql: string, kind: 'text' | 'number' | 'double', branched?: boolean) => string,
+ *   externalsIn?: (valueSql: string, paramsSql: string[]) => string,
  *   intervalIn?: (valueSql: string, tuplesSql: string, tableSql: string, columnSql: string,
  *     within: (memberSql: string, edgeAt: (index: number) => string) => string, json?: boolean, external?: boolean) => string,
  *   physicalTypeMatches?: (codec: string, type: string) => boolean,
@@ -1181,6 +1182,12 @@ export function createDialect(spec) {
      * every number by its decimal digits) at a time — the one IN-list
      * spelling every membership test and `cellIn` share. */
     inList: spec.inList,
+    /** A text value's membership in the strings among several externals,
+     * each bound as its JSON text (`externalEncoding: 'json'`), compared
+     * as `inList` compares text: a conjunction's `$ne` externals over one
+     * string column spelled as one negated membership. `undefined` where
+     * the externals do not bind as JSON. */
+    externalsIn: spec.externalsIn,
     /**
      * Membership of a table's column in the intervals of decimals that
      * round to a list's doubles, bound as one JSON array of edge tuples

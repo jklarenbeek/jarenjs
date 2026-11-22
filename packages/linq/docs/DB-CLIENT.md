@@ -126,6 +126,14 @@ the savepoint's set — no `unitOfWork`, `retry`, `holdTimeoutMs` or
 store's README runs the retry-and-hold and the writer-lock examples end
 to end.
 
+**A validated open refuses at open.** With a validator (the default
+one, a `validator` given, or an explicit `compileSchema`), `open()`
+compiles every entity's and every collection's schema and builds each
+entity's store handle before it answers, so a schema the compiler
+refuses is refused by `open()` itself, not at the first use of its
+handle. The open pays for those compiles, which each handle would
+otherwise pay at its first use; `validator: null` compiles nothing.
+
 ### 2.2 The exported names
 
 The whole export surface: a door, a type-level reader for what it hands
@@ -1015,8 +1023,12 @@ JSON after it, which is what it exports):
 - **Join the entity sets first, filter after.** `A.join(fromAsync(P), …)`
   followed by `where` is one `JOIN` statement (`mode: 'native'`); the
   inner side is a sequence over the set, and the handle itself there is
-  `JL0005` (`join takes another async sequence over a provider (with no
-  mapAsync) as its inner side`). A `where` on either side *before* the
+  read as that sequence, so `A.join(P, …)` (and `A.groupJoin(P, …)`) is
+  the same statement. Upgrade: an earlier release refused the handle as the
+  inner side (`JL0005`, `join takes another async sequence over a provider
+  (with no mapAsync) as its inner side`), which a join over `fromAsync(P)`
+  avoided and still does; an inner side that is neither a sequence nor a
+  provider is still that `JL0005`. A `where` on either side *before* the
   join makes that side a chain rather than an entity set, and the join
   runs in the engine over both reads (`mode: 'set'`, `streaming:
   'buffered'`), with the reason `bindings must each range over one
@@ -1078,6 +1090,7 @@ await permissions.insert({ id: 'p2', position: 'clerk', permission: 'orders.appr
 
 const pair = (a, p) => ({ employee: a.employee, permission: p.permission, level: a.level, minLevel: p.minLevel });
 const joined = () => A.join(fromAsync(P), (a) => a.position, (p) => p.position, pair);
+const viaHandle = () => A.join(P, (a) => a.position, (p) => p.position, pair);
 // what explain() says, and what the chain answers
 const plan = async (chain) => { const { mode, streaming, sql, reasons } = await A.explain(chain);
   return { mode, streaming, join: sql !== null && sql.includes(' JOIN '), reasons: reasons.map((r) => r.reason) }; };
@@ -1086,6 +1099,7 @@ const strict = async (doc) => { try { return await A.execute(doc, { strict: true
 
 // 1. the entity sets joined first, filtered after; then each side filtered before the join
 const joinFirst = joined().where((r) => r.employee.eq('ann')).where((r) => r.permission.eq('orders.approve'));
+const handleFirst = viaHandle().where((r) => r.employee.eq('ann')).where((r) => r.permission.eq('orders.approve'));
 const innerFirst = A.join(P.where((p) => p.permission.eq('orders.approve')), (a) => a.position, (p) => p.position, pair)
   .where((r) => r.employee.eq('ann'));
 const outerFirst = A.where((a) => a.employee.eq('ann')).join(fromAsync(P), (a) => a.position, (p) => p.position, pair)
@@ -1105,7 +1119,7 @@ const fed = federate({ sources: { a: assignments, p: permissions }, maxRows: 100
 
 export const joins = {
   joinFirst: { plan: await plan(joinFirst), rows: await joinFirst.toArray() },
-  handleAsInner: refusal(() => A.join(P, (a) => a.position, (p) => p.position, pair)),
+  handleAsInner: { plan: await plan(handleFirst), rows: await handleFirst.toArray() },
   innerFirst: { plan: await plan(innerFirst), rows: await innerFirst.toArray() },
   outerFirst: { plan: await plan(outerFirst), rows: await outerFirst.toArray() },
   eitherSide: (await plan(eitherSide)).mode,
@@ -1123,7 +1137,7 @@ await client.close();
 ```json
 {
   "joinFirst": {"plan": {"mode": "native", "streaming": "row", "join": true, "reasons": []}, "rows": [{"employee": "ann", "permission": "orders.approve", "level": 2, "minLevel": 2}]},
-  "handleAsInner": {"code": "JL0005", "reason": "join takes another async sequence over a provider (with no mapAsync) as its inner side"},
+  "handleAsInner": {"plan": {"mode": "native", "streaming": "row", "join": true, "reasons": []}, "rows": [{"employee": "ann", "permission": "orders.approve", "level": 2, "minLevel": 2}]},
   "innerFirst": {"plan": {"mode": "set", "streaming": "buffered", "join": false, "reasons": ["bindings must each range over one declared entity array ($.Entity[*])"]}, "rows": [{"employee": "ann", "permission": "orders.approve", "level": 2, "minLevel": 2}]},
   "outerFirst": {"plan": {"mode": "set", "streaming": "buffered", "join": false, "reasons": ["bindings must each range over one declared entity array ($.Entity[*])"]}, "rows": [{"employee": "ann", "permission": "orders.approve", "level": 2, "minLevel": 2}]},
   "eitherSide": "native",

@@ -63,6 +63,7 @@ import { createJobEngine, JOB_DEFAULTS, checkStopOptions } from './jobs.js';
 import { isJobSchedules } from './job-schedules.js';
 import { createOwnerLease, OWNER_LEASE_DEFAULT_MS, OWNER_LEASE_MIN_MS } from './owner.js';
 import { introspectModel, namespaceSchema } from './introspect.js';
+import { catalogCovers, catalogRows, withNamespaceCatalog } from './namespace-catalog.js';
 import { collectEntityRoots, entityRoot, intervalBounds, keyHoldingColumns } from './plan.js';
 import {
   DERIVE_KINDS, PHYSICAL_KINDS, PRECISION_MIN, PRECISION_MAX, DIMS_MIN, DIMS_MAX,
@@ -1060,40 +1061,69 @@ function runCreate(connection, plan) {
  * @returns {any} value-or-promise
  */
 function ensureShape(connection, collections, plans, createsNothing) {
-  const dialect = connection.dialect;
   const names = [...collections.keys()];
   if (names.length === 0) return null;
   return verifyOrCreate(connection, createsNothing, (creates, connection) => {
-    // one read of the namespace's rule programs serves every table verified here
+    // one read of the namespace's rule programs serves every table verified here,
+    // and one read of each catalog every table
     const programs = namespacePrograms(connection);
+    const reading = withNamespaceCatalog(connection, names.flatMap((name) => [name, plans.get(name).table]));
     const step = (i) => {
       if (i >= names.length) return null;
       const name = names[i];
       const collection = collections.get(name);
       const plan = plans.get(name);
-      return chain(connection.prepare(dialect.introspect.tableExists()), (statement) =>
-        chain(statement.get([name]), (row) => {
-          if (row === undefined) {
-            if (createsNothing !== null) {
-              throw new DbCompileError('JD0002',
-                `collection '${name}': the table does not exist and ${createsNothing} creates nothing`,
-                collection.docPath);
-            }
-            if (!creates) throw MUST_CREATE;
-            // the server numbers a key name another relation holds, so the
-            // name is read back from the table just created
-            return chain(runCreate(connection, plan), () => chain(statement.get([name]), (created) => {
-              recordKeyConstraint(plan, created);
-              return step(i + 1);
-            }));
+      return chain(catalogRows(reading, 'tableExists', name), ([row]) => {
+        if (row === undefined) {
+          if (createsNothing !== null) {
+            throw new DbCompileError('JD0002',
+              `collection '${name}': the table does not exist and ${createsNothing} creates nothing`,
+              collection.docPath);
           }
-          recordKeyConstraint(plan, row);
-          return chain(verifyShape(connection, plan, name, collection.docPath, 'collection', undefined, programs),
-            () => step(i + 1));
-        }));
+          if (!creates) throw MUST_CREATE;
+          // the server numbers a key name another relation holds, so the
+          // name is read back from the table just created
+          return chain(runCreate(connection, plan), () => chain(catalogRows(connection, 'tableExists', name), ([created]) => {
+            recordKeyConstraint(plan, created);
+            return step(i + 1);
+          }));
+        }
+        recordKeyConstraint(plan, row);
+        return chain(againOnDifference(reading, connection, name, (on) =>
+          verifyShape(on, plan, name, collection.docPath, 'collection', undefined, programs)), () => step(i + 1));
+      });
     };
     return step(0);
   });
+}
+
+/**
+ * Run a table's verification against the pass's shared catalog read, and,
+ * where it finds a difference to refuse in rows that read gave it, once more
+ * against reads of the table's own, so a refusal judges the catalog as it
+ * stands and says what it always said.
+ * @param {any} reading - the pass's connection view ({@link withNamespaceCatalog})
+ * @param {any} connection - the same connection, reading table by table
+ * @param {string} table
+ * @param {(connection: any) => any} verify - value-or-promise
+ * @returns {any} value-or-promise
+ */
+function againOnDifference(reading, connection, table, verify) {
+  const again = (/** @type {any} */ error) => {
+    if (!(error instanceof DbCompileError)) throw error;
+    return chain(catalogCovers(reading, table), (covered) => {
+      if (!covered) throw error;
+      return verify(connection);
+    });
+  };
+  let out;
+  try {
+    out = verify(reading);
+  }
+  catch (error) {
+    return again(error);
+  }
+  return isThenable(out) ? out.then(undefined, again) : out;
 }
 
 /**
@@ -1125,7 +1155,9 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
     // one read of the namespace's rule programs serves every table verified here,
     // and one read of its catalog every physical entity
     const programs = namespacePrograms(connection);
-    const catalog = namespaceSchema(connection);
+    const reading = withNamespaceCatalog(connection, names.flatMap((name) =>
+      [name, entityPlans.get(name).table, entityPlans.get(name).physical?.table].filter((table) => typeof table === 'string')));
+    const catalog = namespaceSchema(reading);
     /** A physical layout verified against the shared read, and one that departs from the plan
      * there against a read of its own before it is refused, so a refusal judges the catalog as
      * it stands (a rival may have committed the table, or a migration of it, since).
@@ -1154,8 +1186,7 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
         plan.keyConstraint = physicalKeyConstraint(schema, plan.physical.table);
         return step(i + 1);
       });
-      return chain(connection.prepare(dialect.introspect.tableExists()), (statement) =>
-        chain(statement.get([name]), (row) => {
+      return chain(catalogRows(reading, 'tableExists', name), ([row]) => {
           if (row === undefined) {
             if (createsNothing !== null) {
               throw new DbCompileError('JD0002',
@@ -1164,7 +1195,7 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
             }
             if (!creates) throw MUST_CREATE;
             // the text encoding its rule programs compare by is checked when the store opens
-            return chain(runCreate(connection, plan), () => chain(statement.get([name]), (made) => {
+            return chain(runCreate(connection, plan), () => chain(catalogRows(connection, 'tableExists', name), ([made]) => {
               created.push(name);
               // a table this open created holds each column as the plan declares it
               plan.heldTypes = new Map(plan.expected.columns.map((/** @type {any} */ column) =>
@@ -1176,10 +1207,10 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
             }));
           }
           recordKeyConstraint(plan, row);
-          return chain(verifyShape(connection, plan, name, docPath, 'entity', undefined, programs), () =>
-            chain(readKeyChecks(connection, plan), () =>
-            chain(connection.prepare(dialect.introspect.foreignKeyList(name)), (fkStatement) =>
-              chain(fkStatement.all([]), (fkRows) => {
+          return chain(againOnDifference(reading, connection, name, (on) =>
+            chain(verifyShape(on, plan, name, docPath, 'entity', undefined, programs), () =>
+            chain(readKeyChecks(on, plan), () =>
+            chain(catalogRows(on, 'foreignKeyList', name), (fkRows) => {
                 // the whole TUPLE, not the count: a key that changed
                 // `ON DELETE SET NULL` to `ON DELETE CASCADE`, or that now
                 // points at a different table or column, keeps the count
@@ -1210,9 +1241,9 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
                     + `the model declares [${wanted.join(', ')}]`,
                     docPath);
                 }
-                return step(i + 1);
-              }))));
-        }));
+                return null;
+              })))), () => step(i + 1));
+        });
     };
     return step(0);
   });
@@ -1232,11 +1263,11 @@ function readKeyChecks(connection, plan) {
   const wanted = (plan.keyChecks ?? []).filter((/** @type {any} */ check) => plan.heldTypes?.get(check.column) === numeric);
   plan.keyChecked = new Set();
   if (wanted.length === 0) return null;
-  return chain(connection.prepare(dialect.introspect.checks(plan.table)), (statement) => chain(statement.all([]), (rows) => {
+  return chain(catalogRows(connection, 'checks', plan.table), (rows) => {
     const guards = guardsByColumn(dialect.readChecks(rows));
     for (const { column } of wanted) if (guards.get(column)?.has('shortest-digits')) plan.keyChecked.add(column);
     return null;
-  }));
+  });
 }
 
 /**
@@ -3671,9 +3702,8 @@ export function openStore(model, options) {
           // `doc`, so the planned order misread every later value. Align
           // each entity shape to the table as it stands (a shape the
           // table does not match by name keeps the planned order)
-          const alignShapes = (names, i = 0) => (i >= names.length ? null
-            : chain(connection.prepare(dialect.introspect.columns(names[i])), (statement) =>
-              chain(statement.all([]), (rows) => {
+          const alignShapes = (names, reading = withNamespaceCatalog(connection, names), i = 0) => (i >= names.length ? null
+            : chain(catalogRows(reading, 'columns', names[i]), (rows) => {
                 const shape = captureShapes.get(names[i]);
                 const byName = new Map(shape.columns.map((column) => [column.name, column]));
                 const physical = rows.filter((row) => Number(row.hidden) === 0)
@@ -3685,8 +3715,8 @@ export function openStore(model, options) {
                   shape.keyIndexes = keyNames.map((key) => physical.indexOf(key));
                   shape.docIndex = physical.indexOf('doc');
                 }
-                return alignShapes(names, i + 1);
-              })));
+                return alignShapes(names, reading, i + 1);
+              }));
           const aligned = captureMode === 'session'
             ? alignShapes([...captureShapes.keys()]
               .filter((table) => captureShapes.get(table).kind === 'entity'))

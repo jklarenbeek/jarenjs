@@ -384,8 +384,9 @@ export class AsyncSequence {
    * surface emits (a store answers a two-root join in one statement);
    * the inner rows keep their relation table under `it2`. C#'s comparer
    * overload is `JL0005`. @param {...undefined} unread */
-  join(inner, outerKey, innerKey, result, ...unread) {
+  join(side, outerKey, innerKey, result, ...unread) {
     requireNoTrailingArgument(unread, 'join');
+    const inner = joinSide(side);
     const params = this.#requireJoinable(inner, 'join');
     const outer = this.#capture(outerKey);
     const key = this.#capture(innerKey, (sink) => [inner.#rowRoot('it2', sink)]);
@@ -404,8 +405,9 @@ export class AsyncSequence {
 
   /** Group-join, pushed whole: the `$let`-bound group of the synchronous
    * surface, under the same rule as `join`. @param {...undefined} unread */
-  groupJoin(inner, outerKey, innerKey, result, ...unread) {
+  groupJoin(side, outerKey, innerKey, result, ...unread) {
     requireNoTrailingArgument(unread, 'groupJoin');
+    const inner = joinSide(side);
     const params = this.#requireJoinable(inner, 'groupJoin');
     const innerDoc = inner.toDocument();
     const outer = this.#capture(outerKey);
@@ -1034,14 +1036,33 @@ function validateParams(bindings) {
  */
 export function fromAsync(source, options, ...unread) {
   requireNoTrailingArgument(unread, 'fromAsync');
-  if (isProviderSource(source)) {
-    return new AsyncSequence(
-      { kind: 'provider', source, root: providerRoot(source) },
-      [], new Map(), readRuntime(readOptions(options, SOURCE_OPTION_KEYS, 'fromAsync()'), source), providerRelations(source));
-  }
+  if (isProviderSource(source)) return providerSequence(source, options);
   const iterate = adaptAsyncSource(source);
   return new AsyncSequence({ kind: 'source', iterate, rows: source }, [], new Map(),
     readRuntime(readOptions(options, SOURCE_OPTION_KEYS, 'fromAsync()'), source));
+}
+
+/**
+ * The inner side a join reads: a provider — an entity handle, a store's
+ * entity set — as the chain it starts (`fromAsync(handle)`, which its own
+ * `where` begins too), so `A.join(P, …)` is `A.join(fromAsync(P), …)`; an
+ * async sequence, or anything else (which the join then refuses), as given.
+ * @param {any} side
+ * @returns {any}
+ */
+function joinSide(side) {
+  return side instanceof AsyncSequence || !isProviderSource(side) ? side : providerSequence(side, undefined);
+}
+
+/**
+ * {@link fromAsync} over a provider: the sequence whose origin it is.
+ * @param {any} source @param {any} options - as `fromAsync` takes them
+ * @returns {AsyncSequence}
+ */
+function providerSequence(source, options) {
+  return new AsyncSequence(
+    { kind: 'provider', source, root: providerRoot(source) },
+    [], new Map(), readRuntime(readOptions(options, SOURCE_OPTION_KEYS, 'fromAsync()'), source), providerRelations(source));
 }
 
 /**

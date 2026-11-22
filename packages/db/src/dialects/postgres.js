@@ -43,7 +43,7 @@
 
 import { createDialect, stringLiteral, MEMBER_WHEN } from '../dialect.js';
 import { postgresPhysicalRead, postgresPhysicalCompare, postgresPhysicalValueType, postgresPhysicalDifferent, postgresPhysicalTypeMatches, qualifyPostgresPhysicalColumn, postgresHoldsNaN } from './postgres-physical.js';
-import { postgresCatalog } from './postgres-catalog.js';
+import { postgresCatalog, postgresNamespaceReads } from './postgres-catalog.js';
 import { POSTGRES, postgresInvariantTriggers } from './postgres-invariants.js';
 import { postgresRelational } from './postgres-relational.js';
 import { postgresMigration } from './postgres-migration.js';
@@ -977,6 +977,11 @@ export function postgresDialect(options = undefined) {
     // (an external list's branch, beside its other kind's in an `OR`, is the
     // value `= ANY` of that list, an index condition: the `OR` keeps the
     // sublink from becoming a join)
+    // the strings among several externals' JSON texts, byte-ordered as
+    // `inList`'s text: one array constructor, read once, whose length is
+    // no function's argument limit
+    externalsIn: (valueSql, paramsSql) => `${valueSql} IN (SELECT (i.e #>> '{}') COLLATE "C" FROM `
+      + `unnest(ARRAY[${paramsSql.map((sql) => `((${sql})::jsonb)`).join(', ')}]::jsonb[]) AS i(e) WHERE jsonb_typeof(i.e) = 'string')`,
     inList: (valueSql, listSql, kind, branched = false) => {
       const list = `((${listSql})::jsonb)`;
       const items = `(SELECT jsonb_array_elements(${list}) WHERE jsonb_typeof(${list}) = 'array' UNION ALL `
@@ -1124,6 +1129,8 @@ export function postgresDialect(options = undefined) {
     },
     introspect: {
       catalog: () => postgresCatalog(inNamespace),
+      // the per-table reads below over every table an open verifies at once
+      namespace: postgresNamespaceReads(inNamespace),
       version: () => "SELECT current_setting('server_version') AS version",
       // the table probe binds its name, so a hostile collection name is
       // a value and never syntax. It answers the name the catalog gives

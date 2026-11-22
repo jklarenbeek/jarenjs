@@ -4,8 +4,8 @@
  * statement spells them as the member's presence and ONE negated membership
  * list, bound as one value, instead of one comparison per literal — so a
  * statement at the term bound, or a profile's mandatory predicate past it
- * (which rides the residual's fetch whole), hands the server's JIT one leaf
- * rather than hundreds. The term count, the plan's mode and every answer are
+ * hands the server's JIT one leaf rather than hundreds, and the chain counts
+ * one term, so a chain of any length stays native. Every answer is
  * unchanged: the oracle is the engine (`pushdown: false`) over members that
  * are absent, a JSON null, of another type, equal to a literal or past 2^53,
  * under a `$not` and beside other conjuncts, on a collection, an entity's
@@ -139,9 +139,16 @@ describe('PostgreSQL: a conjunction of $ne literals over one member is one negat
     const entity = await store.explain({ $for: { it: '$.Item[*]' }, $where: chain([1, 2, 'q'].concat(Array.from({ length: 125 }, (_, i) => 100 + i))), $return: '$it.id' });
     assert.equal(entity.mode, 'native');
     assert.equal(inequalities(entity.sql), 0);
-    // past the bound the document is still the engine's: the count is the plan's, not the spelling's
-    const above = await store.collection('items').explain({ $for: { it: '$[*]' }, $where: chain(Array.from({ length: 129 }, (_, i) => i)), $return: '$it.id' });
-    assert.equal(reasonId(above.residual.reasons[0].reason), 'predicate.termBound');
+    // the chain is one list and one term, past the bound's count of leaves too
+    for (const length of [129, 1000]) {
+      const above = await store.collection('items').explain({ $for: { it: '$[*]' }, $where: chain(Array.from({ length }, (_, i) => i)), $return: '$it.id' });
+      assert.equal(above.mode, 'native', `${length} literals`);
+      assert.equal(inequalities(above.sql), 0);
+    }
+    // beside 128 other leaves it is the 129th term
+    const beside = { $and: [chain([1, 2]), ...Array.from({ length: 128 }, (_, i) => ({ $ge: ['$it.n', -i] }))] };
+    const past = await store.collection('items').explain({ $for: { it: '$[*]' }, $where: beside, $return: '$it.id' });
+    assert.equal(reasonId(past.residual.reasons[0].reason), 'predicate.termBound');
   });
 
   it('each member kind regroups, but a number column, a lone `$ne` and a literal JSON cannot spell keep their comparisons', async () => {
@@ -167,9 +174,11 @@ describe('PostgreSQL: a conjunction of $ne literals over one member is one negat
     assert.deepEqual(sorted(await store.execute(overAt)), ['b', 'c']);
   });
 
-  it("a profile's 800-literal mandatory predicate reaches the residual's fetch as one list, with the same answer", async () => {
+  it("a profile's 800-literal mandatory predicate reaches the statement as one list and one term, with the same answer", async () => {
     const literals = Array.from({ length: 800 }, (_, i) => i * 2);
     const profile = { maxRows: 5000, predicates: { items: chain(literals), Item: chain(literals) } };
+    assert.equal((await store.collection('items').explain({ $for: { it: '$[*]' }, $return: '$it.id' }, { profile })).mode, 'native');
+    assert.equal((await store.explain({ $for: { it: '$.Item[*]' }, $return: '$it.id' }, { profile })).mode, 'native');
     sent.length = 0;
     const kept = sorted(await store.collection('items').execute({ $for: { it: '$[*]' }, $return: '$it.id' }, { profile }));
     assert.deepEqual(kept, Array.from({ length: 300 }, (_, i) => `i${i}`).filter((_, i) => i % 2 === 1).sort());

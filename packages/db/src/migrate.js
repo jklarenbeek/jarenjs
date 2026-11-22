@@ -57,7 +57,8 @@ import { comparableDeclaredSql } from './schema-sql.js';
 import { applyTableMigration } from './table-migration.js';
 import { withForeignKeySettings } from './foreign-key-scope.js';
 import { withMigrationConnection, checkMigrationTarget, physicalTargetOf, comparePhysicalTarget, verifyShadowOwnership, physicalObjectKey, migrationOwnerOf, lockMigration, migrationWriterSettings, preservationSchemaOf, verifyPreservation, checkPhysicalPreservation } from './migration-target.js';
-import { readSchema } from './introspect.js';
+import { readSchema, namespaceSchema } from './introspect.js';
+import { withNamespaceCatalog } from './namespace-catalog.js';
 import { nonCodePointEncoding, verifyPhysical, verifyRulePrograms, heldPrograms, earlierSpellings, sameTriggerText, namespacePrograms } from './physical.js';
 import { CURRENT_SPELLING, PROGRAM_SPELLINGS } from './dialects/program-spellings.js';
 import { walkPhysicalRows, transformPhysicalRows } from './physical-transform.js';
@@ -4264,6 +4265,12 @@ function validateTargetState(connection, model, options) {
   const collections = [...normalizeModel(model, options.expressions).values()];
   const entities = [...normalizeEntities(model).values()];
   const dialect = connection.dialect;
+  // one mapping of the target, and one read of the namespace's catalog for
+  // every physical entity, as the open verifies them: a read of the whole
+  // database per entity made the statements grow with entities × tables
+  const mapping = explainMapping(model);
+  const catalog = namespaceSchema(withNamespaceCatalog(connection, entities
+    .filter((entity) => entity.physical !== null).map((entity) => mapping.entities[entity.name].table)));
   // entity tables carry no 'key' column; the batched walk goes by row
   // identity and validates every stored document against the target
   const verifyEntity = (i) => {
@@ -4276,9 +4283,9 @@ function validateTargetState(connection, model, options) {
     // the WHOLE document — mapped columns folded in — is what the target
     // schema judges; the rest-document alone failed every entity whose
     // required members are columns, so a pure widening could not land
-    const entityMapping = explainMapping(model).entities[entity.name];
-    return chain(entity.physical === null ? null : chain(readSchema(connection), (schema) =>
-      verifyPhysical(connection, planEntity(entity.name, entityMapping, explainMapping(model), dialect).physical, schema)), () =>
+    const entityMapping = mapping.entities[entity.name];
+    return chain(entity.physical === null ? null : chain(catalog(entityMapping.table), (schema) =>
+      verifyPhysical(connection, planEntity(entity.name, entityMapping, mapping, dialect).physical, schema)), () =>
       chain(walkRows(connection, entityMapping.table, options.batchSize, (rows) => {
       for (const row of rows) {
         const outcome = validate === null ? true : validate(mergeEntityRow(entityMapping, row, 'doc'));

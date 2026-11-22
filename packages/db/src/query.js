@@ -151,6 +151,27 @@ function numberOfJson(value) {
   return spelled === 'Infinity' ? Infinity : spelled === '-Infinity' ? -Infinity : value;
 }
 
+/** A decimal a `numeric` reads exactly: digits, an optional fraction and exponent (PostgreSQL writes none), never NaN or an infinity. */
+const DECIMAL_DIGITS = /^-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?$/;
+
+/**
+ * The digits a row stored for a key the open read without its CHECK
+ * (`keyDigits: true`: a `numeric` an earlier release created, where another
+ * writer may have spelled a key `5.99999999999999999999`), where they are not
+ * the digits of the number the row decodes to: a continuation carries them,
+ * so a page resumes past that row exactly, never past every key that rounds
+ * to its double. `undefined` where the number spells them (a store-written
+ * key, the common case), so its continuation is the number it always was.
+ * @param {unknown} text - the column's text, as the statement projected it
+ * @param {unknown} value - the decoded key
+ * @returns {string | undefined}
+ */
+function keyDigitsOf(text, value) {
+  if (typeof text !== 'string' || !DECIMAL_DIGITS.test(text)) return undefined;
+  const plain = text.includes('.') ? text.replace(/\.?0+$/, '') : text;
+  return typeof value === 'number' && String(value) === plain ? undefined : text;
+}
+
 /**
  * What of a load's `after` is part of its plan's identity. A structural
  * continuation resumes by values, which every call binds; the SQL text
@@ -4575,9 +4596,11 @@ export function createLoadEngine(context, entityName) {
    * @param {ReturnType<typeof orderIdentity>} identity
    * @param {number} declared - how many terms the caller declared
    * @param {readonly string[]} keyColumns
+   * @param {ReadonlySet<string>} digitKeys - the key columns a continuation may resume by the digits their
+   *   row stored ({@link keyDigitsOf}): a decimal's text, bound as it stands
    * @returns {any[]} one value per identity term
    */
-  const continuationValues = (after, identity, declared, keyColumns) => {
+  const continuationValues = (after, identity, declared, keyColumns, digitKeys) => {
     const mismatch = (reason) => new DbCompileError('JD0035',
       `the continuation does not belong to this ordering: ${reason}`,
       entities.get(entityName)?.docPath);
@@ -4616,6 +4639,10 @@ export function createLoadEngine(context, entityName) {
     };
     return identity.map((term, i) => {
       const value = numberOfJson(i < declared ? (after.keys[i] ?? null) : keyOf(term.column));
+      if (typeof value === 'string' && digitKeys.has(term.column)) {
+        if (!DECIMAL_DIGITS.test(value)) throw mismatch(`'${term.column}' resumes from its stored text`);
+        return value;
+      }
       if (term.stored !== true) return encodeColumn(term.column, value);
       if (typeof value !== 'string') throw mismatch(`'${term.column}' resumes from its stored text`);
       return value;
@@ -4714,6 +4741,13 @@ export function createLoadEngine(context, entityName) {
     const columnOfProperty = (/** @type {string} */ property) => mappedColumns.find((c) => c.name === property);
     const columnOfPhysical = (/** @type {string} */ physical) => mappedColumns.find((c) => (c.physical ?? c.name) === physical);
     const propertyOfPhysical = (/** @type {string} */ physical) => columnOfPhysical(physical)?.name ?? physical;
+    // the key columns a continuation may resume by a row's stored digits:
+    // every `numeric` key (`keyDigits`, read by the open), so a
+    // continuation a page emitted before the table's upgrade still
+    // resumes after it; the digits are projected where the open read the
+    // key without its CHECK (`keyDigits: true`), which alone holds them
+    const digitKeys = new Set(keyColumns.filter((key) => columnOfProperty(key)?.keyDigits !== undefined));
+    const projectedDigits = keyColumns.filter((key) => columnOfProperty(key)?.keyDigits === true);
     /**
      * Whether a property resumes a keyset from the text its table stores,
      * not from its decoded value (physicalOrderable answers per codec and
@@ -4811,7 +4845,7 @@ export function createLoadEngine(context, entityName) {
             entities.get(entityName)?.docPath);
         }
         pagination = 'keyset';
-        afterValues = (given) => continuationValues(given, identity, order.length, keyColumns);
+        afterValues = (given) => continuationValues(given, identity, order.length, keyColumns, digitKeys);
         const values = afterValues(after);
         const column = (/** @type {any} */ term) => termSql(term.column);
         if (identity.length > 1 && identity.every((term, i) => notNull(term) && values[i] !== null
@@ -4890,13 +4924,33 @@ export function createLoadEngine(context, entityName) {
       pagination = 'offset';
     }
 
+    // the digits of each key a continuation resumes by, as the row stored them
+    const digitsFields = identity === null ? [] : projectedDigits.map((key, i) => ({ property: key, field: `__key_digits${i}` }));
+    const digitsProjection = digitsFields.map(({ property, field }) => `, CAST(${termSql(property)} AS TEXT) AS ${q(field)}`).join('');
     let sql = `SELECT ${tree.entity.physical != null ? physicalSelection(tree.entityMapping, dialect, `${rendered.aliasSql}.`)
       : `${rendered.aliasSql}.*, ${tree.entityMapping.document === false ? dialect.stringLiteral('{}') : dialect.jsonText(rendered.docSql)} AS ${q('__doc')}`}`
       // a text identity's raw bytes, which every row read proves its key against
       + (textKeys === null ? '' : `, ${textKeys.projection}`)
+      + digitsProjection
       + includeSql
       + ` FROM ${dialect.tableName(tree.entityMapping.table, tree.entityMapping.schema)} AS ${rendered.aliasSql}`;
     if (conditions.length > 0) sql += ` WHERE ${conditions.join(' AND ')}`;
+    /**
+     * A load's order term, a key the open read without its CHECK read as
+     * the double the engine holds, so the keys another writer spelled
+     * `6.00000000000000000001` and `6` tie and the row identity orders
+     * them, as the engine does. A keyset orders such a key bare: rounding
+     * to a double never reverses two decimals, so ordered by its digits it
+     * is ordered by its double and then by its digits, the unique
+     * tie-break its continuation carries ({@link keyDigitsOf}), and its
+     * index still serves it. A scalar `after` positions no row among the
+     * keys that round to its number in either order, and keeps the
+     * statement it always ran.
+     * @param {string} property
+     */
+    const loadOrderSql = (property) => (after === undefined && projectedDigits.includes(property)
+      ? entityOrderRead(dialect, { ...columnOfProperty(property), holdsKey: true }, termSql(property))
+      : termSql(property));
     const orderSql = identity !== null
       ? identity.map((term) => `${termSql(term.column)} `
         + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(term.nullsFirst, notNull(term))}`)
@@ -4905,7 +4959,7 @@ export function createLoadEngine(context, entityName) {
         // and a query's do: a string by code point, a number as the double
         // the engine holds, a JSON null and a missing member as one empty key
         const value = term.ref.flavor === 'entity-column'
-          ? termSql(propertyOfPhysical(term.ref.column))
+          ? loadOrderSql(propertyOfPhysical(term.ref.column))
           : entityOrderRead(dialect, term.ref, rendered.docSql);
         const nullsFirst = term.emptyGreatest === term.desc;
         return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst,
@@ -4951,6 +5005,7 @@ export function createLoadEngine(context, entityName) {
       keyColumns,
       textKeys,
       stored: storedTerms.length === 0 ? null : storedTerms,
+      digits: digitsFields.length === 0 ? null : digitsFields,
       // a page over this ordering is a snapshot only when every order key
       // is immutable, and the primary key is the one column the engine
       // itself guarantees never moves (`update()` refuses to rewrite it)
@@ -5070,6 +5125,13 @@ export function createLoadEngine(context, entityName) {
         const item = each(checkRoot(entry, parseGraphRow(entry.tree, provenRow(entry, row), '__doc', dialect.integerDigits), ++pulled));
         if (entry.stored !== null) {
           storedText.set(item, new Map(entry.stored.map(({ property, physical }) => [property, row[physical]])));
+        }
+        if (entry.digits !== null) {
+          const held = entry.digits.flatMap(({ property, field }) => {
+            const digits = keyDigitsOf(row[field], item[property]);
+            return digits === undefined ? [] : [[property, digits]];
+          });
+          if (held.length > 0) storedText.set(item, new Map([...(storedText.get(item) ?? []), ...held]));
         }
         return [item];
       } });

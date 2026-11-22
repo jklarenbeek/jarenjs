@@ -245,7 +245,7 @@ export function settleStatementUse(call, done, asyncDone = done) {
  * @param {any} connection
  * @param {string} sql
  * @param {(statement: any) => T | Promise<T>} use
- * @param {{ readOnly?: boolean }} [options]
+ * @param {{ readOnly?: boolean, buffered?: boolean }} [options]
  * @returns {T | Promise<T>}
  */
 export function useStatementOnce(connection, sql, use, options = undefined) {

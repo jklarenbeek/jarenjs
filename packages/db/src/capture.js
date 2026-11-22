@@ -40,6 +40,7 @@ import { DbCompileError, DbRuntimeError, wrapDriverError, storedIntegerNumber } 
 import { chain, attempt, useStatementOnce } from './driver.js';
 import { createCursor, drainPage, PAGE_LIMIT_DEFAULT } from './cursor.js';
 import { readOptionsOrNull } from './options.js';
+import { CATALOG_READ } from './namespace-catalog.js';
 
 /** The persisted change log (LIVE-FORMAT §5). */
 
@@ -500,20 +501,39 @@ export function createCaptureEngine(options) {
       + `(SELECT MAX(${q('seq')}) FROM ${q(CHANGES_TABLE)}), 0) AS ${q('hi')}`,
   } : null;
 
+  /**
+   * Whether the log, its state table and the state row are all there: read
+   * holding no write lock, so an open beside a live writer takes the bracket
+   * only where it has a table to create or the row to seed.
+   * @returns {any} value-or-promise of a boolean
+   */
+  const provisioned = () => {
+    const held = (/** @type {string} */ sql, /** @type {any[]} */ params) =>
+      useStatementOnce(connection, sql, (statement) => chain(statement.get(params), (row) => row !== undefined && row !== null), CATALOG_READ);
+    const exists = (/** @type {string} */ table) => held(dialect.introspect.tableExists(), [table]);
+    return chain(exists(CHANGES_TABLE), (log) => log && chain(exists(CHANGES_STATE_TABLE), (state) =>
+      state && held(logStatements.hasState, [])));
+  };
   const ready = logStatements === null
     ? null
     // the seed is written only when the row is absent: a read-only open
-    // of an already-upgraded file reads the row and writes nothing
-    : chain(attempt(() => bracket(() => chain(connection.exec(logStatements.create), () =>
+    // of an already-upgraded file reads the row and writes nothing; a lock
+    // the bracket could not take is the store's busy failure, retryable,
+    // and not a log it cannot open
+    : chain(attempt(() => chain(provisioned(), (done) => (done ? null : bracket(() => chain(connection.exec(logStatements.create), () =>
       chain(connection.exec(logStatements.createState), () =>
         chain(connection.prepare(logStatements.hasState), (probe) => chain(probe.get([]), (row) =>
           (row === undefined || row === null
             ? chain(connection.prepare(logStatements.seedState), (statement) => statement.run([]))
-            : null)))))),
-    (error) => new DbCompileError('JD0002',
-      `the change log table could not be created (${error?.message ?? String(error)}) — `
-      + 'a read-only store creates nothing; open it read-write once, or without capture.log',
-      '/capture', error)), () => null);
+            : null)))))))),
+    (error) => {
+      const wrapped = wrapDriverError(error, { docPath: '/capture' });
+      if (/** @type {any} */ (wrapped)?.class === 'busy') return wrapped;
+      return new DbCompileError('JD0002',
+        `the change log table could not be created (${error?.message ?? String(error)}) — `
+        + 'a read-only store creates nothing; open it read-write once, or without capture.log',
+        '/capture', error);
+    }), () => null);
 
   /** A patch value must be JSON: a `{ ...doc, m: undefined }` write
    * stores the member ABSENT, and the journal must record the JSON

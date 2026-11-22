@@ -1220,8 +1220,9 @@ describe('the predicate term bound', () => {
     assert.strictEqual(predicateTerms(chain(128, (i) => external('$ge', i)).plan), 128);
     assert.strictEqual(predicateTerms(chain(128, (i) => external('$eq', i)).plan), 128);
     // terms add up across kinds: 16 inequalities against externals and 64 plain leaves fill the bound
+    // (orderings: a chain of `$ne` literals over one member is one list and one term)
     const mixed = where({ $and: [...Array.from({ length: 16 }, (_, i) => external('$ne', i)),
-      ...Array.from({ length: 64 }, (_, i) => age('$ne', i))] });
+      ...Array.from({ length: 64 }, (_, i) => age('$ge', i))] });
     assert.strictEqual(predicateTerms(mixed.plan), 128);
     assert.strictEqual(boundPredicateTerms(mixed, 128), mixed);
     assert.strictEqual(boundPredicateTerms(mixed, 127).mode, 'set');

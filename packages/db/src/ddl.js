@@ -20,6 +20,7 @@ import { hashContent, utf8ByteLength } from '@jarenjs/core/string';
 import { IDENTIFIER, ENGINE_TABLES } from './engine-metadata.js';
 import { DbCompileError } from './errors.js';
 import { chain } from './driver.js';
+import { catalogRead } from './namespace-catalog.js';
 import { BBOX_COMPONENTS, BBOX_INDEX_ORDER, derivedMappingFor } from './derive.js';
 import { expressionSql, expressionStem, expressionFunctions, normalizeExpression } from './expression.js';
 import { foldIdentifier } from './invariants.js';
@@ -1446,7 +1447,7 @@ export function legacyColumnTypes(dialect, plan, rows) {
 function adoptLegacyColumns(connection, plan) {
   if (!(plan.generated ?? []).some((/** @type {any} */ column) => column.legacyTypes !== undefined)) return null;
   const dialect = connection.dialect;
-  return chain(connection.prepare(dialect.introspect.columns(plan.table)), (statement) =>
+  return chain(catalogRead(connection, 'columns', plan.table), (statement) =>
     chain(statement.all([]), (rows) => {
       const held = legacyColumnTypes(dialect, plan, rows);
       if (held.size > 0) Object.assign(plan, plan.replan(held));
@@ -1516,7 +1517,7 @@ function verifyDeclaredSql(connection, plan, disagree) {
     const list = plan.virtualTables ?? [];
     if (i >= list.length) return null;
     const virtual = list[i];
-    return chain(connection.prepare(dialect.introspect.declaredSql(virtual.name)),
+    return chain(catalogRead(connection, 'declaredSql', virtual.name),
       (statement) => chain(statement.all([]), (rows) => {
         const row = rows.find((candidate) => String(candidate.name) === virtual.name);
         if (row === undefined) {
@@ -1531,7 +1532,7 @@ function verifyDeclaredSql(connection, plan, disagree) {
         return verifyVirtual(i + 1);
       }));
   };
-  return chain(connection.prepare(dialect.introspect.declaredSql(plan.table)),
+  return chain(catalogRead(connection, 'declaredSql', plan.table),
     (statement) => chain(statement.all([]), (rows) => {
       /** @type {Map<string, string>} */
       const actual = new Map();
@@ -1631,7 +1632,7 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
   // column's expression — through the dialect's exact read-back
   const readBack = dialect.capabilities.declaredSqlText === true ? undefined : dialect.readBack;
   const declared = plan;
-  return chain(adoptLegacyColumns(connection, declared), () => chain(connection.prepare(dialect.introspect.columns(declared.table)), (columnsStatement) =>
+  return chain(adoptLegacyColumns(connection, declared), () => chain(catalogRead(connection, 'columns', declared.table), (columnsStatement) =>
     chain(columnsStatement.all([]), (columnRows) => {
       // a table an earlier release created goes without the columns a unique index keys a
       // container by, their triggers and the indexes over them, and opens as it is
@@ -1717,7 +1718,7 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
         const key = actual.find((column) => column.name === plan.autoKey);
         plan.keyAllocates = key !== undefined && (key.computes !== null || key.identity !== '');
       }
-      return chain(connection.prepare(dialect.introspect.indexes(plan.table)), (indexesStatement) =>
+      return chain(catalogRead(connection, 'indexes', plan.table), (indexesStatement) =>
         chain(indexesStatement.all([]), (indexRows) => {
           // an index beside a declared one that seeks another kind of its member is
           // compared on its own, and a table an earlier release created goes without it
@@ -1758,7 +1759,7 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
             const want = wantedIndexes[i];
             if (have.name !== want.name || have.unique !== want.unique)
               disagree(`index '${have.name}'${have.unique ? ' (unique)' : ''} does not match the declared '${want.name}'`);
-            return chain(connection.prepare(dialect.introspect.indexColumns(have.name)), (statement) =>
+            return chain(catalogRead(connection, 'indexColumns', have.name), (statement) =>
               chain(statement.all([]), (rows) => {
                 // NOT sorted: `(a,b)` and `(b,a)` are different indexes —
                 // one serves an `a`-prefix lookup and the other does not,
@@ -1822,7 +1823,7 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
  */
 function verifyIndexTerms(connection, have, want, disagree) {
   const dialect = connection.dialect;
-  return chain(connection.prepare(dialect.introspect.indexKeyColumns(have.name)), (statement) =>
+  return chain(catalogRead(connection, 'indexKeyColumns', have.name), (statement) =>
     chain(statement.all([]), (keys) => {
       want.terms.forEach((planned, at) => {
         // the key's position holds an expression: the column check before this one compared it
@@ -1861,7 +1862,7 @@ function verifyKindIndexes(connection, planned, rows, conditionColumns, disagree
     const predicate = row.predicate === null || row.predicate === undefined ? null : String(row.predicate);
     const condition = dialect.readBack.condition(predicate, want.where, conditionColumns, readsConforming(row));
     if (condition !== null) disagree(`index '${name}' ${condition}`);
-    return chain(connection.prepare(dialect.introspect.indexKeyColumns(name)), (statement) =>
+    return chain(catalogRead(connection, 'indexKeyColumns', name), (statement) =>
       chain(statement.all([]), (keys) => {
         const difference = keys.length !== want.keys.length ? `keys (${keys.map((key) => key.term ?? key.name).join(', ')})`
           : keys.map((key, at) => {
@@ -1899,7 +1900,7 @@ function verifyIntervalChecks(connection, plan, disagree) {
   const intervals = plan.intervals ?? [];
   const temporals = plan.temporals ?? [];
   if ((intervals.length === 0 && temporals.length === 0) || dialect.capabilities.declaredSqlText === true) return null;
-  return chain(connection.prepare(dialect.introspect.checks(plan.table)), (statement) =>
+  return chain(catalogRead(connection, 'checks', plan.table), (statement) =>
     chain(statement.all([]), (rows) => {
       /** @type {Map<string, any>} */
       const stored = new Map(rows.map((row) => [String(row.name), row]));

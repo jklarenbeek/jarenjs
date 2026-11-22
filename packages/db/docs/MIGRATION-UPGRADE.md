@@ -4193,6 +4193,49 @@ and answers as before, dropped rows included. A model with a non-string
   planned in place (`CREATE OR REPLACE FUNCTION`) or a `repair` link applies
   under the previous release as written.
 
+## 81. An open reads each catalog once, opens beside a live writer, and a re-keyed key pages every row
+
+- An open reads each catalog once for every table it verifies — existence,
+  columns, indexes and their columns, foreign keys, CHECKs, generated
+  expressions, stored CREATE text — one plain query each (no cursor on
+  PostgreSQL), where it read each per table; `readSchema`, `introspect()` and a
+  migration's target validation read them the same way, and a migration
+  verifies each physical entity against the namespace's lists and its own
+  table, where it read the whole database per entity. A table the shared read
+  finds departing from its model is read again on its own before the open
+  refuses it. Re-opening 64 entities on PostgreSQL measured 1,176 statements
+  and 836 ms before, 34 statements and 34 ms after.
+- An open with `jobs` or `capture` reads the queue's and the log's tables, the
+  claim index, the upgraded columns and the log's state row holding no write
+  lock, and takes its immediate bracket only to create or upgrade one: a
+  re-open beside a live writer opens, where on SQLite it rejected `JD0002`
+  after the busy timeout and on PostgreSQL waited on a job-table write past the
+  lock timeout. Where the bracket is needed and its lock cannot be taken, the
+  open rejects `JD2005` (`class: 'busy'`, `retryable: true`), where it
+  rejected `JD0002`. An open with `replication` still takes its bracket on
+  every open.
+- A linq transaction builds its `entities` and `collections` records when its
+  body first reads them.
+- On PostgreSQL a table an earlier release created, whose `numeric` key has no
+  key CHECK, orders a load by the key as the engine's doubles, and a page's
+  keyset continuation carries the digits of a row another writer re-keyed
+  (`"key": "5.99999999999999999999"`), so every row is paged once, where such a
+  row was stepped past. A key under the CHECK keeps its statement and its
+  index. A load's scalar `after` over such a key still compares bare.
+- `A.join(P, …)` and `A.groupJoin(P, …)` take an entity handle as the inner
+  side, read as the chain over it, where they refused it `JL0005`
+  ([DB-CLIENT §6](../../linq/docs/DB-CLIENT.md)).
+- Under strict execution a windowed count (`take(n).count()`) and a reversal
+  (`last()`, `orderBy(…).last()`) run natively, where they were refused
+  `JD0010`.
+- A conjunction's `$ne` over one member — literals, or externals over an
+  entity's string column — is spelled as one negated list and counts one term
+  against PostgreSQL's term bound, so such a chain of any length runs natively
+  where a long one was demoted.
+- No table, column, index, CHECK or program text changes. Downgrade: the
+  previous release opens every store this one leaves; a continuation carrying a
+  key's digits replays under it as that key and resumes past the same row.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

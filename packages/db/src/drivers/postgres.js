@@ -497,7 +497,9 @@ export function adaptPostgresClient(client, options = undefined) {
         },
         all: async (params = []) => {
           if (closing !== undefined) throw new DbRuntimeError('JD2063', 'the PostgreSQL session is closing');
-          if (writes || options?.nativeCursor !== true || !cursorSql(sql))
+          // a statement prepared `buffered` (a catalog read) is one plain
+          // query, under the same row and byte bound as a cursor's rows
+          if (metadata.buffered || writes || options?.nativeCursor !== true || !cursorSql(sql))
             return boundedRows(await run(sql, params, true, writes));
           const iterator = await cursors.open(sql, params.map(encodeParam));
           const rows = [];

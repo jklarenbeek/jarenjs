@@ -447,81 +447,37 @@ costs a descriptor plus examples and no UI code at all.
   database: introspectModel(connection, options) and store.introspect(options)
   do, with the trigger reader (MIGRATION-FORMAT §11 says none ships). Wanted:
   a subcommand over introspectModel that can pass the trigger reader.
-- [ ] **Pushdown beyond the proven scalar shapes.** Group keys the schema does
-  not declare as scalars alone (untyped, a union that lists an object or an
-  array, reached by a negative index),
-  group returns that read the grouped row binding, ordering by a floating
-  sum/avg or other unproven aggregate expressions and floating numeric
-  aggregates without a rounding proof still run in the engine (SQLite's sum
-  compensates its rounding and PostgreSQL's numeric sum is exact, so neither
-  repeats the engine's left-to-right double addition; a guard that every term
-  is integral would answer exactly but send fractional data, the common case,
-  through a second statement). One-root scalar
-  grouping, guarded integer sums/counts, groups ordered by an integer sum/avg
-  and, on SQLite, the unordered grouping of a connected join of roots now have
-  native plans; over a join of roots an ordered grouping, a window over its
-  groups, the nullable form of a sum and a return that reads a whole binding
-  still run in the engine (tied groups would order by the first row's number,
-  with a proof per ordering shape). A window over a group return that can omit
-  an item needs an output-cardinality proof, and a window over groups ordered
-  by an integer sum/avg needs the exactness guard read on every group, not only
-  on the returned ones (`plan.windowedAccumulation`); the proven singleton
-  constructors already lower. A grouping over a compound physical key whose
-  order leaves two groups tied runs in the engine (`entity.groupOrder`): a
-  group's first appearance is its smallest key tuple, which per-column minima
-  do not give. On PostgreSQL an entity grouping lowers only over one adopted
-  table with no document column; a store-owned table and any join plan the set
-  residual (`bind.entityGrouping`) until the runtime guards are qualified
-  there. A comparison of two paths when either is not typed as a scalar (an
-  object, an array, a member with no type), an entity query's comparison of two
-  paths outside one non-null number/string family, predicates whose individual
-  leaves span bindings, and unlisted operators remain residual. **Semantic
-  boundary:** promotions must preserve missing/null, first-occurrence order and
-  engine errors under the indexed, unindexed and forced-residual oracle. A
-  disconnected binding graph remains a deliberate cartesian-product refusal;
-  removing that guard changes the join contract. A join equality is an edge
-  only between mapped columns of one comparison family (the family the column
-  stores and the engine decodes, never a union's first type) that are neither a
-  boolean nor both able to read a NULL as a present `null`, so the database
-  pairs the rows the engine does; an undeclared foreign key compares as the key
-  it references, a nullable member whose NULL reads back as no member (every
-  store-owned nullable column) still joins natively, and any other equality
-  runs in the engine.
-- [ ] **Projection and distinct beyond reconstructible trees.** A return
-  containing an operator beyond `$default`, `$upper`, `$lower`,
-  `$string-length`, `$count`, `$exists`, `$concat`, `$add`, `$sub`, `$mul` and
-  `$div` (each over the members and literals
-  [MODEL-FORMAT §10.6](../packages/db/docs/MODEL-FORMAT.md) names; `$idiv` and
-  `$mod` raise on a zero divisor, and an operator over an operator is not
-  proven), a whole entity binding inside a constructor or a non-singular path
-  still needs the engine. So does a navigation hop that is chained, ordered inside, correlated
-  across comparison families or over a column that can hold a `null`,
-  correlated by inequalities alone or by an inequality outside an existence or
-  emptiness test (a count, a comparison of its member, an order key or a
-  projection leaf), or read as a value without the related entity's key. A hop over a foreign key no
-  property declares stays in the engine although a join reads that key
-  (`entity.hopShape`). Windows over such returns are set-residual: source-row
-  limits cannot stand in for projected-item limits, and the engine evaluates
-  the return of every row, so a window or a count may leave a row unevaluated
-  only where the evaluation cannot raise. Over an object or array constructor
-  of those operators a collection's window rides in the statement (`row`) and
-  a count is a `COUNT(*)`, on a collection and on an entity; an entity window
-  over an operator projection (the entity planner has no row residual; a
-  per-row evaluation of the constructor over the fetched window would lower
-  it), a collection's window or count beside a conjunct that runs as a
-  registered function, and a bare operator as the whole return (always one
-  item per row, but no constructor) are still the engine's. `$distinct` still
-  runs in the engine over a leaf that may hold an object or an array (an
-  untyped member, a union that lists either, a path reached by a negative
-  index: the database groups an object by its text, which keeps member order,
-  where the engine compares members), an array constructor, an operator, the
-  document, a constructor or an ordering by other paths beside a registered
-  function, and, on an entity, a distinct with an ordering of its own (numbering
-  the entity rows by the order terms would lower it) or over a document member,
-  an epoch or a date column (`plan.distinctProjection`, `entity.distinct`).
-  **Proof still needed:** preserve output cardinality, structural equality,
-  ordering and errors, and never drop a member a residual predicate reads.
-
+- [ ] **PostgreSQL entity grouping over a store-owned table.** One-root scalar
+  grouping, guarded integer sums and counts and groups ordered by an integer
+  sum lower on SQLite over every table, and on PostgreSQL over one adopted
+  table with no document column; over a store-owned table, and over any join,
+  PostgreSQL plans the set residual (`bind.entityGrouping`). Lifting that
+  guard is not enough: over a `numeric` column another writer re-keyed, the
+  statement groups `2` and `2.00000000000000000001` apart where the engine
+  reads one key, and it answers a group over an integer past 2^53 that the
+  engine refuses (`JD2003`). Wanted: the group key read as the double the
+  engine holds and the row's integer check carried into the grouping,
+  qualified under SQLite's oracle with re-keyed digits. Every other shape of
+  the former umbrella (untyped or object-listing group keys, row-binding
+  returns, floating sums without a rounding proof, windows over groups, a
+  compound key's tie order, two-path comparisons outside one family,
+  disconnected bindings) answers right in the engine and is the documented
+  boundary ([MODEL-FORMAT §10.6](../packages/db/docs/MODEL-FORMAT.md)), where
+  `explain()` names each reason.
+- [ ] **An entity operator projection has no row residual.** A return built of
+  the operators [MODEL-FORMAT §10.6](../packages/db/docs/MODEL-FORMAT.md)
+  proves (`$upper`, `$add`, `$string-length` over required typed members) runs
+  per fetched row on a collection (`row`), but on an entity every operator
+  projection, and every window over one, is the set residual
+  (`entity.projection`): the entity planner has no row residual. Wanted: the
+  constructor evaluated per fetched row over the entity's statement, so entity
+  operator projections and their windows stream as `row`. Every other shape of
+  the former umbrella (a distinct over an object, an array, an operator or the
+  document — structural equality, not a missing plan —, a distinct with its
+  own ordering, `entity.distinct`; hops chained, ordered inside, correlated
+  across families or by inequalities alone, `entity.hopShape`; operators
+  outside the proven list) answers right in the engine and is the documented
+  boundary (§10.6), where `explain()` names each reason.
 - [ ] **SQLite row estimates.** Wait on a per-statement estimate API in
   `node:sqlite` or `bun:sqlite`; neither exposes one, so `rowEstimates` stays
   absent on SQLite, which also lacks a statement timeout (a server timeout is
@@ -537,17 +493,19 @@ costs a descriptor plus examples and no UI code at all.
   engines (a SQLite uuid by the text its table stores), an identity of NOT
   NULL terms in one direction as one row value that the key's index serves
   ([MODEL-FORMAT §10.5](../packages/db/docs/MODEL-FORMAT.md#105-pagination)).
-  Relation navigation across physical layouts, a PostgreSQL page's `ORDER BY`
-  read in index order (it spells `NULLS FIRST`, so the rows past the row value
-  are sorted: about 14 ms for the second page of 200,000 rows against 0.016 ms
-  read in index order), pushdown beyond the qualified native census and
-  additional PostgreSQL types remain open. A partition attached to an adopted
-  partitioned table while a store is open reports a duplicate key as `JD2005`
-  naming its own constraint until the next open; the catalog read cannot
-  follow it without a read on the failure path, which an aborted PostgreSQL
-  transaction forbids. Capture and replication of adopted physical tables —
-  whose application triggers and cascades the store does not write — remain
-  refused until their complete writer population has an executable oracle.
+  Relation navigation across physical layouts, a PostgreSQL page ordered by a
+  column that may hold NULL read in index order (its empty-first placement is
+  not the order a default index provides, so its rows are sorted — the
+  entity-ordering entry over a column that may hold NULL; a key or a NOT NULL
+  order column reads its index), pushdown beyond the qualified native census
+  and additional PostgreSQL types remain open. A partition attached to an
+  adopted partitioned table while a store is open reports a duplicate key as
+  `JD2005` naming its own constraint until the next open; the catalog read
+  cannot follow it without a read on the failure path, which an aborted
+  PostgreSQL transaction forbids. Capture and replication of adopted physical
+  tables — whose application triggers and cascades the store does not write —
+  remain refused until their complete writer population has an executable
+  oracle.
 - [ ] **Broader database invariant lowering.** Rules lower to verified triggers
   on SQLite and PostgreSQL alike ([MODEL-FORMAT §13](../packages/db/docs/MODEL-FORMAT.md#13-persistence-invariants)),
   over comparisons, membership, existence probes keyed by a verified key or
@@ -561,36 +519,21 @@ costs a descriptor plus examples and no UI code at all.
   collation and stored spelling (§13.4), where PostgreSQL and the store compare
   by codec; comparing by code point would change the text of every installed
   update program, so it waits for a reviewed migration of installed programs.
-- [ ] **An open's per-table catalog reads.** Opening verifies each table the
-  store owns, and each table a physical entity maps, with catalog reads of its
-  own — existence, columns, indexes and their columns, foreign keys, checks —
-  so its statements grow with its tables, each a round trip on PostgreSQL and
-  on the worker, pool and process hosts; the namespace's table list, objects
-  and catalog rows, and on PostgreSQL its rule programs and rewrite rules,
-  already come from one read per open. One read of the namespace for each
-  per-table read would bound an open of many tables.
-- [ ] **A linq transaction's records grow with the model's names.** A
-  transaction client defines one getter per declared entity and collection
-  name on its two records, so a transaction whose body touches one handle
-  still pays for every name the model declares; a record shared per client
-  until a transaction first reads a handle would make that cost constant.
-- [ ] **A validated linq open takes every entity's store handle.** So that a
-  schema the compiler refuses is refused at open, `open()` builds each
-  entity's store-level handle (and compiles each collection schema) when it
-  opens; a compile-only check of the entity write schemas would keep the
-  refusal without the handles.
-- [ ] **The job tables' and the change log's first-open bracket.** An open
-  with `jobs: true` or `capture` creates or verifies its job tables and its
-  change log under `BEGIN IMMEDIATE` on every open, so another connection's
-  write waits for those statements even when every table exists, where the
-  model's own tables are verified holding no write lock. Verifying them first
-  under the read, and taking the bracket only to create or upgrade one, would
-  leave the writer free for the whole open.
-- [ ] **A migration's target validation reads the whole schema once per
-  physical entity.** `validateTargetState` verifies each physical entity of the
-  target model against a read of the whole database, so its catalog statements
-  grow with entities × tables, as an open's did; the open's one read of the
-  namespace would bound it.
+- [ ] **A linq transaction that reads a handle builds a record of every
+  name.** A transaction client builds its `entities` and `collections` records
+  when its body first reads them, so a body that reads no handle costs the
+  same at any model size; a body that reads one still builds that record's
+  getter for every name of its kind, because a record holds the model's names
+  as its own members (DB-CLIENT §2.1). A shared prototype holding the getters
+  would make it constant, and would make `Object.keys` of a transaction's
+  record answer no names.
+- [ ] **The replication tables' first-open bracket.** An open with
+  `replication` creates or verifies its replication tables under the store's
+  immediate bracket on every open, so on SQLite a re-open beside another
+  process's write lock rejects (`JD0002`, `class: 'busy'`) after the busy
+  timeout, where the job tables and the change log are read first holding no
+  lock and bracketed only to create one; the same read-first probe would open
+  it beside a live writer.
 - [ ] **Broader native authoring for legacy SQL.** The executable census now
   proves five adopted-column read families and three SQLite mutation families
   ([native contracts](../packages/db/docs/NATIVE-PLANS.md)). Receipt history
@@ -666,33 +609,34 @@ costs a descriptor plus examples and no UI code at all.
   exists). A migration plan's target model, `explainMapping` and the CLI still
   read a non-string `through` as the implicit `<A>_<B>` name: the refusal
   moves there once a plan reads its from model as history.
-- [ ] **A PostgreSQL statement at the term bound can still compile for
-  seconds.** One statement carries at most 128 predicate terms
+- [ ] **A PostgreSQL statement at the term bound can still compile for seconds
+  over an `$or` of pairs.** One statement carries at most 128 predicate terms
   ([POSTGRESQL](../packages/db/docs/POSTGRESQL.md)); a leaf is one term, an
   inequality or a negated comparison against an external operand on a document
   member counts four, and a member's membership in an external list counts
   sixteen (four in its own column, eight there under a `$not`), so the
-  external chains that compiled for many seconds are the engine's. A statement
-  the server's cost model sends through JIT is still compiled by LLVM, which
-  no signal interrupts. A conjunction's `$ne` literals over one member are
-  spelled as one negated list, whose compile does not grow with its length,
-  but still count one term each; what remains is the weights of the other leaf
-  kinds — an `$or` of `$and` pairs and an external `$ne` compile per leaf and
-  grow with the count — and whether the regrouped chain should count one term.
-- [ ] **A mandatory predicate past the term bound still reaches PostgreSQL
-  whole.** A profile's mandatory predicate with more leaves than the dialect's
-  term bound demotes the document, and the residual's root fetch carries the
-  whole predicate (a 200-leaf statement is sent; it answers right and
-  `maxRows`, `strict` and `refuseFullScan` still bound it). Its `$ne` literals
-  over one member reach the server as one negated list, so a chain of them
-  compiles in a time that does not grow with its length; other leaf kinds
-  still compile per leaf under JIT and grow with the count — an `$or` of
-  tenant/level pairs, and `$ne` against externals. A refusal (`JD0011`) was
-  tried and rejected: profiles of 33 external `$ne` terms or 65 tenant/level
-  pairs answered right and would stop opening. Wanted: a cheaper spelling of
-  those leaves (a row-value membership for pairs, one external list for
-  external `$ne`), or a weight for the fetch in the style of the
-  external-operand weights.
+  external chains that compiled for many seconds are the engine's. A
+  conjunction's `$ne` over one member — literals, or externals over an
+  entity's string column — is spelled as one negated list, whose compile does
+  not grow with its length, and counts one term. A statement the server's cost
+  model sends through JIT is still compiled by LLVM, which no signal
+  interrupts, and an `$or` of `$and` pairs (an equality and a range each)
+  compiles per leaf and grows with the count. Wanted: the pairs spelled as one
+  table-driven membership — a row of bound values per pair, each column typed
+  as the column it is compared with (a `numeric` column by the interval edges
+  it binds) — weighed as one term.
+- [ ] **A mandatory predicate of pairs past the term bound still reaches
+  PostgreSQL whole.** A profile's mandatory predicate with more terms than the
+  dialect's bound demotes the document, and the residual's root fetch carries
+  the whole predicate (a 200-leaf statement is sent; it answers right and
+  `maxRows`, `strict` and `refuseFullScan` still bound it). A chain of `$ne`
+  over one member — literals, or externals over an entity's string column — is
+  one list and one term, so it no longer demotes; an `$or` of tenant/level
+  pairs still does, and compiles per leaf under JIT. A refusal (`JD0011`) was
+  tried and rejected: profiles of 65 tenant/level pairs answered right and
+  would stop opening. Wanted: the pairs spelled as one membership (the
+  statement-bound entry's wanted spelling), or a weight for the fetch in the
+  style of the external-operand weights.
 - [ ] **On PostgreSQL a comparison of another kind of a union member seeks no
   non-unique composite or conditional index, and no non-unique index over a
   path with a guarded step.** A declared single-path index over a member of
@@ -720,20 +664,21 @@ costs a descriptor plus examples and no UI code at all.
   indexes as the store's own (a DDL change: `introspect()` must read them back
   as the declared index and `planColumnUpgrade` must replace an earlier
   release's).
-- [ ] **On PostgreSQL a load's order and a page's continuation read a
-  `numeric` key without the store's key CHECK bare.** A table an earlier
-  release created holds a writer's digits until `planColumnUpgrade` adds the
-  CHECK: a literal, a literal list and an external list compare with its key
-  by the interval of decimals that round to the number's double, and a join, a
-  hop's correlation, two references in one row and a query's ordering compare
-  it as the doubles the engine holds, but a load's `orderBy` and a page's
-  keyset continuation read it bare, so a post another writer re-keyed
-  `5.99999999999999999999` orders apart from post 6, and the continuation
-  after it (`pid > 6`) never pages post 6. At or past 2^53 the CHECK leaves a
-  writer's digits their own, so a pair and an ordering compare such a key
-  exactly where another writer may have spelled it otherwise. Wanted: the
-  load's order term read as the double, with a unique tie-break its
-  continuation carries (the row's stored digits).
+- [ ] **On PostgreSQL a load's scalar `after` over a `numeric` key without the
+  store's key CHECK, and such a key at or past 2^53, still compare bare.** A
+  table an earlier release created holds a writer's digits until
+  `planColumnUpgrade` adds the CHECK: its literals, lists, joins, hops, pairs
+  in one row, a query's, a load's and an include's ordering compare the key as
+  the doubles the engine holds, and a page's keyset continuation carries the
+  digits of a row another writer re-keyed (`"key": "5.99999999999999999999"`),
+  so every row is paged once; but a load's scalar `after` (`load({ orderBy,
+  take, after: 6 })`) positions no row among the keys that round to its
+  number, so a walk by it can step past a row another writer re-keyed, and
+  such a table's load ordered by the key is sorted, not read in the key's
+  index order. At or past 2^53 the CHECK leaves a writer's digits their own,
+  so a pair and an ordering compare such a key exactly where another writer
+  may have spelled it otherwise. Wanted: a scalar `after` that resumes exactly
+  over such a key, and the order of a key past 2^53 read as the double.
 - [ ] **On PostgreSQL an entity's ordering over a column that may hold NULL
   never reads an index.** A term over a reference or an indexed column is `ASC
   NULLS FIRST` (descending `DESC NULLS LAST`), which a default B-tree does not
@@ -821,17 +766,6 @@ costs a descriptor plus examples and no UI code at all.
   the `UPDATE` itself takes when it changes no key column — would let both
   through, as PostgreSQL's foreign keys do. Wanted: that read locks
   `FOR NO KEY UPDATE` when the update assigns no key column.
-- [ ] **A count or a reversal over an entity window stays the engine's under
-  strict execution.** `take(n).count()`, `skip(n).count()` and
-  `select(f).take(n).count()` emit `{ $count: { $subsequence: ... } }`, and
-  `last()` a `$reverse` over the entity phrase; the planner leaves both to the
-  engine, so strict execution refuses them (`JD0010`, 'op') while the residual
-  answers.
-
-- [ ] **A join's inner side refuses the entity handle it accepts once filtered.** `A.join(P, …)`
-  is `JL0005` ("join takes another async sequence over a provider … as its inner side") while
-  `A.join(P.where(…), …)` is accepted and `A.join(fromAsync(P), …)` is the native spelling; the
-  handle could be read as `fromAsync(P)` ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
 
 ## @jarenjs/josl
 

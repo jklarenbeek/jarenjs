@@ -186,8 +186,10 @@ load, the profile's mandatory predicate and every comparison between two
 bindings that refines a join (the equality that joins them is merged by the
 server and is not counted). A membership list is one leaf
 however long it is, so a `$seq`, a same-member `$or` of equalities and a chain
-mixing equalities and ranges on two members all stay native; an `$or` of `$and`
-pairs and a top-level `$and` of `$ne` count per leaf, and a comparison of two
+mixing equalities and ranges on two members all stay native, and so does a
+conjunction's chain of `$ne` over one member that the statement spells as one
+negated list (below), one term however long; an `$or` of `$and` pairs counts
+per leaf, and a comparison of two
 member paths decided one family at a time counts a leaf for each family the two
 share. An inequality, or any comparison under a `$not`, between a document
 member and an external operand counts four, because the server compiles that
@@ -208,17 +210,21 @@ have no engine path, refuse it by name; under a profile the residual is refused
 where its fetch is (`JD2007` past `maxRows`, `JD0011` under `refuseFullScan`),
 and an asynchronous live registration re-snapshots through `execute()`, so its
 snapshot is the engine's answer. The price: a top-level `$and` of more than 128
-`$ne` over a PostgreSQL collection (more than 32 against externals) runs in the
-engine, and a `load({ where })`
+leaves over a PostgreSQL collection (more than 32 `$ne` against externals on a
+document member) runs in the engine, and a `load({ where })`
 or native `mutate()` above the bound that ran before is refused. SQLite has no
-JIT and sets no bound. Within the bound, a conjunction's `$ne` literals over
-one member are spelled as the member's presence and one negated membership
-list bound as one value, so the server compiles one leaf however many there
-are; they still count one term each, so what runs natively is unchanged. A
-profile's mandatory predicate past the bound reaches the residual's fetch in
-that spelling too. A `number` column keeps one comparison per literal (its
-list would compare a `numeric`, not the double the column holds), and so do
-an external operand and a literal the server cannot hold in a list.
+JIT and sets no bound. A conjunction's `$ne` literals over one member are
+spelled as the member's presence and one negated membership list bound as one
+value, and its `$ne` against externals over one string column of an entity as
+the column's presence and one negated membership in the strings among them
+(each external bound once, as its JSON text, in one array: an external of
+another type differs from every string, as the engine answers), so the server
+compiles one leaf however many there are, and each such chain counts one term.
+A profile's mandatory predicate reaches the statement in that spelling too. A
+`number` column keeps one comparison per literal (its list would compare a
+`numeric`, not the double the column holds), and so do an external operand on
+a document member or a number column, a column that reads a NULL as a present
+`null`, and a literal the server cannot hold in a list.
 
 `explain().budget.estimatedRows` is the planner's own row estimate for a native
 plan: `{ rows, source: 'postgresql-planner' }`, where `rows` is the `Plan Rows`
@@ -510,12 +516,21 @@ literal, a literal list or an external list (in a query, a hop's filter or a
 load's `where`) by the interval of decimals that round to the number's double,
 which its index still serves (a lookup is a range of two edges over the
 index), and with another column — a join, a hop's correlation, two references
-in one row — and in a query's ordering as the doubles the engine holds, so a
-row another writer re-keyed by other digits is kept where the engine keeps it.
-A load's order, its include and a page's keyset continuation still read such a
-key bare, so there a page can step past a row another writer re-keyed, until
-`planColumnUpgrade` adds the CHECK (refused `JD0023` naming the rows another
-writer spelled otherwise, with the statement that re-spells them,
+in one row — and in a query's ordering, a load's `orderBy` and an include's
+`orderBy` as the doubles the engine holds, tied by the row identity, so a
+row another writer re-keyed by other digits is kept and ordered where the
+engine keeps and orders it (such a load is sorted, not read in the key's index
+order). A page's keyset orders such a key by its digits, bare, through its
+index: rounding to a double never reverses two decimals, so that is the
+double's order with the digits as its unique tie-break, and the continuation
+of a row whose number does not spell its stored digits carries the digits as
+a string (`"key": "5.99999999999999999999"`, the order key alike), so the next
+page resumes past that row alone and every row is paged once; a continuation
+carrying the number resumes past every key that rounds to it, as it always
+did. A load's scalar `after` positions no row among the keys that round to its
+number, and a page of it can step past a row another writer re-keyed. The
+table reads so until `planColumnUpgrade` adds the CHECK (refused `JD0023` naming the rows
+another writer spelled otherwise, with the statement that re-spells them,
 MIGRATION-FORMAT §3); the next open reads the column as exact. A physical
 mapping declares no `numeric` key (a key's codec is `text`, `integer`, `bigint`
 or `uuid`, and an `integer` codec over a `numeric` column is `JD0002`), so its

@@ -28,6 +28,7 @@
  */
 
 import { chain, useStatementOnce } from './driver.js';
+import { catalogRows, withNamespaceCatalog } from './namespace-catalog.js';
 import { DbCompileError } from './errors.js';
 import { readOptionsOrNull } from './options.js';
 import { KEY_COLUMN, DOC_COLUMN, SCALAR_CODECS, indexCondition, canonicalOf, kindIndexName, containerKeysOf, kindIndexSql,
@@ -87,11 +88,11 @@ export function loss(code, object, detail) {
  */
 function readTable(connection, table, objects) {
   const dialect = connection.dialect;
-  const all = (sql) => useStatementOnce(connection, sql, (statement) => statement.all([]));
-  return chain(all(dialect.introspect.columns(table)), (columnRows) =>
-    chain(all(dialect.introspect.indexes(table)), (indexRows) =>
-      chain(all(dialect.introspect.generated(table)), (generatedRows) =>
-        chain(all(dialect.introspect.foreignKeyList(table)), (fkRows) => {
+  const all = (/** @type {string} */ kind, /** @type {string} */ key) => catalogRows(connection, kind, key);
+  return chain(all('columns', table), (columnRows) =>
+    chain(all('indexes', table), (indexRows) =>
+      chain(all('generated', table), (generatedRows) =>
+        chain(all('foreignKeyList', table), (fkRows) => {
           // a DECLARED index is one the model could have named; the
           // engine's own key index is the primary key, read the same way
           // BY NAME, whatever order the catalog answered in: a physical
@@ -105,11 +106,11 @@ function readTable(connection, table, objects) {
           // catalog reads one: what an index beside a declared one is read back by
           const termsOf = (/** @type {string} */ name, /** @type {any[]} */ rows) =>
             (!rows.some((row) => row.name == null) || dialect.introspect.indexKeyColumns === undefined ? null
-              : chain(all(dialect.introspect.indexKeyColumns(name)), (keys) =>
+              : chain(all('indexKeyColumns', name), (keys) =>
                 keys.map((key) => (typeof key.term === 'string' ? key.term : null))));
           const withColumns = (i, out) => {
             if (i >= declared.length) return out;
-            return chain(all(dialect.introspect.indexColumns(String(declared[i].name))),
+            return chain(all('indexColumns', String(declared[i].name)),
               (rows) => chain(termsOf(String(declared[i].name), rows), (terms) => withColumns(i + 1, [...out, {
                 name: String(declared[i].name),
                 unique: Number(declared[i].uniq) !== 0,
@@ -127,9 +128,9 @@ function readTable(connection, table, objects) {
           return chain(withColumns(0, []), (indexes) =>
             chain(keyIndex === undefined
               ? []
-              : all(dialect.introspect.indexColumns(String(keyIndex.name))), (keyRows) =>
+              : all('indexColumns', String(keyIndex.name)), (keyRows) =>
               chain(dialect.introspect.checks === undefined ? []
-                : all(dialect.introspect.checks(table)), (checkRows) => ({
+                : all('checks', table), (checkRows) => ({
               name: table,
               sql: objects.find((o) => o.type === 'table' && o.name === table)?.sql ?? null,
               primaryKey: columnRows.some((row) => Number(row.pk) > 0)
@@ -216,9 +217,11 @@ export function readSchema(connection, options = undefined) {
   readIntrospectOptions(options);
   const wanted = options?.tables === undefined ? null : new Set(options.tables);
   return chain(readNamespace(connection, wanted), ({ names, views, objects, inspected }) => {
+    // one read of each catalog for every table it reads
+    const reading = withNamespaceCatalog(connection, names);
     const step = (i, out) => (i >= names.length
       ? { tables: out, views, objects }
-      : chain(readTable(connection, names[i], objects), (table) => step(i + 1, [...out, table])));
+      : chain(readTable(reading, names[i], objects), (table) => step(i + 1, [...out, table])));
     return chain(step(0, []), (schema) => chain(readNativeCatalog(connection, inspected),
       (catalog) => (catalog === undefined ? schema : { ...schema, catalog })));
   });

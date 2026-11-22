@@ -124,11 +124,20 @@ const MODEL = {
 /** The catalog answers for a store whose table already exists: the table
  * probe names the primary-key constraint, which a duplicate key is the
  * violation of. */
+/**
+ * A catalog answer, and the same rows led by `owner` where the open reads the
+ * catalog over all its tables at once (each row names the table, or the
+ * index, it belongs to).
+ * @param {string} owner @param {any} answer
+ */
+const owned = (owner, answer) => (/** @type {any[]} */ _values, /** @type {string} */ text) => (!text.includes('jaren_owner') ? answer
+  : { ...answer, rows: answer.rows.map((/** @type {any} */ row) => ({ jaren_owner: owner, ...row })) });
+
 const EXISTING = /** @type {[RegExp, any][]} */ ([
   VERSION,
-  [/FROM pg_class c\b/, { rows: [{ name: 'rows', key: 'rows_pkey' }], rowCount: 1,
-    fields: [{ name: 'name', dataTypeID: 25 }, { name: 'key', dataTypeID: 25 }] }],
-  [/FROM pg_attribute a\b/, { rows: [
+  [/FROM pg_class c\b/, owned('rows', { rows: [{ name: 'rows', key: 'rows_pkey' }], rowCount: 1,
+    fields: [{ name: 'name', dataTypeID: 25 }, { name: 'key', dataTypeID: 25 }] })],
+  [/FROM pg_attribute a\b/, owned('rows', { rows: [
     { name: 'key', type: 'text', hidden: 0 },
     { name: 'doc', type: 'jsonb', hidden: 0 },
     { name: 'rid', type: 'bigint', hidden: 0 },
@@ -136,15 +145,15 @@ const EXISTING = /** @type {[RegExp, any][]} */ ([
   ],
   rowCount: 4,
   fields: [{ name: 'name', dataTypeID: 25 }, { name: 'type', dataTypeID: 25 },
-    { name: 'hidden', dataTypeID: 23 }] }],
+    { name: 'hidden', dataTypeID: 23 }] })],
   // the covered-columns statement first: it is the narrower shape, and
   // both read `pg_index`
-  [/unnest\(i\.indkey/, { rows: [{ name: 'gx_n' }], rowCount: 1,
-    fields: [{ name: 'name', dataTypeID: 25 }] }],
-  [/FROM pg_index i JOIN pg_class ci/, { rows: [{ name: 'rows_by_n', uniq: 0, origin: 'c' }],
+  [/unnest\(i\.indkey/, owned('rows_by_n', { rows: [{ name: 'gx_n' }], rowCount: 1,
+    fields: [{ name: 'name', dataTypeID: 25 }] })],
+  [/FROM pg_index i JOIN pg_class ci/, owned('rows', { rows: [{ name: 'rows_by_n', uniq: 0, origin: 'c' }],
     rowCount: 1,
     fields: [{ name: 'name', dataTypeID: 25 }, { name: 'uniq', dataTypeID: 23 },
-      { name: 'origin', dataTypeID: 25 }] }],
+      { name: 'origin', dataTypeID: 25 }] })],
 ]);
 
 describe('the injected PostgreSQL driver', () => {

@@ -137,3 +137,111 @@ export function postgresCatalog(namespace) {
     WHERE ${namespace} AND (t.typrelid=0 OR EXISTS (SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid=t.typrelid AND c.relkind='c')) AND t.typelem=0
   ) SELECT type,name,owner,schema,sql,metadata::text AS metadata FROM objects ORDER BY schema,type,owner,name`;
 }
+
+/** How the reading session spells a backslash in a plain string, as the dialect's per-table reads report it. */
+const CONFORMING = "(SELECT s.setting FROM pg_settings AS s WHERE s.name = 'standard_conforming_strings')";
+
+/**
+ * PostgreSQL's catalog reads over a set of tables at once: each answers the
+ * rows its per-table twin in the dialect's `introspect` answers, in the same
+ * order and the same columns, for every table `$1` (a JSON array of names)
+ * lists, each row led by the table it belongs to (`jaren_owner`; the index
+ * for an index's own reads). One plain query each, where the per-table reads
+ * took one each per table.
+ * @param {string} namespace - trusted SQL predicate over n.nspname
+ * @returns {Readonly<Record<string, () => string>>}
+ */
+export function postgresNamespaceReads(namespace) {
+  const wanted = (/** @type {string} */ relation) => `${relation}.relname IN (SELECT pg_catalog.jsonb_array_elements_text($1::jsonb))`;
+  const action = (/** @type {string} */ column) => `CASE ${column} `
+    + "WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' "
+    + "WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' ELSE 'NO ACTION' END";
+  return Object.freeze({
+    tableExists: () =>
+      'SELECT c.relname AS jaren_owner, c.relname AS name, (SELECT k.conname FROM pg_constraint k '
+      + `WHERE k.conrelid = c.oid AND k.contype = 'p') AS "key" FROM pg_class c `
+      + 'JOIN pg_namespace n ON n.oid = c.relnamespace '
+      + `WHERE c.relkind IN ('r', 'p') AND ${namespace} AND ${wanted('c')}`,
+    columns: () =>
+      'SELECT c.relname AS jaren_owner, a.attname AS name, format_type(a.atttypid, a.atttypmod) AS type, '
+      + "CASE WHEN a.attgenerated <> '' THEN 1 ELSE 0 END AS hidden, "
+      + 'CASE WHEN a.attnotnull THEN 1 ELSE 0 END AS not_null, '
+      + 'pg_get_expr(d.adbin, d.adrelid) AS default_value, n.nspname AS schema, '
+      + "CASE a.attidentity WHEN 'a' THEN 'always' WHEN 'd' THEN 'by-default' ELSE '' END AS identity, "
+      + 'a.attgenerated AS generated_kind, ty.typtype AS type_kind, tn.nspname AS type_schema, ty.typname AS type_name, '
+      + `co.collname AS collation, ${CONFORMING} AS conforming `
+      + 'FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid '
+      + 'JOIN pg_type ty ON ty.oid = a.atttypid JOIN pg_namespace tn ON tn.oid = ty.typnamespace '
+      + 'LEFT JOIN pg_collation co ON co.oid = a.attcollation '
+      + 'LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum '
+      + 'JOIN pg_namespace n ON n.oid = c.relnamespace '
+      + `WHERE ${wanted('c')} AND ${namespace} `
+      + 'AND a.attnum > 0 AND NOT a.attisdropped ORDER BY c.relname, a.attnum',
+    indexes: () =>
+      'SELECT ct.relname AS jaren_owner, ci.relname AS name, CASE WHEN i.indisunique THEN 1 ELSE 0 END AS uniq, '
+      + "CASE WHEN i.indisprimary THEN 'pk' ELSE 'c' END AS origin, "
+      + 'CASE WHEN i.indpred IS NULL THEN 0 ELSE 1 END AS partial, '
+      + 'pg_get_expr(i.indpred, i.indrelid) AS predicate, '
+      + `${CONFORMING} AS conforming, `
+      + "CASE WHEN am.amname = 'btree' AND NOT i.indnullsnotdistinct AND i.indimmediate AND i.indnkeyatts = i.indnatts "
+      + 'AND NOT EXISTS (SELECT 1 FROM unnest(i.indoption::int2[]) AS o(flags) WHERE o.flags <> 0) '
+      + 'AND NOT EXISTS (SELECT 1 FROM unnest(i.indclass::oid[]) AS c(opclass) '
+      + 'JOIN pg_opclass oc ON oc.oid = c.opclass WHERE NOT oc.opcdefault) '
+      + 'AND NOT EXISTS (SELECT 1 FROM unnest(i.indcollation::oid[], i.indkey::int2[]) AS k(coll, attnum) '
+      + 'JOIN pg_attribute ka ON ka.attrelid = i.indrelid AND ka.attnum = k.attnum WHERE k.coll <> ka.attcollation) '
+      + 'THEN 1 ELSE 0 END AS plain '
+      + 'FROM pg_index i JOIN pg_class ci ON ci.oid = i.indexrelid JOIN pg_am am ON am.oid = ci.relam '
+      + 'JOIN pg_class ct ON ct.oid = i.indrelid '
+      + 'JOIN pg_namespace n ON n.oid = ct.relnamespace '
+      + `WHERE ${wanted('ct')} AND ${namespace} `
+      + 'ORDER BY ct.relname, ci.relname',
+    indexColumns: () =>
+      'SELECT ci.relname AS jaren_owner, a.attname AS name FROM pg_index i '
+      + 'JOIN pg_class ci ON ci.oid = i.indexrelid '
+      + 'JOIN pg_namespace n ON n.oid = ci.relnamespace '
+      + 'JOIN pg_class ct ON ct.oid = i.indrelid '
+      + 'CROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord) '
+      + 'LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum '
+      + `WHERE ${wanted('ct')} AND ${namespace} ORDER BY ci.relname, k.ord`,
+    indexKeyColumns: () =>
+      'SELECT ci.relname AS jaren_owner, a.attname AS name, pg_get_indexdef(i.indexrelid, k.ord::int, false) AS term, '
+      + '(SELECT co.collisdeterministic FROM pg_collation co WHERE co.oid = i.indcollation[(k.ord - 1)::int]) AS deterministic FROM pg_index i '
+      + 'JOIN pg_class ci ON ci.oid = i.indexrelid '
+      + 'JOIN pg_namespace n ON n.oid = ci.relnamespace '
+      + 'JOIN pg_class ct ON ct.oid = i.indrelid '
+      + 'CROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord) '
+      + 'LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum '
+      + `WHERE ${wanted('ct')} AND ${namespace} AND k.ord <= i.indnkeyatts ORDER BY ci.relname, k.ord`,
+    generated: () =>
+      'SELECT c.relname AS jaren_owner, a.attname AS name, pg_get_expr(d.adbin, d.adrelid) AS expression '
+      + 'FROM pg_attrdef d '
+      + 'JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum '
+      + 'JOIN pg_class c ON c.oid = d.adrelid '
+      + 'JOIN pg_namespace n ON n.oid = c.relnamespace '
+      + `WHERE ${wanted('c')} AND ${namespace} `
+      + "AND a.attgenerated <> '' ORDER BY c.relname, a.attnum",
+    checks: () =>
+      'SELECT ct.relname AS jaren_owner, c.conname AS name, pg_get_expr(c.conbin, c.conrelid) AS expression, '
+      + 'CASE WHEN c.convalidated THEN 1 ELSE 0 END AS validated, '
+      + `${CONFORMING} AS conforming, `
+      + 'EXISTS (SELECT 1 FROM pg_attribute ca JOIN pg_collation co ON co.oid = ca.attcollation '
+      + 'WHERE ca.attrelid = c.conrelid AND ca.attnum = ANY(c.conkey) '
+      + 'AND NOT co.collisdeterministic) AS unsafe_collation '
+      + 'FROM pg_constraint c JOIN pg_class ct ON ct.oid = c.conrelid '
+      + 'JOIN pg_namespace n ON n.oid = ct.relnamespace '
+      + `WHERE c.contype = 'c' AND ${wanted('ct')} AND ${namespace} `
+      + 'ORDER BY ct.relname, c.conname',
+    foreignKeyList: () =>
+      'SELECT ct.relname AS jaren_owner, tt.relname AS target, sa.attname AS source_column, '
+      + `ta.attname AS target_column, ${action('c.confdeltype')} AS on_delete, `
+      + `${action('c.confupdtype')} AS on_update, c.conname AS id, k.ord - 1 AS seq `
+      + 'FROM pg_constraint c JOIN pg_class ct ON ct.oid = c.conrelid '
+      + 'JOIN pg_namespace n ON n.oid = ct.relnamespace '
+      + 'JOIN pg_class tt ON tt.oid = c.confrelid '
+      + 'CROSS JOIN LATERAL unnest(c.conkey, c.confkey) WITH ORDINALITY AS k(src, tgt, ord) '
+      + 'JOIN pg_attribute sa ON sa.attrelid = c.conrelid AND sa.attnum = k.src '
+      + 'JOIN pg_attribute ta ON ta.attrelid = c.confrelid AND ta.attnum = k.tgt '
+      + `WHERE c.contype = 'f' AND ${wanted('ct')} AND ${namespace} `
+      + 'ORDER BY ct.relname, c.conname, k.ord',
+  });
+}

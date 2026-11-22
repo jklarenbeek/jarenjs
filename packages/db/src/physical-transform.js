@@ -5,7 +5,7 @@ import { createBoundedCache } from '@jarenjs/core/cache';
 import { setObjectMember } from '@jarenjs/core/object';
 import { chain, isThenable, releaseStatement, releaseStatements, settleStatementUse, useStatementOnce } from './driver.js';
 import { DbCompileError } from './errors.js';
-import { readSchema } from './introspect.js';
+import { namespaceSchema } from './introspect.js';
 import { columnCodec, physicalSelection, verifyPhysical, textKeyPlan, textKeyDecoding, checkTextKeys } from './physical.js';
 import { entityCore } from './entity.js';
 
@@ -34,7 +34,9 @@ function physicalReader(connection, mapping, batchSize, check) {
   if (!Number.isSafeInteger(batchSize) || batchSize < 1)
     throw new TypeError('physical migration batchSize must be a positive safe integer');
   check?.();
-  return chain(readSchema(connection), (schema) => chain(verifyPhysical(connection, mapping, schema), () => {
+  // the namespace's lists and the one table it reads, not the whole database:
+  // a migration reads once per physical entity
+  return chain(namespaceSchema(connection)(mapping.table), (schema) => chain(verifyPhysical(connection, mapping, schema), () => {
     const dialect = connection.dialect, q = dialect.quoteIdentifier;
     const keys = mapping.keys.map((name) => mapping.columns.find((column) => column.name === name));
     if (keys.some((column) => !column || !['text', 'integer', 'bigint'].includes(column.codec)))

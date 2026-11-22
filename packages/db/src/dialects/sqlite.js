@@ -13,6 +13,7 @@ import { rtreeDdl } from './rtree-ddl.js';
 import { readExpression } from './expression-read.js';
 import { SQLITE, sqliteInvariantTriggers } from './invariant-sql.js';
 import { sqliteChecks, SQLITE_PREDICATE } from './check-read.js';
+import { sqliteNamespaceReads } from './sqlite-catalog.js';
 import { OWNER_TABLE } from '../engine-metadata.js';
 import { modelPath } from '../model-path.js';
 
@@ -757,6 +758,8 @@ export const sqliteDialect = createDialect({
     objects: () =>
       'SELECT type, name, tbl_name AS owner, sql FROM sqlite_schema '
       + "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
+    // the per-table reads above over every table an open verifies at once
+    namespace: sqliteNamespaceReads,
   },
   readChecks: sqliteChecks,
   // the owner lease (MODEL-FORMAT §5.1): one row in an engine table,

@@ -625,7 +625,12 @@ through it
 unchanged (`JD2063` after `close()`); `store.jobs` on a read-only
 store is `JD0002` at first use, because the queue tables cannot be
 created — named there, not a raw `SQLITE_READONLY` at the first
-enqueue; a job's own failure is DATA — recorded in
+enqueue; the open reads the queue's tables, claim index and upgraded
+columns holding no write lock and creates or upgrades them in the
+store's immediate bracket only where one is missing, so a re-open runs
+beside a live writer, and a bracket whose lock it cannot take is the
+store's busy failure (`JD2005`, `class: 'busy'`, retryable), not
+`JD0002`; a job's own failure is DATA — recorded in
 `last_error` and the state machine of §4 — because a queue that
 throws away its failure story has failed twice.
 

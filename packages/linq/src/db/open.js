@@ -119,6 +119,25 @@ const TRANSACTION_MEMBERS = Object.freeze({
   sql: readThrough('sql'), relational: readThrough('relational'), jobs: readThrough('jobs'), sync: readThrough('sync') });
 const SAVEPOINTS_MEMBER = readThrough('savepoints');
 
+/** Where a transaction's client keeps the state its handle records are built from. */
+const RECORDS = Symbol('records');
+/**
+ * A handle record of a transaction's client, built on its first read
+ * through the client's state and the same record on every later one: a
+ * transaction whose body reads no handle builds no record, so its cost
+ * does not grow with the names the model declares. One getter per record
+ * for the whole module, as for the handle records' members.
+ * @param {'entities' | 'collections'} name
+ * @returns {PropertyDescriptor}
+ */
+const recordMember = (name) => Object.freeze({
+  get() {
+    const state = /** @type {any} */ (this)[RECORDS];
+    return (state[name] ??= state.build[name](state.over));
+  },
+  enumerable: true, configurable: false });
+const RECORD_MEMBERS = Object.freeze({ entities: recordMember('entities'), collections: recordMember('collections') });
+
 /**
  * The validator the client compiles entity and collection schemas with
  * when none is given: every issue collected, formats asserting. A schema
@@ -214,38 +233,39 @@ export async function open(model, options) {
   const collectionMembers = lazyMembersOf(Object.keys(collectionsOf(model) ?? {}));
 
   /**
-   * The typed handles over ONE store view — the root store, or the one
-   * a transaction callback received. Building them from the same two
+   * The typed handle records over ONE store view — the root store, or the
+   * one a transaction callback received. Building them from the same two
    * constructors is what keeps a transaction's `entities.X` the same
    * surface, with the same inference, as the client's own. Each handle
    * is built on its first read.
-   * @param {any} over
    */
-  const handlesOf = (over) => {
-    // one join handle per join table: both inverse members of an edge
-    // name the same root
-    /** @type {Map<string, any>} */
-    const joins = new Map();
-    /** The join handle of each many-to-many member of `name`. @param {string} name */
-    const membershipsOf = (name) => {
-      /** @type {Record<string, any>} */
-      const record = {};
-      for (const [member, relation] of Object.entries(over.relations?.[name] ?? {})) {
-        if (relation.kind !== 'manyToMany') continue;
-        let join = joins.get(relation.joinTable);
-        if (join === undefined) {
-          join = createJoinHandle(over, relation.joinTable, name, chainOptions);
-          joins.set(relation.joinTable, join);
+  const records = Object.freeze({
+    /** @param {any} over */
+    entities: (over) => {
+      // one join handle per join table: both inverse members of an edge
+      // name the same root
+      /** @type {Map<string, any>} */
+      const joins = new Map();
+      /** The join handle of each many-to-many member of `name`. @param {string} name */
+      const membershipsOf = (name) => {
+        /** @type {Record<string, any>} */
+        const record = {};
+        for (const [member, relation] of Object.entries(over.relations?.[name] ?? {})) {
+          if (relation.kind !== 'manyToMany') continue;
+          let join = joins.get(relation.joinTable);
+          if (join === undefined) {
+            join = createJoinHandle(over, relation.joinTable, name, chainOptions);
+            joins.set(relation.joinTable, join);
+          }
+          setObjectMember(record, member, join);
         }
-        setObjectMember(record, member, join);
-      }
-      return Object.freeze(record);
-    };
-    return {
-      entities: lazyRecord(entityMembers, (name) => createEntityHandle(over, name, membershipsOf(name), chainOptions)),
-      collections: lazyRecord(collectionMembers, (name) => createCollectionHandle(over, name, chainOptions)),
-    };
-  };
+        return Object.freeze(record);
+      };
+      return lazyRecord(entityMembers, (name) => createEntityHandle(over, name, membershipsOf(name), chainOptions));
+    },
+    /** @param {any} over */
+    collections: (over) => lazyRecord(collectionMembers, (name) => createCollectionHandle(over, name, chainOptions)),
+  });
 
   /**
    * The client a transaction callback receives: the same shape as the
@@ -273,9 +293,9 @@ export async function open(model, options) {
     // use as the transaction's store builds them
     Object.defineProperty(inner, TRANSACTION, { value: tx });
     Object.defineProperties(inner, TRANSACTION_MEMBERS);
-    const { entities, collections } = handlesOf(tx);
-    inner.entities = entities;
-    inner.collections = collections;
+    // the two handle records, each built when the body first reads it
+    Object.defineProperty(inner, RECORDS, { value: { over: tx, build: records, entities: undefined, collections: undefined } });
+    Object.defineProperties(inner, RECORD_MEMBERS);
     // the options reach the store, which reads a nested transaction's
     // closed set (refusing what a savepoint cannot honour) — dropping
     // them here would make a refused `unitOfWork` silently shared
@@ -297,7 +317,8 @@ export async function open(model, options) {
   const client = {
     store,
     capabilities: store.capabilities,
-    ...handlesOf(store),
+    entities: records.entities(store),
+    collections: records.collections(store),
     // A transaction gets its own unit of work by default: two handlers
     // on one client then hold two records for the same entity key and
     // neither can see the other's pending state. `unitOfWork: 'shared'`

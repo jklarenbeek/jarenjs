@@ -2,6 +2,9 @@
 /** Queue SQL vocabulary shared by SQLite and PostgreSQL job execution. */
 import { JOBS_TABLE, JOB_CHECKPOINTS_TABLE } from '../engine-metadata.js';
 
+/** The index a claim seeks the earliest eligible job through. */
+const CLAIM_INDEX = Object.freeze({ name: `${JOBS_TABLE}_claim`, table: JOBS_TABLE });
+
 /** The schema declaration also supplies upgrade definitions and verification data.
  * @param {any} dialect @returns {any} */
 export function jobSchema(dialect) {
@@ -29,11 +32,11 @@ export function jobSchema(dialect) {
   const create = tables.map((table) => `CREATE TABLE IF NOT EXISTS ${q(table.name)} (`
     + table.columns.map(declaration).join(', ')
     + (table.keys.length > 1 ? `, PRIMARY KEY (${table.keys.map(q).join(', ')})` : '') + ');')
-    .join('\n') + `\nCREATE INDEX IF NOT EXISTS ${q(`${JOBS_TABLE}_claim`)} ON ${q(JOBS_TABLE)} (state, run_at);`;
+    .join('\n') + `\nCREATE INDEX IF NOT EXISTS ${q(CLAIM_INDEX.name)} ON ${q(CLAIM_INDEX.table)} (state, run_at);`;
   const added = tables.flatMap((table) => table.columns.filter((column) => column[3])
     .map((column) => ({ table: table.name, name: column[0],
       sql: `ALTER TABLE ${q(table.name)} ADD COLUMN ${declaration(column)}` })));
-  return { tables, create, added };
+  return { tables, indexes: [CLAIM_INDEX], create, added };
 }
 
 /** All values stay parameters; backend strategies add only trusted SQL vocabulary.

@@ -14,6 +14,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import { spawnSync } from 'node:child_process';
+import { performance } from 'node:perf_hooks';
 
 import { open } from '@jarenjs/linq/db';
 import * as m from '@jarenjs/linq/model';
@@ -140,6 +141,32 @@ describe('lazy handle records', () => {
     const { store, client } = JSON.parse(run.stdout);
     // every handle built at open made a client cost several stores
     assert.ok(client < store * 1.6, `8 clients grew the live set by ${client} bytes, 8 stores by ${store}`);
+  });
+
+  it('cost a transaction whose body reads no handle the same at 32 and 256 names (an 8x step)', async () => {
+    const LOG = { identity: 'integer', schema: { type: 'object' } };
+    /** The best per-transaction time of rounds of empty transactions. @param {number} names */
+    const perTransaction = async (names) => {
+      const client = await open({ $model: '0.1',
+        collections: Object.fromEntries(Array.from({ length: names }, (_, i) => [`c${i}`, LOG])) },
+      { driver: nodeDriver(), validator: null });
+      try {
+        const body = async () => {};
+        for (let i = 0; i < 1000; i++) await client.transaction(body);
+        let best = Infinity;
+        for (let round = 0; round < 5; round++) {
+          const started = performance.now();
+          for (let i = 0; i < 1000; i++) await client.transaction(body);
+          best = Math.min(best, performance.now() - started);
+        }
+        return best;
+      }
+      finally { await client.close(); }
+    };
+    const small = await perTransaction(32);
+    const large = await perTransaction(256);
+    // both records built per transaction made the large model's cost several times the small one's
+    assert.ok(large < small * 2, `1000 transactions took ${large} ms at 256 names, ${small} ms at 32`);
   });
 
   it('refuse at open a schema the compiler refuses, and close the store they opened', async () => {

@@ -18,7 +18,7 @@
  */
 
 import { codePointPrefixSuccessor } from '@jarenjs/core/string';
-import { plainFamily, bindsText, ranksGroupsApart } from './algebra.js';
+import { plainFamily, bindsText, ranksGroupsApart, inequalityKey } from './algebra.js';
 import { physicalSelection, integerParameter } from './physical.js';
 import { columnKindFor } from './scalar-types.js';
 import { isNumericType } from './types.js';
@@ -39,50 +39,39 @@ function balancedJoin(parts, op) {
 }
 
 /**
- * The member a `$ne` literal leaf of a conjunction tests, as a key equal for
- * two leaves over one member, or `null` for a leaf {@link regroupInequalities}
- * leaves as it is: an external operand, a literal a list cannot carry — a
- * string the server holds in no JSON value ({@link serverHolds}), which keeps
- * the route and the refusal a lone `$ne` has, or a number JSON cannot spell
- * (an infinity) — or a column whose membership list is not the same
- * comparison as its `<>` (a `number` column compares a double there, and the
- * list a `numeric`). An epoch member's `$ne` and list both read its document.
- * @param {any} dialect @param {any} pred @returns {string | null}
- */
-function inequalityKey(dialect, pred) {
-  if (pred.p !== 'cmp' || pred.op !== 'ne' || !('lit' in pred.operand)) return null;
-  const lit = pred.operand.lit;
-  if (typeof lit === 'string' ? !serverHolds(dialect, lit, true) : !Number.isFinite(lit)) return null;
-  const { flavor, storage, codec } = pred.ref;
-  if (flavor === 'entity-column' && !((storage === 'integer' && (codec === undefined || codec === 'integer'))
-    || (storage === 'string' && (codec === undefined || codec === 'text')))) return null;
-  return JSON.stringify(pred.ref);
-}
-
-/**
  * A conjunction's items with every two or more `$ne` literals over one
- * member regrouped as the member's presence and ONE negated membership in
- * their list — the engine's answer exactly: a `$ne` is true for a present
- * member that equals none of the literals, of another type included, and
- * false for an absent one; the list's forms are total, so the `NOT` never
- * meets a NULL. It is for a dialect that bounds a statement's terms, where
- * every leaf is compiled (PostgreSQL's JIT) and a chain of hundreds of
- * `<>` compiles for seconds; the list is one leaf however long. The plan
- * keeps its leaves, so the term count and the mode are unchanged. The
- * regrouped leaf takes the place of the member's first `$ne`, so the
- * parameters stay in statement-text order.
+ * member — or `$ne` externals over one string column, where the dialect
+ * gathers externals into one list (`externalsIn`) — regrouped as the
+ * member's presence and ONE negated membership in their list
+ * ({@link inequalityKey}) — the engine's answer exactly: a `$ne` is true
+ * for a present member that equals none of the values, of another type
+ * included, and false for an absent one; the list's forms are total, so the
+ * `NOT` never meets a NULL, and its items of another kind than the column's
+ * are no member of it. It is for a dialect that bounds a statement's terms,
+ * where every leaf is compiled (PostgreSQL's JIT) and a chain of hundreds of
+ * `<>` compiles for seconds; the list is one leaf however long, and the
+ * planner counts it as one term (`predicateTerms`). The regrouped leaf takes
+ * the place of the member's first `$ne`, so the parameters stay in
+ * statement-text order.
  * @param {any} dialect @param {any[]} items @returns {any[]}
  */
 function regroupInequalities(dialect, items) {
   if (dialect.maxPredicateTerms === null) return items;
-  const keys = items.map((item) => inequalityKey(dialect, item));
+  // a literal the server holds in no JSON value keeps the route and the
+  // refusal a lone `$ne` has; an external folds only where the dialect
+  // gathers externals into one list
+  const keys = items.map((item) => {
+    const key = inequalityKey(item, (literal) => serverHolds(dialect, literal, true));
+    return key !== null && key.startsWith('ext:') && dialect.externalsIn === undefined ? null : key;
+  });
   /** @type {Map<string, any[]>} */
   const lists = new Map();
   keys.forEach((key, i) => {
     if (key === null) return;
+    const operand = 'ext' in items[i].operand ? items[i].operand.ext : items[i].operand.lit;
     const list = lists.get(key);
-    if (list === undefined) lists.set(key, [items[i].operand.lit]);
-    else list.push(items[i].operand.lit);
+    if (list === undefined) lists.set(key, [operand]);
+    else list.push(operand);
   });
   if (![...lists.values()].some((list) => list.length > 1)) return items;
   /** @type {any[]} */
@@ -95,7 +84,7 @@ function regroupInequalities(dialect, items) {
       placed.add(key);
       const { ref } = items[i];
       out.push({ p: 'and', items: [{ p: 'typeIs', ref, types: [], positive: true },
-        { p: 'not', item: { p: 'in', ref, operand: { list } } }] });
+        { p: 'not', item: { p: 'in', ref, operand: key.startsWith('ext:') ? { exts: list } : { list } } }] });
     }
   });
   return out;
@@ -1811,7 +1800,7 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       // column holds no string or number
       const kind = pred.ref.storage === 'string' ? 'text' : pred.ref.storage === 'boolean' ? null : 'number';
       if (kind === null) return dialect.booleanLiteral(false);
-      if (decimalColumn(dialect, pred.ref, 'ext' in pred.operand ? null
+      if (decimalColumn(dialect, pred.ref, 'ext' in pred.operand || 'exts' in pred.operand ? null
         : pred.operand.list.filter((/** @type {any} */ value) => typeof value === 'number'))) {
         // a number column holds the decimal digits a writer spelled, as a
         // document member does; it seeks where the caller names its table
@@ -1824,6 +1813,12 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       if ('ext' in pred.operand) {
         return `(${column} IS NOT NULL AND ${inListSql(dialect, column,
           param({ external: pred.operand.ext, json: true, list: true }), kind)})`;
+      }
+      // a conjunction's `$ne` externals over one string column, gathered
+      // (regroupInequalities): each bound once as the comparison binds it
+      if ('exts' in pred.operand) {
+        return `(${column} IS NOT NULL AND ${dialect.externalsIn(column,
+          pred.operand.exts.map((/** @type {string} */ name) => externalSlot(name)))})`;
       }
       const values = pred.operand.list.filter((/** @type {any} */ value) =>
         (kind === 'text' ? typeof value === 'string' : typeof value === 'number'));
@@ -2024,6 +2019,13 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
  * @returns {{ sql: string, slots: ParamSlot[] }}
  */
 export function emitEntityPlan(plan, dialect, physicalOf) {
+  // a count over a window counts the rows the windowed statement selects:
+  // the same statement, its selection one constant, under `COUNT(*)`
+  if (plan.aggregate === 'count' && plan.window !== null && plan.group === null && plan.quantifier === undefined) {
+    const windowed = emitEntityPlan({ ...plan, aggregate: null, project: { tree: null, leaves: [] } }, dialect, physicalOf);
+    return { sql: `SELECT COUNT(*) AS ${dialect.quoteIdentifier('value')} FROM (${windowed.sql}) AS ${dialect.quoteIdentifier('w')}`,
+      slots: windowed.slots };
+  }
   const q = dialect.quoteIdentifier;
   const sl = dialect.stringLiteral;
   /** @type {ParamSlot[]} */
@@ -2271,8 +2273,10 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
       const notNull = term.hop === undefined && term.ref.flavor === 'entity-column' && term.ref.notNull === true;
       return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst, notNull)}`;
     });
-    // the engine's nested-loop order: binding-order row identities
-    for (const binding of plan.bindings) terms.push(...identityTerms(binding));
+    // the engine's nested-loop order: binding-order row identities, each
+    // descending where the plan reads the order inverted (a `$reverse`)
+    for (const binding of plan.bindings)
+      terms.push(...identityTerms(binding).map((term) => (plan.reverse === true ? `${term} DESC` : term)));
     sql += ` ORDER BY ${terms.join(', ')}`;
     if (plan.window !== null)
       sql += ` ${dialect.limitClause(plan.window.limit, plan.window.offset)}`;

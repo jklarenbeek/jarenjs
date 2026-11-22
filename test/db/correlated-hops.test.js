@@ -925,9 +925,10 @@ if (url) {
   describe('correlated hops: the predicate term bound counts a hop\'s inner leaves (PostgreSQL)', () => {
     /** The dialect's bound on the leaf predicates one statement carries. */
     const BOUND = 128;
-    /** An inner filter of `count` inequalities on the author's age, none of which regroups. @param {number} count */
+    /** An inner filter of `count` inequalities on the author's age, none of which regroups (an ordering: a chain of
+     * `$ne` over one member is one list and one term). @param {number} count */
     const inner = (count) => ({ $and: [{ $eq: ['$r1.id', '$it.authorId'] },
-      ...Array.from({ length: count }, (_, i) => ({ $ne: ['$r1.age', i + 1000] }))] });
+      ...Array.from({ length: count }, (_, i) => ({ $lt: ['$r1.age', i + 1000] }))] });
     /** @param {number} count */
     const bounded = (count) => posts({ $where: { $exists: { $for: { r1: '$.User[*]' }, $where: inner(count), $return: '$r1' } } });
 
@@ -963,9 +964,8 @@ if (url) {
       assert.equal(above.mode, 'set');
       assert.equal(reasonOf(above), 'predicate.termBound');
       assert.deepEqual(await store.execute(leaf(BOUND / 2 + 1)), await store.execute(leaf(BOUND / 2 + 1), { pushdown: false }));
-      // the filter's `$ne` literals are one negated list, which the statement reads for the value and for the type
-      assert.equal((within.sql.match(/<>/g) ?? []).length, 0);
-      assert.equal((within.sql.match(/NOT \("h\d"\."age" IS NOT NULL AND "h\d"\."age" IN \(SELECT/g) ?? []).length, 2,
+      // the statement reads the filter's comparisons for the value and for the type
+      assert.equal((within.sql.match(/"h\d"\."age" < /g) ?? []).length, BOUND,
         'the statement carries the filter the bound counted twice');
     }));
     it('an order key counts its filter once', () => using(HOSTS[1], MODEL, DOCUMENTS, async (store) => {
@@ -979,7 +979,7 @@ if (url) {
       assert.deepEqual(await store.execute(keyed(BOUND + 1)), await store.execute(keyed(BOUND + 1), { pushdown: false }));
     }));
     it('a profile predicate is read twice by a value leaf and counts twice', () => using(HOSTS[1], MODEL, DOCUMENTS, async (store) => {
-      const profileOf = (/** @type {number} */ count) => ({ predicates: { User: { $and: Array.from({ length: count }, (_, i) => ({ $ne: ['$it.age', i + 1000] })) } } });
+      const profileOf = (/** @type {number} */ count) => ({ predicates: { User: { $and: Array.from({ length: count }, (_, i) => ({ $lt: ['$it.age', i + 1000] })) } } });
       const leaf = [{ $for: { it: '$.Post[*]' }, $return: { pid: '$it.pid', by: hop('$r1.name') } }];
       assert.equal((await store.explain(leaf, { profile: profileOf(BOUND / 2) })).mode, 'native');
       const above = await store.explain(leaf, { profile: profileOf(BOUND / 2 + 1) });
@@ -987,7 +987,7 @@ if (url) {
       assert.equal(reasonOf(above), 'predicate.termBound');
     }));
     it('a profile predicate counts once for every hop that wears it', () => using(HOSTS[1], MODEL, DOCUMENTS, async (store) => {
-      const profile = { predicates: { User: { $and: Array.from({ length: 70 }, (_, i) => ({ $ne: ['$it.age', i + 1000] })) } } };
+      const profile = { predicates: { User: { $and: Array.from({ length: 70 }, (_, i) => ({ $lt: ['$it.age', i + 1000] })) } } };
       const one = posts({ $where: { $exists: hop('$r1') } });
       const two = posts({ $where: { $and: [{ $exists: hop('$r1') }, { $exists: hop('$r1.name') }] } });
       assert.equal((await store.explain(one, { profile })).mode, 'native');

@@ -67,12 +67,57 @@ describe('DB-CLIENT.md: joins that run in the database, and the ones that don\'t
     assert.deepEqual([json.acrossOr.plan.mode, json.acrossOr.plan.reasons], ['set', [REASON_WHERE]]);
     assert.deepEqual([json.across.plan.mode, json.across.plan.join], ['native', true]);
     assert.deepEqual(json.strict, { acrossOr: 'JD0010', mixedRoots: 'JD0010', topLevelExists: 'JD0010', count: 2 });
-    assert.equal(json.handleAsInner.code, 'JL0005');
+    // the handle as the inner side is the sequence over it: the same statement and rows
+    assert.deepEqual(json.handleAsInner, json.joinFirst);
     assert.deepEqual(json.collections.map((/** @type {any} */ r) => r.code), ['JL0005', 'JL0005']);
-    assert.notEqual(json.collections[0].reason, json.handleAsInner.reason, 'a collection inner is refused for its source, not its shape');
     for (const quoted of [REASON_FOR, REASON_WHERE, 'join takes another async sequence over a provider (with no mapAsync) as its inner side',
       'join\'s other side must derive from the same source, or from two providers sharing one scope']) {
       assert.ok(prose.includes(quoted), quoted);
+    }
+  });
+});
+
+describe('an entity handle as a join\'s inner side', () => {
+  it('reads as the sequence over it, in join, groupJoin and after a where; another store\'s handle and a non-provider are still JL0005', async () => {
+    const { fromAsync } = await import('@jarenjs/linq');
+    const { open } = await import('@jarenjs/linq/db');
+    const m = await import('@jarenjs/linq/model');
+    const { nodeDriver } = await import('@jarenjs/db/node');
+    const Assignment = m.object({ id: m.string().key(), employee: m.string(), position: m.string(), level: m.integer() });
+    const Permission = m.object({ id: m.string().key(), position: m.string(), permission: m.string(), minLevel: m.integer() });
+    const model = m.defineModel({ entities: { Assignment, Permission } });
+    const client = await open(model, { driver: nodeDriver(), path: ':memory:' });
+    const other = await open(model, { driver: nodeDriver(), path: ':memory:' });
+    try {
+      const A = client.entities.Assignment, P = client.entities.Permission;
+      await A.create({ id: 'a1', employee: 'ann', position: 'clerk', level: 2 });
+      await A.create({ id: 'a2', employee: 'bob', position: 'desk', level: 1 });
+      await P.create({ id: 'p1', position: 'clerk', permission: 'orders.read', minLevel: 1 });
+      await P.create({ id: 'p2', position: 'clerk', permission: 'orders.approve', minLevel: 2 });
+      const pair = (/** @type {any} */ a, /** @type {any} */ p) => ({ employee: a.employee, permission: p.permission });
+      const counted = (/** @type {any} */ a, /** @type {any} */ g) => ({ a: a.id, n: g.count() });
+      for (const [title, build, mode] of /** @type {[string, (inner: any) => any, string][]} */ ([
+        ['join', (inner) => A.join(inner, (a) => a.position, (p) => p.position, pair), 'native'],
+        ['groupJoin', (inner) => A.groupJoin(inner, (a) => a.position, (p) => p.position, counted), 'native'],
+        ['a join after a where', (inner) => A.where((a) => a.level.gt(0)).join(inner, (a) => a.position, (p) => p.position, pair), 'set'],
+      ])) {
+        const byHandle = build(P), bySequence = build(fromAsync(P));
+        assert.deepEqual(byHandle.toDocument(), bySequence.toDocument(), title);
+        assert.deepEqual(await byHandle.toArray(), await bySequence.toArray(), title);
+        assert.equal((await A.explain(byHandle)).mode, mode, title);
+      }
+      assert.deepEqual(await A.join(P, (a) => a.position, (p) => p.position, pair).toArray(),
+        [{ employee: 'ann', permission: 'orders.read' }, { employee: 'ann', permission: 'orders.approve' }]);
+      assert.throws(() => A.join(other.entities.Permission, (a) => a.position, (p) => p.position, pair),
+        (/** @type {any} */ error) => error.code === 'JL0005' && error.message.includes("join's other side must derive from the same source"));
+      for (const inner of [[], { position: 'clerk' }, null]) {
+        assert.throws(() => A.join(inner, (a) => a.position, (/** @type {any} */ p) => p.position, pair),
+          (/** @type {any} */ error) => error.code === 'JL0005' && error.message.includes('join takes another async sequence over a provider'));
+      }
+    }
+    finally {
+      await client.close();
+      await other.close();
     }
   });
 });
