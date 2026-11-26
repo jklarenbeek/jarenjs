@@ -940,10 +940,10 @@ retains earlier Bun memory-budget losses even when a later sample passes.
 
 | Existing SQLite adoption executable | Workload | RSS bytes | Frozen reference bytes | RSS disposition |
 |---|---|---:|---:|---|
-| bun-executable | catalog | 267972608 | 536870912 | within reference |
-| bun-executable | archive-stock | 886812672 | 1073741824 | within reference |
-| node-executable | catalog | 300527616 | 536870912 | within reference |
-| node-executable | archive-stock | 829480960 | 1073741824 | within reference |
+| bun-executable | catalog | 307204096 | 536870912 | within reference |
+| bun-executable | archive-stock | 873377792 | 1073741824 | within reference |
+| node-executable | catalog | 296706048 | 536870912 | within reference |
+| node-executable | archive-stock | 828817408 | 1073741824 | within reference |
 
 These larger physical SQLite workloads are separate from the small build-selected managed application. Functional recovery success does not imply memory-budget success. Earlier samples remain in the resource history.
 

@@ -276,8 +276,9 @@ function placeUnder(errors, fault, own) {
 
 /**
  * What a resolved reference answered on one member at one location, with
- * the errors it kept ({@link ValidationRoot#callReference}).
- * @typedef {{ data: unknown, depth: number, valid: boolean, errors: InternalValidationError[] }} KeptAnswer
+ * the errors it kept and, recording output units, the units it recorded
+ * ({@link ValidationRoot#callReference}).
+ * @typedef {{ data: unknown, depth: number, valid: boolean, errors: InternalValidationError[], units: import('./output.js').UnitRecord[]|null }} KeptAnswer
  */
 
 /** The longest error list whose errors are compared pairwise for repeats before they are indexed by location */
@@ -932,15 +933,14 @@ export class ValidationRoot {
     // annotations to report), which annotation tracking already does.
     this.#usesUnevaluated = flags.unevaluated || this.#recorder !== null;
     // A collecting walk runs every branch of a `oneOf`, and the branches of
-    // an `anyOf` up to a match, in full: branches that enter one definition
-    // on one member through references enter it again per branch, at every
-    // level below. What such an entry answers depends on the member, its
-    // location and the references open around it alone where no annotation
-    // is tracked, nothing records output units and no dynamic reference
-    // reads the scope; there it is kept for the validation and given again,
-    // errors included.
-    this.#keepsReferenceAnswers = !opts.skipErrors && this.#recorder === null
-      && !this.#usesUnevaluated && !flags.dynamic;
+    // an `anyOf` up to a match (every branch while recording), in full:
+    // branches that enter one definition on one member through references
+    // enter it again per branch, at every level below. What such an entry
+    // answers depends on the member, its location and the references open
+    // around it alone where no `unevaluated*` keyword reads the annotations
+    // and no dynamic reference reads the scope; there it is kept for the
+    // validation and given again, errors and recorded output units included.
+    this.#keepsReferenceAnswers = !opts.skipErrors && !flags.unevaluated && !flags.dynamic;
 
     // For the root schema, baseUri is the origin
     this.#firstSchema = ValidationRoot.#createObject(this, origin, schema, origin);
@@ -1563,8 +1563,9 @@ export class ValidationRoot {
    * Call what a resolved reference enters. While a branch walk is open in a
    * compilation that keeps reference answers, an entry on the member it
    * answered before, at the same location with the same references open,
-   * gives that answer again and records the errors that entry left; any
-   * other call runs the target and keeps what it answered.
+   * gives that answer again and records the errors and the output units
+   * that entry left; any other call runs the target and keeps what it
+   * answered. Recording, the caller marks the reference's step first.
    * @param {Function} validate - The reference's target
    * @param {unknown} data - The member
    * @param {string} dataPath - Its location
@@ -1581,6 +1582,8 @@ export class ValidationRoot {
     if (kept !== undefined && kept.data === data && kept.depth === depth) {
       const errors = kept.errors;
       for (let i = 0; i < errors.length; i++) this.#keep(errors[i]);
+      // The units hold their evaluation path relative to the reference.
+      if (kept.units !== null) this.#recorder?.give(kept.units);
       return kept.valid;
     }
     // The entry's errors are kept apart until it returns, so its answer
@@ -1590,6 +1593,8 @@ export class ValidationRoot {
     const outerStart = this.#spanStart, outerOld = this.#spanOld;
     this.#spanStart = start;
     this.#spanOld = 0;
+    const units = this.#recorder?.units() ?? null;
+    const first = units === null ? 0 : units.length;
     let valid;
     try {
       valid = validate(data, dataPath, dataRoot);
@@ -1599,7 +1604,7 @@ export class ValidationRoot {
           byPath = new Map();
           this.#keptAnswers.set(validate, byPath);
         }
-        byPath.set(dataPath, { data, depth, valid, errors: this.#errors.slice(start) });
+        byPath.set(dataPath, { data, depth, valid, errors: this.#errors.slice(start), units: units === null ? null : units.slice(first) });
       }
     }
     finally {
@@ -2057,8 +2062,10 @@ export class ValidationObject {
     // Memoized state of the first resolution - the target never changes.
     let resolvedState = null;
     // The target itself, once resolved, where the reference enters no
-    // dynamic scope, has no siblings and records nothing.
+    // dynamic scope, has no siblings, and records nothing or keeps its
+    // answers (the reference's step is then marked before each entry).
     let direct = null;
+    const keepsAnswers = root.keepsReferenceAnswers;
 
     // Every loop through schemas passes a reference resolved on first use, so
     // the reference depth bound holds a deep instance and a loop that never
@@ -2100,7 +2107,7 @@ export class ValidationObject {
           dynAnchorName: isObjectClass(resolvedSchema) ? getDynamicAnchorName(resolvedSchema) : null,
         };
         if (enterAnchors.length === 0 && !resolvedState.hasRecAnchor && !resolvedState.dynAnchorName
-          && !boundSiblingValidator && rootRef.recorder === null)
+          && !boundSiblingValidator && (rootRef.recorder === null || keepsAnswers))
           direct = targetValidator;
       }
       const { refValidator, callRef, enterAnchors, hasRecAnchor, dynAnchorName } = resolvedState;
@@ -2150,15 +2157,18 @@ export class ValidationObject {
     // slower.
     const ceiling = root.options.maxReferenceDepth;
     const weight = root.referenceWeight(ref);
-    const keepsAnswers = root.keepsReferenceAnswers;
+    const recorder = root.recorder;
     const open = openReferences;
     const outermost = function resolveOutermostReference(data, dataPath, dataRoot) {
       if (open.depth + weight > ceiling) throw referencesTooDeep(path, ceiling, weight);
       open.depth += weight;
       open.count++;
       try {
-        if (direct !== null)
-          return keepsAnswers ? rootRef.callReference(direct, data, dataPath, dataRoot) : direct(data, dataPath, dataRoot);
+        if (direct !== null) {
+          if (!keepsAnswers) return direct(data, dataPath, dataRoot);
+          if (recorder !== null) recorder.pending = REF_STEP;
+          return rootRef.callReference(direct, data, dataPath, dataRoot);
+        }
         return resolveAndCall(data, dataPath, dataRoot);
       }
       catch (error) {
@@ -2175,8 +2185,11 @@ export class ValidationObject {
       open.depth += weight;
       open.count++;
       try {
-        if (direct !== null)
-          return keepsAnswers ? rootRef.callReference(direct, data, dataPath, dataRoot) : direct(data, dataPath, dataRoot);
+        if (direct !== null) {
+          if (!keepsAnswers) return direct(data, dataPath, dataRoot);
+          if (recorder !== null) recorder.pending = REF_STEP;
+          return rootRef.callReference(direct, data, dataPath, dataRoot);
+        }
         return resolveAndCall(data, dataPath, dataRoot);
       }
       finally {

@@ -159,7 +159,7 @@ the table and stale in the paragraph that cites it:
 | `./schema` | <!--fact:bundle.schema.kb-->48<!--/fact--> kB | the builders and the recording proxy `check()` captures through |
 | `./model` | <!--fact:bundle.model.kb-->60<!--/fact--> kB | the schema pen it subclasses |
 | `./jslt` | <!--fact:bundle.jslt.kb-->29<!--/fact--> kB | the body capture; of the schema pen, only the builder brand |
-| `./migration` | <!--fact:bundle.migration.kb-->36<!--/fact--> kB | the canonicalizer and hash a shape identity needs |
+| `./migration` | <!--fact:bundle.migration.kb-->37<!--/fact--> kB | the canonicalizer and hash a shape identity needs |
 | `./contract` | <!--fact:bundle.contract.kb-->61<!--/fact--> kB | the schema pen (a contract's inputs and outputs are schemas) |
 | `./flow` | <!--fact:bundle.flow.kb-->30<!--/fact--> kB | the capture; of the schema pen, only the brand |
 | `./app` | <!--fact:bundle.app.kb-->63<!--/fact--> kB | the schema pen and the JSLT pen (state, and views) |
@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->30 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->21 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -227,7 +227,7 @@ included.
 | `./auth-node` | 11 | core 8, contract 3 | 1.4 |
 | `./client` | 139 | core 75, validate 27, json 24, contract 13 | 6.1 |
 | `./command` | 23 | core 11, json 7, contract 5 | 1.2 |
-| `./continuation-node` | 20 | core 10, json 7, contract 3 | 1.6 |
+| `./continuation-node` | 20 | core 10, json 7, contract 3 | 1.7 |
 | `./diff` | 140 | core 74, validate 29, json 24, contract 13 | 6.8 |
 | `./fetch` | 11 | core 8, contract 3 | 0.7 |
 | `./http` | 46 | contract 17, core 16, json 7, validate 6 | 2.0 |
@@ -235,7 +235,7 @@ included.
 | `./local` | 19 | core 10, contract 9 | 1.1 |
 | `./node` | 13 | core 9, contract 4 | 0.8 |
 | `./port` | 27 | contract 15, core 12 | 1.4 |
-| `./project` | 174 | core 84, json 42, validate 29, contract 14, emit 5 | 9.3 |
+| `./project` | 174 | core 84, json 42, validate 29, contract 14, emit 5 | 9.4 |
 | `./provider` | 115 | core 75, json 32, contract 8 | 4.5 |
 | `./stream` | 16 | core 11, contract 5 | 1.0 |
 | `./webmcp` | 1 | contract 1 | 0.1 |
@@ -308,7 +308,7 @@ included.
 | `./patch` | 18 | core 10, json 8 | 1.0 |
 | `./path` | 18 | core 11, json 7 | 1.0 |
 | `./pointer` | 16 | core 10, json 6 | 0.9 |
-| `./query` | 85 | core 62, json 23 | 3.8 |
+| `./query` | 85 | core 62, json 23 | 3.9 |
 | `./query/calendar` | 36 | core 28, json 8 | 1.9 |
 | `./rules` | 90 | core 62, json 28 | 4.0 |
 | `./write` | 20 | core 11, json 9 | 1.1 |
@@ -359,7 +359,7 @@ included.
 | `./message` | 9 | core 9 | 0.6 |
 | `./model` | 9 | core 9 | 0.6 |
 | `./number` | 1 | core 1 | 0.1 |
-| `./object` | 8 | core 8 | 0.5 |
+| `./object` | 8 | core 8 | 0.6 |
 | `./process-node` | 1 | core 1 | 0.7 |
 | `./random` | 1 | core 1 | 0.1 |
 | `./range` | 10 | core 10 | 0.6 |

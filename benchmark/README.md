@@ -1167,17 +1167,17 @@ Measured on v24.22.1, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
 
 | Consumer / engine | Rows | Cold / warm ms | Query p95 ms | One update ms | Snapshot gzip bytes | Sampled heap / RSS high-water MiB | V8 heap ceiling MiB |
 |---|---:|---|---:|---:|---:|---|---:|
-| catalog / reference | 10000 | 116.26 / 72.35 | 7.73 | 0.61 | 370591 | 86.33 / 183.89 | 240.00 |
-| catalog / native | 10000 | 200.89 / 200.37 | 9.84 | 59.49 | 121054 | 99.02 / 213.08 | 240.00 |
-| archive-stock / reference | 75000 | 855.04 / 404.82 | 92.53 | 0.45 | 2820312 | 567.50 / 699.42 | 752.00 |
-| archive-stock / native | 75000 | 1080.75 / 1581.04 | 72.64 | 653.49 | 920811 | 578.11 / 762.73 | 752.00 |
+| catalog / reference | 10000 | 114.52 / 69.62 | 5.59 | 0.40 | 370591 | 88.41 / 195.71 | 240.00 |
+| catalog / native | 10000 | 183.65 / 201.20 | 9.73 | 88.87 | 121054 | 98.77 / 220.25 | 240.00 |
+| archive-stock / reference | 75000 | 1266.89 / 537.49 | 149.04 | 0.53 | 2820312 | 549.96 / 696.40 | 752.00 |
+| archive-stock / native | 75000 | 1437.59 / 1824.13 | 118.40 | 855.40 | 920811 | 576.69 / 738.79 | 752.00 |
 
 | Consumer | Native logical index MiB | Peak update accounted MiB | Native teardown ms / remaining handles | Membership / order / score / native reload differences | Reference reload tie changes |
 |---|---:|---:|---|---|---:|
-| catalog | 24.58 | 35.37 | 0.04 / 0 | 0 / 0 / 0 / 0 | 1002 |
+| catalog | 24.58 | 35.37 | 0.05 / 0 | 0 / 0 / 0 / 0 | 1002 |
 | archive-stock | 186.22 | 267.03 | 0.04 / 0 | 0 / 0 / 0 / 0 | 6002 |
 
-Browser gzip: native 6136 bytes; reference 5874 bytes.
+Browser gzip: native 6165 bytes; reference 5874 bytes.
 
 Separate Node processes, identical source rows and queries, five query samples each; startup includes source generation, cold build, snapshot and warm restore. An earlier unconstrained native run exceeded the larger corpus heap and RSS ceilings; the explicit host heap settings are required for this qualification. RSS is the OS process high-water mark; heap is sampled after operations. peakHeapBytes is the V8 hard heap ceiling (a conservative bound, not an observed peak); both engines run with the same max-old-space-size derived from the frozen heap budget, reserving 64 MiB for young space and explicitly limiting each semi-space to 16 MiB. Unconstrained GC is not a bounded host. Reference indexBytes is serialized JSON; native indexBytes is conservative logical retained allocation, so those columns are not the same metric. Both retain a cold and a restored index during query qualification.
 
