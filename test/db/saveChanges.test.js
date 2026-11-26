@@ -50,12 +50,13 @@ const MODEL = {
 };
 
 describe('one transaction, counts, and the return shape', () => {
-  it('a multi-entity save runs in exactly one savepoint and reports data', async () => {
+  it('a multi-entity save runs in exactly one transaction, begun with the write lock, and reports data', async () => {
     const db = new DatabaseSync(':memory:');
-    let savepoints = 0;
+    /** @type {string[]} */
+    let opened = [];
     const shim = {
       exec: (sql) => {
-        if (/^SAVEPOINT /.test(sql)) savepoints++;
+        if (/^(SAVEPOINT|BEGIN)\b/.test(sql)) opened.push(sql);
         return db.exec(sql);
       },
       prepare: (sql) => {
@@ -80,14 +81,15 @@ describe('one transaction, counts, and the return shape', () => {
     await store.entity('Label').create({ name: 'admin' });
     await store.entity('Post').create({ title: 'old', authorId: 'u1' });
 
-    savepoints = 0;
+    opened = [];
     users.put({ ...ada, name: 'ada2' });
     store.entity('Post').add({ title: 'fresh', authorId: 'u1' });
     users.put({ ...(await users.get('u1')), name: 'ada2', labels: ['admin'] });
     store.entity('Post').remove(1);
     const report = await store.saveChanges();
 
-    assert.strictEqual(savepoints, 1, 'all statements share one transaction');
+    // one transaction, which takes SQLite's write lock with its first statement
+    assert.deepStrictEqual(opened, ['BEGIN IMMEDIATE'], 'all statements share one transaction');
     assert.strictEqual(report.inserted, 1);
     assert.strictEqual(report.updated, 1);
     assert.strictEqual(report.deleted, 1);

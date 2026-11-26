@@ -4843,7 +4843,8 @@ not plan are a different fact and code, `JD2041` (§5.3).
 
 ### 11.6 Failure semantics and the return shape
 
-`saveChanges()` is all-or-nothing inside one transaction. On ANY
+`saveChanges()` is all-or-nothing inside one transaction, which at the
+root takes SQLite's write lock with its first statement (§13.3). On ANY
 failure the tracker is left exactly as it was before the call — the
 same save can be retried once the cause is gone; a half-applied
 tracker is worse than a rollback. A save whose statements all succeed
@@ -5414,7 +5415,18 @@ its own `JD2096` and message, and nothing is written, even inside a
 transaction that catches the refusal. That holds for `delete()`, a tracked
 save's removal and a delete inside a transaction, under every capture mode; a
 delete whose actions reach no row a store rule judges reads none of them for
-its rules (journal capture reads them to record them, LIVE-FORMAT §4). The
+its rules (journal capture reads them to record them, LIVE-FORMAT §4). These
+reads come before the write, inside its transaction, so on SQLite a write in a
+transaction of its own takes the write lock with its first statement (`BEGIN
+IMMEDIATE`): an entity write in a bracket of its own (a ruled or probed write,
+a database rule's, a physical entity's insert or update, a judged cascade
+delete) and every `saveChanges()` with a statement to run. Another
+connection's write lock is then waited out for `busyTimeout`, as any write's
+is, and a lock held longer is the busy failure (`JD2005`, class `busy`)
+naming the write's entity. A deferred transaction upgraded from read to
+write meets the `SQLITE_BUSY` the busy handler cannot wait out. Inside a
+caller's transaction the write is a savepoint and the root decides: a body
+whose writes read first begins with `mode: 'immediate'` (§5.1). The
 replay a replica applies runs no store rule, on its own rows or on theirs. A document's insert and update rules are checked before its own
 statement, against the document the unit of work holds, membership arrays
 included, as the store reads it back: a member written `null` that the table

@@ -1617,10 +1617,18 @@ export function createTracker(context) {
     // does: the statements below run in a savepoint whose release is not
     // a commit, so the right to KEEP what they justify waits for one
     const undo = undoFor(statements, joinOnly);
-    // the savepoint itself can refuse — a PostgreSQL transaction an earlier
-    // failure spent — and answers as its statements would (`JD2088`)
+    // The transaction takes the writer lock up front (`immediate`): a save
+    // reads before it writes (the row a rule judges, a probe, a cascade's
+    // closure), and a deferred transaction upgraded from read to write while
+    // another connection holds the write lock meets the `SQLITE_BUSY` no
+    // busy handler is asked to wait out. Inside an open transaction it is
+    // that transaction's savepoint, and the root's mode decides. The
+    // bracket itself can refuse — a lock held past `busyTimeout`, a
+    // PostgreSQL transaction an earlier failure spent (`JD2088`) — and answers
+    // as its first statement would
     return chain(
-      writes ? attempt(() => connection.transaction(() => runStatements(statements, report, deferred, joinOnly)), (error) => wrapDriverError(error))
+      writes ? attempt(() => connection.transaction(() => runStatements(statements, report, deferred, joinOnly), 'immediate'),
+        (error) => wrapDb(error, statements[0]))
         : chain(settleChecks(joinOnly.flatMap((record) => deferred.get(record) ?? [])), () => report),
       (finished) => {
         // The advance itself lands now, because inside the transaction the

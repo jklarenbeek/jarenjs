@@ -126,10 +126,15 @@ export function insertAttempt(connection, call, details, held) {
  *   declared zoned member (`x-entity.temporal`); without one a zoned member's
  *   key and stamp are written absent, and the row stays a candidate the engine
  *   decides, as one another provider keyed
+ * @param {(fn: () => any) => any} [ownTransaction] - the transaction a
+ *   bracketed write runs in: the store's takes the writer lock up front
+ *   where nothing is open (its connection's `transaction(fn, 'immediate')`);
+ *   without one, the connection's own `transaction(fn)`, whose second
+ *   argument on a driver's connection is a signal, not a mode
  * @returns {any}
  */
 export function entityCore(connection, entity, entityMapping, validate, runtime = undefined, keyConstraint = undefined, keyAllocates = true,
-  zoneProvider = null) {
+  zoneProvider = null, ownTransaction = undefined) {
   const host = resolveRuntime(runtime);
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
@@ -596,12 +601,21 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
         : storedKeyPart(i, doc[name])))).filter((row) => row.every((part) => part !== null)) }));
   /**
    * A write in a transaction of its own — a savepoint inside the caller's.
-   * A bracket that cannot open, on a PostgreSQL transaction an earlier
-   * failure spent, is classified as the write's own failure (`JD2088`),
-   * as its statement would be; a coded failure inside passes through.
+   * Under a store its own transaction takes the writer lock up front
+   * (`ownTransaction`): the bracketed writes read before they write (the
+   * row a rule judges, a probe, a physical row's current values), and a
+   * deferred transaction upgraded from read to write while another
+   * connection holds the write lock meets the `SQLITE_BUSY` no busy handler
+   * is asked to wait out, so `busyTimeout` never applied. Inside an open
+   * transaction it is that transaction's savepoint, and the root's mode
+   * decides. A bracket that cannot open — a lock held past `busyTimeout`, a
+   * PostgreSQL transaction an earlier failure spent — is classified as the
+   * write's own failure, as its statement would be; a coded failure inside
+   * passes through.
    * @param {any} key @param {() => any} run
    */
-  const bracketed = (key, run) => attempt(() => connection.transaction(run), (error) => wrapWrite(error, key));
+  const bracketed = (key, run) => attempt(() => (ownTransaction === undefined ? connection.transaction(run) : ownTransaction(run)),
+    (error) => wrapWrite(error, key));
 
   /**
    * A store rule's `$exists-row`: the probe SQL the database's trigger runs,

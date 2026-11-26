@@ -4092,8 +4092,11 @@ export function openStore(model, options) {
                         if (closure !== null && capture !== null) recordCascade(closure.entries);
                         return deleted;
                       }))));
-                return judged ? attempt(() => connection.transaction(remove),
-                  (error) => wrapDriverError(error, { docPath: `/entities/${entityName}`, collection: entityName })) : remove();
+                // the closure and the row it judges are read before the
+                // delete: the transaction takes the writer lock up front, as
+                // the entity's own bracketed writes do
+                return judged ? attempt(() => connection.transaction(remove, 'immediate'),
+                  (error) => wrapDriverError(error, { docPath: `/entities/${entityName}`, collection: entityName, key })) : remove();
               }),
             };
           };
@@ -4249,8 +4252,10 @@ export function openStore(model, options) {
               const validate = validationResult(options.compileSchema !== undefined
                 ? options.compileSchema(writeSchemaOf(entity, mapping.entities[name]))
                 : null);
+              // a write that reads first takes the writer lock up front (entity.js `bracketed`)
               core = captureEntity(name, entityCore(connection, entity,
-                mapping.entities[name], validate, runtime, entityPlans.get(name)?.keyConstraint, entityPlans.get(name)?.keyAllocates, zoneProvider));
+                mapping.entities[name], validate, runtime, entityPlans.get(name)?.keyConstraint, entityPlans.get(name)?.keyAllocates, zoneProvider,
+                (fn) => connection.transaction(fn, 'immediate')));
               entityCores.set(name, core);
             }
             return core;
@@ -4388,8 +4393,13 @@ export function openStore(model, options) {
                 // row back too, and journal capture records the join rows —
                 // in a capture nest, so when an enclosing transaction catches
                 // the refusal, the records of the rolled-back savepoint go too
-                const write = () => connection.transaction(() =>
-                  chain(core.create(doc), (made) => chain(attach(made, memberships), () => made)));
+                // a rule's probe reads before the INSERT: the transaction
+                // takes the writer lock up front, as the entity's own
+                // bracketed writes do, and its BEGIN fails as the INSERT would
+                const write = () => attempt(() => connection.transaction(() =>
+                  chain(core.create(doc), (made) => chain(attach(made, memberships), () => made)), 'immediate'),
+                (error) => wrapDriverError(error,
+                  { docPath: entities.get(name).docPath, collection: name, key: doc?.[mapping.entities[name].keys[0]] }));
                 return chain(guard(() => (capture === null ? write() : capture.nest(write))), registerCreated);
               },
               get: (key, readOptions) => chain(read(key, readOptions), (doc) =>
