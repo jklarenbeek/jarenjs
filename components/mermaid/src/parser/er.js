@@ -12,8 +12,10 @@ import { failWith } from '../errors.js';
 
 /** An entity name: a run of non-space characters, or a quoted name that may hold spaces. */
 const NAME = '("[^"]*"|\\S+)';
-/** `LEFT <cardl>--<cardr> RIGHT : label` (relationship); the label may be absent. */
-const RE_REL = new RegExp(`^${NAME}\\s+([|}{o]{1,2})(--|\\.\\.)([|}{o]{1,2})\\s+${NAME}(?:\\s*:\\s*(.*))?$`);
+/** One of Mermaid's cardinality symbols, which either end may write (`o{--||` reads). */
+const CARD = '(\\|o|o\\||\\|\\||\\}o|o\\{|\\}\\||\\|\\{)';
+/** `LEFT <cardl>--<cardr> RIGHT : label` (relationship); a missing label is caught after. */
+const RE_REL = new RegExp(`^${NAME}\\s+${CARD}(--|\\.\\.)${CARD}\\s+${NAME}(?:\\s*:\\s*(.*))?$`);
 
 /** A cardinality's word aliases, as Mermaid lists them (each is one of the four symbol pairs). */
 const CARD_WORDS = 'one or zero|zero or one|one or more|one or many|many\\(1\\)|1\\+|zero or more|zero or many'
@@ -31,6 +33,16 @@ const RE_REL_ANY = new RegExp(`^${NAME.replace('\\S+', '[^\\s"|{}]+?')}\\s*(\\|o
 
 /** One of Mermaid's connectors, a cardinality pair around `--` or `..` (`A--` is a name). */
 const RE_CONNECTOR = /(?:\|o|\|\||\}o|\}\|)(?:--|\.\.)(?:o\||\|\||o\{|\|\{)/;
+
+/** A spaced connector of cardinality characters, Mermaid's or not (`A }}--{{ B : x`). */
+const RE_LOOSE_REL = new RegExp(`^${NAME}\\s+[|}{o]{1,2}(?:--|\\.\\.)[|}{o]{1,2}\\s+${NAME}(?:\\s*:.*)?$`);
+
+/**
+ * A line of entity names Mermaid reads one by one (`A B C`, `A o--o B`):
+ * each a run of word characters, `-` and `*`, or quoted; a line opening
+ * with a directive's word (`direction TB`) is that directive.
+ */
+const RE_NAMES = /^(?!(?:direction|classDef|class|style|accTitle|accDescr)\s)(?:[\w*\u0080-\uffff-]+|"[^"]*")(?:\s+(?:[\w*\u0080-\uffff-]+|"[^"]*"))+$/;
 
 /** The quoted comment that ends an attribute line. */
 const RE_COMMENT = /\s+"([^"]*)"\s*$/;
@@ -94,6 +106,8 @@ export function parseEr(lines, lineOffset = 0) {
     // it can never match RE_REL.
     const spaced = RE_REL.exec(line);
     const rel = spaced ?? RE_REL_ANY.exec(line);
+    // a relationship without `: label` is refused, as Mermaid refuses it
+    if (rel !== null && rel[6] === undefined) failWith('mermaid/er/relationship', { line }, lineOffset + li + 1);
     if (rel !== null) {
       const left = entityName(rel[1]).name;
       const right = entityName(rel[5]).name;
@@ -118,7 +132,9 @@ export function parseEr(lines, lineOffset = 0) {
     const masked = line.replace(/"[^"]*"/g, (quoted) => '"' + ' '.repeat(quoted.length - 2) + '"');
     const brace = masked.indexOf('{');
     const head = brace === -1 ? line : line.slice(0, brace);
-    if (RE_CONNECTOR.test(masked)) {
+    // so is one spaced like a relationship around a connector Mermaid has
+    // not (`A |--| B : x`), unless it is names alone (`A o--o B`)
+    if (RE_CONNECTOR.test(masked) || (RE_LOOSE_REL.test(line) && !RE_NAMES.test(line))) {
       failWith('mermaid/er/relationship', { line }, lineOffset + li + 1);
     }
 
@@ -139,6 +155,10 @@ export function parseEr(lines, lineOffset = 0) {
     // a bare entity line: one name (quoted or not) and nothing else
     const bare = RE_BARE.exec(line);
     if (bare !== null && entityName(bare[1]).name !== '') ensure(bare[1]);
+    // several names, each an entity, as Mermaid reads them
+    else if (RE_NAMES.test(line)) {
+      for (const written of line.match(/"[^"]*"|\S+/g) ?? []) if (entityName(written).name !== '') ensure(written);
+    }
   }
 
   return { entities: order.map((n) => entityMap.get(n)), relationships };

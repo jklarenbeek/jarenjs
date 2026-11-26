@@ -22,9 +22,12 @@ describe('stateDiagram-v2 — every line reads, or is refused', () => {
   const transitions = (/** @type {string} */ src) => parseMermaid(src).ast.transitions
     .map((/** @type {any} */ t) => [t.from, t.to, t.label]);
 
-  it('splits at `;` where every piece is a statement, and keeps a label\'s `;` otherwise', () => {
+  it('splits at `;` where every piece is a statement, a label ending there, and keeps an entity code\'s `;`', () => {
     assert.deepEqual(transitions('stateDiagram-v2\n  A --> B; B --> C'), [['A', 'B', null], ['B', 'C', null]]);
-    assert.deepEqual(transitions('stateDiagram-v2\n  A --> B : x; y z'), [['A', 'B', 'x; y z']]);
+    // Mermaid ends the label at the `;` and reads `y z` as two states
+    const { ast } = parseMermaid('stateDiagram-v2\n  A --> B : x; y z');
+    assert.deepEqual([ast.transitions.map((/** @type {any} */ t) => [t.from, t.to, t.label]), ast.states.map((/** @type {any} */ s) => s.id)],
+      [[['A', 'B', 'x']], ['A', 'B', 'y', 'z']]);
     assert.deepEqual(transitions('stateDiagram-v2\n  A --> B : I #9829; you'), [['A', 'B', 'I #9829; you']]);
   });
 
@@ -38,13 +41,13 @@ describe('stateDiagram-v2 — every line reads, or is refused', () => {
     assert.deepEqual(ast.states.map((/** @type {any} */ s) => s.id), ['A', 'B']);
   });
 
-  it('prints a label\'s `;` as #59; only where the line would split, so it reads back as one transition', () => {
-    const doc = parseMermaid('stateDiagram-v2\n  A --> B : x; y z');
+  it('prints a label\'s `;` as #59;, so it reads back as one transition', () => {
+    const doc = parseMermaid('stateDiagram-v2\n  A --> B : x');
     doc.ast.transitions.push({ ...doc.ast.transitions[0], label: 'p; B --> C', event: 'p; B --> C' });
     const text = toMermaid(doc);
-    assert.match(text, /^A --> B : x; y z$/m);
+    assert.match(text, /^A --> B : x$/m);
     assert.match(text, /^A --> B : p#59; B --> C$/m);
-    assert.deepEqual(parseMermaid(text).ast.transitions.map((/** @type {any} */ t) => t.label), ['x; y z', 'p#59; B --> C']);
+    assert.deepEqual(parseMermaid(text).ast.transitions.map((/** @type {any} */ t) => t.label), ['x', 'p#59; B --> C']);
   });
 });
 
@@ -57,11 +60,24 @@ describe('classDiagram — a relation no form reads is refused', () => {
 });
 
 describe('erDiagram — a relationship reads, or is refused', () => {
-  it('reads a relationship without a label, and the lines after it', () => {
-    const doc = parseMermaid('erDiagram\n  A ||--o{ B\n  C ||--|| D : owns\n  E {\n    string x\n  }');
+  it('reads a relationship with an empty label, and the lines after it', () => {
+    const doc = parseMermaid('erDiagram\n  A ||--o{ B : ""\n  C ||--|| D : owns\n  E {\n    string x\n  }');
     assert.deepEqual(doc.ast.entities.map((/** @type {any} */ e) => e.name), ['A', 'B', 'C', 'D', 'E']);
     assert.deepEqual(doc.ast.relationships.map((/** @type {any} */ r) => [r.left, r.right, r.label]), [['A', 'B', ''], ['C', 'D', 'owns']]);
     assert.deepEqual(parseMermaid(toMermaid(doc)).ast, doc.ast);
+  });
+
+  it('refuses a relationship without `: label` in every spelling, as Mermaid does, naming its line', () => {
+    refused('erDiagram\n  C ||--|| D : owns\n  A ||--o{ B', 3, /^'A \|\|--o\{ B' is no relationship/);
+    refused('erDiagram\n  A||--o{B', 2, /^'A\|\|--o\{B' is no relationship/);
+    refused('erDiagram\n  A ||..o{ B', 2, /^'A \|\|\.\.o\{ B' is no relationship/);
+    refused('erDiagram\n  A one or more to zero or more B', 2, /^'A one or more to zero or more B' is no relationship/);
+  });
+
+  it('refuses a spaced connector of cardinality characters Mermaid has not', () => {
+    refused('erDiagram\n  A }}--{{ B : x', 2, /^'A \}\}--\{\{ B : x' is no relationship/);
+    refused('erDiagram\n  A |--| B : x', 2, /^'A \|--\| B : x' is no relationship/);
+    refused('erDiagram\n  A o--o B : x', 2, /^'A o--o B : x' is no relationship/);
   });
 
   it('refuses a connector line no form reads, naming its line', () => {

@@ -146,25 +146,41 @@ export function flowchartAst(direction, nodes, edges, subgraphs, classDefs, clas
 //#region sequence --------------------------------------------------
 
 /**
- * A declared participant/actor.
+ * A declared participant/actor. A participant whose `@{ "type": … }` names
+ * one of Mermaid's other boxes (`boundary`, `control`, `entity`, `database`,
+ * `collections`, `queue`) also carries it as `type`, which the renderer
+ * does not draw.
  * @param {string} id
  * @param {string} label
  * @param {'participant'|'actor'} kind
- * @returns {object}
+ * @returns {{ id: string, label: string, kind: 'participant'|'actor', type?: string }}
  */
 export function seqParticipant(id, label, kind) {
   return { id, label, kind };
 }
 
 /**
- * A message statement.
+ * A message's head: `arrow` (`->>`), `open` (`->`), `cross` (`-x`), `point`
+ * (`-)`), `both` (the two-way `<<->>`), and the half arrows: `half-top`
+ * (`-|\`), `half-bottom` (`-|/`), `stick-top` (`-\\`), `stick-bottom`
+ * (`-//`), and each written before the line (`/|-`, `\|-`, `//-`, `\\-`) as
+ * its `-reverse`. The renderer draws the last nine as an `arrow`.
+ * @typedef {'arrow'|'open'|'cross'|'point'|'both'|'half-top'|'half-bottom'|'stick-top'|'stick-bottom'
+ *   |'half-top-reverse'|'half-bottom-reverse'|'stick-top-reverse'|'stick-bottom-reverse'} SeqHead
+ */
+
+/**
+ * A message statement. A message written with Mermaid's central-connection
+ * marks (`A()->>()B`) also carries `central`: `from`, `to` or `both`, the
+ * ends the marks stand at, which the renderer does not draw.
  * @param {string} from
  * @param {string} to
  * @param {string} text
  * @param {'solid'|'dotted'} line
- * @param {'arrow'|'open'|'cross'|'point'} head
+ * @param {SeqHead} head
  * @param {'activate'|'deactivate'|null} activation `+`/`-` shorthand
- * @returns {object}
+ * @returns {{ kind: 'message', from: string, to: string, text: string, line: 'solid'|'dotted',
+ *   head: SeqHead, activation: 'activate'|'deactivate'|null, central?: 'from'|'to'|'both' }}
  */
 export function seqMessage(from, to, text, line, head, activation) {
   return { kind: 'message', from, to, text, line, head, activation };

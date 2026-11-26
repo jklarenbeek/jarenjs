@@ -44,7 +44,7 @@ describe('stateDiagram — the states keep their order through the printer', fun
   });
 
   it('declares an idle state after the states a transition introduces before it', () => {
-    const { text, ast } = roundTrip('stateDiagram-v2\nA : Alpha\nA --> B : go\nstate C');
+    const { text, ast } = roundTrip('stateDiagram-v2\nA : Alpha\nA --> B : go\nC');
     assert.deepEqual(ast.states.map((/** @type {any} */ s) => s.id), ['A', 'B', 'C']);
     assert.equal(text, 'stateDiagram-v2\nA : Alpha\nB\nC\nA --> B : go\n');
   });

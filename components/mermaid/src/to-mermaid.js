@@ -93,7 +93,8 @@ const RE_TITLE_NEEDS_QUOTE = /^[\s"']|[\s"']$/;
 
 /**
  * A label as source text that reads back as the same label. A line break
- * prints as `<br/>` (printed raw it would end the statement). A label that
+ * prints as `<br/>` (printed raw it would end the statement), but in a
+ * markdown string as itself, the quoted label running on to the next line. A label that
  * `needsQuote` matches, and a markdown string (unquoted, its backticks are
  * plain text), print quoted, in the quote kind the label does not hold; a
  * quoted label is one unit, so its delimiters are text.
@@ -112,7 +113,9 @@ const RE_TITLE_NEEDS_QUOTE = /^[\s"']|[\s"']$/;
  * @returns {string}
  */
 function labelSource(label, closer, needsQuote) {
-  let text = label.replace(/\n/g, '<br/>');
+  // a markdown string breaks its lines as Mermaid writes it, at a newline
+  // inside its quotes (one with a quote of its own prints `<br/>`)
+  let text = isMarkdownString(label) && !/["']/.test(label) ? label : label.replace(/\n/g, '<br/>');
   if (closer !== null) {
     const closes = text.includes(closer);
     if (closes || text.includes(';')) {
@@ -233,7 +236,8 @@ function printSequence(ast) {
   if (ast.autonumber) out.push('autonumber');
   for (const p of ast.participants) {
     const decl = p.kind === 'actor' ? 'actor' : 'participant';
-    out.push(p.label === p.id ? `${decl} ${p.id}` : `${decl} ${p.id} as ${p.label}`);
+    const type = p.type == null ? '' : `@{ "type": "${p.type}" }`;
+    out.push(p.label === p.id ? `${decl} ${p.id}${type}` : `${decl} ${p.id}${type} as ${p.label}`);
   }
   printSeqStatements(ast.statements, out, 0);
   return out.join('\n') + '\n';
@@ -250,7 +254,9 @@ function printSeqStatements(statements, out, depth) {
     if (stmt.kind === 'message') {
       const arrow = arrowToken(stmt.line, stmt.head);
       const act = stmt.activation === 'activate' ? '+' : stmt.activation === 'deactivate' ? '-' : '';
-      out.push(pad + oneStatement(`${stmt.from}${arrow}${act}${stmt.to}: `, stmt.text, sequenceStatements));
+      const fromMark = stmt.central === 'from' || stmt.central === 'both' ? '()' : '';
+      const toMark = stmt.central === 'to' || stmt.central === 'both' ? '()' : '';
+      out.push(pad + oneStatement(`${stmt.from}${fromMark}${arrow}${act}${toMark}${stmt.to}: `, stmt.text, sequenceStatements));
     }
     else if (stmt.kind === 'note') {
       out.push(pad + oneStatement(`note ${stmt.placement} ${stmt.actors.join(',')}: `, stmt.text, sequenceStatements));
@@ -291,14 +297,24 @@ function oneStatement(head, text, statements) {
     : head + text.replace(/(#[A-Za-z0-9]+;)|;/g, (m, code) => code ?? '#59;');
 }
 
+/** Each half-arrow head's marks, written after the line or (`-reverse`) before it. */
+const HALF_HEAD_MARKS = /** @type {Record<string, string>} */ ({
+  __proto__: null,
+  'half-top': '|\\', 'half-bottom': '|/', 'stick-top': '\\\\', 'stick-bottom': '//',
+  'half-top-reverse': '/|', 'half-bottom-reverse': '\\|', 'stick-top-reverse': '//', 'stick-bottom-reverse': '\\\\',
+});
+
 /**
  * The exact inverse of `classifyArrow`.
  * @param {'solid'|'dotted'} line
- * @param {'arrow'|'open'|'cross'|'point'} head
+ * @param {import('./ast.js').SeqHead} head
  * @returns {string}
  */
 function arrowToken(line, head) {
   const dash = line === 'dotted' ? '--' : '-';
+  if (head === 'both') return `<<${dash}>>`;
+  const marks = HALF_HEAD_MARKS[head];
+  if (marks !== undefined) return head.endsWith('-reverse') ? marks + dash : dash + marks;
   const tip = head === 'arrow' ? '>>' : head === 'cross' ? 'x' : head === 'point' ? ')' : '>';
   return dash + tip;
 }
@@ -324,7 +340,8 @@ function printClass(ast) {
   // a name only words may spell is written bare; any other in backticks
   const name = (/** @type {string} */ n) => (/^[^\s"`:;<>*|()\-[\]{}~]+$/.test(n) ? n : `\`${n}\``);
   for (const cls of ast.classes) {
-    const head = `class ${name(cls.name)}${cls.label !== cls.name ? `["${cls.label}"]` : ''}`;
+    const generic = cls.generic == null ? '' : `~${cls.generic}~`;
+    const head = `class ${name(cls.name)}${generic}${cls.label !== cls.name ? `["${cls.label}"]` : ''}`;
     if (cls.members.length === 0) {
       out.push(head);
     }
@@ -377,6 +394,17 @@ function sameStates(text, ast) {
 }
 
 /**
+ * A labelled state's line: `X : label`, or `state "label" as X` for a label
+ * holding a `;`, which would end the `:` form's label there.
+ * @param {{ id: string, label: string }} s
+ * @returns {string}
+ */
+function stateLabelLine(s) {
+  return s.label.includes(';') && !/["\n]/.test(s.label) ? `state "${s.label}" as ${s.id}`
+    : oneStatement(`${s.id} : `, s.label, stateStatements);
+}
+
+/**
  * One transition's line, read back as the one transition it is.
  * @param {any} t
  * @returns {string}
@@ -394,7 +422,7 @@ function printStateLines(ast, declareAll) {
   const out = ['stateDiagram-v2'];
   const nested = ast.states.some((s) => s.parent != null) || ast.transitions.some((t) => t.parent != null);
   if (declareAll) {
-    for (const s of ast.states) out.push(s.label !== s.id ? oneStatement(`${s.id} : `, s.label, stateStatements) : stateDeclaration(s.id));
+    for (const s of ast.states) out.push(s.label !== s.id ? stateLabelLine(s) : stateDeclaration(s.id));
   }
   if (nested) {
     const states = new Map(ast.states.map((s) => [s.id, s]));
@@ -418,7 +446,7 @@ function printStateLines(ast, declareAll) {
       if (declareAll && s.parent == null) continue;
       scope(s.parent);
       out.push('  '.repeat(opened.length)
-        + (declareAll || s.label === s.id ? stateDeclaration(s.id) : oneStatement(`${s.id} : `, s.label, stateStatements)));
+        + (declareAll || s.label === s.id ? stateDeclaration(s.id) : stateLabelLine(s)));
     }
     for (const t of ast.transitions) {
       scope(t.parent);
@@ -438,7 +466,7 @@ function printStateLines(ast, declareAll) {
       mentioned.add(t.to);
     }
     for (const s of ast.states) {
-      if (s.label !== s.id) out.push(oneStatement(`${s.id} : `, s.label, stateStatements));
+      if (s.label !== s.id) out.push(stateLabelLine(s));
       else if (!mentioned.has(s.id)) out.push(stateDeclaration(s.id));
     }
   }

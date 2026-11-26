@@ -4,7 +4,8 @@
  * bodies (`class Foo["label"]` sets the label), `Foo : +member` line form,
  * relations (`<|--`, `*--`, `o--`, `-->`, `..>`, `..|>`, the lollipop
  * `()--`, …; blanks around the operator optional) with optional quoted
- * cardinalities on either side and an optional `: label`, and `click`
+ * cardinalities on either side and an optional `: label`, a class's generic
+ * (`Foo~T~`, named `Foo` wherever it is written, kept as `generic`), and `click`
  * statements (a link or a call, with the tooltip text). Geometry-free:
  * members and relations preserve declaration order.
  */
@@ -39,6 +40,20 @@ const RE_DIRECTIVE = /^(?:note|classDef|cssClass|style|link|callback|direction|n
  */
 function className(name) {
   return name.startsWith('`') ? name.slice(1, -1) : name.replace(/\s+/g, '');
+}
+
+/** A name's generic: `Square~Shape~` is `Square` of `Shape` (`List~List~int~~` nests). */
+const RE_GENERIC = /^([^~]+)~(.*)~$/;
+
+/**
+ * A written class name without its generic, as Mermaid names the class, and
+ * the generic it gives it (null without one).
+ * @param {string} name a name as `className` keeps it
+ * @returns {{ name: string, generic: string|null }}
+ */
+function genericOf(name) {
+  const m = RE_GENERIC.exec(name);
+  return m === null ? { name, generic: null } : { name: m[1], generic: m[2] };
 }
 
 /**
@@ -98,6 +113,28 @@ function classHead(head) {
 }
 
 /**
+ * The text of a `class` statement up to its body, its `<<annotation>>` and
+ * anything after one dropped, its generic kept; a `<` inside a quoted label
+ * or a backtick-quoted name is text.
+ * @param {string} rest the statement after `class`
+ * @returns {string}
+ */
+function classStatementHead(rest) {
+  const brace = rest.indexOf('{');
+  const head = brace === -1 ? rest : rest.slice(0, brace);
+  for (let i = 0; i < head.length; i++) {
+    const c = head[i];
+    if (c === '"' || c === '`') {
+      const close = head.indexOf(c, i + 1);
+      if (close === -1) return head;
+      i = close;
+    }
+    else if (c === '<') return head.slice(0, i);
+  }
+  return head;
+}
+
+/**
  * @param {string[]} lines
  * @returns {object}
  */
@@ -109,13 +146,17 @@ export function parseClass(lines, lineOffset = 0) {
   /** @type {import('./click.js').NodeClick[]} */
   const clicks = [];
 
-  const ensure = (name) => {
+  // a class is named without its generic (`Square~Shape~` is `Square`),
+  // wherever the generic is written, and keeps the generic as `generic`
+  const ensure = (written) => {
+    const { name, generic } = genericOf(written);
     let cls = classMap.get(name);
     if (cls === undefined) {
       cls = { name, label: name, members: [] };
       classMap.set(name, cls);
       order.push(name);
     }
+    if (generic !== null) cls.generic = generic;
     return cls;
   };
 
@@ -130,7 +171,7 @@ export function parseClass(lines, lineOffset = 0) {
     if (line.startsWith('class ')) {
       const rest = line.slice('class '.length).trim();
       const brace = rest.indexOf('{');
-      const head = classHead(brace === -1 ? rest.replace(/[~<].*$/, '') : rest.slice(0, brace));
+      const head = classHead(classStatementHead(rest));
       const cls = ensure(head.name);
       if (head.label !== null) cls.label = head.label;
       if (brace === -1) continue;
@@ -158,8 +199,8 @@ export function parseClass(lines, lineOffset = 0) {
     if (rel !== null) {
       // the end at a lollipop (`bar ()-- foo`) names an interface, not a class
       const lollipop = rel.type.startsWith('()') !== rel.type.endsWith('()');
-      if (!lollipop || !rel.type.startsWith('()')) ensure(rel.from);
-      if (!lollipop || !rel.type.endsWith('()')) ensure(rel.to);
+      if (!lollipop || !rel.type.startsWith('()')) rel.from = ensure(rel.from).name;
+      if (!lollipop || !rel.type.endsWith('()')) rel.to = ensure(rel.to).name;
       relations.push(rel);
       continue;
     }

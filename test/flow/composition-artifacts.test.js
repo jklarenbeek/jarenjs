@@ -86,7 +86,7 @@ Active --> Outside : leave`;
     assert.deepEqual(transformJson(forward, parseMermaid(printed)), doc);
   });
   it('requires a declared initial for each compound scope instead of choosing a child arbitrarily', () => {
-    const doc = transformJson(forward, parseMermaid('stateDiagram-v2\n[*] --> A\nstate A {\nstate B\n}'));
+    const doc = transformJson(forward, parseMermaid('stateDiagram-v2\n[*] --> A\nstate A {\nB\n}'));
     assert.throws(() => compileStatechart(doc), { code: 'JF0020' });
     const labelled = transformJson(forward, parseMermaid('stateDiagram-v2\n[*] --> A : conditional\nA --> [*]'));
     assert.throws(() => compileStatechart(labelled), { code: 'JF0020' });

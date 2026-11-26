@@ -16,14 +16,22 @@ import {
 import { failWith } from '../errors.js';
 import { firstToken } from '../utils.js';
 
-/** A message: `A->>+B: text`. */
-const RE_MSG = /^([^-<>:]+?)\s*((?:-{1,2})(?:>>|>|x|\)))\s*([+-]?)\s*([^:]+?)\s*:\s*(.*)$/;
+/**
+ * A message's arrow, as Mermaid spells them: `->>`, `->`, `-x`, `-)`, the
+ * two-way `<<->>`, the half arrows `-|\`, `-|/`, `-\\`, `-//` and their
+ * reverse `/|-`, `\|-`, `//-`, `\\-`; each with `--` for a dotted line.
+ */
+const ARROW = '<<-{1,2}>>|-{1,2}(?:>>|>|x|\\)|\\|\\\\|\\|\\/|\\\\\\\\|\\/\\/)|(?:\\/\\||\\\\\\||\\/\\/|\\\\\\\\)-{1,2}';
+/** A message: `A->>+B: text`, a `()` mark at either end of the arrow. */
+const RE_MSG = new RegExp(`^([^-<>:]+?)\\s*(\\(\\))?\\s*(${ARROW})\\s*([+-]?)\\s*(\\(\\))?\\s*([^:]+?)\\s*:\\s*(.*)$`);
 /** `participant A as Alice` / `actor A`. */
 const RE_PARTICIPANT = /^(participant|actor)\s+(.+)$/;
 /** A participant's `@{ … }` metadata: the name before it, the metadata, the rest. */
 const RE_PARTICIPANT_META = /^([^@]*?)\s*@\{([^}]*)\}(.*)$/;
 /** The `"alias"` member of a participant's metadata. */
 const RE_META_ALIAS = /"alias"\s*:\s*"([^"]*)"/;
+/** The `"type"` member of a participant's metadata, one of Mermaid's participant types. */
+const RE_META_TYPE = /"type"\s*:\s*"(actor|participant|boundary|control|entity|database|collections|queue)"/;
 /** `note left of A: t` / `note right of A: t` / `note over A,B: t`. */
 const RE_NOTE = /^[Nn]ote\s+(left of|right of|over)\s+([^:]+):\s*(.*)$/;
 
@@ -31,8 +39,8 @@ const RE_NOTE = /^[Nn]ote\s+(left of|right of|over)\s+([^:]+):\s*(.*)$/;
 const OPEN_BLOCKS = new Set(['loop', 'opt', 'alt', 'par', 'critical', 'break', 'rect']);
 
 /** The words that start a statement this reader reads by its first word. */
-const STATEMENT_WORDS = new Set([...OPEN_BLOCKS, 'participant', 'actor', 'activate', 'deactivate',
-  'else', 'and', 'option', 'end', 'autonumber']);
+const STATEMENT_WORDS = new Set([...OPEN_BLOCKS, 'participant', 'actor', 'create', 'destroy', 'activate',
+  'deactivate', 'else', 'and', 'option', 'end', 'autonumber']);
 
 /** A `;` that ends an entity code (`#59;`, `#quot;`) is part of the text. */
 const RE_SEPARATOR = /#[A-Za-z0-9]+;|;/g;
@@ -84,10 +92,12 @@ export function parseSequence(lines, lineOffset) {
   const stack = [];
   let autonumber = false;
 
-  const declare = (id, label, kind) => {
+  const declare = (id, label, kind, type = null) => {
     if (seen.has(id)) return;
     seen.add(id);
-    participants.push(seqParticipant(id, label ?? id, kind));
+    const participant = seqParticipant(id, label ?? id, kind);
+    if (type !== null) participant.type = type;
+    participants.push(participant);
   };
 
   /**
@@ -100,19 +110,28 @@ export function parseSequence(lines, lineOffset) {
 
     if (line === 'autonumber') { autonumber = true; return; }
 
-    if (firstWord === 'participant' || firstWord === 'actor') {
-      const m = RE_PARTICIPANT.exec(line);
+    // `create participant A` declares A where the line stands
+    const declaration = firstWord === 'create' ? line.slice('create'.length).trim() : line;
+    const declares = firstToken(declaration);
+    if (declares === 'participant' || declares === 'actor') {
+      const m = RE_PARTICIPANT.exec(declaration);
       if (m !== null) {
-        // `Alice@{ "type": "database", "alias": "Store" }`: the box's kind is
-        // not kept; its alias is the label unless an `as` names one
+        // `Alice@{ "type": "database", "alias": "Store" }`: the type names the
+        // box (an `actor` type draws an actor), and the alias is the label
+        // unless an `as` names one
         const meta = RE_PARTICIPANT_META.exec(m[2]);
         const written = meta === null ? m[2] : meta[1] + meta[3];
         const { id, label } = splitAlias(written.trim());
         const alias = meta === null ? null : RE_META_ALIAS.exec(meta[2]);
-        declare(id, label === id && alias !== null ? alias[1] : label, /** @type {any} */ (m[1]));
+        const type = meta === null ? null : RE_META_TYPE.exec(meta[2])?.[1] ?? null;
+        const kind = type === 'actor' || type === 'participant' ? type : type === null ? m[1] : 'participant';
+        declare(id, label === id && alias !== null ? alias[1] : label, /** @type {any} */ (kind),
+          type === null || type === 'actor' || type === 'participant' ? null : type);
       }
       return;
     }
+    // `destroy A` ends A's lifeline, which this tree does not keep
+    if (firstWord === 'destroy') return;
 
     if (firstWord === 'activate' || firstWord === 'deactivate') {
       const actor = line.slice(firstWord.length).trim();
@@ -165,16 +184,20 @@ export function parseSequence(lines, lineOffset) {
     // A message.
     const mm = RE_MSG.exec(line);
     if (mm !== null) {
-      // `A()->>()B`: the half-arrow marks at the actors are not kept
-      const from = mm[1].trim().replace(/\(\)$/, '');
-      const arrow = mm[2];
-      const activation = mm[3] === '+' ? 'activate' : mm[3] === '-' ? 'deactivate' : null;
-      const to = mm[4].trim().replace(/^\(\)/, '');
-      const text = mm[5];
+      const from = mm[1].trim();
+      const arrow = mm[3];
+      const activation = mm[4] === '+' ? 'activate' : mm[4] === '-' ? 'deactivate' : null;
+      const to = mm[6].trim();
+      const text = mm[7];
       declare(from, from, 'participant');
       declare(to, to, 'participant');
       const { line: lineStyle, head } = classifyArrow(arrow);
-      current.push(seqMessage(from, to, text, lineStyle, head, /** @type {any} */ (activation)));
+      const message = seqMessage(from, to, text, lineStyle, head, /** @type {any} */ (activation));
+      // `A()->>()B`: the central-connection marks at either end of the arrow
+      if (mm[2] !== undefined || mm[5] !== undefined) {
+        message.central = mm[2] === undefined ? 'to' : mm[5] === undefined ? 'from' : 'both';
+      }
+      current.push(message);
       return;
     }
 
@@ -192,16 +215,35 @@ export function parseSequence(lines, lineOffset) {
 }
 
 /**
+ * The half-arrow heads by the marks that spell them after the line: a filled
+ * (`|`) or a stick (doubled) half, on the top or the bottom of the line.
+ * @type {Record<string, import('../ast.js').SeqHead>}
+ */
+const HALF_HEADS = {
+  __proto__: null, '|\\': 'half-top', '|/': 'half-bottom', '\\\\': 'stick-top', '//': 'stick-bottom',
+};
+/**
+ * The same heads written before the line, which point back at the sender.
+ * @type {Record<string, import('../ast.js').SeqHead>}
+ */
+const REVERSE_HALF_HEADS = {
+  __proto__: null, '/|': 'half-top-reverse', '\\|': 'half-bottom-reverse', '//': 'stick-top-reverse',
+  '\\\\': 'stick-bottom-reverse',
+};
+
+/**
  * Classify a sequence arrow token into line style + head.
  * @param {string} arrow
- * @returns {{ line: 'solid'|'dotted', head: 'arrow'|'open'|'cross'|'point' }}
+ * @returns {{ line: 'solid'|'dotted', head: import('../ast.js').SeqHead }}
  */
 function classifyArrow(arrow) {
-  const line = arrow.startsWith('--') ? 'dotted' : 'solid';
-  const head = arrow.endsWith('>>') ? 'arrow'
-    : arrow.endsWith('x') ? 'cross'
-      : arrow.endsWith(')') ? 'point'
-        : 'open';
+  const run = /** @type {RegExpExecArray} */ (/-+/.exec(arrow));
+  const line = run[0].length === 2 ? 'dotted' : 'solid';
+  if (arrow.startsWith('<<')) return { line, head: 'both' };
+  if (run.index > 0) return { line, head: REVERSE_HALF_HEADS[arrow.slice(0, run.index)] };
+  const tip = arrow.slice(run[0].length);
+  if (Object.hasOwn(HALF_HEADS, tip)) return { line, head: HALF_HEADS[tip] };
+  const head = tip === '>>' ? 'arrow' : tip === 'x' ? 'cross' : tip === ')' ? 'point' : 'open';
   return { line, head };
 }
 

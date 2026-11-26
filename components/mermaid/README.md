@@ -653,6 +653,24 @@ swallowed the lines after it) or with the word cardinalities
 (`CAR 1 to zero or more NAMED-DRIVER`, dropped) reads, an entity's `p[Person]`
 is an `alias` and its `:::style` is dropped (both were part of the name), and a
 one-line entity block whose comment holds a connector reads (it was refused).
+More of Mermaid's documented forms read as Mermaid reads them: a quoted
+flowchart label over lines (`` n["`Line1↵Line 2`"] ``, refused) reads with its
+line breaks, which `toMermaid` writes as newlines in a markdown string; a
+node's `A@{ shape: diamond, label: "x" }` sets its shape and label (both were
+skipped); `subgraph1 --> B` is a node `subgraph1` (it opened a subgraph `1`,
+so a subgraph linked to by its id printed a line that read back as another
+tree); a class is named without its generic in every form (`class X~T~ {`
+and a relation's ends kept `X~T~`), with the generic as `generic`, drawn
+`X<T>`; a sequence participant's `@{ "type": … }` is its `kind` (`actor`) or
+`type`, and the half-arrow (`A-|\B`), two-way (`A<<->>B`) and
+central-connection (`A()->>()B`) messages read, where the first two lost the
+message and its actors and the marks were dropped, as does `create
+participant X`; a state transition label and a description end at `;`
+(`A --> B : x;` kept `x;`), several names on one line are states, and
+`state X` with no `{` or `<<kind>>` declares no state; an ER line of names is
+that many entities (`A o--o B` read a relationship), and an ER relationship
+without `: label` is refused, as Mermaid refuses it (it read with the label
+`""`; write `: ""` for an empty one).
 
 ## Exports
 

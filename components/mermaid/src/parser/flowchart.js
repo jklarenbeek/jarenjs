@@ -99,9 +99,10 @@ export function parseFlowchart(lines, lineOffset, direction) {
       nodeMap.set(id, node);
       nodeOrder.push(id);
     }
-    else if (label !== null && label !== undefined) {
-      node.label = label;
-      node.shape = shape ?? node.shape;
+    else {
+      if (label !== null && label !== undefined) node.label = label;
+      // a shape comes with a label, or alone from a node's `@{ shape: … }`
+      if (shape !== null && shape !== undefined) node.shape = shape;
     }
     if (subgraphStack.length > 0) {
       const group = subgraphStack[subgraphStack.length - 1];
@@ -127,7 +128,8 @@ export function parseFlowchart(lines, lineOffset, direction) {
       subgraphs.push(flowSubgraph(group.id, group.label, group.direction, group.nodes));
       return true;
     }
-    if (line.startsWith('subgraph')) {
+    // `subgraph` is a keyword only as a word of its own: `subgraph1` is a node
+    if (line === 'subgraph' || RE_SUBGRAPH.test(line)) {
       const rest = line.slice('subgraph'.length).trim();
       const sg = parseSubgraphHeader(rest);
       subgraphStack.push({ id: sg.id, label: sg.label, direction: null, nodes: [] });
@@ -172,9 +174,17 @@ export function parseFlowchart(lines, lineOffset, direction) {
   };
 
   for (let li = 0; li < lines.length; li++) {
-    const line = lines[li].trim();
+    let line = lines[li].trim();
     if (line === '') continue;
     const lineNo = lineOffset + li + 1;
+    // a quoted label may run over lines (a markdown string's line breaks are
+    // its own): a line no reading takes on its own, with a quote left open,
+    // reads on to the line that closes it
+    const joined = quotedLabelLines(lines, li, line, direction);
+    if (joined !== null) {
+      line = joined.line;
+      li = joined.last;
+    }
     // a line that opens with a keyword is that one statement, read whole
     if (readKeyword(line, lineNo)) continue;
     // A node/edge chain: split on ';' first (multiple statements per line);
@@ -196,6 +206,53 @@ export function parseFlowchart(lines, lineOffset, direction) {
 
   const nodes = nodeOrder.map((id) => nodeMap.get(id));
   return flowchartAst(direction, nodes, edges, subgraphs, classDefs, classes, styles, clicks);
+}
+
+/** `subgraph` and a blank: the keyword, not a node id that begins with it. */
+const RE_SUBGRAPH = /^subgraph\s/;
+/** A subgraph header whose title opens with a quote: `subgraph s ["…`, `subgraph "…`. */
+const RE_SUBGRAPH_QUOTED_TITLE = /^subgraph\s+(?:"|[^\s[]*\s*\[\s*")/;
+
+/**
+ * A statement whose quoted label runs over lines, as Mermaid reads it: the
+ * line holds an odd number of `"` and is refused on its own, so the lines up
+ * to the next one that closes the quote join it, each trimmed, at a line
+ * break. Null when the line reads on its own or no later line closes it.
+ * @param {string[]} lines
+ * @param {number} li the line's index
+ * @param {string} line the line, trimmed
+ * @param {string} direction
+ * @returns {{ line: string, last: number } | null}
+ */
+function quotedLabelLines(lines, li, line, direction) {
+  // the last line has none to join (and a line read alone is the last)
+  if (li === lines.length - 1 || countCharCode(line, 0x22 /* " */) % 2 === 0) return null;
+  // a subgraph header reads alone with its title cut short, so one whose
+  // quote opens its title (`subgraph s ["…`, `subgraph "…`) reads on
+  if (RE_SUBGRAPH.test(line) ? !RE_SUBGRAPH_QUOTED_TITLE.test(line) : readsAlone(line, direction)) return null;
+  let text = line;
+  for (let next = li + 1; next < lines.length; next++) {
+    const more = lines[next].trim();
+    text += '\n' + more;
+    if (countCharCode(more, 0x22) % 2 === 1) return { line: text, last: next };
+  }
+  return null;
+}
+
+/**
+ * Does one line read as a flowchart on its own?
+ * @param {string} line
+ * @param {string} direction
+ * @returns {boolean}
+ */
+function readsAlone(line, direction) {
+  try {
+    parseFlowchart([line], 0, direction);
+    return true;
+  }
+  catch {
+    return false;
+  }
 }
 
 /**
@@ -390,13 +447,83 @@ function readVertex(s, pos, lineNo) {
       p = RE_ID.lastIndex;
     }
   }
-  // `A@{ shape: …, label: … }`: the node's metadata, which the tree does
-  // not read yet, is skipped so the statement reads on
+  // `A@{ shape: …, label: … }`: the node's metadata sets its shape and label
   if (s.charCodeAt(p) === 0x40 /* @ */ && s.charCodeAt(p + 1) === 0x7b /* { */) {
     const end = metadataEnd(s, p + 2);
-    if (end !== -1) p = end;
+    if (end !== -1) {
+      const meta = nodeMetadata(s.slice(p + 2, end - 1));
+      if (meta.label !== null) label = meta.label;
+      if (meta.shape !== null) shape = meta.shape;
+      p = end;
+    }
   }
   return { id, label, shape, className, pos: p };
+}
+
+/**
+ * Mermaid's shape names (each short name and alias) for the shapes this tree
+ * draws. Any other name Mermaid draws is a rectangle here.
+ */
+const METADATA_SHAPES = /** @type {Record<string, string>} */ ({
+  __proto__: null,
+  rounded: 'round', event: 'round',
+  stadium: 'stadium', terminal: 'stadium', pill: 'stadium',
+  'fr-rect': 'subroutine', subprocess: 'subroutine', subproc: 'subroutine',
+  'framed-rectangle': 'subroutine', subroutine: 'subroutine',
+  cyl: 'cylinder', db: 'cylinder', database: 'cylinder', cylinder: 'cylinder',
+  circle: 'circle', circ: 'circle',
+  diam: 'diamond', decision: 'diamond', diamond: 'diamond', question: 'diamond',
+  hex: 'hexagon', hexagon: 'hexagon', prepare: 'hexagon',
+  'lean-r': 'parallelogram', 'lean-right': 'parallelogram', 'in-out': 'parallelogram',
+  'lean-l': 'parallelogram_alt', 'lean-left': 'parallelogram_alt', 'out-in': 'parallelogram_alt',
+  'trap-b': 'trapezoid', priority: 'trapezoid', 'trapezoid-bottom': 'trapezoid', trapezoid: 'trapezoid',
+  'trap-t': 'trapezoid_alt', manual: 'trapezoid_alt', 'trapezoid-top': 'trapezoid_alt',
+  'inv-trapezoid': 'trapezoid_alt',
+  'dbl-circ': 'doublecircle', 'double-circle': 'doublecircle',
+  odd: 'asymmetric',
+});
+
+/** Mermaid's other shape names: shapes this tree draws as a rectangle. */
+const RECT_SHAPES = new Set([
+  'rect', 'proc', 'process', 'rectangle', 'datastore', 'data-store', 'bang', 'cloud', 'text', 'notch-rect',
+  'card', 'notched-rectangle', 'lin-rect', 'lined-rectangle', 'lined-process', 'lin-proc', 'shaded-process',
+  'sm-circ', 'start', 'small-circle', 'fr-circ', 'stop', 'framed-circle', 'fork', 'join', 'hourglass',
+  'collate', 'brace', 'comment', 'brace-l', 'brace-r', 'braces', 'bolt', 'com-link', 'lightning-bolt', 'doc',
+  'document', 'delay', 'half-rounded-rectangle', 'h-cyl', 'das', 'horizontal-cylinder', 'lin-cyl', 'disk',
+  'lined-cylinder', 'curv-trap', 'curved-trapezoid', 'display', 'div-rect', 'div-proc', 'divided-rectangle',
+  'divided-process', 'tri', 'extract', 'triangle', 'win-pane', 'internal-storage', 'window-pane', 'f-circ',
+  'junction', 'filled-circle', 'notch-pent', 'loop-limit', 'notched-pentagon', 'flip-tri', 'manual-file',
+  'flipped-triangle', 'sl-rect', 'manual-input', 'sloped-rectangle', 'docs', 'documents', 'st-doc',
+  'stacked-document', 'st-rect', 'procs', 'processes', 'stacked-rectangle', 'bow-rect', 'stored-data',
+  'bow-tie-rectangle', 'cross-circ', 'summary', 'crossed-circle', 'tag-doc', 'tagged-document', 'tag-rect',
+  'tagged-rectangle', 'tag-proc', 'tagged-process', 'flag', 'paper-tape', 'lin-doc', 'lined-document',
+]);
+
+/** One `key: value` entry of a node's metadata; the value may be quoted. */
+const RE_METADATA_ENTRY = /\s*([\w-]+)\s*:\s*("[^"]*"|'[^']*'|[^,]*?)\s*(?:,|$)/y;
+
+/**
+ * Read a node's `@{ … }` metadata as Mermaid does: its `label`, and its
+ * `shape` by Mermaid's name for it. A shape name Mermaid does not know (it
+ * refuses the diagram) leaves the shape as written; the rest of the entries
+ * (`icon`, `img`, `pos`, …) are not kept.
+ * @param {string} body the text between `@{` and `}`
+ * @returns {{ label: string|null, shape: string|null }}
+ */
+function nodeMetadata(body) {
+  let label = null;
+  let shape = null;
+  RE_METADATA_ENTRY.lastIndex = 0;
+  for (let m; RE_METADATA_ENTRY.lastIndex < body.length && (m = RE_METADATA_ENTRY.exec(body)) !== null;) {
+    if (m[0] === '') break;
+    // an empty label is none: the node shows its id
+    if (m[1] === 'label') label = stripQuotes(m[2]) || label;
+    else if (m[1] === 'shape') {
+      const name = stripQuotes(m[2]);
+      shape = METADATA_SHAPES[name] ?? (RECT_SHAPES.has(name) ? 'rect' : null);
+    }
+  }
+  return { label, shape };
 }
 
 /**

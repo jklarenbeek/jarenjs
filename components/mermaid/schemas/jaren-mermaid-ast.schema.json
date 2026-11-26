@@ -277,6 +277,17 @@
             "participant",
             "actor"
           ]
+        },
+        "type": {
+          "description": "Mermaid's other participant box, from the participant's @{ \"type\": … } metadata; not drawn",
+          "enum": [
+            "boundary",
+            "control",
+            "entity",
+            "database",
+            "collections",
+            "queue"
+          ]
         }
       }
     },

@@ -17,7 +17,7 @@
  */
 
 import { failWith } from '../errors.js';
-import { commentStart } from '../utils.js';
+import { commentStart, firstToken } from '../utils.js';
 
 /**
  * Read a transition label's UML parts: `event [guard] / effect`, every
@@ -71,18 +71,20 @@ const RE_SEPARATOR = /#[A-Za-z0-9]+;|;/g;
 
 /**
  * One line's statements: Mermaid ends a statement at `;` (`A --> B; B --> C`
- * is two transitions), so a line splits at every `;` outside an entity code
- * where each piece reads as a statement other than state names alone;
- * otherwise it is one statement, and a label keeps its `;` (`A --> B : x; y`).
+ * is two transitions), and a label or a description with it (`A --> B : x;`
+ * is the label `x`, `A --> B : x; y` the label `x` and a state `y`), so a
+ * line splits at every `;` outside an entity code where each piece reads as
+ * a statement; otherwise it is one statement (a directive's styles, a quoted
+ * description), and its text keeps the `;`.
  * @param {string} line - trimmed
  * @returns {string[]}
  */
 export function stateStatements(line) {
   if (line.indexOf(';') === -1) return [line];
   const statements = separated(line);
-  return statements.length > 1 && statements.every((piece) => piece === 'end' || piece === '}'
-    || piece.startsWith('state ') || RE_STATE_DESC.test(piece)
-    || (transitionsOf(piece)?.some((item) => item.to !== undefined) ?? false)) ? statements : [line];
+  return statements.length > 0 && !RE_DIRECTIVE.test(line) && statements.every((piece) => piece === 'end'
+    || piece === '}' || piece.startsWith('state ') || RE_STATE_DESC.test(piece) || transitionsOf(piece) !== null)
+    ? statements : [line];
 }
 
 /**
@@ -113,8 +115,10 @@ const ID = '(\\[\\*\\]|[^\\s:;"-](?:(?:(?!-->)[^\\s:;"])*[^\\s:;"-])?)(?::::[\\w
 const RE_TRANSITION_AT = new RegExp(`${ID}\\s*-->\\s*${ID}(?:\\s*:(?!::)(.*))?`, 'y');
 /** Sticky: one state named on its own, ended by a blank or the end of the line. */
 const RE_STATE_AT = new RegExp(`${ID}(?=\\s|$)`, 'y');
-/** `state X`, `state X <<choice>>` (the fork/join/choice kind is not kept), `state X:::class`. */
-const RE_STATE_DECL = new RegExp(`^state\\s+${ID}(?:\\s+<<\\w+>>)?$`);
+/** `state X <<choice>>` (the fork/join/choice kind is not kept), `state X:::class <<fork>>`. */
+const RE_STATE_DECL = new RegExp(`^state\\s+${ID}\\s+<<\\w+>>$`);
+/** `state X` or `state X:::class` with nothing after it, which Mermaid reads as no state. */
+const RE_STATE_PLAIN = new RegExp(`^state\\s+${ID}$`);
 /** Lines Mermaid reads as styling or accessibility text, which this tree does not keep. */
 const RE_DIRECTIVE = /^(?:classDef|class|style|click|accTitle|accDescr)(?=[\s:{]|$)/;
 /** A note line: `note left of A : text`, a block up to `end note`, or `note "text" as N`. */
@@ -163,15 +167,16 @@ const KEYWORDS = new Set(['end', 'state', 'note', 'direction', 'classDef', 'clas
 
 /**
  * How a state with no transition and no label is declared: its name on a
- * line of its own, as Mermaid reads it (Mermaid reads `state X` with no `{`
- * after it as no state at all), or `state X` where the name alone would read
- * as a keyword or as something else.
+ * line of its own, as Mermaid reads it, or `state "X" as X` where the name
+ * alone would read as a keyword or as something else (Mermaid, and this
+ * reader, read `state X` with no `{` after it as no state at all).
  * @param {string} id
  * @returns {string}
  */
 export function stateDeclaration(id) {
   const one = KEYWORDS.has(id) ? null : transitionsOf(id);
-  return one !== null && one.length === 1 && one[0].state === id ? id : `state ${id}`;
+  if (one !== null && one.length === 1 && one[0].state === id) return id;
+  return id.includes('"') ? `state ${id}` : `state "${id}" as ${id}`;
 }
 
 /** The longest parent chain walked to decide whether a re-declared state is an ancestor. */
@@ -241,6 +246,7 @@ export function parseState(lines, lineOffset = 0) {
 
     const decl = RE_STATE_DECL.exec(line);
     if (decl !== null) { if (decl[1] !== '[*]') ensure(decl[1], null, true); return; }
+    if (RE_STATE_PLAIN.test(line)) return;
 
     if (RE_DIRECTIVE.test(line)) return;
 
@@ -275,9 +281,14 @@ export function parseState(lines, lineOffset = 0) {
 
     if (line.startsWith('state ')) { ensure(line.slice('state '.length).trim(), null, true); return; }
 
-    // a state named on its own line declares it, as `state X` does
-    const one = transitionsOf(line);
-    if (one !== null && one.length === 1) { ensure(/** @type {string} */ (one[0].state), null, true); return; }
+    // a state named on its own line declares it, and so does each of
+    // several names on one (`y z`), as Mermaid reads them; a line of words
+    // that opens with a keyword (`direction LR`, `hide empty description`) is that keyword's
+    const named = transitionsOf(line);
+    if (named !== null && (named.length === 1 || (named.length > 1 && !KEYWORDS.has(firstToken(line))))) {
+      for (const item of named) ensure(/** @type {string} */ (item.state), null, true);
+      return;
+    }
 
     const sd = RE_STATE_DESC.exec(line);
     if (sd !== null && sd[1] !== '[*]') ensure(sd[1], sd[2].trim());

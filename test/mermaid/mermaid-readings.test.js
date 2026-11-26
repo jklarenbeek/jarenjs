@@ -93,8 +93,8 @@ describe('stateDiagram — notes, comments and statement forms', () => {
     refused('stateDiagram-v2\n "A" --> B', 2, /^'"A" --> B' is no transition/);
   });
 
-  it('prints a lone state as its name, which Mermaid reads as that state, and `state X` for a keyword', () => {
-    assert.equal(printsBack('stateDiagram-v2\n X\n state end\n A --> B'), 'stateDiagram-v2\nX\nstate end\nA --> B\n');
+  it('prints a lone state as its name, which Mermaid reads as that state, and `state "X" as X` for a keyword', () => {
+    assert.equal(printsBack('stateDiagram-v2\n X\n state "end" as end\n A --> B'), 'stateDiagram-v2\nX\nstate "end" as end\nA --> B\n');
   });
 });
 

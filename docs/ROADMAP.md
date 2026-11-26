@@ -241,19 +241,26 @@ delete it or fix it.
 ## @jarenjs/mermaid
 
 - [ ] **Mermaid forms still read differently from Mermaid** — measured against
-  Mermaid 11.16.1 on its own syntax-doc examples: a flowchart label holding a
-  multi-line markdown string is refused as an unterminated shape; a node's
-  `A@{ shape: …, label: … }` metadata is skipped rather than read into the
-  node's shape and label; a class generic keeps `~T~` in the name in `class
-  X~T~ {` and relation ends but not in `class X~T~` or `X : member` (Mermaid
-  names all of them `X`); a lollipop's interface keeps its written name where
-  Mermaid generates one; a sequence participant's `type` (boundary, database,
-  …) and a message's half-arrow marks are not kept; a state transition label
-  keeps a closing `;` (`A --> B : x;`, Mermaid ends the label there); `state
-  X` with no `{` is read as a state (Mermaid reads none); an ER line `A o--o
-  B` reads as a relationship (Mermaid: three entities) and one without `:
-  label` reads (Mermaid refuses it); a flowchart link to a subgraph id prints
-  a node line for the id that reads back as another tree.
+  Mermaid 11.16.1 on its own syntax-doc examples: a class lollipop's interface
+  is the relation's written end (`foo --() bar` ends at `bar`), where Mermaid
+  makes one interface per lollipop (`interface0`, labelled `bar`), so two
+  lollipops named alike, or one named like a class, share an end (wanted: the
+  relations panel marks a lollipop end, so a class of the same name is not
+  taken as it; the tree keeps the written name); an `<<enumeration>>` line
+  inside a class body counts as a member; a subgraph nested in another is not
+  its member, and one named by a quoted markdown title keeps the backticks in
+  its id; `state X` with its `{` on the next line reads a state `{`; and a few
+  lines Mermaid refuses still read: a node `@{ shape: … }` Mermaid has no name
+  for, a lone `"` inside an unquoted label (`A[He said "hi]`), a nested
+  generic in a class name (`class List~List~int~~`) and a bare `subgraph`
+  line.
+- [ ] **Sequence marks read but not drawn** — a participant's `type` (boundary,
+  control, entity, database, collections, queue), the half arrows (`-|\`,
+  `-//`, `/|-`, …), the two-way `<<->>` and the central-connection marks
+  (`A()->>()B`) are read and printed back (MERMAID-FORMAT §4.2) but drawn as a
+  plain box and a plain arrow; flowchart nodes in the 36 Mermaid 11 shapes
+  with no drawn equivalent (`doc`, `manual-file`, …) read as a rectangle and
+  print as one.
 - [ ] **`htmlLabels:true` — browser check** — flowchart and state labels
   render as HTML in `foreignObject` when the host passes `htmlLabels: true` (a
   diagram's config can turn them off, never on; sized and wrapped by the

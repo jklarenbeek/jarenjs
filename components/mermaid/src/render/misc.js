@@ -104,6 +104,24 @@ export function renderPlaceholder(type, theme, hash, noteId = 'mermaid/placehold
 }
 
 /**
+ * A class's generic as Mermaid draws it, each `~` inside it as the `<` that
+ * opens a type's own generic or the `>` that closes it (`List~int~` is
+ * `List<int>`): a `~` between two characters of a name opens one.
+ * @param {string} generic
+ * @returns {string}
+ */
+function genericText(generic) {
+  let text = '';
+  for (let i = 0; i < generic.length; i++) {
+    const c = generic[i];
+    if (c !== '~') { text += c; continue; }
+    const opens = i > 0 && /[^\s~,]/.test(generic[i - 1]) && i + 1 < generic.length && /[^\s~,]/.test(generic[i + 1]);
+    text += opens ? '<' : '>';
+  }
+  return text;
+}
+
+/**
  * Build the sections for the structured renderers.
  * @param {string} diagram
  * @param {any} ast
@@ -117,7 +135,7 @@ export function structuredSections(diagram, ast, messages = null) {
     const tips = clickTooltips(ast.clicks);
     /** @type {PanelSection[]} */
     const sections = ast.classes.map((c) => ({
-      heading: c.name,
+      heading: c.generic == null ? c.name : `${c.name}<${genericText(c.generic)}>`,
       rows: c.members.map((m) => `${m.visibility ?? ''}${m.text}`),
       id: c.name,
       tooltip: tips.get(c.name),
