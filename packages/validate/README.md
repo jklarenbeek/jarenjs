@@ -2055,7 +2055,13 @@ What the units say:
 boolean validator, which stops at the first failure; the other five record a
 unit per applied subschema and evaluate every `anyOf` branch (each passing
 branch has annotations to report), so they cost about an order of magnitude
-more than the `collectErrors` output. The boolean default and
+more than the `collectErrors` output. Where the schemas hold no
+`unevaluated*` and no dynamic-scope keyword, a definition that several
+branches enter on the same member through a reference is walked once and
+its units recorded once; `basic`, `detailed` and `list` write only the branches that
+decide the answer, while `verbose` and `hierarchical` write that
+definition's units under every branch that entered it, so their size grows
+with the branches tried. The boolean default and
 `collectErrors` are unchanged. Against the specifications' examples, two
 answers differ: `basic` adds the `valid` its output schema requires to
 every unit; and `droppedAnnotations` follows one rule (every failed unit

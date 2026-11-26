@@ -885,9 +885,13 @@ member it entered before, at the same location with as many reference
 levels open (whether a reference refuses, `JK2001`, depends on those
 levels), gives that answer again and records the errors that entry left
 (`ValidationRoot#callReference`). The answers are kept for one validation
-and dropped when it returns. A compilation that tracks annotations, records
-output units, or holds any dynamic-scope keyword (`$dynamicRef`,
-`$dynamicAnchor`, `$recursiveRef`, `$recursiveAnchor`) walks in full.
+and dropped when it returns. Recording output units, a kept answer also
+gives again the units its entry recorded (`UnitRecorder#give`): a unit holds
+its evaluation path segment from the unit that applied it, so the one
+recorded subtree stands under every unit that entered it. A compilation
+whose schemas hold an `unevaluated*` keyword (it reads the annotations an
+entry leaves) or any dynamic-scope keyword (`$dynamicRef`, `$dynamicAnchor`,
+`$recursiveRef`, `$recursiveAnchor`) walks in full.
 
 The error list keeps each distinct error once, in the order of first
 appearance. Most repeats are the same records given again by kept answers,
@@ -958,7 +962,13 @@ always built):
   annotations from the schema and from the units each applicator applied,
   the survival rule (a passing unit inside passing units), the wrapper
   errors a failed subschema already explains, and the pruning of the flat
-  and condensed forms.
+  and condensed forms. A unit's applied units are made from the records on
+  first read, and `basic`, `detailed` and `list` read only the ones their
+  pruning keeps: a failed branch under an applicator that passed (an `anyOf`
+  branch, a `not` subschema), recorded once and given to every unit that
+  entered it, is never expanded. `verbose` and `hierarchical` write every
+  applied unit, so their size follows the branches. The recorder lets go of
+  the tree once the run returns.
 - **Texts are rendered once and kept renderable.** A unit's text joins the
   messages `convertInternalErrors` rendered (`joinErrorMessages`); each
   projection lists, as it builds the units, which object holds each text,

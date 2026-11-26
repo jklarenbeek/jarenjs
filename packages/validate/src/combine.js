@@ -97,7 +97,7 @@ function compileAnyOf(schemaObj, jsonSchema) {
   // failed branches are rolled back.
   const root = schemaObj.root;
   if (root.usesUnevaluated) {
-    return function validateAnyOfTracked(data, dataPath, dataRoot, dataKey) {
+    return walkingBranches(root, function validateAnyOfTracked(data, dataPath, dataRoot, dataKey) {
       if (data === undefined && !undefinedElement) return true;
       const log = root.evalLog;
       const errors = root.errorMark();
@@ -113,7 +113,7 @@ function compileAnyOf(schemaObj, jsonSchema) {
       // branches' errors behind unless they are rolled back here too.
       if (found) root.rollbackErrors(errors);
       return found || addError(data, dataPath);
-    };
+    });
   }
 
   return walkingBranches(root, function validateAnyOf(data, dataPath, dataRoot, dataKey) {
@@ -159,7 +159,7 @@ function compileOneOf(schemaObj, jsonSchema) {
   // With annotation tracking, annotations from failed branches are rolled back.
   const root = schemaObj.root;
   if (root.usesUnevaluated) {
-    return function validateOneOfTracked(data, dataPath, dataRoot, dataKey) {
+    return walkingBranches(root, function validateOneOfTracked(data, dataPath, dataRoot, dataKey) {
       const log = root.evalLog;
       const errors = root.errorMark();
       let found = false;
@@ -180,7 +180,7 @@ function compileOneOf(schemaObj, jsonSchema) {
       // when nothing matched and they are the explanation.
       if (found) root.rollbackErrors(errors);
       return found || addError(data, dataPath);
-    };
+    });
   }
 
   return walkingBranches(root, function validateOneOf(data, dataPath, dataRoot, dataKey) {

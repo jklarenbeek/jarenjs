@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import v8 from 'node:v8';
 import { JarenValidator, ValidatorOptions, ValidationOptions, SchemaCompileError, VALIDATE_CODES, compileMessageCatalog, localizeErrors } from '@jarenjs/validate';
 import { nl } from '@jarenjs/locales';
 import { stringFormats } from '@jarenjs/formats';
@@ -649,5 +650,147 @@ describe('verbose lists only the keywords the validator evaluates', () => {
     const schema = { $schema: D7, type: 'number', 'x-ui': 1, deprecated: true, prefixItems: [false] };
     assert.deepEqual(output('flag', schema, 'a'), { valid: false });
     assert.deepEqual(new JarenValidator({ collectErrors: true }).compile(schema)('a').errors.map((/** @type {any} */ e) => [e.keyword, e.instancePath]), [['type', '']]);
+  });
+});
+
+describe('a recording format walks each definition once per member', () => {
+  // Every branch of the `anyOf` enters `node` on the same member: a recording
+  // walk that entered it again per branch grows with the branches to the
+  // power of the nesting.
+  const schema = {
+    $schema: S, $id: 'https://example.com/node', $ref: '#/$defs/node',
+    $defs: { node: { anyOf: [
+      { type: 'array', items: { $ref: '#/$defs/node' }, minItems: 2 },
+      { type: 'array', items: { $ref: '#/$defs/node' } },
+      { type: 'integer' },
+    ] } },
+  };
+  const nest = (/** @type {number} */ depth, /** @type {unknown} */ leaf) => {
+    let value = leaf;
+    for (let i = 0; i < depth; i++) value = [value];
+    return value;
+  };
+  /**
+   * A format that counts the units its recorder enters, and the recorded
+   * units its projection reads the applied units of (one read per unit it
+   * expands).
+   * @param {any} inner
+   */
+  const counting = (inner) => {
+    const counts = { entered: 0, expanded: 0 };
+    /** @type {(record: any) => any} */
+    const track = (record) => new Proxy(record, {
+      get(target, key) {
+        if (key !== 'children') return target[key];
+        counts.expanded++;
+        return target.children.map(track);
+      },
+    });
+    const format = {
+      name: inner.name,
+      validator: inner.validator,
+      recorder: (/** @type {Map<string, unknown>} */ schemas) => {
+        const recorder = inner.recorder(schemas);
+        const { enter, run } = recorder;
+        recorder.enter = (/** @type {any[]} */ ...args) => { counts.entered++; return enter(...args); };
+        recorder.run = (/** @type {() => unknown} */ validate) => {
+          const recorded = run(validate);
+          return { ...recorded, root: track(recorded.root) };
+        };
+        return recorder;
+      },
+    };
+    return { format, counts };
+  };
+
+  it('records a kept reference answer\'s units again instead of walking the branch', () => {
+    for (const name of ['basic', 'detailed', 'verbose', 'list', 'hierarchical']) {
+      const entered = [];
+      for (const depth of [4, 8]) {
+        const { format, counts } = counting(FORMATS[name]);
+        new JarenValidator({ outputFormat: format }).compile(schema)(nest(depth, 1));
+        entered.push(counts.entered);
+      }
+      // six units per level and fifteen for the leaf; a walk that entered
+      // the definition again per branch would enter 155 and 2,555
+      assert.deepEqual(entered, [39, 63], name);
+    }
+  });
+
+  it('expands only the units the condensed formats write', () => {
+    for (const name of ['basic', 'detailed', 'list']) {
+      const expanded = [];
+      for (const depth of [4, 8]) {
+        const { format, counts } = counting(FORMATS[name]);
+        new JarenValidator({ outputFormat: format }).compile(schema)(nest(depth, 1));
+        expanded.push(counts.expanded);
+      }
+      // the failed branches under a branch that passed are not expanded;
+      // expanding every recorded unit would read 155 and 2,555
+      assert.deepEqual(expanded, [25, 45], name);
+    }
+  });
+
+  it('answers the documents it answered when it walked every branch', () => {
+    const compile = (/** @type {string} */ name) => new JarenValidator({ outputFormat: FORMATS[name] }).compile(schema);
+    const at = 'https://example.com/node#/$defs/node/anyOf/1';
+    assert.deepEqual(compile('basic')([[1]]), { valid: true, annotations: [
+      { valid: true, keywordLocation: '/$ref/anyOf/1/items', absoluteKeywordLocation: `${at}/items`, instanceLocation: '', annotation: true },
+      { valid: true, keywordLocation: '/$ref/anyOf/1/items/$ref/anyOf/1/items', absoluteKeywordLocation: `${at}/items`, instanceLocation: '/0', annotation: true },
+    ] });
+    assert.deepEqual(compile('detailed')([[1]]), {
+      valid: true, keywordLocation: '/$ref/anyOf/1/items', absoluteKeywordLocation: `${at}/items`, instanceLocation: '', annotation: true,
+      annotations: [{ valid: true, keywordLocation: '/$ref/anyOf/1/items/$ref/anyOf/1/items', absoluteKeywordLocation: `${at}/items`, instanceLocation: '/0', annotation: true }],
+    });
+    assert.deepEqual(compile('list')([[1]]), { valid: true, details: [
+      { valid: true, evaluationPath: '/$ref/anyOf/1', schemaLocation: at, instanceLocation: '', annotations: { items: true } },
+      { valid: true, evaluationPath: '/$ref/anyOf/1/items/$ref/anyOf/1', schemaLocation: at, instanceLocation: '/0', annotations: { items: true } },
+    ] });
+    // A broken document still writes each failing path: the kept answer's
+    // units stand under every branch that entered it.
+    const broken = /** @type {any} */ (compile('basic')([['x']]));
+    assert.equal(broken.valid, false);
+    assert.equal(broken.errors.length, 28);
+    const paths = broken.errors.map((/** @type {any} */ unit) => unit.keywordLocation);
+    assert.deepEqual(paths.filter((/** @type {string} */ path) => path.endsWith('/items/$ref/anyOf')), [
+      '/$ref/anyOf/0/items/$ref/anyOf',
+      '/$ref/anyOf/0/items/$ref/anyOf/0/items/$ref/anyOf',
+      '/$ref/anyOf/0/items/$ref/anyOf/1/items/$ref/anyOf',
+      '/$ref/anyOf/1/items/$ref/anyOf',
+      '/$ref/anyOf/1/items/$ref/anyOf/0/items/$ref/anyOf',
+      '/$ref/anyOf/1/items/$ref/anyOf/1/items/$ref/anyOf',
+    ]);
+    const { format, counts } = counting(FORMATS.basic);
+    const deep = /** @type {any} */ (new JarenValidator({ outputFormat: format }).compile(schema)(nest(8, 'x')));
+    assert.equal(deep.errors.length, 2044);
+    assert.equal(counts.entered, 63);
+  });
+
+  it('holds no recorded unit once the document is answered', async () => {
+    v8.setFlagsFromString('--expose-gc');
+    const gc = /** @type {() => void} */ (vm.runInNewContext('gc'));
+    /** @type {WeakRef<object>[]} */
+    const trees = [];
+    const format = {
+      name: basicOutput.name,
+      validator: basicOutput.validator,
+      recorder: (/** @type {Map<string, unknown>} */ schemas) => {
+        const recorder = /** @type {any} */ (basicOutput).recorder(schemas);
+        const run = recorder.run;
+        recorder.run = (/** @type {() => unknown} */ validate) => {
+          const recorded = run(validate);
+          trees.push(new WeakRef(recorded.root));
+          return recorded;
+        };
+        return recorder;
+      },
+    };
+    const validate = new JarenValidator({ outputFormat: format }).compile(schema);
+    assert.equal(validate(nest(4, 1)).valid, true);
+    await new Promise((resolve) => setImmediate(resolve));
+    gc();
+    // the recorded tree holds the instance and every unit the walk entered
+    assert.equal(trees.length, 1);
+    assert.equal(trees[0].deref(), undefined);
   });
 });

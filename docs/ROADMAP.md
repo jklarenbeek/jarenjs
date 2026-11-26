@@ -114,24 +114,24 @@ delete it or fix it.
   still extends them even when nothing it can reach reads one. Following those
   needs every `$dynamicAnchor` the compilation can enter by that name, and the
   embedded resource's base.
-- [ ] **An output format that records units walks every branch in full, and
-  exhausts the heap on the studio's `form` seed.** With `outputFormat` basic,
-  detailed, verbose, list or hierarchical the reference answers a collecting
-  walk keeps are off (the recorder hangs units under the evaluation path that
-  entered them, and a kept answer gives errors only), so every `oneOf`/`anyOf`
-  branch is walked again at every level: the VALID `minisite` seed takes
-  90-243 MB and 0.17-0.66 s, `dashboard` 238-506 MB and 0.56-1.35 s, and
-  `form`, valid or broken, runs out of a 2 GB heap, where `flagOutput` answers
-  in 2-3 ms. basic, detailed and list write 108-235 KB for those valid seeds:
-  their cost is the recording, and wants a kept answer that holds its unit
-  subtree relative to its reference plus a projection that drops a failed
-  subtree under a valid applicator before expanding it. verbose and
-  hierarchical write the failed branches' units under `valid: true` by their
-  own definition (65-219 MB of JSON on the valid seeds), so their size follows
-  the branches. On a broken document basic writes each failing path (minisite
-  one phrase down: 2,819 units, 529 distinct by location, instance and text).
-  Wanted: the bounded recording for basic/detailed/list, and a decision on
-  writing each distinct error once on a broken document.
+- [ ] **`verbose` and `hierarchical` write a definition's units under every branch
+  that entered it, and exhaust the heap on the studio's `form` seed; a broken
+  document's `basic` writes each failing path.** A recording walk keeps a
+  reference's answer and its units for the branches that enter it again, and
+  `basic`, `detailed` and `list` expand only what they write
+  (packages/validate/ARCHITECTURE.md, Standard Output Formats: "A unit's
+  applied units are made from the records on first read, and `basic`,
+  `detailed` and `list` read only the ones their pruning keeps"). `verbose`
+  and `hierarchical` write the failed branches' units under `valid: true` by
+  their own definition, so their size follows the branches. On the valid
+  seeds, hierarchical writes 67 MB of JSON on minisite and 224 MB on
+  dashboard, verbose 219 MB and 729 MB, and on `form` both run out of a 2 GB
+  heap. On a broken document `basic` writes each failing path (minisite one
+  phrase down: 2,819 units, 529 distinct by location, instance and text; form
+  three phrases down: 183,807 units, 123 MB, 702 distinct). Wanted: an opt-in
+  that writes each distinct error once (by schema location, instance location
+  and text) on the recording formats, the default staying the specification's
+  shape; `collectErrors` already keeps each distinct error once.
 - [ ] **A two-position tuple validates at about half of Ajv's speed.** The
   validator benchmark's 'uniqueItems=false with an array of items' rows (a
   two-position `prefixItems`/`items` tuple of `type: boolean`; `uniqueItems:

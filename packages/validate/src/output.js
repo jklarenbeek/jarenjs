@@ -191,8 +191,36 @@ class OutputUnit {
     this.valid = true;
     /** @type {any[]} Internal error records raised by this unit's own keywords */
     this.errors = [];
-    /** @type {OutputUnit[]} */
-    this.children = [];
+  }
+
+  /** @type {OutputUnit[]} */
+  #children = [];
+
+  /** @type {{ records: UnitRecord[], schemas: Map<string, unknown> }|null} The recorded units this one applied, not made into units yet */
+  #recorded = null;
+
+  /**
+   * The units this one applied. Recorded ones are made into units on first
+   * need: a kept reference answer gives one recorded subtree to every unit
+   * that entered it, and a projection expands only the branches it writes.
+   * @returns {OutputUnit[]}
+   */
+  get children() {
+    const recorded = this.#recorded;
+    if (recorded !== null) {
+      this.#recorded = null;
+      this.#children = recorded.records.map((record) => unitOf(record, this, recorded.schemas));
+    }
+    return this.#children;
+  }
+
+  /**
+   * Take the recorded units this one applied, made into units on first need.
+   * @param {UnitRecord[]} records
+   * @param {Map<string, unknown>} schemas
+   */
+  applied(records, schemas) {
+    this.#recorded = records.length === 0 ? null : { records, schemas };
   }
 }
 
@@ -319,7 +347,7 @@ function unitOf(record, parent, schemas) {
   const unit = new OutputUnit(enclosing, segment, location, object.schema, object, record.instanceLocation, record.data);
   unit.valid = record.valid;
   unit.errors = record.errors;
-  unit.children = record.children.map((child) => unitOf(child, unit, schemas));
+  unit.applied(record.children, schemas);
   if (enclosing !== parent) enclosing.children.push(unit);
   return top ?? unit;
 }
@@ -675,7 +703,11 @@ function keywordTree(unit, surviving, verbose) {
       sources: here,
       annotation,
       // A `true` subschema has no keywords: its node would hold nothing.
-      kids: [...result.children.filter((child) => child.schema !== true)
+      // Condensed (not verbose), a unit whose answer is not its keyword's,
+      // under a keyword whose answer is not its unit's, decides nothing
+      // (see `condense`) and is not expanded.
+      kids: [...result.children.filter((child) => child.schema !== true
+        && (verbose || (child.valid === result.valid && result.valid === unit.valid)))
         .map((child) => keywordTree(child, surviving && child.valid, verbose)), ...elsewhere],
     });
   }
@@ -796,11 +828,16 @@ function projectBasic(root, validation, texts) {
  * What a compilation hands every subschema it applies: `enter` records it,
  * under the evaluation path segment the applicator that reached it marked
  * as `pending` (`/properties/a`, `/$ref`); `error` takes each error raised;
- * `run` validates and answers the recorded tree.
+ * `units` and `give` let a kept reference answer record the units its entry
+ * recorded once more (a unit holds its segment from the unit that applied
+ * it, so one recorded subtree stands under each unit it is given to); `run`
+ * validates and answers the recorded tree.
  * @typedef {object} UnitRecorder
  * @property {readonly (string|number|undefined)[]|null} pending - The step an applicator marked: its keyword, then the index or name inside its value
  * @property {(object: UnitRecord['object'], validate: Function, data: unknown, dataPath: any, dataRoot: any, dataKey?: any) => any} enter
  * @property {(error: any) => void} error
+ * @property {() => UnitRecord[]|null} units - The units the open unit applied so far, or null outside a validation
+ * @property {(units: UnitRecord[]) => void} give - Records `units` as applied by the open unit, the marked step taken
  * @property {(validate: () => unknown) => { root: UnitRecord, schemas: Map<string, unknown> }} run
  */
 
@@ -851,12 +888,25 @@ function createRecorder(schemas) {
     error(error) {
       if (open.length !== 0) open[open.length - 1].errors.push(error);
     },
+    units() {
+      return open.length === 0 ? null : open[open.length - 1].children;
+    },
+    give(units) {
+      recorder.pending = null;
+      if (open.length !== 0) open[open.length - 1].children.push(...units);
+    },
     run(validate) {
       open.length = 0;
       root = null;
       recorder.pending = null;
-      validate();
-      return { root: /** @type {UnitRecord} */ (root), schemas };
+      try {
+        validate();
+        return { root: /** @type {UnitRecord} */ (root), schemas };
+      }
+      finally {
+        // the recorded tree holds the instance: the answer is projected from it alone
+        root = null;
+      }
     },
   };
   return recorder;
