@@ -882,7 +882,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,211,000 (measured 1210898): the string helpers' named refusal of a non-string (string 175), and a job read that locks its row for a lease-less decision (jobs 93).
 // Raised to 1,211,100 (measured 1211077): a reference's recorded units kept for the branches that enter it again, and read only where a recording format writes them (index and combine 179 together; minified alone index 190, combine 10).
 // Raised to 1,212,200 (measured 1212115): semanticKey joining a remembered frozen tree (object 655), four more string helpers' named refusal of a non-string (string 303), and the queue's SQLite writes beginning with the writer lock (jobs 80).
-if (clientBytes > 1212200)
+// Raised to 1,212,400 (measured 1212310): the entity writes that read first beginning with the writer lock on SQLite (entity, tracker, store 195).
+if (clientBytes > 1212400)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
