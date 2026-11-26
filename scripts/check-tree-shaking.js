@@ -879,7 +879,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,207,300 (measured 1207266): PostgreSQL indexes keyed in the order a statement reads with the declared double beside a number index, verified and read back (ddl 4118, dialect 132, introspect 6), a rule added to a populated table judging its rows and a probe's lock and row-level-security refusal (invariants 531, invariant-sql 523, entity 416, errors 112, tracker 57, row-predicate 30), and replication ordered by an expression index's key with its tables read before any bracket (replication 1061).
 // Raised to 1,210,700 (measured 1210630): an ordering that places the empty key greatest read through the PostgreSQL index in two branches, a keyset page past a value seeking it, and the open's reading of the indexes a table holds plain carried to the statements (emit 1919, query 1353, ddl 308, store 28).
 // Raised to 1,211,000 (measured 1210898): the string helpers' named refusal of a non-string (string 175), and a job read that locks its row for a lease-less decision (jobs 93).
-if (clientBytes > 1211000)
+// Raised to 1,211,100 (measured 1211077): a reference's recorded units kept for the branches that enter it again, and read only where a recording format writes them (index and combine 179 together; minified alone index 190, combine 10).
+if (clientBytes > 1211100)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
