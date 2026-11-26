@@ -34,6 +34,7 @@ import {
 import { createDataHandlers, dataContract } from '@jarenjs/studio/data/host';
 import { tempDbPath } from '../db/helpers.js';
 import { createStubHost } from '../view/dom.stub.js';
+import { runQuery, runJslt } from '../../packages/website/src/boundaries/engines.js';
 
 const IDS = Object.keys(studioMessagesEn);
 const MARK = '⟦';
@@ -54,6 +55,9 @@ const PSEUDO = compileMessageCatalog({
  * produce, and a forms failure the form widget catches. */
 const SOURCE_ONLY = new Set(['studio/store/ready', 'studio/store/committed', 'studio/store/live-failed',
   'studio/store/live-ended', 'studio/data/live-ended', 'studio/run/empty-sequence', 'studio/flow/dag-schema',
+  // a disagreement line names the empty sequence when the corpus runs on a
+  // live store (run-words.test.js)
+  'studio/data/oracle-empty',
   // the forms build every JSON schema a document can hold: the widget's
   // catch is for a forms refusal none can provoke
   'studio/document/form-failed']);
@@ -222,6 +226,13 @@ describe('the Project IDE speaks the reader\'s language', () => {
       host.runProjectFile(project([{ name: 'c.contract', kind: 'contract', text: JSON.stringify({ $contract: '0.1', operations: { 'echo.say': { kind: 'command', input: { type: 'object', nullable: false }, output: true } } }) }]), 'c.contract', t),
       host.runProjectFile(project([{ name: 's.schema', kind: 'schema', text: '{}' }, { name: 'x.data', kind: 'data', text: '{' }]), 's.schema', t),
     ];
+    // the site's query and JSLT runners title their cards and results in the studio's words
+    const site = createProjectHost({ loadDocument: () => ({ ok: true, app: null }), runQuery, runJslt, runValidation: () => validation });
+    const data = { name: 'x.data', kind: 'data', text: '{"a":[1]}' };
+    runs.push(site.runProjectFile(project([{ name: 'q.query', kind: 'query', text: '"$.a[*]"' }, data]), 'q.query', t));
+    runs.push(site.runProjectFile(project([{ name: 'q.query', kind: 'query', text: '"$.none[*]"' }, data]), 'q.query', t));
+    runs.push(site.runProjectFile(project([{ name: 'q.query', kind: 'query', text: '{' }, data]), 'q.query', t));
+    runs.push(site.runProjectFile(project([{ name: 'j.jslt', kind: 'jslt', text: '[]' }, data]), 'j.jslt', t));
     validation = { ...report([]), schemaError: 'the schema is not JSON' };
     runs.push(host.runProjectFile(project([{ name: 's.schema', kind: 'schema', text: '{}' }]), 's.schema', t));
     validation = report([]);
@@ -442,7 +453,10 @@ function sources(/** @type {string} */ dir) {
 
 describe('the studio catalog', () => {
   it('every id is reached by a rendering above, or used in the source when only a live store reaches it', () => {
-    const text = sources(join(import.meta.dirname, '../../components/studio/src')).map((p) => readFileSync(p, 'utf8')).join('\n');
+    // the site's runners (packages/website/src/boundaries/engines.js) speak the
+    // studio's words for the runs its project host renders
+    const text = [...sources(join(import.meta.dirname, '../../components/studio/src')),
+      join(import.meta.dirname, '../../packages/website/src/boundaries/engines.js')].map((p) => readFileSync(p, 'utf8')).join('\n');
     const unused = IDS.filter((id) => !text.includes(`'${id}'`)
       && !(id.startsWith('studio/role/') && text.includes('`studio/role/${kind}`'))
       && !(/^studio\/flow\/(?:selected|target)-/.test(id) && text.includes('`studio/flow/${as}-${selection.type}`')));

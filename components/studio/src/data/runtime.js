@@ -42,9 +42,12 @@ const agrees = (entry, outcome) => (entry.empty === true
   ? outcome.empty === true
   : outcome.empty === false && equalsJson(outcome.answer, entry.expected));
 
-/** What the engine recorded, spelled for a report line. */
-const recorded = (/** @type {any} */ entry) => (entry.empty === true
-  ? 'the empty sequence' : JSON.stringify(entry.expected));
+/**
+ * What the engine recorded, spelled for a report line in the reader's words.
+ * @param {any} entry @param {(id: string) => string} t
+ */
+const recorded = (entry, t) => (entry.empty === true
+  ? t('studio/data/oracle-empty') : JSON.stringify(entry.expected));
 
 /**
  * A failed store request: shown in the Data pane, and answered as the
@@ -359,8 +362,9 @@ export function createDataRuntime(env = {}) {
               const agreed = agrees(entry, outcome);
               results.push({ mapping, name: entry.name, answer: outcome.answer, empty: outcome.empty, agreed });
               if (!agreed) {
-                disagreements.push(`${where}: recorded ${recorded(entry)}, answered `
-                  + `${outcome.empty ? 'the empty sequence' : JSON.stringify(outcome.answer)}`);
+                const t = words();
+                disagreements.push(`${where}: recorded ${recorded(entry, t)}, answered `
+                  + `${outcome.empty ? t('studio/data/oracle-empty') : JSON.stringify(outcome.answer)}`);
               }
             }
           }

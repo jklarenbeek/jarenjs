@@ -165,8 +165,8 @@ function runProjectFile(slice, name, options = {}) {
     }
     catch (err) { return { nodes: [error(err, t('studio/run/flow-failed'))] }; }
   }
-  if (file.kind === 'query') return { nodes: runQuery({ query: file.text, data: dataText, externals: '' }) };
-  if (file.kind === 'jslt') return { nodes: runJslt({ stylesheet: file.text, data: dataText }) };
+  if (file.kind === 'query') return { nodes: runQuery({ query: file.text, data: dataText, externals: '' }, { messages: catalogOf(options.messages) }) };
+  if (file.kind === 'jslt') return { nodes: runJslt({ stylesheet: file.text, data: dataText }, { messages: catalogOf(options.messages) }) };
   if (file.kind === 'schema') return { nodes: validateNodes(file.text, dataText, t, catalogOf(options.messages)) };
   if (file.kind === 'contract') return { nodes: contractNodes(file.text, t) };
   return null;

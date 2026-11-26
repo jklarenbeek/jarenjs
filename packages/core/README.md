@@ -57,7 +57,13 @@ same way, where a number, a boolean or an object answered as the empty string (`
 `hashContent({})` equal to `hashContent('')`, `isAsciiString(5)` `true`,
 `getStringLength(5, true)` `NaN`, `slugify(5)` `''`); `fromCodePoints` refuses what is no
 list of code points (`fromCodePoints(5)` answered `''`, and a string `'65'` encoded
-U+0006 U+0005), and still reads an array or a typed array.
+U+0006 U+0005), and still reads an array or a typed array. `isStringWhiteSpace`,
+`isStringUpperCase`, `isStringLowerCase`, `compareCodePoints` (either side), `kebabCase`
+and `escapePointerToken` refuse a non-string the same way, where `isStringWhiteSpace([])`
+answered `true`, `compareCodePoints(5, '')` `1` and `compareCodePoints([], '')` `0`, and the
+other four threw the host's unnamed `TypeError`; `isStringWhiteSpace` still answers `true`
+for `null` and `undefined`, and a `String` wrapper object's case is now read as its
+string's (`isStringUpperCase(new String('A'))` answered `false`).
 
 `equalsJson` (`@jarenjs/core/object`) compares the two objects JOSL and JSONX
 read text into by what they hold: a `Date` equals a `Date` of the same instant

@@ -118,6 +118,10 @@ export const studioMessagesEn = Object.freeze({
   'studio/run/compile': 'Compile',
   'studio/run/validate': 'Validate',
   'studio/run/validation-error': 'Validation error',
+  'studio/run/items': 'Items',
+  'studio/run/run': 'Run',
+  'studio/run/transform': 'Transform',
+  'studio/run/output': 'Output',
 
   // ——— the status line the project's downloads write ———
   'studio/status/no-app': 'this project has no app document',
@@ -212,6 +216,7 @@ export const studioMessagesEn = Object.freeze({
   'studio/data/oracle-agreed': '{executor} agreed with the engine on every entry: {agreed} / {ran}',
   'studio/data/oracle-disagreed': '{executor} DISAGREED with the engine on {disagreed} of {ran}',
   'studio/data/oracle-verdict': '{verdict} ({entries} entries × {mappings}); {skipped} engine-only entries left out by their marker',
+  'studio/data/oracle-empty': 'the empty sequence',
   'studio/data/operators-title': 'Registered operators (host opt-in)',
   'studio/data/operators-summary': '{count} registered · {pushed} pushed to SQLite as UDFs',
   'studio/data/operators-awaiting': 'the owner\'s (awaiting capabilities)',

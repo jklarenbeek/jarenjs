@@ -7,6 +7,11 @@
  * boolean or an object has no `length`, so each used to answer as if given
  * the empty string (`hashContent({})` was `hashContent('')`,
  * `isAsciiString(5)` was `true`, `getStringLength(5, true)` was `NaN`).
+ * `isStringWhiteSpace`, `isStringUpperCase`, `isStringLowerCase`,
+ * `compareCodePoints`, `kebabCase` and `escapePointerToken` refuse the same
+ * way: `isStringWhiteSpace([])` was `true` (an array read as its joined
+ * text), `compareCodePoints(5, '')` was `1` and `compareCodePoints([], '')`
+ * `0`, and the other four threw the host's unnamed `TypeError`.
  * Every input that answered right before still answers the same.
  */
 
@@ -15,6 +20,7 @@ import assert from 'node:assert';
 import {
   countCodePoints, countCharCode, toCodePoints, fnv1a, hashContent, codePointPrefixSuccessor,
   isAsciiString, getStringLength, fromCodePoints, slugify,
+  isStringWhiteSpace, isStringUpperCase, isStringLowerCase, compareCodePoints, kebabCase, escapePointerToken,
 } from '../../packages/core/src/string.js';
 
 const given = /** @type {[unknown, string][]} */ ([
@@ -122,5 +128,75 @@ describe('the length, ASCII, slug and code-point builders refuse what they answe
     assert.strictEqual(getStringLength(w), 3);
     assert.strictEqual(getStringLength(w, true), 3);
     assert.strictEqual(slugify(w), 'a-é');
+  });
+});
+
+describe('the predicates, the comparison, kebabCase and escapePointerToken refuse a non-string', () => {
+  /** @type {[string, (v: any) => unknown][]} */
+  const refusing = [
+    ['isStringUpperCase', (v) => isStringUpperCase(v)],
+    ['isStringLowerCase', (v) => isStringLowerCase(v)],
+    ['compareCodePoints', (v) => compareCodePoints(v, '')],
+    ['compareCodePoints', (v) => compareCodePoints('', v)],
+    ['kebabCase', (v) => kebabCase(v)],
+    ['escapePointerToken', (v) => escapePointerToken(v)],
+  ];
+  for (const [name, call] of refusing) {
+    it(`${name} refuses each shape, naming what was given`, () => {
+      for (const [input, kind] of given)
+        assert.throws(() => call(input), { name: 'TypeError', message: `${name}: expected a string, got ${kind}` }, `${name} ${kind}`);
+    });
+  }
+
+  it('isStringWhiteSpace refuses every shape but null and undefined, which stay blank', () => {
+    for (const [input, kind] of given) {
+      if (input == null) continue;
+      assert.throws(() => isStringWhiteSpace(/** @type {any} */ (input)), { name: 'TypeError', message: `isStringWhiteSpace: expected a string, got ${kind}` }, kind);
+    }
+    assert.strictEqual(isStringWhiteSpace(null), true);
+    assert.strictEqual(isStringWhiteSpace(undefined), true);
+  });
+
+  it('an array is refused where it answered: blank, greater, or equal to the empty string', () => {
+    assert.throws(() => isStringWhiteSpace(/** @type {any} */ ([])), { name: 'TypeError', message: 'isStringWhiteSpace: expected a string, got an array' });
+    assert.throws(() => compareCodePoints(/** @type {any} */ (5), ''), { name: 'TypeError', message: 'compareCodePoints: expected a string, got a number' });
+    assert.throws(() => compareCodePoints(/** @type {any} */ ([]), ''), { name: 'TypeError', message: 'compareCodePoints: expected a string, got an array' });
+  });
+});
+
+describe('the predicates, the comparison, kebabCase and escapePointerToken answer every string as before', () => {
+  it('reads blank strings as blank', () => {
+    assert.deepStrictEqual(['', ' ', '\t\n', '\u00a0', 'a', ' a '].map(isStringWhiteSpace), [true, true, true, true, false, false]);
+  });
+
+  it('reads a string as its own upper or lower case form', () => {
+    assert.deepStrictEqual(['', 'ABC', 'AbC', 'É1', 'é'].map(isStringUpperCase), [true, true, false, true, false]);
+    assert.deepStrictEqual(['', 'abc', 'aBc', 'é1', 'É'].map(isStringLowerCase), [true, true, false, true, false]);
+  });
+
+  it('orders by code point, the shorter of a prefix pair first', () => {
+    assert.deepStrictEqual([['a', 'b'], ['b', 'a'], ['a', 'a'], ['', 'a'], ['ab', 'a'], ['\uffff', '😀'], ['😀', '\uffff']]
+      .map(([a, b]) => compareCodePoints(a, b)), [-1, 1, 0, -1, 1, -1, 1]);
+  });
+
+  it('kebab-cases and escapes as before', () => {
+    assert.deepStrictEqual(['fontFamily', 'font-family', '', 'aBC'].map(kebabCase), ['font-family', 'font-family', '', 'a-b-c']);
+    assert.deepStrictEqual(['a/b~c', '', '~1', '0'].map(escapePointerToken), ['a~1b~0c', '', '~01', '0']);
+  });
+
+  it('reads a String wrapper object as the string it wraps', () => {
+    const w = (/** @type {string} */ s) => /** @type {any} */ (new String(s));
+    assert.strictEqual(isStringWhiteSpace(w(' ')), true);
+    assert.strictEqual(isStringWhiteSpace(w('a')), false);
+    assert.strictEqual(compareCodePoints(w('b'), 'a'), 1);
+    assert.strictEqual(compareCodePoints('a', w('a')), 0);
+    assert.strictEqual(kebabCase(w('fontFamily')), 'font-family');
+    assert.strictEqual(escapePointerToken(w('a/b')), 'a~1b');
+  });
+
+  it('reads a String wrapper object\'s case as the string\'s, where it answered false', () => {
+    assert.strictEqual(isStringUpperCase(/** @type {any} */ (new String('A'))), true);
+    assert.strictEqual(isStringLowerCase(/** @type {any} */ (new String('a'))), true);
+    assert.strictEqual(isStringUpperCase(/** @type {any} */ (new String('a'))), false);
   });
 });

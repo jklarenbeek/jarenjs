@@ -14,26 +14,51 @@ export function isStringEmpty(data) {
 }
 
 /**
+ * Whether a string holds nothing but white space; `null` and `undefined`
+ * count as blank.
+ *
+ * Anything else but a string is refused with a `TypeError` naming what
+ * was given, never tested as the text it converts to (an array read as
+ * its joined items, so `[]` answered `true`); a `String` wrapper object
+ * is read as the string it wraps.
  * @param {string | null | undefined} data
  * @returns {boolean}
+ * @throws {TypeError} When `data` is neither a string, `null` nor `undefined`
  */
 export function isStringWhiteSpace(data) {
-  return data == null || /^\s*$/.test(data);
+  if (data == null) return true;
+  if (typeof data !== 'string')
+    data = unwrapString(data, 'isStringWhiteSpace');
+  return /^\s*$/.test(data);
 }
 
 /**
+ * Whether a string is its own upper-case form.
+ *
+ * Anything but a string is refused with a `TypeError` naming what was
+ * given; a `String` wrapper object is read as the string it wraps.
  * @param {string} str
  * @returns {boolean}
+ * @throws {TypeError} When `str` is not a string
  */
 export function isStringUpperCase(str) {
+  if (typeof str !== 'string')
+    str = unwrapString(str, 'isStringUpperCase');
   return str === str.toUpperCase();
 }
 
 /**
+ * Whether a string is its own lower-case form.
+ *
+ * Anything but a string is refused with a `TypeError` naming what was
+ * given; a `String` wrapper object is read as the string it wraps.
  * @param {string} str
  * @returns {boolean}
+ * @throws {TypeError} When `str` is not a string
  */
 export function isStringLowerCase(str) {
+  if (typeof str !== 'string')
+    str = unwrapString(str, 'isStringLowerCase');
   return str === str.toLowerCase();
 }
 
@@ -472,11 +497,21 @@ export function fromCodePoints(codePoints) {
  * `<`, which compares UTF-16 code units and orders surrogate pairs
  * (U+10000 and up) below unpaired BMP characters in U+E000-U+FFFF.
  * When one string is a prefix of the other, the shorter sorts first.
+ *
+ * Anything but a string, on either side, is refused with a `TypeError`
+ * naming what was given, never compared as the empty string (a value
+ * without a `length` read as no code units); a `String` wrapper object is
+ * compared as the string it wraps.
  * @param {string} a
  * @param {string} b
  * @returns {number} -1 when a < b, 0 when equal, 1 when a > b
+ * @throws {TypeError} When `a` or `b` is not a string
  */
 export function compareCodePoints(a, b) {
+  if (typeof a !== 'string')
+    a = unwrapString(a, 'compareCodePoints');
+  if (typeof b !== 'string')
+    b = unwrapString(b, 'compareCodePoints');
   const alen = a.length;
   const blen = b.length;
   const m = alen < blen ? alen : blen;
@@ -659,10 +694,16 @@ export async function sha256Hex(input) {
  * (`fontFamily` → `font-family`). Leaves already-hyphenated or
  * all-lowercase input unchanged.
  *
+ * Anything but a string is refused with a `TypeError` naming what was
+ * given; a `String` wrapper object is read as the string it wraps.
+ *
  * @param {string} s
  * @returns {string}
+ * @throws {TypeError} When `s` is not a string
  */
 export function kebabCase(s) {
+  if (typeof s !== 'string')
+    s = unwrapString(s, 'kebabCase');
   return s.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
 }
 
@@ -671,12 +712,19 @@ export function kebabCase(s) {
  * `~0` and `/` becomes `~1`, in that order, so an escaped `/` is never
  * escaped again.
  *
+ * Anything but a string is refused with a `TypeError` naming what was
+ * given (an array index is written as text first); a `String` wrapper
+ * object is read as the string it wraps.
+ *
  * @param {string} token - A member name or an array index, as text
  * @returns {string} The token as it is written between two slashes
+ * @throws {TypeError} When `token` is not a string
  * @example
  * escapePointerToken('a/b~c'); // 'a~1b~0c'
  */
 export function escapePointerToken(token) {
+  if (typeof token !== 'string')
+    token = unwrapString(token, 'escapePointerToken');
   return token.replaceAll('~', '~0').replaceAll('/', '~1');
 }
 

@@ -592,7 +592,9 @@ printer chooses, a row of touching nodes at a time and weighing each node
 against the runs left open around it: each node's delimiter (`*` or `_`);
 whether its runs merge with its parent's (`***x***`, emphasis around
 strong); whether literal `*` or `_` beside a run print bare as part of it,
-where the rule of three needs the longer run; and which white space or
+where the rule of three needs the longer run — all of them, or only some and
+the rest escaped where neither reads back (`*\**2;_"_\*****\*\_`: two of the
+three `*` after the closers print in their run); and which white space or
 letter beside a run prints as a character reference, which a run reads as
 punctuation (`*&#32;x*`: `* x*` does not open, and reads back as a list
 item). A letter alone between two runs prints one way for both. The runs
@@ -665,9 +667,10 @@ The normative round-trip guarantees:
 The guarantee is checked over those corpora and over randomly assembled
 documents; it has a known gap outside them, in a shape no real document holds:
 content of touching delimiters neither the derivation nor the search
-reaches — literal `*` or `_` inside nested runs, long chains of nested
-emphasis and strong — prints in the derived spelling, reads back as other
-nodes, and is named to `onLossy` as `'unread'`. A paragraph that is only raw inline HTML a block would start on (it can
+reaches — literal `*` or `_` inside nested runs that no choice the derivation
+weighs reads back as, or that it weighs as reading back where the reader reads
+it otherwise — prints in the derived spelling, reads back as other nodes, and
+is named to `onLossy` as `'unread'`. A paragraph that is only raw inline HTML a block would start on (it can
 only follow a link reference definition, which the AST does not keep) prints
 after a definition that defines nothing, `[-]: <>`, and so does an HTML block
 that begins with as many spaces as the last item of the list before it is

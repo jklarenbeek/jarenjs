@@ -227,16 +227,20 @@ delete it or fix it.
 
 ## @jarenjs/md
 
-- [ ] **Canonical printing: delimiter runs neither the derivation nor the
-  search reaches.** `toMarkdown` spells emphasis, strong and strikethrough
-  whose canonical spelling does not read back from the delimiter rules, falls
-  back to the search where that spelling does not read back, and names what
-  still does not read back to `onLossy`. Some trees the reader makes are
-  reached by neither and are named `'unread'` instead of reading back: literal
-  `*` or `_` inside nested runs (`*\**2;_"_\*****\*_` is one), and long chains
-  of nested emphasis and strong. Wanted: those spellings derived, so that
-  every tree the reader makes reads back and the search can go; such content
-  costs the derivation and then the search.
+- [ ] **Canonical printing: delimiter runs neither the derivation nor the search
+  reaches.** `toMarkdown` spells emphasis, strong and strikethrough whose
+  canonical spelling does not read back from the delimiter rules (each node's
+  delimiter, how many of the literal `*` and `_` beside a run print bare in
+  it, the characters beside a run that print as references), falls back to the
+  search where that spelling does not read back, and names what still does not
+  read back to `onLossy`. Some trees the reader makes are reached by neither
+  and are named `'unread'` instead of reading back: literal `*` or `_` inside
+  nested runs (`*_***_**__x*_____2;_*____*_` is one), where no spelling the
+  derivation weighs reads back or the derivation weighs one as reading back
+  that the reader reads otherwise. Wanted: those spellings derived and the
+  derivation's weighing agreeing with the reader, so that every tree the
+  reader makes reads back and the search can go; such content costs the
+  derivation and then the search.
 
 ## @jarenjs/mermaid
 
@@ -668,25 +672,14 @@ delete it or fix it.
 
 ## @jarenjs/locales
 
-- [ ] **Catalog copies the uncataloged-text guard lists.** The guard refuses a
-  literal equal to a catalog's English unless one of its ids sits beside it;
-  the copies it found in modules that do not read their catalog there are
-  listed in `test/locales/uncataloged-allowlist.json` as `catalog-copy`: the
-  website's engine cards (`packages/website/src/boundaries/engines.js`) and
-  the data studio's report line (`components/studio/src/data/runtime.js`).
-  Each should read the catalog that holds its words and leave the list. The
-  guard reads a window of tokens, so a copy beside a word equal to an id's
-  last segment still passes.
+- [ ] **The uncataloged-text guard reads a window of tokens.** The guard refuses a
+  literal equal to a catalog's English unless one of its ids sits beside it,
+  but it reads a window of tokens, so a copy beside a word equal to an id's
+  last segment still passes. The data studio's corpus disagreement line
+  (`components/studio/src/data/runtime.js`) reads its catalog for the empty
+  sequence and is English around it (`) disagreed on ` is listed `not-prose`).
 
 ## @jarenjs/core
-
-- [ ] **String predicates and comparison that answer for a non-string.**
-  `isStringWhiteSpace([])` answers `true` (the pattern reads an array as its
-  joined text) and `compareCodePoints(5, '')` answers `1`,
-  `compareCodePoints([], '')` `0` (a missing `length` reads as no code units);
-  `isStringUpperCase`, `kebabCase` and `escapePointerToken` throw the host's
-  unnamed `TypeError`. The string helpers that read a length refuse such input
-  with a named `TypeError`; these should follow once each caller is audited.
 
 ## Lexical search (cross-package)
 

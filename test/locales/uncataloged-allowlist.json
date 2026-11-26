@@ -566,8 +566,7 @@
     ["Only the owning tab can recreate the store.", "English-by-design-paragraph"],
     ["The Data editor is disposed.", "English-by-design-paragraph"],
     ["The store is not booted.", "English-by-design-paragraph"],
-    ["This host has no migration configured.", "English-by-design-paragraph"],
-    ["the empty sequence", "catalog-copy"]
+    ["This host has no migration configured.", "English-by-design-paragraph"]
   ],
   "components/studio/src/data/storage.js": [
     ["SharedArrayBuffer is unavailable", "developer-facing"],
@@ -2400,18 +2399,12 @@
     ["The array source is resident. Only requested pages and visible cells are mounted.", "English-by-design-paragraph"]
   ],
   "packages/website/src/boundaries/engines.js": [
-    ["(empty sequence)", "catalog-copy"],
     [". Add them to the externals input as JSON.", "English-by-design-paragraph"],
-    ["Compile", "catalog-copy"],
     ["Externals must be an object", "developer-facing"],
-    ["Invalid JSON", "catalog-copy"],
-    ["Items", "catalog-copy"],
     ["JSLT error", "developer-facing"],
     ["Query error", "developer-facing"],
-    ["Run", "catalog-copy"],
     ["The externals input is a JSON object of name → value, one member per external the query uses.", "English-by-design-paragraph"],
     ["This query needs externals not provided: ", "English-by-design-paragraph"],
-    ["Transform", "catalog-copy"],
     ["Unbound externals", "developer-facing"],
     ["proof of no change", "developer-facing"]
   ],

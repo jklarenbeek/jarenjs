@@ -5,7 +5,9 @@
  * §6.2: which runs can open and close beside which characters, the rule of
  * three, the reader taking two characters from an opener and a closer that
  * both have two): each node's delimiter, which literal `*` and `_` beside
- * it print bare, and which characters beside a run print as references;
+ * it print bare (all of a text's literal characters at the run, or only
+ * some, the rest escaped), and which characters beside a run print as
+ * references;
  * content the derived spelling does not reach is spelled by the search it
  * replaced. A node no Markdown reads back as, and content neither reads
  * back as, is named to `onLossy` with its path instead of printing as
@@ -138,12 +140,23 @@ describe('toMarkdown — onLossy names each node no Markdown reads back as', fun
   });
 
   it('names the first node of content no spelling the printer derives or finds reads back as', () => {
-    const ast = parseMarkdown('*\\**2;_"_\\*****\\*_').ast;
+    const ast = parseMarkdown('*_***_**__x*_____2;_*____*_').ast;
     assert.deepEqual(lossy(ast), {
-      text: '*\\*_2;*"*\\*_*\\*\\*\\*\\_\n',
-      reports: [{ code: 'unread', path: [0, 0, 0],
-        reason: 'no spelling the printer derives or finds reads back as it: it reads back as the text "*_2;" where the document has the text "*"' }],
+      text: '*\\_*__\\___\\_\\_x\\*\\_****2;_\\*_***\\**\n',
+      reports: [{ code: 'unread', path: [0, 2],
+        reason: 'no spelling the printer derives or finds reads back as it: it reads back as the text "__x*_**" where the document has the text "__x*_"' }],
     });
+  });
+
+  it('prints some of the literal delimiters after a closer bare in its run and the rest escaped, where none or all does not read back', () => {
+    // the three `*` after the closers: two print bare in the closers' run, the third escaped
+    assert.deepEqual(lossy(parseMarkdown('*\\**2;_"_\\*****\\*_').ast), { text: '*\\**2;_"_\\*****\\*\\_\n', reports: [] });
+    canonical('*\\**2;_"_\\*****\\*_');
+    const inner = em(t('*'), em(t('2;'), em(t('"')), t('*')));
+    assert.deepEqual(lossy([p(inner, t('***.'))]), { text: '*\\**2;_"_\\*****\\*.\n', reports: [] });
+    assert.deepEqual(lossy([p(inner, t('***x'))]), { text: '*\\**2;_"_\\*****\\*x\n', reports: [] });
+    // all of them bare, as before, where that reads back
+    assert.deepEqual(lossy([p(inner, t('**.'))]), { text: '*\\**2;_"_\\*****.\n', reports: [] });
   });
 
   it('prints content the derivation does not reach in the spelling the search finds', () => {
@@ -178,8 +191,8 @@ describe('toMarkdown — random runs and trees read back or are named, never rea
       else assert.deepEqual(parseMarkdown(text).ast, ast, `AST drift for ${JSON.stringify(source)} printed ${JSON.stringify(text)}`);
     }
     // the residue neither the derivation nor the search reaches: literal
-    // delimiters inside nested runs (the source `*\\**2;_"_\\*****\\*_` is one)
-    assert.equal(named, 7);
+    // delimiters inside nested runs (the source `*_***_**__x*_____2;_*____*_` is one)
+    assert.equal(named, 6);
   });
 
   it('prints 1500 random trees of emphasis, strong, text and code so that each reads back or is named', function () {

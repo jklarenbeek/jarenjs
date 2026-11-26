@@ -83,7 +83,9 @@ a host can inject its existing `createRow(text)` convenience function.
 app documents and provides the form/chart/Markdown/diagram render widgets. The
 host supplies its Markdown and diagram rendering policy.
 `createProjectHost({ loadDocument, runQuery, runJslt, runValidation, operators? })`
-provides the stage, splitter and project engine integration.
+provides the stage, splitter and project engine integration. `runQuery(inputs, { messages })`
+and `runJslt(inputs, { messages })` are handed the reader's compiled catalog with each
+run, so the result they render speaks the reader's language.
 
 Pass that host to `mountStudioEditor(node, { project, host, ... })`. Optional
 services include template lookup, template cards, downloads, offline export,
