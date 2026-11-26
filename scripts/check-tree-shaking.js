@@ -291,7 +291,8 @@ if (engineLeak.length > 0)
 // Raised to 47,600 (measured 47577): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129) add 129.
 // Raised to 47,700 (measured 47615): the builder's date format taking a zone operand, which every pen shares (expression 38).
 // Raised to 47,800 (measured 47750): the captured expression's instantOf and wallClock for the query language's $instant and $wall, which every pen shares (expression 107).
-if (schemaBytes > 47800)
+// Raised to 48,100 (measured 48091): core's escapePointerToken, isStringWhiteSpace, compareCodePoints, kebabCase and the case predicates refusing a non-string with a named TypeError, which every pen reaches through escapePointerToken (string 341).
+if (schemaBytes > 48100)
   throw new Error(`The schema pen bundle grew to ${schemaBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${schemaBytes} byte schema-pen bundle; no chain module, no engine).`);
@@ -397,7 +398,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 260,600 (measured 260598): an entity handle read as the chain over it as a join's inner side (async 193).
 // Raised to 261,000 (measured 260936): the string helpers' named refusal of a non-string, which every chain reaches through core's string module (string 338).
 // Raised to 261,600 (measured 261591): semanticKey joining a frozen tree remembered inside a per-call wrapper (object 655).
-if (chainBytes > 261600)
+// Raised to 261,800 (measured 261742): core's escapePointerToken, isStringWhiteSpace, compareCodePoints, kebabCase and the case predicates refusing a non-string with a named TypeError (string 151).
+if (chainBytes > 261800)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -489,7 +491,8 @@ if (modelEngineLeak.length > 0)
 // Raised to 59,900 (measured 59812): the builder's date format taking a zone operand, which every pen shares (expression 38).
 // Raised to 60,100 (measured 60086): a collection's declared calendar members and an entity member's calendar kind (collection 128, entity 11), and the captured expression's instantOf and wallClock, which every pen shares (expression 107).
 // Raised to 60,200 (measured 60122): an index's doubleOrder option, a boolean the builder checks and carries (collection 36).
-if (modelBytes > 60200)
+// Raised to 60,500 (measured 60463): core's escapePointerToken, isStringWhiteSpace, compareCodePoints, kebabCase and the case predicates refusing a non-string with a named TypeError, which every pen reaches through escapePointerToken (string 341).
+if (modelBytes > 60500)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
@@ -883,7 +886,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,211,100 (measured 1211077): a reference's recorded units kept for the branches that enter it again, and read only where a recording format writes them (index and combine 179 together; minified alone index 190, combine 10).
 // Raised to 1,212,200 (measured 1212115): semanticKey joining a remembered frozen tree (object 655), four more string helpers' named refusal of a non-string (string 303), and the queue's SQLite writes beginning with the writer lock (jobs 80).
 // Raised to 1,212,400 (measured 1212310): the entity writes that read first beginning with the writer lock on SQLite (entity, tracker, store 195).
-if (clientBytes > 1212400)
+// Raised to 1,212,700 (measured 1212616): core's escapePointerToken, isStringWhiteSpace, compareCodePoints, kebabCase and the case predicates refusing a non-string with a named TypeError (string 306).
+if (clientBytes > 1212700)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
@@ -947,7 +951,8 @@ if (contractPenLeak.length > 0)
 // Raised to 61,200 (measured 61150): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
 // Raised to 61,300 (measured 61216): the builder's date format passing a zone operand verbatim, which every pen shares (expression 66).
 // Raised to 61,400 (measured 61323): the captured expression's instantOf and wallClock, which every pen shares (expression 107).
-if (contractPenBytes > 61400)
+// Raised to 61,700 (measured 61664): core's escapePointerToken, isStringWhiteSpace, compareCodePoints, kebabCase and the case predicates refusing a non-string with a named TypeError, which every pen reaches through escapePointerToken (string 341).
+if (contractPenBytes > 61700)
   throw new Error(`The contract pen bundle grew to ${contractPenBytes} bytes.`);
 const chainContractLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/contract/') && info.bytesInOutput > 0);
@@ -1019,7 +1024,8 @@ if (flowPenLeak.length > 0)
 // Raised to 30,200 (measured 30179): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 627, walk 595, string 66, renames 5) add 1293.
 // Raised to 30,400 (measured 30308): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
 // Raised to 30,500 (measured 30481): the captured expression's instantOf and wallClock, which every pen shares (expression 107).
-if (flowPenBytes > 30500)
+// Raised to 30,900 (measured 30822): core's escapePointerToken, isStringWhiteSpace, compareCodePoints, kebabCase and the case predicates refusing a non-string with a named TypeError, which every pen reaches through escapePointerToken (string 341).
+if (flowPenBytes > 30900)
   throw new Error(`The flow pen bundle grew to ${flowPenBytes} bytes.`);
 const chainFlowLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/flow/') && info.bytesInOutput > 0);
@@ -1087,7 +1093,8 @@ if (appPenLeak.length > 0)
 // Raised to 62,600 (measured 62505): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 630, walk 597) add 1227.
 // Raised to 62,700 (measured 62634): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
 // Raised to 62,900 (measured 62807): the captured expression's instantOf and wallClock, which every pen shares (expression 107).
-if (appPenBytes > 62900)
+// Raised to 63,200 (measured 63148): core's escapePointerToken, isStringWhiteSpace, compareCodePoints, kebabCase and the case predicates refusing a non-string with a named TypeError, which every pen reaches through escapePointerToken (string 341).
+if (appPenBytes > 63200)
   throw new Error(`The app pen bundle grew to ${appPenBytes} bytes.`);
 const chainAppLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/app/') && info.bytesInOutput > 0);
@@ -1154,7 +1161,8 @@ if (formsPenLeak.length > 0)
 // Raised to 51,900 (measured 51847): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
 // Raised to 52,000 (measured 51913): the builder's date format passing a zone operand verbatim, which every pen shares (expression 66).
 // Raised to 52,100 (measured 52020): the captured expression's instantOf and wallClock, which every pen shares (expression 107).
-if (formsPenBytes > 52100)
+// Raised to 52,400 (measured 52361): core's escapePointerToken, isStringWhiteSpace, compareCodePoints, kebabCase and the case predicates refusing a non-string with a named TypeError, which every pen reaches through escapePointerToken (string 341).
+if (formsPenBytes > 52400)
   throw new Error(`The forms pen bundle grew to ${formsPenBytes} bytes.`);
 const chainFormsLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/forms/') && info.bytesInOutput > 0);
