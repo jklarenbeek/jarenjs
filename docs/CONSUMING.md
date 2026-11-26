@@ -155,7 +155,7 @@ the table and stale in the paragraph that cites it:
 
 | Subpath | Bundle | What rides along |
 |---|---:|---|
-| `.` | <!--fact:bundle.chain.kb-->261<!--/fact--> kB | the query engine — a chain's document has to run somewhere |
+| `.` | <!--fact:bundle.chain.kb-->262<!--/fact--> kB | the query engine — a chain's document has to run somewhere |
 | `./schema` | <!--fact:bundle.schema.kb-->48<!--/fact--> kB | the builders and the recording proxy `check()` captures through |
 | `./model` | <!--fact:bundle.model.kb-->60<!--/fact--> kB | the schema pen it subclasses |
 | `./jslt` | <!--fact:bundle.jslt.kb-->29<!--/fact--> kB | the body capture; of the schema pen, only the builder brand |
@@ -169,7 +169,7 @@ the table and stale in the paragraph that cites it:
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->26<!--/fact--> kB | text template capture; no renderer |
 | `./project` | <!--fact:bundle.project.kb-->5<!--/fact--> kB | project files; no Studio engine |
 | `./charts` | <!--fact:bundle.charts.kb-->7<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->1211<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->1212<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both
@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->17 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->24 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -225,19 +225,19 @@ included.
 | `.` | 139 | core 74, validate 29, json 24, contract 12 | 6.4 |
 | `./app` | 29 | core 11, contract 9, json 9 | 1.5 |
 | `./auth-node` | 11 | core 8, contract 3 | 1.4 |
-| `./client` | 139 | core 75, validate 27, json 24, contract 13 | 6.1 |
+| `./client` | 139 | core 75, validate 27, json 24, contract 13 | 6.2 |
 | `./command` | 23 | core 11, json 7, contract 5 | 1.2 |
 | `./continuation-node` | 20 | core 10, json 7, contract 3 | 1.7 |
 | `./diff` | 140 | core 74, validate 29, json 24, contract 13 | 6.8 |
 | `./fetch` | 11 | core 8, contract 3 | 0.7 |
-| `./http` | 46 | contract 17, core 16, json 7, validate 6 | 2.0 |
+| `./http` | 46 | contract 17, core 16, json 7, validate 6 | 2.1 |
 | `./ledger` | 11 | core 9, contract 2 | 0.8 |
 | `./local` | 19 | core 10, contract 9 | 1.1 |
 | `./node` | 13 | core 9, contract 4 | 0.8 |
 | `./port` | 27 | contract 15, core 12 | 1.4 |
 | `./project` | 174 | core 84, json 42, validate 29, contract 14, emit 5 | 9.4 |
 | `./provider` | 115 | core 75, json 32, contract 8 | 4.5 |
-| `./stream` | 16 | core 11, contract 5 | 1.0 |
+| `./stream` | 16 | core 11, contract 5 | 1.1 |
 | `./webmcp` | 1 | contract 1 | 0.1 |
 <!--/fact-->
 
@@ -246,25 +246,25 @@ included.
 <!--fact:closure.db-->
 | Subpath | Modules | By package | Live heap MiB |
 |---|---:|---|---:|
-| `.` | 216 | core 88, db 87, json 35, validate 6 | 12.4 |
+| `.` | 216 | core 88, db 87, json 35, validate 6 | 12.5 |
 | `./app` | 1 | db 1 | 0.1 |
 | `./async-live` | 142 | core 64, db 49, json 23, validate 6 | 8.0 |
 | `./bun` | 134 | core 63, db 42, json 23, validate 6 | 6.6 |
 | `./entity` | 137 | core 63, db 43, json 25, validate 6 | 7.5 |
 | `./model` | 125 | core 63, db 33, json 23, validate 6 | 6.3 |
-| `./node` | 135 | core 63, db 43, json 23, validate 6 | 7.0 |
-| `./node-pool` | 109 | core 62, db 24, json 23 | 5.0 |
+| `./node` | 135 | core 63, db 43, json 23, validate 6 | 7.1 |
+| `./node-pool` | 109 | core 62, db 24, json 23 | 5.1 |
 | `./node-process` | 105 | core 62, json 23, db 20 | 5.0 |
 | `./node-worker` | 105 | core 62, json 23, db 20 | 5.0 |
 | `./postgres` | 122 | core 63, db 36, json 23 | 5.4 |
-| `./query` | 138 | core 63, db 46, json 23, validate 6 | 7.9 |
+| `./query` | 138 | core 63, db 46, json 23, validate 6 | 8.0 |
 | `./relational` | 128 | core 63, db 36, json 23, validate 6 | 6.4 |
 | `./schedules` | 44 | core 29, db 9, json 6 | 2.1 |
 | `./search` | 95 | core 67, json 23, db 5 | 4.3 |
-| `./temporals` | 212 | core 88, db 83, json 35, validate 6 | 12.2 |
-| `./trigger-rules` | 126 | core 63, db 34, json 23, validate 6 | 6.4 |
+| `./temporals` | 212 | core 88, db 83, json 35, validate 6 | 12.3 |
+| `./trigger-rules` | 126 | core 63, db 34, json 23, validate 6 | 6.5 |
 | `./typed` | 1 | db 1 | 0.1 |
-| `./wasm` | 107 | core 62, json 23, db 22 | 5.0 |
+| `./wasm` | 107 | core 62, json 23, db 22 | 5.1 |
 | `./worker-endpoint` | 139 | core 63, db 47, json 23, validate 6 | 7.2 |
 <!--/fact-->
 
@@ -273,20 +273,20 @@ included.
 <!--fact:closure.linq-->
 | Subpath | Modules | By package | Live heap MiB |
 |---|---:|---|---:|
-| `.` | 96 | core 62, json 23, linq 11 | 4.5 |
+| `.` | 96 | core 62, json 23, linq 11 | 4.6 |
 | `./app` | 24 | linq 16, core 8 | 1.2 |
 | `./authoring` | 15 | core 8, linq 7 | 1.0 |
 | `./charts` | 15 | core 8, linq 7 | 1.0 |
 | `./contract` | 20 | core 10, linq 10 | 1.2 |
 | `./db` | 288 | core 101, db 87, json 38, validate 28, linq 27, formats 7 | 15.1 |
 | `./flow` | 19 | linq 11, core 8 | 1.1 |
-| `./forms` | 21 | linq 13, core 8 | 1.2 |
+| `./forms` | 21 | linq 13, core 8 | 1.3 |
 | `./formula` | 93 | core 62, json 26, linq 5 | 4.3 |
 | `./jslt` | 17 | linq 9, core 8 | 1.0 |
 | `./jtlt` | 15 | core 8, linq 7 | 1.0 |
 | `./messages` | 16 | core 9, linq 7 | 1.1 |
 | `./migration` | 27 | core 11, linq 9, json 7 | 1.4 |
-| `./model` | 23 | linq 15, core 8 | 1.3 |
+| `./model` | 23 | linq 15, core 8 | 1.4 |
 | `./project` | 14 | core 8, linq 6 | 1.0 |
 | `./schema` | 19 | linq 11, core 8 | 1.2 |
 <!--/fact-->
@@ -308,8 +308,8 @@ included.
 | `./patch` | 18 | core 10, json 8 | 1.0 |
 | `./path` | 18 | core 11, json 7 | 1.0 |
 | `./pointer` | 16 | core 10, json 6 | 0.9 |
-| `./query` | 85 | core 62, json 23 | 3.8 |
-| `./query/calendar` | 36 | core 28, json 8 | 1.9 |
+| `./query` | 85 | core 62, json 23 | 3.9 |
+| `./query/calendar` | 36 | core 28, json 8 | 2.0 |
 | `./rules` | 90 | core 62, json 28 | 4.0 |
 | `./write` | 20 | core 11, json 9 | 1.1 |
 | `./xquery` | 87 | core 62, json 25 | 4.1 |
@@ -320,13 +320,13 @@ included.
 <!--fact:closure.validate-->
 | Subpath | Modules | By package | Live heap MiB |
 |---|---:|---|---:|
-| `.` | 124 | core 73, validate 27, json 24 | 5.5 |
+| `.` | 124 | core 73, validate 27, json 24 | 5.6 |
 | `./load` | 41 | core 24, validate 11, json 6 | 1.8 |
 | `./normalize` | 126 | core 73, validate 29, json 24 | 5.9 |
 | `./output` | 42 | core 25, validate 11, json 6 | 2.0 |
-| `./query` | 124 | core 73, validate 27, json 24 | 5.5 |
+| `./query` | 124 | core 73, validate 27, json 24 | 5.6 |
 | `./references` | 24 | core 12, json 6, validate 6 | 1.1 |
-| `./strict-profile` | 127 | core 73, validate 30, json 24 | 6.0 |
+| `./strict-profile` | 127 | core 73, validate 30, json 24 | 6.1 |
 <!--/fact-->
 
 **`@jarenjs/core`**
@@ -336,7 +336,7 @@ included.
 |---|---:|---|---:|
 | `.` | 5 | core 5 | 0.3 |
 | `./array` | 6 | core 6 | 0.3 |
-| `./assign` | 25 | core 25 | 0.9 |
+| `./assign` | 25 | core 25 | 1.0 |
 | `./assign/days` | 19 | core 19 | 0.8 |
 | `./async` | 6 | core 6 | 0.3 |
 | `./bigint` | 6 | core 6 | 0.3 |
@@ -364,12 +364,12 @@ included.
 | `./random` | 1 | core 1 | 0.1 |
 | `./range` | 10 | core 10 | 0.6 |
 | `./retry` | 9 | core 9 | 0.6 |
-| `./route` | 10 | core 10 | 0.6 |
+| `./route` | 10 | core 10 | 0.7 |
 | `./runtime` | 1 | core 1 | 0.1 |
 | `./scan` | 1 | core 1 | 0.1 |
 | `./schedule` | 10 | core 10 | 0.6 |
 | `./schema` | 9 | core 9 | 0.6 |
-| `./search` | 12 | core 12 | 0.6 |
+| `./search` | 12 | core 12 | 0.7 |
 | `./series` | 19 | core 19 | 0.8 |
 | `./stats` | 2 | core 2 | 0.1 |
 | `./string` | 6 | core 6 | 0.3 |
