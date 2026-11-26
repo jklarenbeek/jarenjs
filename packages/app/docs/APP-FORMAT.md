@@ -316,6 +316,11 @@ yields the number or `null` for a cleared control: an app whose own
 actions write a number control reads it with that expression, so it takes
 exactly the text the standard action takes.
 
+The view's chrome words (the add/remove buttons' accessible names and the
+JSON editor's hint) come from `labels`, then from `messages` (a compiled
+locale pack, read when the view is built), then English; a `labelsPath`
+document member wins over all three at render time.
+
 The options are checked when the actions are made, and `createFormView`
 checks its own the same way: options that are not an object and a
 member outside the documented set (each factory accepts the other's

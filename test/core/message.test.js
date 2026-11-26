@@ -7,6 +7,8 @@ import {
   formatMessageValue,
   compileMessageTemplate,
   compileMessageCatalog,
+  formChromeLabels,
+  formChromeMessagesEn,
 } from '@jarenjs/core/message';
 
 describe('formatTemplateParam', function () {
@@ -196,5 +198,18 @@ describe('compileMessageCatalog', function () {
   it('freezes the result', function () {
     const catalog = compileMessageCatalog({ a: 'x' });
     assert.equal(Object.isFrozen(catalog), true);
+  });
+});
+
+describe('formChromeLabels', function () {
+  it('answers the English of each form-chrome id without a catalog', function () {
+    assert.deepEqual(formChromeLabels(), { addItem: 'Add item', removeItem: 'Remove item', jsonPlaceholder: 'Enter a JSON value' });
+    assert.equal(Object.isFrozen(formChromeMessagesEn), true);
+    assert.deepEqual(Object.keys(formChromeMessagesEn), ['form/addItem', 'form/removeItem', 'form/jsonPlaceholder']);
+  });
+
+  it('reads each id a compiled catalog holds, and the English of the others', function () {
+    const catalog = compileMessageCatalog({ 'form/removeItem': 'Verwijderen', 'form/jsonPlaceholder': 'JSON {kind}' });
+    assert.deepEqual(formChromeLabels(catalog), { addItem: 'Add item', removeItem: 'Verwijderen', jsonPlaceholder: 'JSON {kind}' });
   });
 });

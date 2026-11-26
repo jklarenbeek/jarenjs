@@ -143,7 +143,9 @@
   ],
   "components/md/src/utils.js": [
     [" — did you mean '", "developer-facing"],
-    ["a plain object of labels", "developer-facing"]
+    ["a plain object of labels", "developer-facing"],
+    ["an array", "developer-facing"],
+    ["an object", "developer-facing"]
   ],
   "components/mermaid/src/layout/sequence.js": [
     ["left of", "not-prose"],
@@ -349,6 +351,7 @@
     ["One selector, three shapes", "data"],
     ["One stylesheet, two inputs", "data"],
     ["Order", "data"],
+    ["Parse profile — ms per document", "data"],
     ["Payment", "data"],
     ["Pie", "data"],
     ["Play retires the playground", "data"],
@@ -398,6 +401,7 @@
     ["Treemap in groups", "data"],
     ["Two engines compared", "data"],
     ["Two modes: a TOC and the body", "data"],
+    ["Typed values", "data"],
     ["User", "data"],
     ["Where visits go", "data"],
     ["XML: escaping vs $raw", "data"],
@@ -454,6 +458,10 @@
   "components/play/src/host/validator.js": [
     ["Invalid JSON: ", "English-by-design-paragraph"]
   ],
+  "components/studio/src/assemble.js": [
+    ["data store", "data"],
+    ["state machine", "data"]
+  ],
   "components/studio/src/component/data/actions.js": [
     ["$event.value", "not-prose"]
   ],
@@ -494,12 +502,22 @@
     ["btn small", "not-prose"],
     ["btn small active", "not-prose"]
   ],
+  "components/studio/src/component/project-actions.js": [
+    ["Untitled project", "data"]
+  ],
   "components/studio/src/component/project-controller.js": [
     ["' has no result runner in this host.", "English-by-design-paragraph"],
     ["The project changed before the candidate could be applied.", "English-by-design-paragraph"],
     ["The project editor is disposed.", "English-by-design-paragraph"],
     ["The project revision changed.", "English-by-design-paragraph"],
-    ["Unknown project file '", "developer-facing"]
+    ["Unknown project file '", "developer-facing"],
+    ["Untitled project", "data"]
+  ],
+  "components/studio/src/component/project-state.js": [
+    ["Untitled project", "data"]
+  ],
+  "components/studio/src/component/project.js": [
+    ["Untitled project", "data"]
   ],
   "components/studio/src/component/shared/nodes.js": [
     ["\"\" (document root)", "not-prose"]
@@ -523,6 +541,9 @@
     ["js-file active", "not-prose"],
     ["seg-btn active", "not-prose"]
   ],
+  "components/studio/src/component/viewmodel.js": [
+    ["Untitled project", "data"]
+  ],
   "components/studio/src/data/browser-worker.js": [
     [" (non-durable; data lasts until reload).", "not-prose"],
     ["CREATE TABLE IF NOT EXISTS probe(n); DELETE FROM probe; INSERT INTO probe VALUES(73)", "not-prose"],
@@ -545,7 +566,8 @@
     ["Only the owning tab can recreate the store.", "English-by-design-paragraph"],
     ["The Data editor is disposed.", "English-by-design-paragraph"],
     ["The store is not booted.", "English-by-design-paragraph"],
-    ["This host has no migration configured.", "English-by-design-paragraph"]
+    ["This host has no migration configured.", "English-by-design-paragraph"],
+    ["the empty sequence", "catalog-copy"]
   ],
   "components/studio/src/data/storage.js": [
     ["SharedArrayBuffer is unavailable", "developer-facing"],
@@ -614,6 +636,8 @@
     ["' threw while disposing: ", "developer-facing"],
     ["a boolean or 'interactive'", "developer-facing"],
     ["a plain object", "developer-facing"],
+    ["an array", "developer-facing"],
+    ["an object", "developer-facing"],
     ["an object of ", "developer-facing"],
     ["effect handler '", "developer-facing"],
     ["multiple failures surfaced in one drain", "developer-facing"],
@@ -652,8 +676,10 @@
     ["an action document failed to compile", "developer-facing"],
     ["an action produced a transition that is not an object", "developer-facing"],
     ["an action, when document or event-field extractor threw", "developer-facing"],
+    ["an array", "developer-facing"],
     ["an awaited effect threw, rejected or resolved a value that is not JSON", "developer-facing"],
     ["an effect handler threw", "developer-facing"],
+    ["an object", "developer-facing"],
     ["an object from another realm", "developer-facing"],
     ["an object with a custom prototype", "developer-facing"],
     ["an unknown action was dispatched", "developer-facing"],
@@ -797,6 +823,7 @@
     [" (this compiler speaks '0.1')", "developer-facing"],
     [" cannot carry '", "developer-facing"],
     [" carries no content, but the output schema never admits null — the value could not be answered; declare an output that admits null, or another status", "developer-facing"],
+    [" is not a JSON value", "developer-facing"],
     [" must be one of path, query, header, body", "developer-facing"],
     [" operation bound to ", "developer-facing"],
     [" with an earlier operation", "developer-facing"],
@@ -1456,6 +1483,7 @@
   "packages/json/src/canonical.js": [
     [" instance is not a JSON object", "developer-facing"],
     [" is not a JSON number", "developer-facing"],
+    [" is not a JSON value", "developer-facing"],
     [" levels cannot be canonicalized", "developer-facing"],
     ["a BigInt is not a JSON number", "developer-facing"],
     ["a circular reference", "developer-facing"],
@@ -1717,7 +1745,9 @@
     ["unknown template member '", "developer-facing"]
   ],
   "packages/json/src/jtlt/writer.js": [
-    [" into text output; dispatch into it with $apply, or embed it with $json", "developer-facing"]
+    [" into text output; dispatch into it with $apply, or embed it with $json", "developer-facing"],
+    ["an array", "developer-facing"],
+    ["an object", "developer-facing"]
   ],
   "packages/json/src/node.js": [
     [" — a .ts module loads only where Node strips types (Node >= 24 does by default; --no-strip-types turns it off)", "developer-facing"],
@@ -1821,6 +1851,7 @@
     ["version envelope with unknown or non-string $query", "developer-facing"]
   ],
   "packages/json/src/query/normalize.js": [
+    ["an object", "developer-facing"],
     ["host error (message unavailable)", "developer-facing"]
   ],
   "packages/json/src/query/series.js": [
@@ -1961,6 +1992,7 @@
     ["a strict profile cannot carry a schema that accepts no value", "developer-facing"],
     ["a strict profile cannot carry an object whose member names are open", "developer-facing"],
     ["a strict profile cannot close an object around a required member it does not declare", "developer-facing"],
+    ["an array", "developer-facing"],
     ["an empty array", "developer-facing"],
     ["an identifier names two schemas", "developer-facing"],
     ["compileAsync: a compilation needs more schema loads than the maxLoads option", "developer-facing"],
@@ -2014,6 +2046,7 @@
     [", not a schema (an object or a boolean)", "developer-facing"],
     [", referenced by a schema the validator held", "developer-facing"],
     ["; the URI is under the validator's default base '", "developer-facing"],
+    ["an array", "developer-facing"],
     ["give the schema an $id, or the validator a base (traverse: new TraverseOptions(base))", "developer-facing"],
     ["the string '", "developer-facing"]
   ],
@@ -2097,6 +2130,7 @@
   ],
   "packages/view/src/vnode.js": [
     [" is not an element name (a letter, then ", "developer-facing"],
+    ["at the root", "developer-facing"],
     ["before an element, start the list with null: [null, \\' \\', [\\'b\\', {}, \\'x\\']]", "developer-facing"],
     ["inside a widget\\'s ssr vnode", "developer-facing"],
     ["letters, digits or hyphens). An array whose first item is a string is an element; to splice text ", "developer-facing"],
@@ -2344,9 +2378,13 @@
     ["md", "proper-noun"],
     ["mermaid", "data"],
     ["over whatever exists. Changing one leaves the other alone — the three lines above ", "English-by-design-paragraph"],
+    ["patch", "data"],
+    ["path", "data"],
     ["pointer", "data"],
+    ["render", "data"],
     ["rival A", "data"],
     ["rival B", "data"],
+    ["schemas", "data"],
     ["streaming", "proper-noun"],
     ["tests, fastest first", "data"],
     ["the outage is still a gap and the line still ends where the data does.", "English-by-design-paragraph"],
@@ -2362,12 +2400,18 @@
     ["The array source is resident. Only requested pages and visible cells are mounted.", "English-by-design-paragraph"]
   ],
   "packages/website/src/boundaries/engines.js": [
+    ["(empty sequence)", "catalog-copy"],
     [". Add them to the externals input as JSON.", "English-by-design-paragraph"],
+    ["Compile", "catalog-copy"],
     ["Externals must be an object", "developer-facing"],
+    ["Invalid JSON", "catalog-copy"],
+    ["Items", "catalog-copy"],
     ["JSLT error", "developer-facing"],
     ["Query error", "developer-facing"],
+    ["Run", "catalog-copy"],
     ["The externals input is a JSON object of name → value, one member per external the query uses.", "English-by-design-paragraph"],
     ["This query needs externals not provided: ", "English-by-design-paragraph"],
+    ["Transform", "catalog-copy"],
     ["Unbound externals", "developer-facing"],
     ["proof of no change", "developer-facing"]
   ],

@@ -174,7 +174,7 @@ describe('createFormActions — a checked option set', function () {
       /^createFormActions: unknown option 'clearedd' — did you mean 'cleared'\?$/);
     refuses(() => createFormActions(/** @type {any} */ ({ datapointer: '/calc' })), /unknown option 'datapointer' — did you mean 'dataPointer'\?$/);
     refuses(() => createFormActions(/** @type {any} */ ({ onEmpty: 'keep' })),
-      /^createFormActions: unknown option 'onEmpty'; the options are root, classPrefix, actions, addLabel, removeLabel, requiredMarker, labels, labelsPath, dataPointer, cleared$/);
+      /^createFormActions: unknown option 'onEmpty'; the options are root, classPrefix, actions, addLabel, removeLabel, requiredMarker, labels, labelsPath, messages, dataPointer, cleared$/);
   });
 
   it('refuses options that are not an object, which read as no options or crashed', function () {

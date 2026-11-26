@@ -158,10 +158,19 @@ export function getSegmenter() {
 }
 
 /**
+ * Whether every UTF-16 code unit of a string is ASCII (U+0000-U+007F).
+ *
+ * Anything but a string is refused with a `TypeError` naming what was
+ * given, never answered `true`: a non-string has no `length`, so it
+ * would read as the empty string. A `String` wrapper object is read as
+ * the string it wraps.
  * @param {string} str
  * @returns {boolean}
+ * @throws {TypeError} When `str` is not a string
  */
 export function isAsciiString(str) {
+  if (typeof str !== 'string')
+    str = unwrapString(str, 'isAsciiString');
   const len = str.length;
   for (let i = 0; i < len; i++) {
     if (str.charCodeAt(i) > 127) return false;
@@ -181,11 +190,20 @@ export function isAsciiString(str) {
 const COMPLEX_GRAPHEME_REGEX = /[\r\p{M}\p{Join_Control}\p{Emoji_Modifier}\p{Regional_Indicator}\u0600-\u0605\u06DD\u070F\u0890\u0891\u08E2\uFE00-\uFE0F\u1100-\u11FF\uA960-\uA97F\uD7B0-\uD7FF\u{110BD}\u{110CD}\u{E0000}-\u{E007F}]/u;
 
 /**
+ * The length of a string in UTF-16 code units, or in grapheme clusters
+ * when `useGrapheme` is set.
+ *
+ * Anything but a string is refused with a `TypeError` naming what was
+ * given, never answered `undefined` or `NaN`; a `String` wrapper object
+ * is measured as the string it wraps.
  * @param {string} str
  * @param {boolean} [useGrapheme=false]
  * @returns {number}
+ * @throws {TypeError} When `str` is not a string
  */
 export function getStringLength(str, useGrapheme = false) {
+  if (typeof str !== 'string')
+    str = unwrapString(str, 'getStringLength');
   if (!useGrapheme) {
     return str.length;
   }
@@ -383,6 +401,28 @@ export function toCodePoints(str) {
 }
 
 /**
+ * Refuse, with a `TypeError` naming what was given, a value that is no
+ * array-like list of code points: a primitive, a function, an object
+ * without a numeric `length`, or a `String` wrapper object.
+ * @param {unknown} value - Anything that is not an array
+ * @returns {void}
+ */
+function refuseNonCodePointList(value) {
+  if (value !== null && typeof value === 'object'
+    && typeof (/** @type {{ length?: unknown }} */ (value)).length === 'number') {
+    let wrapsString = true;
+    try {
+      String.prototype.valueOf.call(value);
+    }
+    catch {
+      wrapsString = false;
+    }
+    if (!wrapsString) return;
+  }
+  throw new TypeError(`fromCodePoints: expected an array of code points, got ${kindOfGiven(value)}`);
+}
+
+/**
  * Fewer code points than this and appending one at a time beats
  * spreading the array into `String.fromCodePoint`, whose argument-list
  * setup then costs more than the concatenations it saves. Measured
@@ -397,10 +437,19 @@ const CODE_POINT_SPREAD_CHUNK = 4096;
  * Build a string from Unicode code points - the inverse of
  * {@link toCodePoints}.
  *
- * @param {number[]} codePoints - The code points to encode
+ * An array or a typed array of code points is read. A primitive, a
+ * function, a `String` wrapper object or an object without a numeric
+ * `length` is refused with a `TypeError` naming what was given, never
+ * encoded as `''`: a number or a boolean has no `length`, and a string's
+ * characters are no code points (`'65'` would encode as U+0006 U+0005).
+ *
+ * @param {ArrayLike<number> & Iterable<number>} codePoints - The code points to encode: an array or a typed array
  * @returns {string} The resulting string
+ * @throws {TypeError} When `codePoints` is no list of code points
  */
 export function fromCodePoints(codePoints) {
+  if (!Array.isArray(codePoints))
+    refuseNonCodePointList(codePoints);
   const len = codePoints.length;
   if (len < CODE_POINT_SPREAD_MIN) {
     let out = '';
@@ -658,10 +707,17 @@ const SLUG_KEEP = /[\p{L}\p{N}\p{M}]/u;
  * slugify('Hello, World!');   // 'hello-world'
  * slugify('§ 3.1 — Setup');   // '-31--setup'
  *
+ * Anything but a string is refused with a `TypeError` naming what was
+ * given, never slugged as `''`; a `String` wrapper object is slugged as
+ * the string it wraps.
+ *
  * @param {string} text
  * @returns {string}
+ * @throws {TypeError} When `text` is not a string
  */
 export function slugify(text) {
+  if (typeof text !== 'string')
+    text = unwrapString(text, 'slugify');
   let out = '';
   for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i);

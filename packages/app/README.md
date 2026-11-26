@@ -314,6 +314,15 @@ Nested object and array fields honor `x-form.enabled` through their native
 field uses native `readonly` for text inputs and textareas, and `disabled` for
 checkboxes, selects, collection fieldsets, and add/remove buttons.
 
+The add/remove buttons' accessible names and the JSON editor's hint speak the
+reader's language when the rule set is built with its compiled pack:
+`createFormView({ messages: compileMessageCatalog(nl) })` reads the
+`form/addItem`, `form/removeItem` and `form/jsonPlaceholder` words from it
+(`labels` still wins per word, and `labelsPath` at render time); without one
+they are English. The words and their English live in `@jarenjs/core/message`
+(`formChromeLabels`, `formChromeMessagesEn`), the one home `@jarenjs/forms`
+reads too.
+
 ## Headless and server-side
 
 Without a `node`, the app runs headless: `getVnode()` returns the current view output for any renderer, and SSR is one composition:

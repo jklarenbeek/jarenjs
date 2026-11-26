@@ -37,6 +37,7 @@
  * them too.
  */
 import { refuseUnknownMembers } from '@jarenjs/core/object';
+import { formChromeLabels } from '@jarenjs/core/message';
 import { describeOption } from './errors.js';
 
 /** The default action names shared by both factories. */
@@ -103,13 +104,17 @@ export function formEventFields() {
  * @property {{addItem?: string, removeItem?: string, jsonPlaceholder?: string}} [labels] - Accessible
  *   names for the symbol buttons and the JSON editor's hint. `@jarenjs/forms`'
  *   `formChromeLabels(catalog)` resolves them from a message catalog;
- *   the English defaults apply when absent.
+ *   a member absent falls back to `messages`, then to English.
+ * @property {Readonly<Record<string, unknown>>} [messages] - The reader's
+ *   compiled `@jarenjs/locales` pack (or any compiled catalog), read once,
+ *   when the view is built, for the `form/addItem`, `form/removeItem` and
+ *   `form/jsonPlaceholder` words `labels` does not give. Absent: English.
  * @property {string} [labelsPath] - JSONPath (`$.`-rooted, like `root`) of
  *   a `{addItem, removeItem, jsonPlaceholder}` object inside the view input
  *   document, read at render time: the stylesheet is built once, so a host
  *   whose language changes while the form is open puts the current
  *   `formChromeLabels(catalog)` there. A member it lacks falls back to
- *   `labels`, then to English.
+ *   `labels`, then to `messages`, then to English.
  * @property {string} [dataPointer] - (actions) JSON Pointer to the form
  *   data inside the app state (default `'/data'`).
  * @property {'remove' | 'empty'} [cleared] - (actions) What a cleared
@@ -122,7 +127,7 @@ export function formEventFields() {
  * Every {@link FormViewOptions} member: one options object may serve
  * both factories, so each accepts the other's members and ignores them.
  */
-const FORM_OPTIONS = ['root', 'classPrefix', 'actions', 'addLabel', 'removeLabel', 'requiredMarker', 'labels', 'labelsPath', 'dataPointer', 'cleared'];
+const FORM_OPTIONS = ['root', 'classPrefix', 'actions', 'addLabel', 'removeLabel', 'requiredMarker', 'labels', 'labelsPath', 'messages', 'dataPointer', 'cleared'];
 
 /**
  * Refuse options either factory would misread: a value that is not an
@@ -162,6 +167,32 @@ function checkLabelsPath(path) {
   return path;
 }
 
+/** The ids the form view reads from its `messages`. */
+const CHROME_IDS = ['form/addItem', 'form/removeItem', 'form/jsonPlaceholder'];
+
+/**
+ * The `messages` option: absent, or a compiled catalog object. A pack not
+ * yet compiled holds template strings, which would fail at the first
+ * render call, so an id the view reads that is no function is refused by
+ * name.
+ * @param {unknown} messages
+ * @returns {Readonly<Record<string, any>> | undefined} the catalog, or undefined when absent
+ * @throws {TypeError} when the catalog is not an object, or holds a chrome id that is no function
+ */
+function checkMessages(messages) {
+  if (messages === undefined || messages === null) return undefined;
+  if (typeof messages !== 'object' || Array.isArray(messages)) {
+    throw new TypeError(`createFormView: options.messages must be a compiled message catalog, got ${describeOption(messages)}`);
+  }
+  const catalog = /** @type {Readonly<Record<string, any>>} */ (messages);
+  for (const id of CHROME_IDS) {
+    if (Object.hasOwn(catalog, id) && typeof catalog[id] !== 'function') {
+      throw new TypeError(`createFormView: options.messages must be a compiled message catalog (compileMessageCatalog), got ${describeOption(catalog[id])} at '${id}'`);
+    }
+  }
+  return catalog;
+}
+
 /**
  * Refuse options the actions would misread: those {@link checkFormOptions}
  * refuses, and a `cleared` that is neither `'remove'` nor `'empty'`.
@@ -196,7 +227,7 @@ export function createFormView(options = {}) {
   const root = options.root ?? '$.form';
   const cls = options.classPrefix ?? 'jaren-form';
   const act = { ...DEFAULT_ACTIONS, ...options.actions };
-  const labels = { addItem: 'Add item', removeItem: 'Remove item', jsonPlaceholder: 'Enter a JSON value', ...options.labels };
+  const labels = { ...formChromeLabels(checkMessages(options.messages)), ...options.labels };
   const labelsPath = checkLabelsPath(options.labelsPath);
   /**
    * One chrome label: the fixed text, or the document's label at render

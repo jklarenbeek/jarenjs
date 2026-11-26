@@ -4,9 +4,9 @@ The package supplies the engine registry, example library, a JSLT
 component and a host kit. The embedding app owns state, actions, scheduling
 and browser capabilities. The executable host is
 [`packages/website/src/boundaries/play.js`](../../packages/website/src/boundaries/play.js),
-with its reducer and run loop in the website's `src/app/` directory; it
-takes its validator, language catalogs, slice rules and session file from
-`@jarenjs/play/host`, the same kit another host composes.
+with its run loop in the website's `src/app/` directory; it takes its
+validator, language catalogs, slice rules, the slice's reducers and session
+file from `@jarenjs/play/host`, the same kit another host composes.
 
 ## Package boundaries
 
@@ -24,6 +24,7 @@ takes its validator, language catalogs, slice rules and session file from
 | `src/host/validator.js` | `createPlayValidator`: the `validate` seam with referenced schemas, the generated form and its chrome; `playDataForm`, `referencedSchemas`, `detectDraftName` |
 | `src/host/session.js` | `PLAY_START`, the reader-language rules (`withPlayLocale`, `switchPlayOption`, `loadExample`), `runPlay`, the session file |
 | `src/host/forms.js` | `playFormActions`: the generated form's actions over `/play/dataValue`; `PLAY_FORM_VIEW`, the `createFormView` options that read `ui.play` |
+| `src/host/actions.js` | `playSliceActions({ langPointer })`: the reducers of `play/loaded`, `play/option-set` and `play/loaded-session` as action documents, writing the reader's language at the host's pointer |
 | `styles/play.css` | Desktop grid, mobile pane switcher and result/editor styling |
 
 `createPlayComponent({ operators, renderers, validate, messages })` returns
@@ -61,6 +62,7 @@ effects. Input bindings carry the native event's serialized `value`.
 | `play/name`, `play/open` | Event value; rename or open a saved session |
 | `play/new`, `play/save`, `play/save-as`, `play/delete-session` | Session lifecycle; delete carries the session name |
 | `play/download`, `play/import`, `play/share` | Host file/clipboard capabilities, with status in `shared` |
+| `play/loaded`, `play/option-set`, `play/loaded-session` | Dispatched by the host with what `loadExample`, `switchPlayOption` and `sessionToLoaded` answer; `@jarenjs/play/host`'s `playSliceActions({ langPointer })` supplies their reducers, writing the reader's language at the host's pointer (the website's `/lang`) |
 
 The host also keeps presentation state (`panel`, `deep`, `deepPick`,
 `mobilePane`, `ratio`, `dataView`) and session state (`name`, `savedName`,

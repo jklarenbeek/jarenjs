@@ -588,7 +588,10 @@ Unit tests live in `test/forms/` at the repository root. See the repository [REA
 
 `formChromeLabels(catalog)` supplies `addItem`, `removeItem` and
 `jsonPlaceholder`, with English fallbacks and translations in every
-locale pack. Pass them to `createFormView({ labels })`; the JSON hint is
+locale pack; the function and its English are `@jarenjs/core/message`'s,
+re-exported here, so `@jarenjs/app`'s form view defaults to the same words.
+Pass them to `createFormView({ labels })`, or the compiled pack itself as
+`createFormView({ messages })`; the JSON hint is
 both an empty-editor placeholder and an accessible description. A label
 beginning with `$` remains literal text. When the language can change
 while the form is open, put them in the view input document instead and

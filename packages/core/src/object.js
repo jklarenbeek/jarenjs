@@ -1335,28 +1335,35 @@ const CYCLE_MET = Object.freeze({ cycle: true });
 let semanticWritesLeft = PLAIN_WRITE_BUDGET;
 /** @type {Map<object, { text: string, height: number }> | null} */
 let semanticWritten = null;
-// Whether every container the current call has opened so far is frozen,
-// dense and holds only data members; see `semanticKey`'s memo.
-let semanticImmutable = false;
-// The key of a root whose whole tree a walk proved immutable, one map per
-// key form, so a later call returns it without walking again.
-/** @type {WeakMap<object, string>} */
+// The containers the current call has opened, and how many of them were
+// not frozen, dense and of data members only: a container's subtree is
+// immutable when the second count did not move while it was open. See
+// `semanticKey`'s memo.
+let semanticOpened = 0;
+let semanticMutable = 0;
+// The deepest container the current call has reached (the root is depth
+// 1), a joined subtree counting its height: a subtree's height is the
+// deepest it reached while it was open, less its own depth, plus one.
+let semanticDeepest = 0;
+// The key and height of a tree a walk proved immutable, one map per key
+// form: a later call returns it for that root without walking again, and
+// a walk joins it where it meets the tree inside another value.
+/** @type {WeakMap<object, { text: string, height: number }>} */
 const sortedKeyOf = new WeakMap();
-/** @type {WeakMap<object, string>} */
+/** @type {WeakMap<object, { text: string, height: number }>} */
 const orderedKeyOf = new WeakMap();
 
 /**
- * True when a container can never key differently: frozen, so no member
- * is added, removed or rewritten; every keyed member a data property, so
- * no getter answers differently on a later read; an array dense, so no
- * hole reads through a prototype that may change.
- * @param {object} object
+ * True when a frozen container can never key differently: frozen, so no
+ * member is added, removed or rewritten; every keyed member a data
+ * property, so no getter answers differently on a later read; an array
+ * dense, so no hole reads through a prototype that may change.
+ * @param {object} object - A frozen container
  * @param {string[]} keys - Its own enumerable string keys
  * @param {boolean} isArray
  * @returns {boolean}
  */
 function holdsImmutableData(object, keys, isArray) {
-  if (!Object.isFrozen(object)) return false;
   if (isArray && keys.length !== /** @type {any[]} */ (object).length) return false;
   for (let i = 0; i < keys.length; i++) {
     // an accessor's descriptor always names `get`, a data member's never does
@@ -1371,16 +1378,18 @@ function holdsImmutableData(object, keys, isArray) {
 const RECURSIVE_SEMANTIC_DEPTH = 256;
 
 /**
- * Check one container the walk is about to open and mark it open: the
- * member names in key order, or `null` for an array.
+ * Check one container the walk is about to open, mark it open and count
+ * it (as mutable unless it holds immutable data): the member names in key
+ * order, or `null` for an array.
  * @param {object} object
  * @param {string} path - JSON-Pointer-ish trail, for the error message
  * @param {Set<object>} open - Ancestors on the current path (cycle guard)
  * @param {boolean} ordered - Object members in enumeration order rather
  *   than sorted
+ * @param {boolean} frozen - Whether `object` is frozen
  * @returns {string[] | null}
  */
-function openSemantic(object, path, open, ordered) {
+function openSemantic(object, path, open, ordered, frozen) {
   if (open.has(object)) throw CYCLE_MET;
   const proto = Object.getPrototypeOf(object);
   // a symbol-keyed member is data the serialization cannot show, so two
@@ -1398,7 +1407,8 @@ function openSemantic(object, path, open, ordered) {
       if (!Number.isInteger(index) || index < 0 || index >= object.length || String(index) !== key)
         throw semanticRefusal(`the extra array property ${JSON.stringify(key)}`, path);
     }
-    if (semanticImmutable) semanticImmutable = holdsImmutableData(object, indices, true);
+    semanticOpened++;
+    if (!frozen || !holdsImmutableData(object, indices, true)) semanticMutable++;
     return null;
   }
   // Date, Map, Set, RegExp and every class instance stringify to `{}`
@@ -1408,35 +1418,75 @@ function openSemantic(object, path, open, ordered) {
   // the member names are distinct, so their sequence alone spells the
   // order: an ordered key stays injective with order as part of identity
   const keys = ordered ? Object.keys(object) : Object.keys(object).sort(compareCodePoints);
-  if (semanticImmutable) semanticImmutable = holdsImmutableData(object, keys, false);
+  semanticOpened++;
+  if (!frozen || !holdsImmutableData(object, keys, false)) semanticMutable++;
   return keys;
+}
+
+/**
+ * The key a walk joins for a frozen container `depth` levels down that a
+ * walk has proved immutable before, or `undefined`. The joined text is
+ * what walking the container writes: it holds no cycle (an immutable tree
+ * that reached an ancestor would have closed one inside itself) and no
+ * refusal, and is refused `JO2001` when its height passes the bound,
+ * where the walk down it would be.
+ * @param {object} value - A frozen container
+ * @param {boolean} ordered
+ * @param {number} depth
+ * @returns {string | undefined}
+ */
+function joinRemembered(value, ordered, depth) {
+  const known = (ordered ? orderedKeyOf : sortedKeyOf).get(value);
+  if (known === undefined)
+    return undefined;
+  const deepest = depth + known.height - 1;
+  if (deepest > JSON_WALK_DEPTH_CEILING)
+    throw walkTooDeep('a cache identity');
+  if (deepest > semanticDeepest)
+    semanticDeepest = deepest;
+  return known.text;
 }
 
 /**
  * Serialize one node of a semantic key, `depth` containers down from the
  * root, or throw when the value cannot be keyed injectively.
+ *
+ * A frozen container a walk proved immutable before is joined rather than
+ * walked ({@link joinRemembered}); one this walk proves immutable is
+ * remembered when it took `REMEMBERED_WORK` containers to write and its
+ * parent is known mutable (`remember`): the subtrees so remembered are
+ * disjoint, so their texts never hold more than the key does.
  * @param {*} value
  * @param {string} path - JSON-Pointer-ish trail, for the error message
  * @param {Set<object>} open - Ancestors on the current path (cycle guard)
  * @param {boolean} ordered - Object members in enumeration order rather
  *   than sorted
  * @param {number} depth
+ * @param {boolean} remember - Whether the parent is known mutable
  * @returns {string}
  */
-function semanticToken(value, path, open, ordered, depth) {
+function semanticToken(value, path, open, ordered, depth, remember) {
   const leaf = semanticLeaf(value, path);
   if (leaf !== undefined)
     return leaf;
+  const frozen = Object.isFrozen(value);
+  if (frozen) {
+    const joined = joinRemembered(value, ordered, depth);
+    if (joined !== undefined)
+      return joined;
+  }
   if (--semanticWritesLeft < 0)
     return semanticShared(value, path, open, ordered, depth, semanticWritten ??= new Map());
   if (depth > RECURSIVE_SEMANTIC_DEPTH)
     return semanticWalk(value, path, open, ordered, depth);
-  const keys = openSemantic(value, path, open, ordered);
+  const opened = semanticOpened, mutable = semanticMutable, outerDeepest = semanticDeepest;
+  semanticDeepest = depth;
+  const keys = openSemantic(value, path, open, ordered, frozen);
   let out;
   if (keys === null) {
     out = '[';
     for (let i = 0; i < value.length; i++)
-      out += (i === 0 ? '' : ',') + semanticToken(value[i], `${path}/${i}`, open, ordered, depth + 1);
+      out += (i === 0 ? '' : ',') + semanticToken(value[i], `${path}/${i}`, open, ordered, depth + 1, semanticMutable !== mutable);
     out += ']';
   }
   else {
@@ -1444,11 +1494,15 @@ function semanticToken(value, path, open, ordered, depth) {
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
       out += (i === 0 ? '' : ',') + JSON.stringify(key) + ':'
-        + semanticToken(value[key], `${path}/${key}`, open, ordered, depth + 1);
+        + semanticToken(value[key], `${path}/${key}`, open, ordered, depth + 1, semanticMutable !== mutable);
     }
     out += '}';
   }
   open.delete(value);
+  if (remember && semanticMutable === mutable && semanticOpened - opened >= REMEMBERED_WORK)
+    (ordered ? orderedKeyOf : sortedKeyOf).set(value, { text: out, height: semanticDeepest - depth + 1 });
+  if (outerDeepest > semanticDeepest)
+    semanticDeepest = outerDeepest;
   return out;
 }
 
@@ -1474,8 +1528,15 @@ function semanticWalk(value, path, open, ordered, depth) {
   let nextPath = path;
   for (;;) {
     const leaf = semanticLeaf(next, nextPath);
+    const frozen = leaf === undefined && Object.isFrozen(next);
+    const joined = frozen ? joinRemembered(next, ordered, depth + frames.length) : undefined;
     if (leaf !== undefined)
       out += leaf;
+    else if (joined !== undefined) {
+      out += joined;
+      if (frames.length === 0)
+        return out;
+    }
     else if (--semanticWritesLeft < 0) {
       out += semanticShared(next, nextPath, open, ordered, depth + frames.length, semanticWritten ??= new Map());
       if (frames.length === 0)
@@ -1484,7 +1545,9 @@ function semanticWalk(value, path, open, ordered, depth) {
     else {
       if (depth + frames.length > JSON_WALK_DEPTH_CEILING)
         throw walkTooDeep('a cache identity');
-      const keys = openSemantic(next, nextPath, open, ordered);
+      if (depth + frames.length > semanticDeepest)
+        semanticDeepest = depth + frames.length;
+      const keys = openSemantic(next, nextPath, open, ordered, frozen);
       out += keys === null ? '[' : '{';
       frames.push({ object: next, keys, at: 0, path: nextPath });
     }
@@ -1549,16 +1612,25 @@ function semanticShared(value, path, open, ordered, depth, written) {
     let text = semanticLeaf(next, nextPath);
     let height = 0;
     if (text === undefined) {
-      const known = written.get(next);
+      const frozen = Object.isFrozen(next);
+      const remembered = frozen ? (ordered ? orderedKeyOf : sortedKeyOf).get(next) : undefined;
+      const known = remembered ?? written.get(next);
       if (known === undefined) {
         if (depth + frames.length > JSON_WALK_DEPTH_CEILING)
           throw walkTooDeep('a cache identity');
-        const keys = openSemantic(next, nextPath, open, ordered);
+        if (depth + frames.length > semanticDeepest)
+          semanticDeepest = depth + frames.length;
+        const keys = openSemantic(next, nextPath, open, ordered, frozen);
         frames.push({ object: next, keys, at: 0, path: nextPath, out: keys === null ? '[' : '{', height: 1, start: opened++ });
       }
       else {
-        if (depth + frames.length + known.height - 1 > JSON_WALK_DEPTH_CEILING)
+        const deepest = depth + frames.length + known.height - 1;
+        if (deepest > JSON_WALK_DEPTH_CEILING)
           throw walkTooDeep('a cache identity');
+        if (deepest > semanticDeepest)
+          semanticDeepest = deepest;
+        // a container met again was opened, and counted, where this call
+        // first wrote it
         text = known.text;
         height = known.height;
       }
@@ -1666,9 +1738,14 @@ function semanticShared(value, path, open, ordered, depth, written) {
  * walking: such a tree cannot change, so the key stays exact. A tree with
  * one unfrozen container, an accessor or a hole anywhere is walked on
  * every call, and a refused value is refused on every call. The memory is
- * held weakly, for as long as the root object lives; a fresh wrapper —
- * a tuple such as `[document, options]` built per call — is a new root
- * and walks every time.
+ * held weakly, for as long as the root object lives. A fresh wrapper —
+ * a tuple such as `[document, options]` built per call — is walked, but
+ * an immutable tree inside it is joined rather than walked when a call has
+ * remembered it: the tree itself as a root, or one a walk met under a
+ * container that was not frozen (or held a member that was not) and that
+ * took 32 containers or more to write. A joined tree counts its height
+ * against the 10000-level bound, so the key and every refusal are the
+ * walk's.
  * @param {*} value - The value to derive an identity for
  * @param {{ ordered?: boolean }} [options] - `ordered: true` keeps object
  *   members in enumeration order instead of sorting them
@@ -1692,25 +1769,30 @@ export function semanticKey(value, options = undefined) {
   const memo = ordered ? orderedKeyOf : sortedKeyOf;
   if (isContainer) {
     const known = memo.get(value);
-    if (known !== undefined) return known;
+    if (known !== undefined) return known.text;
   }
   semanticWritesLeft = PLAIN_WRITE_BUDGET;
   // a getter met by the walk may call `semanticKey` itself; the inner
-  // call's proof is its own, so the outer one's resumes as it stood
-  const outerImmutable = semanticImmutable;
-  semanticImmutable = isContainer;
+  // call's counts are its own, so the outer one's resume as they stood
+  const outerOpened = semanticOpened, outerMutable = semanticMutable, outerDeepest = semanticDeepest;
+  semanticOpened = 0;
+  semanticMutable = 0;
+  semanticDeepest = 0;
   let error;
   try {
-    const key = semanticToken(value, '', new Set(), ordered, 1);
+    const key = semanticToken(value, '', new Set(), ordered, 1, false);
     semanticWritten = null;
-    if (semanticImmutable) memo.set(value, key);
-    semanticImmutable = outerImmutable;
+    if (isContainer && semanticMutable === 0) memo.set(value, { text: key, height: semanticDeepest });
     return key;
   }
   catch (thrown) {
     error = thrown;
     semanticWritten = null;
-    semanticImmutable = outerImmutable;
+  }
+  finally {
+    semanticOpened = outerOpened;
+    semanticMutable = outerMutable;
+    semanticDeepest = outerDeepest;
   }
   if (isPastLongestString(error))
     throw textTooLong('a cache identity');

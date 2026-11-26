@@ -197,22 +197,6 @@ delete it or fix it.
   host id that starts with the prefix, must be kept apart by the host passing
   its own prefix. Wanted: a check that refuses a second render with the same
   prefix into one document, or a per-render default that DOM and SSR agree on.
-- [ ] **`createFormView`'s own form-chrome defaults are English.** `@jarenjs/app`
-  keeps a hand copy of the add/remove/JSON-hint words because it does not depend on
-  `@jarenjs/forms`, whose `formChromeLabels(catalog)` speaks every pack; a host passes
-  `labels` or `labelsPath` (the website does), and a host that passes neither shows English.
-Reusable host helpers now cover [bounded file tokens and route subscriptions](../packages/app/docs/APP-FORMAT.md),
-the [owned native dialog](../packages/view/docs/VIEW-FORMAT.md), and
-[ordinary-panel drag sources](../components/collection/docs/COLLECTION.md).
-Public consumers exercise disposal, interrupted interaction and three browser
-engines; the manual device and assistive-technology qualification below remains
-open. [Signed Node continuations](../packages/contract/docs/CONTRACT-FORMAT.md)
-bind injected host context, while [CSV formula neutralization](../packages/josl/FORMAT.md)
-is an opt-in formatter policy with unchanged default bytes. SQLite
-[async jobs, committed feeds and separate-file receipt replay](../packages/db/docs/HOSTS.md)
-have source and isolated-package fixtures. These source capabilities do not
-establish registry publication or downstream acceptance.
-
 - [ ] **Segmented logical scrolling past the CSS extent ceiling.** The [reusable collection](../components/collection/docs/COLLECTION.md) and [injected provider coordinator](../packages/app/docs/COLLECTION-PROVIDER.md) cover fixed/measured axes, keyed interaction and bounded page caches up to the conservative CSS extent ceiling; a source longer than that needs segmented logical scrolling. Complete sequential database snapshots and index seeks behind the provider also need an independently qualified source contract.
 
 - [ ] **Collection table semantics beyond activation and selection.** A host serving a record table still lacks per-column
@@ -297,20 +281,6 @@ establish registry publication or downstream acceptance.
   carry a tooltip) are not modelled.
 
 ## @jarenjs/play
-
-- [ ] **The play slice's reducers are still each host's** — `@jarenjs/play/host`
-  exports the slice (`PLAY_START`), its reader-language rules and the
-  generated form's actions, but `play/loaded`, `play/option-set` and
-  `play/loaded-session` (which write `exampleLocale` and the reader's
-  language) are action documents each host writes from ARCHITECTURE's
-  table. A kit builder for them would take the host's language pointer
-  (the site's `/lang`) as an argument.
-The engine playground behind `#/play`: pick an engine and an example, edit the
-source or the data, it runs live. Membership is a rule rather than a list — an
-engine belongs here iff it is a **pure function of `(source, data)`**:
-stateless, no worker, no live subscription, no side channel. That is why flow
-and the document store are studio file kinds instead, and why adding an engine
-costs a descriptor plus examples and no UI code at all.
 
 - [ ] **Streaming readers need a chunked source pane** — the JOSL and CSV
   stream parsers are pure, but they consume a stream rather than a string, so
@@ -479,14 +449,16 @@ costs a descriptor plus examples and no UI code at all.
   stored spelling (§13.4), where PostgreSQL and the store compare by codec;
   comparing by code point would change the text of every installed update
   program, so it waits for a reviewed migration of installed programs.
-- [ ] **A linq transaction that reads a handle builds a record of every
-  name.** A transaction client builds its `entities` and `collections` records
-  when its body first reads them, so a body that reads no handle costs the
-  same at any model size; a body that reads one still builds that record's
-  getter for every name of its kind, because a record holds the model's names
-  as its own members (DB-CLIENT §2.1). A shared prototype holding the getters
-  would make it constant, and would make `Object.keys` of a transaction's
-  record answer no names.
+- [ ] **A linq transaction that reads a handle builds a record of every name.** A
+  transaction client builds its `entities` and `collections` records when its
+  body first reads them, so a body that reads no handle costs the same at any
+  model size; a body that reads one still builds that record's getter for
+  every name of its kind, because a record holds the model's names as its own
+  frozen members (DB-CLIENT §2.1), which stays the contract. A shared
+  prototype holding the getters would make `Object.keys` of a transaction's
+  record answer no names, and a Proxy cannot answer the names of a frozen
+  record without holding them. Wanted: a cheaper build that keeps the names as
+  own frozen members.
 - [ ] **The native SQL census's mutation families on PostgreSQL.** The
   executable census proves five adopted-column read families and three SQLite
   mutation families ([native contracts](../packages/db/docs/NATIVE-PLANS.md)),
@@ -689,23 +661,25 @@ costs a descriptor plus examples and no UI code at all.
 
 ## @jarenjs/locales
 
-- [ ] **The uncataloged-text guard trusts a catalog's English.** A literal equal to an
-  existing English catalog value passes `test/locales/uncataloged.test.js`; a
-  rendered-surface test is the only catch for a copy typed back into a view.
+- [ ] **Catalog copies the uncataloged-text guard lists.** The guard refuses a
+  literal equal to a catalog's English unless one of its ids sits beside it;
+  the copies it found in modules that do not read their catalog there are
+  listed in `test/locales/uncataloged-allowlist.json` as `catalog-copy`: the
+  website's engine cards (`packages/website/src/boundaries/engines.js`) and
+  the data studio's report line (`components/studio/src/data/runtime.js`).
+  Each should read the catalog that holds its words and leave the list. The
+  guard reads a window of tokens, so a copy beside a word equal to an id's
+  last segment still passes.
 
 ## @jarenjs/core
 
-- [ ] **More string helpers that answer for a non-string.** `isAsciiString(5)`
-  answers `true`, `getStringLength(5)` `undefined` and `getStringLength(5,
-  true)` `NaN`, `fromCodePoints(5)` and `slugify(5)` `''`, each because a
-  non-string's missing `length` ends the loop at once; `countCodePoints`,
-  `fnv1a` and their siblings refuse such input with a named `TypeError`. These
-  should follow once each caller is audited.
-- [ ] **A frozen subtree inside a fresh tuple still walks.** `semanticKey` remembers the key of a
-  wholly frozen root, but a key built per call over it (`[document, dialect, strict]`) is a new
-  root and walks the whole document. Joining a remembered subtree's key inside a walk would make
-  that case cheap too; it needs the depth bound to count the joined subtree's height, as the
-  shared-subtree form does.
+- [ ] **String predicates and comparison that answer for a non-string.**
+  `isStringWhiteSpace([])` answers `true` (the pattern reads an array as its
+  joined text) and `compareCodePoints(5, '')` answers `1`,
+  `compareCodePoints([], '')` `0` (a missing `length` reads as no code units);
+  `isStringUpperCase`, `kebabCase` and `escapePointerToken` throw the host's
+  unnamed `TypeError`. The string helpers that read a length refuse such input
+  with a named `TypeError`; these should follow once each caller is audited.
 
 ## Lexical search (cross-package)
 

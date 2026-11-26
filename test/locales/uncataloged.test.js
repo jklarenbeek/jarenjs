@@ -4,7 +4,13 @@
  * the rendering modules. Every string literal and template chunk that holds
  * words (two letter-words, or one word under a UI key: label, title,
  * aria-label, placeholder, alt, textContent) must be one of:
- * - a catalog's own English (it sits beside its message id as a fallback);
+ * - a catalog's own English beside one of its message ids, as a fallback
+ *   where the catalog is read: within twelve tokens a name that is the id
+ *   (`pageBreak: 'Page break'`), or a string that is the id, the prefix the
+ *   id is built from (`'calc/financial/nper'` for
+ *   `calc/financial/nper#label`) or its last segment (`key: 'overview'` for
+ *   `site/bench/suite/overview`). A copy of a catalog's English typed
+ *   anywhere else is a reader meeting English: it is refused like new text;
  * - out of scope by its place in the code: an object key, a module
  *   specifier, a class list, the message of a coded error a developer
  *   reads (`throw`, `new …Error(`), a log line (`console.*`);
@@ -13,7 +19,10 @@
  *   diagnostics a developer reads, coded or framing a coded error),
  *   English-by-design-paragraph (prose: paragraphs, the home page and the
  *   hero, generated sentences), data (example, demo and benchmark content,
- *   chart definitions, generated documents), proper-noun (names).
+ *   chart definitions, generated documents, a stored default value),
+ *   proper-noun (names), catalog-copy (a catalog's English typed back
+ *   into a module that does not read the catalog there: each a known
+ *   defect, waiting to read its catalog).
  * Anything else is a new string a reader would meet in English: give it a
  * key in the catalog that owns it (a published package's catalog, its
  * translations in @jarenjs/locales; a site-only word in siteMessagesEn and
@@ -58,16 +67,41 @@ const DIRS = ['packages/forms/src', 'packages/view/src', 'packages/app/src', 'pa
 const CATALOG_FILE = /(^|\/)messages\.js$|^packages\/website\/src\/lang\//;
 
 /** The reason classes an allowlist entry may give. */
-const REASONS = new Set(['not-prose', 'developer-facing', 'English-by-design-paragraph', 'data', 'proper-noun']);
+const REASONS = new Set(['not-prose', 'developer-facing', 'English-by-design-paragraph', 'data', 'proper-noun', 'catalog-copy']);
 
 const TWO_WORDS = /\p{L}{2,}[ \t\u00a0]+\p{L}{2,}/u;
 const UI_KEYS = new Set(['aria-label', 'ariaLabel', 'title', 'placeholder', 'alt', 'textContent', 'aria-description', 'label']);
 
-/** Every English text a catalog holds, trimmed. */
-const ENGLISH = new Set([messagesEn, formsMessagesEn, contractMessagesEn, queryMessagesEn, formulaMessagesEn,
+/** Every English text a catalog holds, trimmed, with the ids that hold it. */
+const ENGLISH = new Map();
+for (const catalog of [messagesEn, formsMessagesEn, contractMessagesEn, queryMessagesEn, formulaMessagesEn,
   { ...mdMessagesEn, ...DEFAULT_LABELS }, playMessagesEn, studioMessagesEn, mermaidMessagesEn, calcMessagesEn, rulesMessagesEn,
-  collectionMessagesEn, chartsMessagesEn, viewMessagesEn, { ...dateMessagesEn, ...numberMessagesEn }, siteMessagesEn]
-  .flatMap((catalog) => Object.values(catalog)).filter((v) => typeof v === 'string').map((v) => v.trim()));
+  collectionMessagesEn, chartsMessagesEn, viewMessagesEn, { ...dateMessagesEn, ...numberMessagesEn }, siteMessagesEn]) {
+  for (const [id, english] of Object.entries(catalog)) {
+    if (typeof english !== 'string') continue;
+    const text = english.trim();
+    if (!ENGLISH.has(text)) ENGLISH.set(text, []);
+    ENGLISH.get(text).push(id);
+  }
+}
+
+/**
+ * Whether a string token names a message id: the id, the prefix it is
+ * built from (cut at a `/` or `#`), or its last `/` segment.
+ * @param {string} id @param {string} token
+ */
+const namesId = (id, token) => token === id || id.endsWith(`/${token}`)
+  || (token.length >= 3 && id.startsWith(token) && (token.endsWith('/') || id[token.length] === '/' || id[token.length] === '#'));
+
+/**
+ * Whether a text is a catalog's English sitting beside one of its ids.
+ * @param {{ text: string, near: string[], nearNames: string[] }} s
+ */
+const besideItsId = (s) => {
+  const ids = ENGLISH.get(s.text.trim());
+  return ids !== undefined
+    && ids.some((id) => s.nearNames.includes(id) || s.near.some((token) => namesId(id, token)));
+};
 
 const REGEX_BEFORE = new Set(['(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '<', '>', '~', '^', 'return', 'typeof', 'case', 'do', 'else', 'in', 'of', 'new', 'delete', 'void', 'throw', 'yield', 'await', '=>', '&&', '||', '??', '']);
 /**
@@ -119,7 +153,13 @@ function strings(src) {
     push({ k: 'p', v: c }); i++;
   }
   // context: index into tokens
-  tokens.forEach((t, n) => { if (t.k === 'str') out.push({ ...t, before: tokens.slice(Math.max(0, n - 12), n).map((x) => x.v), after: tokens.slice(n + 1, n + 3).map((x) => x.v) }); });
+  // `near`, `nearNames`: the strings and the names within twelve tokens either side
+  const around = (/** @type {number} */ n, /** @type {string} */ kind) => tokens.slice(Math.max(0, n - 12), n + 13)
+    .filter((x) => x !== tokens[n] && x.k === kind).map((x) => (kind === 'str' ? x.text : x.v));
+  tokens.forEach((t, n) => {
+    if (t.k === 'str') out.push({ ...t, before: tokens.slice(Math.max(0, n - 12), n).map((x) => x.v), after: tokens.slice(n + 1, n + 3).map((x) => x.v),
+      near: around(n, 'str'), nearNames: around(n, 'id') });
+  });
   return out;
 }
 
@@ -166,7 +206,7 @@ export function uncatalogedTexts(read = (file) => readFileSync(join(ROOT, file),
       if (last === 'from' || last === 'import' || (last === '(' && b[b.length - 2] === 'import')) continue; // a module specifier
       if (last === 'throw' || insideCall(b, (t, k) => /Error$/.test(t[k]) && t[k - 1] === 'new')) continue; // a coded developer error
       if (insideCall(b, (t, k) => t[k - 2] === 'console')) continue; // a log line
-      if (ENGLISH.has(s.text.trim())) continue; // a catalog's own English
+      if (besideItsId(s)) continue; // a catalog's own English, beside its id
       out.push({ file, line: s.line, text: s.text });
     }
   }
@@ -218,6 +258,25 @@ describe('@jarenjs/locales — no uncataloged human text in a rendering module',
     assert.deepStrictEqual(unlisted(uncatalogedTexts((f) => (f === file ? ui : readFileSync(join(ROOT, f), 'utf8')))).map((h) => h.text), ['Theme']);
     // and the source as it is passes
     assert.deepStrictEqual(unlisted(uncatalogedTexts()), []);
+  });
+
+  it('a catalog\'s English typed back into a view fails like new words; beside its id it passes', () => {
+    const file = 'packages/website/src/views/shell.js';
+    const source = readFileSync(join(ROOT, file), 'utf8');
+    const anchor = "['span', { class: 'brand-name' }, 'Jaren'],";
+    /** @param {string} added */
+    const scan = (added) => {
+      const changed = source.replace(anchor, `${anchor} ${added}`);
+      assert.notStrictEqual(changed, source, 'the probe found its anchor');
+      return unlisted(uncatalogedTexts((f) => (f === file ? changed : readFileSync(join(ROOT, f), 'utf8')))).map((h) => [h.file, h.text]);
+    };
+    // a copy: the English of studio/project/untitled and of play/card/compile, read by no catalog here
+    assert.deepStrictEqual(scan("['span', {}, 'Untitled project'],"), [[file, 'Untitled project']]);
+    assert.deepStrictEqual(scan("['span', { title: 'Compile' }],"), [[file, 'Compile']]);
+    // a fallback beside the id it falls back for: the id, its prefix, its last segment
+    assert.deepStrictEqual(scan("['span', {}, t('studio/project/untitled') ?? 'Untitled project'],"), []);
+    assert.deepStrictEqual(scan("['span', { title: t(`play/card/${'compile'}`, 'Compile') }],"), []);
+    assert.deepStrictEqual(scan("['span', { key: 'compile', title: 'Compile' }],"), []);
   });
 
   it('the lexer reads strings, templates, comments and regular expressions the way a parser does', () => {

@@ -1235,19 +1235,28 @@ flattens it.
 
 `semanticKey` walks the whole value on every call, because a value can change
 between two calls; that walk is a semantic cache's per-lookup cost. The one
-exception is a value that cannot change. Every container the walk opens, in any
-of its three forms, passes `openSemantic`, which also asks whether it is frozen,
-dense and holds only data members; the answer folds into one flag for the call,
-and the first container that fails clears it, so the checks stop there: a value
-whose root is not frozen pays one `Object.isFrozen` and nothing more, and a frozen
-root over an unfrozen child pays the root's member checks besides. When the flag survives the
-walk, the key is stored in a `WeakMap` keyed by the root object — one map per key
-form, so an ordered key never answers for a sorted one — and a later call with
-that object returns it before walking. The memo lives in `semanticKey` rather
-than in `createSemanticCache`, so every caller of the key shares it; what it costs
-is the key text, held as long as the root object lives. A getter met during a
-walk may call `semanticKey` itself, so each call saves the flag it found and
-restores it on the way out.
+exception is a tree that cannot change. Every container the walk opens, in any
+of its three forms, passes `openSemantic`, which counts it, and counts it again
+as mutable unless it is frozen, dense and holds only data members (an unfrozen
+container pays one `Object.isFrozen` for that answer). A subtree is immutable when
+the mutable count did not move while it was open; the walk also tracks the deepest
+container reached, so a subtree's height is what it reached less its own depth,
+plus one. When the whole value proves immutable, its key and height are stored in a
+`WeakMap` keyed by the root object — one map per key form, so an ordered key never
+answers for a sorted one — and a later call with that object returns it before
+walking. Inside a walk, the recursive form stores the same for an immutable
+subtree whose parent it already knows mutable (unfrozen, or holding a mutable
+member before it) once the subtree took `REMEMBERED_WORK` containers to write:
+the subtrees so stored are disjoint, so their texts never hold more than the key
+does. Each of the three forms looks a frozen container up before opening it and
+joins a stored key, refusing it `JO2001` when its depth plus its height passes the
+bound, as walking it would; a stored tree holds no cycle and no refusal, so the
+key and the first refusal are the walk's. This is what keeps a tuple built per
+call (`[document, dialect, strict]`) at the tuple's cost once its frozen document
+is stored. The memo lives in `semanticKey` rather than in `createSemanticCache`, so
+every caller of the key shares it; what it costs is the key text, held as long as
+the object lives. A getter met during a walk may call `semanticKey` itself, so
+each call saves the counts it found and restores them on the way out.
 
 ```mermaid
 flowchart TB

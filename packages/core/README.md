@@ -51,9 +51,13 @@ the draft-04 modifier is `false` (it read `false` as a bound); `utf8ByteLength`
 (`@jarenjs/core/string`) refuses anything but a string with a `TypeError` naming
 what was given, where a number, a boolean or an object measured 0 bytes and so
 passed a byte bound as empty (a `String` wrapper object is still measured as the
-string it wraps). `countCodePoints`, `countCharCode`, `toCodePoints`, `fnv1a` and
-`hashContent` refuse a non-string the same way, where a number, a boolean or an object
-answered as the empty string (`0`, `[]`, and `hashContent({})` equal to `hashContent('')`).
+string it wraps). `countCodePoints`, `countCharCode`, `toCodePoints`, `fnv1a`,
+`hashContent`, `isAsciiString`, `getStringLength` and `slugify` refuse a non-string the
+same way, where a number, a boolean or an object answered as the empty string (`0`, `[]`,
+`hashContent({})` equal to `hashContent('')`, `isAsciiString(5)` `true`,
+`getStringLength(5, true)` `NaN`, `slugify(5)` `''`); `fromCodePoints` refuses what is no
+list of code points (`fromCodePoints(5)` answered `''`, and a string `'65'` encoded
+U+0006 U+0005), and still reads an array or a typed array.
 
 `equalsJson` (`@jarenjs/core/object`) compares the two objects JOSL and JSONX
 read text into by what they hold: a `Date` equals a `Date` of the same instant
@@ -182,9 +186,12 @@ no array with holes — the key is remembered for that root object, per key form
 and the next call with the same object returns it without walking. A frozen tree
 cannot change, so the key stays exact. A value with one unfrozen container, an
 accessor or a hole anywhere is walked on every call, a refused value is refused
-on every call, and a fresh wrapper built per call (a tuple such as
-`[document, options]`) is a new root that walks each time. The remembered key is
-held weakly, as long as its root object lives.
+on every call. A fresh wrapper built per call (a tuple such as
+`[document, options]`) is walked, but a frozen tree inside it is remembered the
+first time (when it took 32 containers or more to write) and joined on every later
+call, so `[document, dialect, strict]` costs the tuple, not the document; a joined
+tree counts its height against the depth bound below, so the key and each refusal
+are the walk's. The remembered key is held weakly, as long as its root object lives.
 
 `semanticKey` holds the same bound and names a cycle the same way: past 10000
 levels it throws `JO2001` (`a value nested deeper than 10000 levels cannot be a
@@ -262,7 +269,7 @@ such a value used to escape as an uncoded `RangeError`.*
 | `@jarenjs/core/checksum` | `crc32(bytes)` computes the unsigned CRC-32 used by PNG and ZIP over a byte view, without changing it; empty input answers 0 |
 | `@jarenjs/core/chunk` | cutting a value down to size: `sizeOf` (the suite's one size rule — a string is its length, anything else its JSON), `excerpt`, `truncate`, and `chunkText` by size, line or separator with offsets that locate a piece in its source (an empty separator, which used to loop forever, and a NaN size or overlap are a `TypeError`) |
 | `@jarenjs/core/scan` | char-code constants and predicates for recursive-descent parsers |
-| `@jarenjs/core/message` | the message template/catalog compiler shared by the validator and the form layer |
+| `@jarenjs/core/message` | the message template/catalog compiler shared by the validator and the form layer, and the form-chrome words both `@jarenjs/forms` and `@jarenjs/app` read (`formChromeLabels`, `formChromeMessagesEn`) |
 | `@jarenjs/core/schema` | the JSON Schema constraint-keyword groups (`NUMERIC_CONSTRAINTS`, `STRING_CONSTRAINTS`, `ARRAY_CONSTRAINTS`, `OBJECT_CONSTRAINTS`) that forms, emit and the validator compose, the per-type `TYPE_SCOPED_KEYWORDS` and `ANNOTATION_KEYWORDS`, ordered `SCHEMA_VALUE_KEYWORDS` / `SCHEMA_MAP_KEYWORDS` / `SCHEMA_LIST_KEYWORDS` that readers extend with their own compatibility rules, and the suite's one nullable normalizer: `splitNullable` gives the non-null branch of `type: [T, 'null']` or of a two-branch `anyOf`/`oneOf` (structural — forms, the contract transport compiler), `canonicalNullable` the one spelling only where both accept the same values (value-exact — the contract diff) |
 | `@jarenjs/core/color` | pure color math (`lerpColor` — hex `#rrggbb` interpolation) |
 | `@jarenjs/core/number` | boolean/number/integer coercion helpers (`isIntishType`, ...) and `isJsonNumberString`, the strict lexical JSON-number predicate shared by query casts and schema normalization; conversion and overflow policy stay with each caller |
@@ -456,6 +463,12 @@ const t = compileMessageTemplate('must be {comparison} {limit}');
 // t.parameters is the frozen unique list ['comparison', 'limit'] from this parser.
 t({ comparison: '>=', limit: 18 });   // 'must be >= 18'
 ```
+
+`formChromeLabels(catalog)` answers the three form-chrome words a form renderer
+shows (`form/addItem`, `form/removeItem`, `form/jsonPlaceholder`) from a compiled
+catalog, falling back per id to `formChromeMessagesEn`; it lives here so
+`@jarenjs/forms` and `@jarenjs/app`, which do not depend on each other, read one
+English.
 
 A parameter renders as `String(value)`, an object or array as its JSON, and
 `formatMessageValue` quotes a value a message names (a string keeps its

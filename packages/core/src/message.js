@@ -161,3 +161,34 @@ export function compileMessageCatalog(catalogLike) {
   }
   return Object.freeze(compiled);
 }
+
+/**
+ * The English of the form chrome: the accessible names of a rendered
+ * form's array add/remove buttons and the JSON editor's hint, under the
+ * `form/...` ids every locale pack translates. The one home of these
+ * words: `@jarenjs/forms` holds them in its catalog and `@jarenjs/app`'s
+ * form view defaults to them, and neither package depends on the other.
+ * @type {Readonly<{ 'form/addItem': string, 'form/removeItem': string, 'form/jsonPlaceholder': string }>}
+ */
+export const formChromeMessagesEn = /*#__PURE__*/ Object.freeze({
+  'form/addItem': 'Add item',
+  'form/removeItem': 'Remove item',
+  'form/jsonPlaceholder': 'Enter a JSON value',
+});
+
+/**
+ * The localized chrome strings a form renderer needs: the accessible
+ * names of the array add/remove buttons and the JSON editor's hint, each
+ * the catalog's entry for its id, called with no parameters, or its
+ * {@link formChromeMessagesEn} English when the catalog lacks the id or
+ * none is given.
+ * @param {Readonly<Record<string, (params: object, error?: object) => string>>} [catalog] - A compiled catalog, or undefined for English
+ * @returns {{addItem: string, removeItem: string, jsonPlaceholder: string}}
+ * @example
+ * formChromeLabels(); // { addItem: 'Add item', removeItem: 'Remove item', jsonPlaceholder: 'Enter a JSON value' }
+ */
+export function formChromeLabels(catalog = undefined) {
+  /** @param {'form/addItem' | 'form/removeItem' | 'form/jsonPlaceholder'} id */
+  const text = (id) => (catalog !== undefined && Object.hasOwn(catalog, id) ? catalog[id]({}) : formChromeMessagesEn[id]);
+  return { addItem: text('form/addItem'), removeItem: text('form/removeItem'), jsonPlaceholder: text('form/jsonPlaceholder') };
+}

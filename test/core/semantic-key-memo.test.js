@@ -2,9 +2,12 @@
 /**
  * @file `semanticKey` remembers the key of a root whose whole tree its
  * walk proved immutable — every container frozen, dense and holding only
- * data members — and returns it on the next call without walking. Every
- * other value is walked on every call. Walks are counted by the calls the
- * walk makes to `Object.keys`, one per container it opens.
+ * data members — and returns it on the next call without walking; a walk
+ * also remembers such a tree it meets under a container it knows mutable
+ * (a tuple built per call), and joins a remembered tree's key wherever it
+ * meets it, counting its height against the depth bound. Every other
+ * value is walked on every call. Walks are counted by the calls the walk
+ * makes to `Object.keys`, one per container it opens.
  */
 
 import { describe, it } from 'node:test';
@@ -161,5 +164,51 @@ describe('semanticKey memo', () => {
       delete /** @type {any} */ (Array.prototype)[1];
     }
     assert.strictEqual(semanticKey(holey), before);
+  });
+
+  it('a frozen document inside a fresh tuple is walked once, then joined, at any size', (t) => {
+    const count = walkCounter(t);
+    for (const members of [1000, 8000]) {
+      const document = deepFreeze(documentOf(members));
+      const expected = semanticKey(structuredClone([document, 'sqlite', true]));
+      let first = '';
+      assert.ok(count(() => { first = semanticKey([document, 'sqlite', true]); }) > members, 'the first tuple walks the document');
+      assert.strictEqual(first, expected);
+      // the next tuple opens itself alone: the document's key is joined
+      let second = '';
+      assert.strictEqual(count(() => { second = semanticKey([document, 'sqlite', true]); }), 1, `${members} members`);
+      assert.strictEqual(second, expected);
+      assert.strictEqual(count(() => semanticKey({ strict: false, document })), 1);
+      assert.strictEqual(semanticKey({ strict: false, document }), semanticKey(structuredClone({ strict: false, document })));
+      // the ordered form keeps its own memory
+      assert.ok(count(() => semanticKey([document], { ordered: true })) > members);
+      assert.ok(count(() => semanticKey([document], { ordered: true })) <= 2);
+      assert.strictEqual(semanticKey([document], { ordered: true }), semanticKey(structuredClone([document]), { ordered: true }));
+    }
+  });
+
+  it('a joined tree counts its height against the depth bound, as walking it does', () => {
+    /** @param {number} levels @returns {any} */
+    const chain = (levels) => { let v = /** @type {any} */ (0); for (let i = 0; i < levels; i++) v = [v]; return v; };
+    for (const remembered of [true, false]) {
+      const tree = deepFreeze(chain(9998));
+      if (remembered) semanticKey(tree);
+      // remembered or proved inside the tuple, the answers are the walk's
+      assert.strictEqual(semanticKey([tree]), '['.repeat(9999) + '0' + ']'.repeat(9999));
+      assert.strictEqual(semanticKey([[tree]]).length, 10000 * 2 + 1);
+      assert.throws(() => semanticKey([[[tree]]]), { code: 'JO2001', message: 'JO2001: a value nested deeper than 10000 levels cannot be a cache identity' });
+      assert.throws(() => semanticKey({ a: [[[tree]]] }), { code: 'JO2001' });
+    }
+  });
+
+  it('a frozen tree under a frozen container with an unfrozen child sees the child\'s change', () => {
+    const child = { a: 1 };
+    const big = deepFreeze(documentOf(40));
+    const holder = Object.freeze({ big, child });
+    const first = semanticKey([holder]);
+    child.a = 2;
+    assert.notStrictEqual(semanticKey([holder]), first);
+    assert.strictEqual(semanticKey([holder]), semanticKey(structuredClone([holder])));
+    assert.strictEqual(semanticKey(holder), semanticKey(structuredClone(holder)));
   });
 });

@@ -8,7 +8,7 @@
  */
 
 import { FORM_NUMBER_VALUE } from '@jarenjs/app';
-import { playFormActions } from '@jarenjs/play/host';
+import { playFormActions, playSliceActions } from '@jarenjs/play/host';
 import { DATA_ACTIONS } from '@jarenjs/studio/data';
 import { PROJECT_ACTIONS } from '@jarenjs/studio/component';
 
@@ -54,6 +54,9 @@ const LAST_STAGE = (stages) => ({ $if: [
   { $sub: [{ $count: stages }, 1] },
   0,
 ] });
+
+/** The play slice's reducers, writing the reader's language at the site's `/lang`. */
+const PLAY_SLICE = playSliceActions({ langPointer: '/lang' });
 
 export const ACTIONS = {
   // the @jarenjs/calc sub-app's actions (namespaced 'calc/*' + 'calc-form/*')
@@ -256,37 +259,7 @@ export const ACTIONS = {
   // an example (loads its source + first dataset), edit a source/data pane
   // live, or switch datasets; the debounced boundary re-runs the engine.
   'play/example': { effects: [{ run: 'play-load', with: { id: '$payload' } }] },
-  'play/loaded': {
-    patch: [
-      { op: 'replace', path: '/play/engine', value: '$payload.engine' },
-      { op: 'replace', path: '/play/exampleId', value: '$payload.exampleId' },
-      { op: 'replace', path: '/play/source', value: '$payload.source' },
-      { op: 'replace', path: '/play/datasetIndex', value: '$payload.datasetIndex' },
-      { op: 'replace', path: '/play/data', value: '$payload.data' },
-      { op: 'replace', path: '/play/config', value: '$payload.config' },
-      // an example made to show one language runs in it while it is
-      // loaded; the site language is the reader's alone
-      { op: 'replace', path: '/play/exampleLocale', value: { $default: ['$payload.exampleLocale', null] } },
-      { op: 'replace', path: '/play/result', value: null },
-      // an example REPLACES the session's content, so it can no longer be
-      // the saved record: unbind, or the next Save would overwrite that
-      // record with something the user never saved there
-      { op: 'replace', path: '/play/savedName', value: null },
-      // a new engine's result has different screens; drop any stale tab,
-      // and a fresh example opens CALM — the depth toggle resets off
-      { op: 'replace', path: '/play/panel', value: null },
-      { op: 'replace', path: '/play/deep', value: false },
-      { op: 'replace', path: '/play/deepPick', value: null },
-      // the structured form buffer belongs to the example it was parsed
-      // from — keep it and the first form edit mirrors the OLD buffer
-      // over the new example's data pane (loaded-session resets the same)
-      { op: 'replace', path: '/play/dataView', value: 'json' },
-      { op: 'replace', path: '/play/dataValue', value: null },
-      // on a phone, picking an example answers immediately: show its result
-      // (desktop shows every pane, so this is invisible there)
-      { op: 'replace', path: '/play/mobilePane', value: 'result' },
-    ],
-  },
+  'play/loaded': PLAY_SLICE['play/loaded'],
   'play/source': {
     patch: [{ op: 'add', path: { $concat: ['/play/source/', '$payload.key'] }, value: '$event.value' }],
   },
@@ -297,20 +270,7 @@ export const ACTIONS = {
   // what the switch does to the source (a chart definition converted, a
   // kernel's own arguments loaded), then the run loop re-runs
   'play/option': { effects: [{ run: 'play-option', with: { key: '$payload.key', value: '$event.value' } }] },
-  'play/option-set': {
-    patch: [
-      { op: 'replace', path: '/play/config', value: '$payload.config' },
-      { op: 'replace', path: '/play/source', value: '$payload.source' },
-      { op: 'replace', path: '/play/data', value: '$payload.data' },
-      { op: 'replace', path: '/play/exampleId', value: '$payload.exampleId' },
-      { op: 'replace', path: '/play/datasetIndex', value: '$payload.datasetIndex' },
-      { op: 'replace', path: '/play/dataView', value: '$payload.dataView' },
-      { op: 'replace', path: '/play/dataValue', value: '$payload.dataValue' },
-      // the Messages select writes the site language (null: not this pane)
-      { op: 'replace', path: '/lang', value: { $if: ['$payload.lang', '$payload.lang', '$.lang'] } },
-      { op: 'replace', path: '/play/exampleLocale', value: { $default: ['$payload.exampleLocale', null] } },
-    ],
-  },
+  'play/option-set': PLAY_SLICE['play/option-set'],
   'play/dataset': { effects: [{ run: 'play-dataset', with: { index: '$payload' } }] },
   'play/dataset-set': {
     patch: [
@@ -363,29 +323,7 @@ export const ACTIONS = {
   'play/shared': { patch: [{ op: 'replace', path: '/play/shared', value: '$payload' }] },
   'play/layout-ratio': { patch: [{ op: 'replace', path: '/play/ratio', value: '$payload' }] },
   // seed engine+source+data+config from a saved/shared/blank session, then run
-  'play/loaded-session': {
-    patch: [
-      { op: 'replace', path: '/play/engine', value: '$payload.engine' },
-      { op: 'replace', path: '/play/exampleId', value: '$payload.exampleId' },
-      { op: 'replace', path: '/play/source', value: '$payload.source' },
-      { op: 'replace', path: '/play/data', value: '$payload.data' },
-      { op: 'replace', path: '/play/config', value: '$payload.config' },
-      { op: 'replace', path: '/play/name', value: '$payload.name' },
-      // a loaded record binds; a blank or SHARED session does not (a share
-      // link is not a local record, so its first Save must ask for a name)
-      { op: 'replace', path: '/play/savedName', value: { $default: ['$payload.savedName', null] } },
-      // a session renders in its reader's language, whatever it carries
-      { op: 'replace', path: '/play/exampleLocale', value: null },
-      { op: 'replace', path: '/play/datasetIndex', value: 0 },
-      { op: 'replace', path: '/play/result', value: null },
-      { op: 'replace', path: '/play/panel', value: null },
-      { op: 'replace', path: '/play/deep', value: false },
-      { op: 'replace', path: '/play/deepPick', value: null },
-      { op: 'replace', path: '/play/shared', value: null },
-      { op: 'replace', path: '/play/dataView', value: 'json' },
-      { op: 'replace', path: '/play/dataValue', value: null },
-    ],
-  },
+  'play/loaded-session': PLAY_SLICE['play/loaded-session'],
 
   // the validate engine's data pane toggles JSON ↔ a generated form.
   // Switching to the form parses the current text into the structured buffer

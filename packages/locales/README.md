@@ -355,8 +355,11 @@ The repository holds itself to this: `test/locales/uncataloged.test.js`
 scans the rendering modules for text with words, and a string that is in
 no catalog and not in its reasoned allowlist
 (`test/locales/uncataloged-allowlist.json`: not-prose, developer-facing,
-English-by-design-paragraph, data, proper-noun) fails it with its file,
-line and the fix. The parity tests (`test/locales/packs.test.js`, the
+English-by-design-paragraph, data, proper-noun, catalog-copy) fails it with
+its file, line and the fix. A catalog's own English passes only beside one
+of its ids (the id, the prefix it is built from, or its last segment, within
+a few tokens): the same words typed into a view that reads no catalog there
+fail like new text. The parity tests (`test/locales/packs.test.js`, the
 site's `site-lang.test.js`) fail until every pack carries the new key with
 the English placeholders.
 

@@ -124,7 +124,7 @@ import { createPlayComponent } from '@jarenjs/play/component';
 import {
   createPlayCatalogs, createPackRequester, createPlayValidator, playDataForm,
   PLAY_START, loadExample, withPlayLocale, runPlay, switchPlayOption, sessionOf,
-  playFormActions, PLAY_FORM_VIEW,
+  playFormActions, playSliceActions, PLAY_FORM_VIEW,
 } from '@jarenjs/play/host';
 import { stringFormats, numberFormats, dateTimeFormats, jsonFormats } from '@jarenjs/formats';
 import { buildFormModel, buildFormViewModel, formChromeLabels } from '@jarenjs/forms';
@@ -169,6 +169,9 @@ const ui = { play: { ...play.viewModel({ play: slice }, { messages: catalogs.cat
 const formRules = createFormView(PLAY_FORM_VIEW).map((rule) => ({ ...rule, mode: play.mode }));
 const actions = playFormActions({ numberValue: FORM_NUMBER_VALUE }); // merged into the app's actions
 Object.keys(actions).length;                             // 6
+// the slice's reducers, writing the reader's language where this host keeps it
+const reducers = playSliceActions({ langPointer: '/lang' });
+Object.keys(reducers);                                   // ['play/loaded', 'play/option-set', 'play/loaded-session']
 
 // 5. The reader picks a language on the Messages pane: it becomes theirs.
 const picked = switchPlayOption(slice, 'locale', 'fr');

@@ -22,6 +22,7 @@
 import {
   formatMessageValue,
   compileMessageCatalog,
+  formChromeMessagesEn,
 } from '@jarenjs/core/message';
 
 export {
@@ -60,10 +61,9 @@ export const formsMessagesEn = {
   // Form CHROME, not validation: the accessible names of the array
   // buttons. A symbol-only button ('+', '×') is unreadable to a screen
   // reader and untranslatable as a glyph, so the name travels as a
-  // message like every other string an operator can hear.
-  'form/addItem': 'Add item',
-  'form/removeItem': 'Remove item',
-  'form/jsonPlaceholder': 'Enter a JSON value',
+  // message like every other string an operator can hear; their English
+  // has one home, shared with `@jarenjs/app`'s form view.
+  ...formChromeMessagesEn,
 };
 
 /** The compiled built-in English catalog (module-level singleton). */
@@ -147,22 +147,15 @@ export function renderFormsMessage(catalog, msgid, params) {
  *
  * The stylesheet that renders a form is plain JSON built once, so it
  * cannot look a catalog up at render time — the host resolves these and
- * hands them to `createFormView` (`labels`), or puts them in the view
- * input document where `createFormView`'s `labelsPath` reads them when
- * the language can change while the form is open. Kept next to the error
- * catalog on purpose: one keyspace, one parity gate across every locale
- * pack.
- * @param {Readonly<Record<string, (params: object, error?: object) => string>>} [catalog] - A compiled catalog, or undefined for English
- * @returns {{addItem: string, removeItem: string, jsonPlaceholder: string}}
+ * hands them to `createFormView` (`labels`, or `messages` for the pack
+ * itself), or puts them in the view input document where
+ * `createFormView`'s `labelsPath` reads them when the language can change
+ * while the form is open. Their ids sit in this package's catalog, so one
+ * parity gate covers them across every locale pack; the function and the
+ * English are `@jarenjs/core/message`'s, which `@jarenjs/app` reads too.
  * @example
  * createFormView({ labels: formChromeLabels(catalogs[locale]) });
  */
-export function formChromeLabels(catalog = undefined) {
-  return {
-    addItem: renderFormsMessage(catalog, 'form/addItem', {}),
-    removeItem: renderFormsMessage(catalog, 'form/removeItem', {}),
-    jsonPlaceholder: renderFormsMessage(catalog, 'form/jsonPlaceholder', {}),
-  };
-}
+export { formChromeLabels } from '@jarenjs/core/message';
 
 //#endregion

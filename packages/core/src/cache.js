@@ -137,8 +137,9 @@ export function createBoundedCache(limit, onEvict = undefined) {
  * keyable — except a value whose whole tree is frozen (as `deepFreeze`
  * leaves it) and holds only data members: its key is remembered for that
  * object, so looking the same frozen object up again costs a weak-map
- * read instead of a walk. Keep and pass the frozen object itself; a
- * wrapper built per lookup is a new value and is walked.
+ * read instead of a walk. A wrapper built per lookup is a new value and
+ * is walked, but a frozen tree inside it is joined rather than walked
+ * once a lookup has remembered it, as {@link semanticKey} describes.
  *
  * **Member order.** By default the identity is order-insensitive, as
  * plain JSON data is: two values differing only in object member order
