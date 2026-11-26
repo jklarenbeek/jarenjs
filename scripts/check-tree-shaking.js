@@ -396,7 +396,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 260,500 (measured 260405): a store's compare guard on a call a row decides, which each comparison, $distinct, $index-of and grouping key hands its items to, with no equality bucket skipping a pair (operators 235, runtime 176, normalize 137, compile 83, index 59).
 // Raised to 260,600 (measured 260598): an entity handle read as the chain over it as a join's inner side (async 193).
 // Raised to 261,000 (measured 260936): the string helpers' named refusal of a non-string, which every chain reaches through core's string module (string 338).
-if (chainBytes > 261000)
+// Raised to 261,600 (measured 261591): semanticKey joining a frozen tree remembered inside a per-call wrapper (object 655).
+if (chainBytes > 261600)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -880,7 +881,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,210,700 (measured 1210630): an ordering that places the empty key greatest read through the PostgreSQL index in two branches, a keyset page past a value seeking it, and the open's reading of the indexes a table holds plain carried to the statements (emit 1919, query 1353, ddl 308, store 28).
 // Raised to 1,211,000 (measured 1210898): the string helpers' named refusal of a non-string (string 175), and a job read that locks its row for a lease-less decision (jobs 93).
 // Raised to 1,211,100 (measured 1211077): a reference's recorded units kept for the branches that enter it again, and read only where a recording format writes them (index and combine 179 together; minified alone index 190, combine 10).
-if (clientBytes > 1211100)
+// Raised to 1,212,200 (measured 1212115): semanticKey joining a remembered frozen tree (object 655), four more string helpers' named refusal of a non-string (string 303), and the queue's SQLite writes beginning with the writer lock (jobs 80).
+if (clientBytes > 1212200)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
