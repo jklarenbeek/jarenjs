@@ -1,11 +1,11 @@
 {
   "bundles": {
     "schema": 47750,
-    "chain": 260598,
+    "chain": 260936,
     "model": 60122,
     "jslt": 29086,
-    "migration": 36271,
-    "db": 1210630,
+    "migration": 36643,
+    "db": 1210898,
     "contract": 61323,
     "flow": 30481,
     "app": 62807,
@@ -18,11 +18,11 @@
   },
   "chain": {
     "own": 56802,
-    "withSchemaPen": 286131,
+    "withSchemaPen": 286469,
     "shared": 22217
   },
   "components": {
-    "md": 92443,
-    "mermaid": 135404
+    "md": 92815,
+    "mermaid": 135845
   }
 }

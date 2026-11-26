@@ -395,7 +395,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 259,800 (measured 259715): a message value holding a bigint wrapper object rendered as its digits, and an unserialisable value rendered by the fallback text instead of throwing (message 136).
 // Raised to 260,500 (measured 260405): a store's compare guard on a call a row decides, which each comparison, $distinct, $index-of and grouping key hands its items to, with no equality bucket skipping a pair (operators 235, runtime 176, normalize 137, compile 83, index 59).
 // Raised to 260,600 (measured 260598): an entity handle read as the chain over it as a join's inner side (async 193).
-if (chainBytes > 260600)
+// Raised to 261,000 (measured 260936): the string helpers' named refusal of a non-string, which every chain reaches through core's string module (string 338).
+if (chainBytes > 261000)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -631,7 +632,8 @@ if (migrationEngineLeak.length > 0)
 // Raised to 36,000 (measured 35969): the captured expression's coded refusal of a member read off a method read without its call, which every pen shares (expression 392) add 392.
 // Raised to 36,200 (measured 36098): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
 // Raised to 36,300 (measured 36271): the captured expression's instantOf and wallClock, which every pen shares (expression 107).
-if (migrationBytes > 36300)
+// Raised to 36,700 (measured 36643): the string helpers' named refusal of a non-string, which every pen shares (string 372).
+if (migrationBytes > 36700)
   throw new Error(`The migration pen bundle grew to ${migrationBytes} bytes.`);
 const chainMigrationLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/migration/') && info.bytesInOutput > 0);
@@ -876,7 +878,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,198,900 (measured 1198896): one shared catalog read per namespace at open and in a migration's validation (sqlite-catalog 1610, namespace-catalog 1379, store 274, migrate 166, sqlite 75, physical-transform 14, net of ddl 103 and introspect 11), the job tables and the change log read before any bracket with a lock failure answered busy (jobs 559, capture 286, dialects/jobs 63), linq transaction records built on first read (open 314), and a page over an earlier release's re-keyed key carrying its digits, a windowed count and a reversal native, and a $ne chain over one column as one list (query 770, plan 574, algebra 536, emit 230, async 109, dialect 26).
 // Raised to 1,207,300 (measured 1207266): PostgreSQL indexes keyed in the order a statement reads with the declared double beside a number index, verified and read back (ddl 4118, dialect 132, introspect 6), a rule added to a populated table judging its rows and a probe's lock and row-level-security refusal (invariants 531, invariant-sql 523, entity 416, errors 112, tracker 57, row-predicate 30), and replication ordered by an expression index's key with its tables read before any bracket (replication 1061).
 // Raised to 1,210,700 (measured 1210630): an ordering that places the empty key greatest read through the PostgreSQL index in two branches, a keyset page past a value seeking it, and the open's reading of the indexes a table holds plain carried to the statements (emit 1919, query 1353, ddl 308, store 28).
-if (clientBytes > 1210700)
+// Raised to 1,211,000 (measured 1210898): the string helpers' named refusal of a non-string (string 175), and a job read that locks its row for a lease-less decision (jobs 93).
+if (clientBytes > 1211000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
