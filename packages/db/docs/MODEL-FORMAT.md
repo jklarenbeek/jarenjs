@@ -1494,9 +1494,10 @@ body sees every earlier immediate commit and cannot lose an update to
 another immediate transaction, and `capabilities.immediateTransactions`
 is `true`. On SQLite a body that reads before it writes — a ledger claim:
 read the record, decide, insert — otherwise meets the read→write upgrade
-`SQLITE_BUSY` when another connection commits between its read and its
-write, the one busy the busy handler cannot retry; with the lock taken
-first that wait is an ordinary busy wait the `busyTimeout` covers, and
+`SQLITE_BUSY` when another connection holds the write lock at its write
+or committed since its read, the one busy the busy handler cannot
+retry; with the lock taken first that wait is an ordinary busy wait the
+`busyTimeout` covers, and
 two processes claiming one key see one `new`. On PostgreSQL two immediate
 bodies on two stores run one after the other. At `read committed` (the
 server default) the second reads the first one's commit: two concurrent

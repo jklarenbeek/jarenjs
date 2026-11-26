@@ -112,7 +112,14 @@ adds `FOR UPDATE SKIP LOCKED` to the bounded candidate SELECT. Independent
 workers skip candidates another transaction holds. Eligibility order therefore
 applies to the available rows, with no global FIFO or starvation guarantee.
 Lease assertions inside a Store transaction and checkpoint saves lock the job
-row until that transaction settles. A sweep uses one selected and locked victim
+row until that transaction settles. On SQLite every queue transaction that
+reads before it writes — a checkpoint save, `schedule()`, a tick with a due
+row (§11) — takes the write lock with its first statement (`BEGIN
+IMMEDIATE`) when it is a transaction of its own (a root call, a worker's);
+through `tx.jobs` it is a savepoint of the caller's transaction, which
+decides the lock (`mode: 'immediate'`). So another connection's write
+lock is waited out for `busyTimeout` like any write's, and a lock held
+longer is the busy failure (`JD2005`, §9). A sweep uses one selected and locked victim
 set for both job and checkpoint deletion, even when another worker settles a
 job concurrently.
 
@@ -326,8 +333,8 @@ a third of its lease, and at most every 2^31 − 1 milliseconds:
   and a table another process creates is found within 16 passes, without
   a restart: an idle worker passes once per `pollInterval` (8 s at the
   default 500 ms), a busy one once per claim.
-  Once the table exists, every poll pays one tick transaction (the due-row read)
-  before its claim. A tick that fails — a zone without the runtime's
+  Once the table exists, every poll pays one due-row read before its
+  claim, and a tick transaction only when a row is due. A tick that fails — a zone without the runtime's
   provider (`JD0016`), a busy database — is counted in `stats().tickErrors`
   (`stats().ticks` counts the ones that ran) and never stops the claim;
 - retry backoff is `min(backoffCap, backoffBase × 2^(attempts − 1))`,
@@ -757,7 +764,9 @@ store.jobs.createWorker({ handlers: { report: async () => {} }, tick: true }).st
   - the schedule advances to its next occurrence in the same transaction,
     guarded by the instant it was due at. On PostgreSQL the due rows are
     read `FOR UPDATE SKIP LOCKED`, as a claim reads jobs; SQLite's single
-    writer serializes ticks. The answers are the same;
+    writer serializes ticks. The answers are the same. A tick that finds
+    nothing due answers from that one read and takes no lock; one that
+    finds a due row reads the due rows again in its transaction;
   - an occurrence due more than `latenessMs` before the tick's instant
     (`runtime.now`) is skipped under every `missed` policy, the latest one
     too; one exactly `latenessMs` late fires. Of the rest, an occurrence is

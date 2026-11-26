@@ -481,13 +481,15 @@ function publicSchedule(row) {
 /**
  * The schedule operations over one queue engine's connection (§11):
  * `schedule`, `unschedule`, `schedules` and `tick`, each the engine's
- * value-or-promise.
+ * value-or-promise. `writing` is the queue's transaction for work that
+ * reads before it writes.
  * @param {{ connection: any, prepared: (key: string, text?: string) => any, now: () => number,
- *   bracket: (fn: () => any) => any, wake: () => void, storedJson: (value: unknown, what: string) => string,
+ *   bracket: (fn: () => any) => any, writing: (fn: () => any) => any, wake: () => void,
+ *   storedJson: (value: unknown, what: string) => string,
  *   adopt: boolean, maxAttempts: number, provider: any }} context
  */
 function attach(context) {
-  const { connection, prepared: preparedJob, now, bracket, wake, storedJson, adopt, maxAttempts, provider } = context;
+  const { connection, prepared: preparedJob, now, bracket, writing, wake, storedJson, adopt, maxAttempts, provider } = context;
   const sql = scheduleStatements(connection.dialect);
   /** A schedule statement, prepared once through the queue's own cache and failure wrap. @param {string} key */
   const prepared = (key, text = sql[key]) => preparedJob(key, text);
@@ -547,7 +549,7 @@ function attach(context) {
    */
   const schedule = (spec) => {
     const definition = readSchedule(spec, storedJson, provider);
-    return chain(ensureSchedules(), () => connection.transaction(() => chain(
+    return chain(ensureSchedules(), () => writing(() => chain(
       prepared('scheduleGet').get([definition.id]), (/** @type {any} */ existing) => {
         const at = now();
         const createdAt = existing === undefined ? at : Number(existing.created_at);
@@ -596,8 +598,12 @@ function attach(context) {
     /** @type {string[]} */
     const fired = [];
     let skipped = 0;
-    return chain(schedulesPresent(), (present) => !present ? Object.freeze({ fired: Object.freeze([]), skipped: 0, advanced: 0, more: false })
-      : chain(connection.transaction(() => {
+    const idle = () => Object.freeze({ fired: Object.freeze([]), skipped: 0, advanced: 0, more: false });
+    // nothing due answers from a read alone: the write lock is taken only
+    // when there is a row to advance, and the due rows are read again under it
+    return chain(schedulesPresent(), (present) => !present ? idle()
+      : chain(prepared('scheduleDue').all([now(), limit]), (/** @type {any[]} */ due) => due.length === 0 ? idle()
+      : chain(writing(() => {
         fired.length = 0;
         skipped = 0;
         const at = now();
@@ -656,7 +662,7 @@ function attach(context) {
       }), (advanced) => {
         if (fired.length > 0) wake();
         return Object.freeze({ fired: Object.freeze(fired), skipped, advanced, more: advanced === limit });
-      }));
+      })));
   };
 
   return {

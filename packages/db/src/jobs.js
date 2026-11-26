@@ -265,6 +265,14 @@ export function createJobEngine(options) {
    * a read-only file, a locked database, a constraint — never the
    * driver's raw error. */
   const wrapJobs = (error) => wrapDriverError(error, { docPath: '/jobs', collection: JOBS_TABLE });
+  /** A transaction whose work reads before it writes takes the write lock
+   * up front (`immediate`): a deferred one, upgraded from read to write
+   * while another connection holds the write lock, meets the `SQLITE_BUSY`
+   * no busy handler is asked to wait out, so `busyTimeout` never applies.
+   * Its own BEGIN — the statement that waits — rides the same wrap.
+   * Inside an open transaction it is that transaction's savepoint.
+   * @param {(scope: any) => any} fn */
+  const writing = (fn) => attempt(() => connection.transaction(fn, 'immediate'), wrapJobs);
   /** @type {Map<string, any>} */
   const statements = new Map();
   const prepared = (key, text = sql[key]) => {
@@ -683,7 +691,7 @@ export function createJobEngine(options) {
             values: Object.fromEntries(
               rows.map((row) => [row.node_id, JSON.parse(row.value)])),
           })),
-      save: (runId, nodeId, value) => connection.transaction(() => {
+      save: (runId, nodeId, value) => writing(() => {
         const misuse = requireLease(lease, 'checkpoint save()');
         if (misuse !== null) throw misuse;
         const at = now();
@@ -938,7 +946,7 @@ export function createJobEngine(options) {
   // The calendar half is `@jarenjs/db/schedules`: a store opened without it
   // carries no calendar, and every schedule call refuses by name.
   const scheduling = options.schedules?.attach({
-    connection, prepared, now, bracket, wake: wakeAll, storedJson,
+    connection, prepared, now, bracket, writing, wake: wakeAll, storedJson,
     adopt: options.adopt === true, maxAttempts: defaults.maxAttempts,
     // the zone provider is the runtime's: never a host default
     provider: runtime.zoneProvider ?? null,
