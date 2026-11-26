@@ -3,7 +3,7 @@
 import { compileLexical } from '@jarenjs/core/search';
 import { createLexicalProvider } from '@jarenjs/json/query';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
-import { utf8ByteLength } from '@jarenjs/core/string';
+import { sha256Hex, utf8ByteLength } from '@jarenjs/core/string';
 import { isCursorBudgetError } from './cursor.js';
 import { readRevisionSnapshot } from './snapshot.js';
 import { createLatestDelivery } from '@jarenjs/core/async';
@@ -93,8 +93,7 @@ export async function createDbSearch(store, entity, definition, options) {
           if (page.hasMore !== false || page.items.length > maxRows) throw new RangeError('Lexical source exceeds row credits');
           const source = canonicalizeJson(page.items);
           if (utf8ByteLength(source) > maxBytes) throw new RangeError('Lexical source exceeds byte credits');
-          const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(source));
-          const contentRevision = `${options.source}:${Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')}`;
+          const contentRevision = `${options.source}:${await sha256Hex(source)}`;
           return { items: page.items, revision: contentRevision, bytes: utf8ByteLength(source), epoch };
         }), { signal: controller.signal });
         if (disposed) return refusal('error', 'disposed');

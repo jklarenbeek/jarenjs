@@ -2569,8 +2569,13 @@ literal union), `UrlOperations` (opaque operations included, for
 binding-neutral `Client` never requires a byte method), `Failure`,
 `CarrierName`, `HandlerContextBase<Host>`, `HttpHandlerContext<Host>`,
 `ChannelHandlerContext<Host, Carrier>`, `HandlerContext<Host = null,
-Carrier = 'http'>` and `Handlers<Host = null, Carrier = 'http'>` — the
-handler context selected by carrier (§7.7): omitted generics are the
+Carrier = 'http'>`, `ReplayPage`, `SnapshotOf<T>`,
+`SubscriptionSource<T>`, `HandlerAnswer<Op>` and `Handlers<Host = null,
+Carrier = 'http'>` — a handler answers its operation's output, or, for a
+`subscribe` operation, the `SubscriptionSource` over it that the stream
+binding reads (§17.1; answering the snapshot itself is `JC2010`, so it
+does not compile), either one or a `Failure`, as a value or a promise —
+and the handler context selected by carrier (§7.7): omitted generics are the
 HTTP context with `host: null`, exactly the shape it always was plus
 `carrier` and `host`; a port or local context spells the request-line
 members, the body, the key, `etag` and `status` as `null` rather than

@@ -479,7 +479,6 @@
     ["\" is still the seed template's while the form is now titled \"", "English-by-design-paragraph"],
     ["\" — patch the heading to match the repurposed form", "English-by-design-paragraph"],
     ["' is not a valid element tag name — the app fails to boot on it (text belongs directly in the children, not wrapped in an array)", "not-prose"],
-    [": a bare object is not a vnode — it renders as nothing (expected [\"tag\", props, ...children] or text)", "not-prose"],
     [": the chart widget's props.config did not resolve to a chart definition object", "English-by-design-paragraph"],
     [": the form widget's props.schema did not resolve to a JSON Schema object — the form renders an error instead of fields", "English-by-design-paragraph"],
     [": unknown widget '", "developer-facing"],
@@ -519,6 +518,8 @@
     ["$.w.deleteTitle", "not-prose"],
     ["$.w.errors", "not-prose"],
     ["$.w.routeCollectionPlaceholder", "not-prose"],
+    ["$.w.warnings", "not-prose"],
+    ["js-errorline js-warnline", "not-prose"],
     ["js-file active", "not-prose"],
     ["seg-btn active", "not-prose"]
   ],
@@ -557,7 +558,9 @@
   "components/studio/src/errors.js": [
     ["a file name is duplicated in the project", "developer-facing"],
     ["a project file reference cannot be resolved", "developer-facing"],
+    ["an app view places an object of no element shape where a vnode renders, which renders as nothing (a warning)", "developer-facing"],
     ["an app view renders an element written as an object, which renders as nothing", "developer-facing"],
+    ["an app view writes an element as an object in an element's props position, which is read as attributes (a warning)", "developer-facing"],
     ["an app view's text holds another template language's expression (a warning)", "developer-facing"],
     ["the project document is invalid", "developer-facing"]
   ],
@@ -571,8 +574,12 @@
     ["The Flow editor is disposed.", "English-by-design-paragraph"]
   ],
   "components/studio/src/render-audit.js": [
+    [" is not a vnode and renders as nothing (the DOM renderer refuses one at the root); a child is text or an array: ['tag', {attrs}, …children]", "not-prose"],
     [" is not a vnode and renders as nothing; a vnode is an array: ['", "not-prose"],
+    ["', …}) in the props position is read as this element's attributes; a child element is an array after the props: ['", "not-prose"],
     [", another template language's expression syntax; it renders as literal text — compute the value with a query ({\"$count\": \"$.items\"}, {\"$for\": …, \"$return\": …}) if that is what it means", "not-prose"],
+    ["an element written as an object ({tag: '", "developer-facing"],
+    ["an empty object", "developer-facing"],
     ["an object with ", "developer-facing"],
     ["its root", "developer-facing"],
     ["the first frame renders, at ", "developer-facing"],

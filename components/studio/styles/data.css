@@ -48,6 +48,6 @@
 }
 :where(.jaren-data-editor) .data-row code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 0.8rem; }
 :where(.jaren-data-editor) .data-row-delete { flex: none; color: var(--muted, hsl(220 12% 45%)); }
-:where(.jaren-data-editor) .data-row-delete:hover { color: var(--fail, hsl(0 68% 46%)); border-color: var(--fail, hsl(0 68% 46%)); }
+:where(.jaren-data-editor) .data-row-delete:hover { color: var(--fail-ink, var(--fail, hsl(0 68% 46%))); border-color: var(--fail, hsl(0 68% 46%)); }
 :where(.jaren-data-editor) .data-trip-map { margin-block: var(--space-3, 0.75rem); padding: 0; border: 0; background: transparent; }
 :where(.jaren-data-editor) .data-trip-narrative { word-break: break-word; }

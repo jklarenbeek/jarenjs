@@ -74,11 +74,15 @@ assets from its host; it has no filesystem, fetch or DOM dependency.
 - `src/render-audit.js` — what an app view renders that its author did
   not mean, read with the view format's vnode rules over the stylesheet's
   literal elements and the first frame: an element written as an object
-  (`JS0004`, refused) and text holding another template language's
-  expression (`JS0005`, a warning).
+  (`JS0004`, refused), text holding another template language's
+  expression (`JS0005`), any other object where a vnode renders
+  (`JS0006`) and an element written as an object in the props position
+  (`JS0007`), the last three warnings. The document host
+  (`src/component/document.js`, `auditDocumentRender`) reads the same
+  audit: its refusals are the host's problems, its warnings notes.
 - `src/assemble.js` — `assembleArtifacts`, `classifyChange`, `describe`.
 - `src/errors.js` — `StudioError` on `@jarenjs/core`'s coded base;
-  `STUDIO_CODES` (JS0001/JS0002/JS0003 thrown; JS0004/JS0005 reported by
+  `STUDIO_CODES` (JS0001/JS0002/JS0003 thrown; JS0004–JS0007 reported by
   the render audit).
 - `src/resolve.js` — import assembly, reference routing, rename and write-back.
 - `src/skeletons.js` — the shared creation vocabulary and valid starter files.

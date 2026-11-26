@@ -2,7 +2,7 @@
 /**
  * @file What an `app` view renders that its author did not mean, read
  * with the view format's own vnode rules (VIEW-FORMAT §2): text, skipped
- * values, `[tag, props?, ...children]` elements and lists. Two findings:
+ * values, `[tag, props?, ...children]` elements and lists. Four findings:
  *
  *  - `JS0004`, a refusal: an object carrying `tag` or `type` together
  *    with `props`, `attrs` or `children`, in a position the view renders
@@ -16,6 +16,15 @@
  *    leading `for .`/`if .` (Schibsted JSLT), or a call `name([…])`. It
  *    renders as literal text, which may be what the author meant, so it
  *    never refuses.
+ *  - `JS0006`, a warning: any other object in a vnode position. It renders
+ *    as nothing too, but an object of no element shape is as often a
+ *    computed value the author means to drop as a mistake, so it never
+ *    refuses.
+ *  - `JS0007`, a warning: an element written as an object with a `tag`
+ *    (`["ul", {"tag": "li", "children": […]}]`) in an element's props
+ *    position. The renderer reads it as that element's attributes, which
+ *    renders, so it never refuses; `type` alone is not read as the shape
+ *    there, because it is an HTML attribute (`["input", {"type": …}]`).
  *
  * Two walks: one over the stylesheet's literal element arrays (it finds
  * the shape in a branch the first frame does not take, such as the body
@@ -68,6 +77,23 @@ function isObjectShapedElement(value) {
     && (Object.hasOwn(value, 'props') || Object.hasOwn(value, 'attrs') || Object.hasOwn(value, 'children'));
 }
 
+/**
+ * Is this props object an element written as an object — `tag` beside
+ * `props`, `attrs` or `children`?
+ * @param {Record<string, unknown>} props
+ */
+const isPropsShapedElement = (props) => Object.hasOwn(props, 'tag') && isObjectShapedElement(props);
+
+/** @param {Record<string, unknown>} object */
+const objectWarning = (object) => {
+  const keys = Object.keys(object);
+  const named = keys.length === 0 ? 'an empty object' : `an object with ${keys.slice(0, 3).map((key) => `'${key}'`).join(', ')}${keys.length > 3 ? ', …' : ''}`;
+  return `${named} is not a vnode and renders as nothing (the DOM renderer refuses one at the root); a child is text or an array: ['tag', {attrs}, …children]`;
+};
+
+/** @param {Record<string, unknown>} props */
+const propsWarning = (props) => `an element written as an object ({tag: '${String(props.tag)}', …}) in the props position is read as this element's attributes; a child element is an array after the props: ['${String(props.tag)}', {attrs}, …children]`;
+
 /** @param {Record<string, unknown>} object */
 function vnodeRefusal(object) {
   const name = typeof object.tag === 'string' ? object.tag : typeof object.type === 'string' ? object.type : 'tag';
@@ -110,7 +136,10 @@ function walkExpression(expr, path, child, out) {
     const element = typeof expr[0] === 'string' && !expr[0].startsWith('$');
     for (let i = element ? 1 : 0; i < expr.length; i++) {
       // an element's second item, when an object, is its props (or computes them)
-      if (element && i === 1 && isJsonObject(expr[1])) continue;
+      if (element && i === 1 && isJsonObject(expr[1])) {
+        if (expr[0] !== WIDGET_TAG && !hasOperatorKey(expr[1]) && isPropsShapedElement(expr[1])) warn(out, 'JS0007', `${path}/1`, propsWarning(expr[1]));
+        continue;
+      }
       walkExpression(expr[i], `${path}/${i}`, element || child, out);
     }
     return;
@@ -123,30 +152,49 @@ function walkExpression(expr, path, child, out) {
     }
     return;
   }
-  if (child && isObjectShapedElement(expr)) out.refusals.push({ code: 'JS0004', docPath: path, message: vnodeRefusal(expr) });
+  if (!child) return;
+  if (isObjectShapedElement(expr)) out.refusals.push({ code: 'JS0004', docPath: path, message: vnodeRefusal(expr) });
+  else warn(out, 'JS0006', path, objectWarning(expr));
 }
 
 /**
- * Walk the rendered first frame with the renderer's own rules.
+ * Record a warning, bounded.
+ * @param {{ warnings: any[] }} out @param {string} code @param {string} docPath @param {string} message
+ */
+function warn(out, code, docPath, message) {
+  if (out.warnings.length < MAX_FINDINGS) out.warnings.push({ code, docPath, message });
+}
+
+/**
+ * Walk the rendered first frame with the renderer's own rules. `find`
+ * names the findings still wanted: those the stylesheet walk did not
+ * already place exactly.
  * @param {unknown} vnode
  * @param {string} path - a pointer into the rendered frame
- * @param {any[]} refusals
+ * @param {{ refusals: any[], warnings: any[] }} out
+ * @param {{ JS0004: boolean, JS0006: boolean, JS0007: boolean }} find
  */
-function walkFrame(vnode, path, refusals) {
-  if (refusals.length >= MAX_FINDINGS || isSkippedNode(vnode) || isTextNode(vnode)) return;
+function walkFrame(vnode, path, out, find) {
+  if (out.refusals.length >= MAX_FINDINGS || isSkippedNode(vnode) || isTextNode(vnode)) return;
+  const where = path === '' ? 'its root' : path;
   if (isElementNode(vnode)) {
     if (vnode[0] === WIDGET_TAG) return; // its props are the widget's data
-    for (let i = isJsonObject(vnode[1]) ? 2 : 1; i < vnode.length; i++) walkFrame(vnode[i], `${path}/${i}`, refusals);
+    const props = isJsonObject(vnode[1]);
+    if (props && find.JS0007 && isPropsShapedElement(vnode[1])) {
+      warn(out, 'JS0007', '/view', `the first frame renders, at ${path}/1, ${propsWarning(vnode[1])}`);
+    }
+    for (let i = props ? 2 : 1; i < vnode.length; i++) walkFrame(vnode[i], `${path}/${i}`, out, find);
     return;
   }
   if (Array.isArray(vnode)) {
-    for (let i = 0; i < vnode.length; i++) walkFrame(vnode[i], `${path}/${i}`, refusals);
+    for (let i = 0; i < vnode.length; i++) walkFrame(vnode[i], `${path}/${i}`, out, find);
     return;
   }
+  if (!isJsonObject(vnode)) return;
   if (isObjectShapedElement(vnode)) {
-    refusals.push({ code: 'JS0004', docPath: '/view',
-      message: `the first frame renders, at ${path === '' ? 'its root' : path}, ${vnodeRefusal(vnode)}` });
+    if (find.JS0004) out.refusals.push({ code: 'JS0004', docPath: '/view', message: `the first frame renders, at ${where}, ${vnodeRefusal(vnode)}` });
   }
+  else if (find.JS0006) warn(out, 'JS0006', '/view', `the first frame renders, at ${where}, ${objectWarning(vnode)}`);
 }
 
 /**
@@ -168,7 +216,10 @@ export function auditRenderedView(view, frame) {
       if (isJsonObject(rule) && Object.hasOwn(rule, 'body')) walkExpression(rule.body, `${base}/${i}/body`, false, out);
     });
   }
-  // the stylesheet names the place exactly; the frame is read when it found none
-  if (out.refusals.length === 0) walkFrame(frame, '', out.refusals);
+  // the stylesheet names the place exactly; the frame is read for each
+  // finding it placed none of
+  const placed = (/** @type {string} */ code) => out.warnings.some((w) => w.code === code);
+  const find = { JS0004: out.refusals.length === 0, JS0006: !placed('JS0006'), JS0007: !placed('JS0007') };
+  if (find.JS0004 || find.JS0006 || find.JS0007) walkFrame(frame, '', out, find);
   return out;
 }

@@ -69,7 +69,7 @@ describe('csv: RFC 4180 reading', () => {
     deepStrictEqual(parseCsv('a;b', { delimiter: ';' }), [['a', 'b']]);
     deepStrictEqual(parseCsv('a\tb', { delimiter: '\t' }), [['a', 'b']]);
     deepStrictEqual(parseCsv("'a,b',c", { quote: "'" }), [['a,b', 'c']]);
-    deepStrictEqual(parseCsv('"a",b', { quote: null }), [['"a"', 'b']]);
+    deepStrictEqual(parseCsv('"a",b', { quote: '' }), [['"a"', 'b']]);
     deepStrictEqual(parseCsv('# note\na,b', { comment: '#' }), [['a', 'b']]);
     throws(() => parseCsv('a', { delimiter: ',,' }), TypeError);
   });

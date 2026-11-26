@@ -1566,9 +1566,9 @@ paused effect, whose job is `cancelled` and so has no lease. That decision is
 fenced by the record's `revision` alone, refused `JL2009` while the job is
 leased (the lease holder decides then), and checked in the transaction that
 moves the revision, which can be the command's own: an effect store over a
-transaction client nests in it. Under SQLite that transaction keeps a claim
-from landing between the check and the write; on PostgreSQL a claim that lands
-between them meets the moved revision at its own next write. A missing
+transaction client nests in it. It reads the job row-locked there, then the record:
+no claim leases the job before the commit (on PostgreSQL another store's claim skips
+it), and a second lease-less decision meets the revision the first one moved. A missing
 (`undefined`) lease is still refused as a foreign job; a `null` one used to be
 too. After the decision, `requeue` the job, and whichever worker claims it
 next continues from the decision: a requeue followed by a claim by kind can

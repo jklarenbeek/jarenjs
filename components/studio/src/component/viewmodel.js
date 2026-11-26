@@ -37,7 +37,7 @@ const shellWords = wordsBy((t) => ({
   routeCollectionPlaceholder: t('studio/project/route-collection-placeholder'),
   resize: t('studio/project/resize'), stage: t('studio/stage/head'), stageHint: t('studio/stage/hint'),
   // a rail row is its own rule, matched at its own node: it carries these
-  rail: { errors: t('studio/project/file-errors'), delete: t('studio/project/file-delete'),
+  rail: { errors: t('studio/project/file-errors'), warnings: t('studio/project/file-warnings'), delete: t('studio/project/file-delete'),
     deleteTitle: t('studio/project/file-delete-title') },
 }));
 
@@ -116,16 +116,22 @@ export function projectViewModel(state, options = {}) {
     w: words.rail,
     badge: KIND_BADGE[f.kind] ?? 'json',
     valid: f.valid,
+    // a valid file can still carry warnings: the rail marks those apart
+    warned: f.valid && f.warnings.length > 0,
     active: f.name === activeName,
     artifact: f.artifact,
   }));
 
-  // the docked strip: every file's coded errors, prefixed by file name,
-  // so a broken file anywhere is visible and one click reaches it
+  // the docked strip: every file's coded errors, then its warnings,
+  // prefixed by file name, so a broken file anywhere is visible and one
+  // click reaches it
   const problems = [];
   for (const f of d.files) {
     for (const e of f.errors) {
-      problems.push({ file: f.name, code: e.code ?? '', message: e.message, docPath: e.docPath ?? '' });
+      problems.push({ file: f.name, code: e.code ?? '', message: e.message, docPath: e.docPath ?? '', warning: false });
+    }
+    for (const w of f.warnings) {
+      problems.push({ file: f.name, code: w.code ?? '', message: w.message, docPath: w.docPath ?? '', warning: true });
     }
   }
 

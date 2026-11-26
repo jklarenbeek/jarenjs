@@ -5,9 +5,7 @@ import { setObjectMember, semanticKey } from '@jarenjs/core/object';
 import { canonicalizeJson } from '../canonical.js';
 import { createFormulaCompiler } from './index.js';
 import { JsonQueryCompileError, JsonQueryRuntimeError } from '../query/errors.js';
-import { renderMessageId } from '../message-ref.js';
-import { formulaMessagesEn } from './messages.js';
-import { FormulaError, causeCode, causePath, formulaMessage, snapshot, credit, FORMULA_OPTIONS, checkFormulaOptions } from './shared.js';
+import { FormulaError, causeCode, causePath, formulaDiagnostic, formulaMessage, snapshot, credit, FORMULA_OPTIONS, checkFormulaOptions } from './shared.js';
 
 /**
  * The message reference of a formula or query error (`messageId` and
@@ -41,12 +39,14 @@ function diagnostic(error, targetId, maxChars) {
 }
 
 /**
- * The diagnostic of a cell whose computed input produced no value.
+ * The diagnostic of a cell whose computed input produced no value; its
+ * params carry its English as `reason`, as every formula message's do, so
+ * a catalog without the formula's messages (the query engine's English)
+ * renders that English rather than the bare id.
  * @param {string} targetId @param {number} maxChars
  */
 function computedMissing(targetId, maxChars) {
-  const params = { formulaId: targetId };
-  const message = renderMessageId('query/formula/computed-missing', params, formulaMessagesEn);
+  const { message, params } = formulaDiagnostic(formulaMessage('query/formula/computed-missing'), targetId);
   return { code: 'JQ2013', targetId, message: message.slice(0, maxChars), docPath: '/expression',
     ...(JSON.stringify(params).length > maxChars ? {} : { messageId: 'query/formula/computed-missing', params }) };
 }

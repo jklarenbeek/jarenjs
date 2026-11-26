@@ -3,7 +3,10 @@
  * @file The app authoring gate's findings beyond the meta-schema: an
  * element written as an object is refused `JS0004` (both renderers draw
  * it as nothing); text holding another template language's expression is
- * warned `JS0005` (it may be real text); and an unknown operator is
+ * warned `JS0005` (it may be real text); any other object where a vnode
+ * renders is warned `JS0006`, and an element written as an object in an
+ * element's props position `JS0007` (both render as something the author
+ * may mean); and an unknown operator is
  * reported as the compiler's `JQ0002` at its own place, with the nearest
  * known operator, in place of the branch errors it causes in the grammar.
  * Every wrong-answer row has right-answer rows beside it.
@@ -15,6 +18,7 @@ import assert from 'node:assert/strict';
 import { validateFile, STUDIO_CODES } from '@jarenjs/studio';
 import { renderToString } from '@jarenjs/view';
 import { compileJsonQuery } from '@jarenjs/json';
+import { createJsltRegistry } from '@jarenjs/json/jslt';
 
 const app = (body, state = {}, extra = {}) => ({ name: 'app.json', kind: 'app', text: JSON.stringify({ state, view: [{ match: '$', body }], ...extra }) });
 const codes = (verdict) => verdict.errors.map((e) => `${e.code} ${e.docPath}`);
@@ -97,6 +101,81 @@ describe('JS0005: text holding another template language is warned, never refuse
   });
 });
 
+describe('JS0006: any other object where a vnode renders is warned, never refused', () => {
+  it('renders as nothing, as an element written as an object does', () => {
+    assert.equal(renderToString(['div', {}, { class: 'x' }]), '<div></div>');
+  });
+
+  it('a literal child at its own place, a computed one in the first frame, and one at the root', () => {
+    const literal = validateFile(app(['div', {}, { class: 'x' }]));
+    assert.deepEqual([literal.valid, codes(literal), warned(literal)], [true, [], ['JS0006 /view/0/body/2']]);
+    assert.match(literal.warnings[0].message, /^an object with 'class' is not a vnode and renders as nothing/);
+    const computed = validateFile(app(['div', {}, '$.user'], { user: { name: 'Ada' } }));
+    assert.deepEqual([computed.valid, warned(computed)], [true, ['JS0006 /view']]);
+    assert.match(computed.warnings[0].message, /^the first frame renders, at \/2, an object with 'name'/);
+    const root = validateFile(app({ a: 1 }));
+    assert.deepEqual([root.valid, warned(root)], [true, ['JS0006 /view']]);
+    assert.match(root.warnings[0].message, /at its root/);
+  });
+
+  it('a literal placed in the stylesheet is warned once, at its place, not again in the frame', () => {
+    assert.deepEqual(warned(validateFile(app(['div', {}, { a: 1 }, ['p', {}, { b: 2 }]]))), ['JS0006 /view/0/body/2', 'JS0006 /view/0/body/3/2']);
+  });
+
+  it('right answers carry no warning: data objects outside vnode child positions', () => {
+    const data = { type: 'Feature', children: [1, 2] };
+    for (const [name, body, state] of /** @type {Array<[string, any, any]>} */ ([
+      ['in state, shown through a path to text', ['p', {}, '$.doc.type'], { doc: data }],
+      ['as element props', ['input', { type: 'text', children: 'x' }], {}],
+      ['as a widget\'s props', ['jaren-widget', { name: 'chart', props: { config: data } }], {}],
+      ['as a $let argument', ['p', {}, { $let: { n: data }, $return: '$n.type' }], {}],
+      ['as an operator operand', ['p', {}, { $string: { $count: [data] } }], {}],
+      ['the array form itself', ['ul', {}, ['li', {}, 'x']], {}],
+      ['props an operator computes', ['p', { $if: ['$.on', { class: 'a' }, { class: 'b' }] }, 'x'], { on: true }],
+    ])) {
+      const verdict = validateFile(app(body, state));
+      assert.deepEqual([verdict.valid, codes(verdict), warned(verdict)], [true, [], []], name);
+    }
+  });
+});
+
+describe('JS0007: an element written as an object in the props position is warned, never refused', () => {
+  it('is read as the element\'s attributes, so it renders, just not as the child it was meant to be', () => {
+    assert.equal(renderToString(['ul', { tag: 'li', children: ['x'] }]), '<ul tag="li" children="x"></ul>');
+  });
+
+  it('a literal one at its place, and one a query computed', () => {
+    const literal = validateFile(app(['ul', { tag: 'li', children: ['x'] }]));
+    assert.deepEqual([literal.valid, codes(literal), warned(literal)], [true, [], ['JS0007 /view/0/body/1']]);
+    assert.match(literal.warnings[0].message, /in the props position is read as this element's attributes; a child element is an array after the props: \['li', \{attrs\}, …children\]/);
+    const computed = validateFile(app(['ul', '$.item', 'x'], { item: { tag: 'li', props: {} } }));
+    assert.deepEqual([computed.valid, warned(computed)], [true, ['JS0007 /view']]);
+    assert.match(computed.warnings[0].message, /^the first frame renders, at \/1, an element written as an object/);
+  });
+
+  it('type alone is an HTML attribute there, not the shape: no warning', () => {
+    for (const props of [{ type: 'li', children: ['x'] }, { type: 'submit', attrs: 'x' }, { tag: 'li' }]) {
+      assert.deepEqual(warned(validateFile(app(['button', props, 'go']))), [], JSON.stringify(props));
+    }
+  });
+});
+
+describe('the app render audit renders with the host\'s operators', () => {
+  const twice = app(['p', {}, { $string: { $call: ['twice', 21] } }]);
+  const host = createJsltRegistry().use({ name: 'host', entries: { twice: { kind: 'fn', fn: (/** @type {number} */ x) => x * 2 } } });
+
+  it('a function the host registers renders, so the file is valid under that registry', () => {
+    assert.deepEqual(validateFile(twice, { operators: host }), { valid: true, kind: 'app', total: 0, errors: [], warnings: [] });
+  });
+
+  it('without it the first frame does not render, and the file is refused as before', () => {
+    const verdict = validateFile(twice);
+    assert.equal(verdict.valid, false);
+    assert.match(verdict.errors[0].message, /^the view failed to render its first frame: .*'\$call' names no registered func/);
+    assert.equal(validateFile(twice, { operators: createJsltRegistry() }).valid, false);
+  });
+});
+
 describe('JQ0002 wins over the branch errors an unknown operator causes', () => {
   const action = (search) => app(['p', {}, 'x'], { q: 'A' }, { actions: { search } });
 
@@ -149,7 +228,7 @@ describe('JQ0002 wins over the branch errors an unknown operator causes', () => 
 
 describe('the studio codes', () => {
   it('registers the authoring gate\'s codes', () => {
-    assert.ok(Object.hasOwn(STUDIO_CODES, 'JS0004') && Object.hasOwn(STUDIO_CODES, 'JS0005'));
+    for (const code of ['JS0004', 'JS0005', 'JS0006', 'JS0007']) assert.ok(Object.hasOwn(STUDIO_CODES, code), code);
   });
 });
 

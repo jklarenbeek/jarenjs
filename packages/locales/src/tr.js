@@ -801,6 +801,7 @@ export const tr = {
   'studio/project/add-file': 'dosya ekle',
   'studio/project/add-file-option': '+ dosya ekle…',
   'studio/project/file-errors': 'bu dosyada hatalar var',
+  'studio/project/file-warnings': 'bu dosyada uyarılar var',
   'studio/project/file-delete': 'dosyayı sil',
   'studio/project/file-delete-title': 'bu dosyayı sil',
   'studio/project/file-name': 'dosya adı',

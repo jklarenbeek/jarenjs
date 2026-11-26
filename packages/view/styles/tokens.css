@@ -7,7 +7,9 @@
 
    The accent family is anchored on the logo's blue (#3b82f6). The CTA
    accent is one step darker because white text on the logo blue itself
-   falls short of WCAG AA. */
+   falls short of WCAG AA. Each status colour has an `-ink` step for text
+   (on --bg, --surface and its own -soft tint): the light --ok and --warn
+   are fills and strokes, too light to be read as text. */
 :root, .light, [data-theme="light"] {
   --bg: hsl(0 0% 100%);
   --fg: hsl(224 20% 14%);
@@ -20,10 +22,13 @@
   --accent-hover: hsl(221 83% 47%);
   --ok: hsl(150 65% 34%);
   --ok-soft: hsl(150 60% 94%);
+  --ok-ink: hsl(150 65% 28%);
   --fail: hsl(0 68% 46%);
   --fail-soft: hsl(0 80% 96%);
+  --fail-ink: hsl(0 68% 46%);
   --warn: hsl(38 92% 44%);
   --warn-soft: hsl(48 96% 89%);
+  --warn-ink: hsl(32 90% 32%);
   --code-bg: hsl(224 25% 12%);
   --code-fg: hsl(210 30% 90%);
 }
@@ -58,10 +63,13 @@
   --accent-hover: hsl(213 94% 74%);
   --ok: hsl(150 60% 55%);
   --ok-soft: hsl(150 40% 14%);
+  --ok-ink: hsl(150 60% 55%);
   --fail: hsl(0 75% 65%);
   --fail-soft: hsl(0 40% 15%);
+  --fail-ink: hsl(0 75% 65%);
   --warn: hsl(38 92% 55%);
   --warn-soft: hsl(40 35% 15%);
+  --warn-ink: hsl(38 92% 55%);
   --code-bg: hsl(224 28% 7%);
   --code-fg: hsl(210 30% 88%);
 }

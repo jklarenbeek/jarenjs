@@ -188,3 +188,38 @@ describe('the component surface + primitives', () => {
     assert.strictEqual(KIND_BADGE.model, 'model');
   });
 });
+
+describe('the authoring gate\'s warnings in the IDE', () => {
+  const WARNED = JSON.stringify({ state: {}, view: [{ match: '$', body: ['p', {}, 'Total: ${count}'] }] });
+  const files = [
+    { name: 'app.json', kind: 'app', text: WARNED },
+    { name: 'bad.query', kind: 'query', text: '{"x":{"$flter":"$"}}' },
+  ];
+
+  it('describe passes each file\'s warnings beside its errors', () => {
+    const c = createStudioComponent();
+    const d = c.describe({ files, active: 'app.json', layout: {} });
+    assert.deepStrictEqual(d.files.map((f) => [f.name, f.valid, f.errors.length, f.warnings.map((w) => `${w.code} ${w.docPath}`)]),
+      [['app.json', true, 0, ['JS0005 /view/0/body/2']], ['bad.query', false, 1, []]]);
+  });
+
+  it('the strip lists a warning after the errors, marked as one, and the rail marks a valid file that carries one', () => {
+    const vm = projectViewModel(state({ files, active: 'app.json' }));
+    assert.deepStrictEqual(vm.problems.map((p) => [p.file, p.code, p.warning]),
+      [['app.json', 'JS0005', true], ['bad.query', 'JQ0002', false]]);
+    assert.strictEqual(vm.problemCount, 2);
+    assert.deepStrictEqual(vm.rail.map((r) => [r.name, r.valid, r.warned]), [['app.json', true, true], ['bad.query', false, false]]);
+    const html = JSON.stringify(renderIDE(vm));
+    assert.match(html, /"class":"js-errorline js-warnline"/);
+    assert.strictEqual(html.match(/"class":"js-errorline"/g)?.length, 1, 'the error keeps its own line');
+    assert.match(html, /\["span",\{"class":"js-file-note","title":"this file has warnings"\},"○"\]/);
+    assert.match(html, /\["span",\{"class":"js-file-warn","title":"this file has errors"\},"●"\]/);
+  });
+
+  it('a file with no warnings carries no mark and no warning line', () => {
+    const vm = projectViewModel(state());
+    assert.ok(vm.problems.every((p) => p.warning === false));
+    assert.ok(vm.rail.every((r) => r.warned === false));
+    assert.doesNotMatch(JSON.stringify(renderIDE(vm)), /js-warnline|js-file-note/);
+  });
+});

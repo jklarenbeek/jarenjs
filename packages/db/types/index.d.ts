@@ -2630,7 +2630,12 @@ export interface JobWorkerOptions {
 export interface JobsApi {
   enqueue(kind: string, payload?: unknown,
     options?: { id?: string; runAt?: number; maxAttempts?: number }): Promise<string>;
-  get(id: string): Promise<JobRecord | undefined>;
+  /** One job by id. `{ lock: true }` reads it row-locked until the
+   * transaction ends (PostgreSQL's `FOR UPDATE`, as `assertLease` takes):
+   * inside `tx.jobs`, no other store's claim can lease the job between
+   * the read and the commit. SQLite's writer already keeps a claim out,
+   * so there it is the plain read. */
+  get(id: string, options?: { lock?: boolean }): Promise<JobRecord | undefined>;
   counts(): Promise<JobCounts>;
   /** The low-level guarded claim the worker itself uses (§3). It mints
    * the fence: a fresh token and the next generation. */

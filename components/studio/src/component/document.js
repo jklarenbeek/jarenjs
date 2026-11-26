@@ -11,6 +11,7 @@ import { buildFormModel, buildFormViewModel, formChromeLabels } from '@jarenjs/f
 import { compileChart } from '@jarenjs/charts';
 import { errorMessage } from './shared/nodes.js';
 import { studioTextOf } from '../messages.js';
+import { auditRenderedView } from '../render-audit.js';
 import appSchema from '@jarenjs/app/schemas/jaren-app.schema.json' with { type: 'json' };
 import querySchema from '@jarenjs/json/schemas/jaren-query.schema.json' with { type: 'json' };
 import jsltSchema from '@jarenjs/json/schemas/jaren-jslt.schema.json' with { type: 'json' };
@@ -212,8 +213,10 @@ const VALID_TAG = /^[a-zA-Z][a-zA-Z0-9-]*$/;
  * Walk one rendered vnode with the renderer's own shape rules (text,
  * skipped, `[tag, props?, ...children]`, non-string-head arrays splice
  * as lists) and collect what a live mount would host: the widgets it
- * names, and the shapes that render as junk even though the meta-schema
- * accepted the document.
+ * names, and what this host cannot mount even though the meta-schema
+ * accepted the document. An object where a vnode belongs is the render
+ * audit's (`auditRenderedView`, the one `validateFile` runs), not this
+ * walk's.
  * @param {any} node
  * @param {string} path - a JSON-pointer-ish trail into the rendered tree
  * @param {{ widgets: string[], problems: string[] }} out
@@ -222,10 +225,7 @@ function walkRenderedVnode(node, path, out) {
   if (out.problems.length >= MAX_RENDER_PROBLEMS) return;
   if (node == null || node === true || node === false) return; // skipped
   if (typeof node === 'string' || typeof node === 'number') return; // text
-  if (!Array.isArray(node)) {
-    out.problems.push(`${path}: a bare object is not a vnode — it renders as nothing (expected ["tag", props, ...children] or text)`);
-    return;
-  }
+  if (!Array.isArray(node)) return; // an object: the render audit reads it
   if (typeof node[0] !== 'string') {
     // a list: each item renders in place
     for (let i = 0; i < node.length; i++) walkRenderedVnode(node[i], `${path}/${i}`, out);
@@ -305,14 +305,17 @@ function getSeedHeadings() {
  * compiler and state the live host boots with — and report the widgets
  * it hosts plus any render problems the meta-schema cannot see. "It
  * validates" is not "it renders": a valid document can still name an
- * unknown widget, hand the form widget a non-object schema, or place a
- * bare object where a vnode belongs.
+ * unknown widget, hand the form widget a non-object schema, or write an
+ * element as an object. That last one is `validateFile`'s own render
+ * audit (`auditRenderedView`): its refusals (`JS0004`) are problems
+ * here, and its warnings (`JS0005`–`JS0007`) notes.
  *
- * `notes` are soft semantic observations, not failures — today one
- * rule: a SEED template's heading still on screen while the form's
- * schema title has moved on (the repurposed-template leftover). The
- * rule deliberately keys on the seed headings so a pristine template,
- * or an authored heading of the user's own, never trips it.
+ * `notes` are soft observations, not failures: the render audit's
+ * warnings, then one rule of this host's — a SEED template's heading
+ * still on screen while the form's schema title has moved on (the
+ * repurposed-template leftover). The rule deliberately keys on the seed
+ * headings so a pristine template, or an authored heading of the user's
+ * own, never trips it.
  * @param {any} doc
  * @returns {{ widgets: string[], problems: string[], notes: string[] }}
  */
@@ -328,9 +331,13 @@ function auditDocumentRender(doc) {
     return { widgets: out.widgets, problems: out.problems, notes: [] };
   }
   walkRenderedVnode(vnode, '', out);
+  const audit = auditRenderedView(doc.view, vnode);
+  for (const refusal of audit.refusals) {
+    if (out.problems.length < MAX_RENDER_PROBLEMS) out.problems.push(`${refusal.docPath}: ${refusal.message}`);
+  }
 
   /** @type {string[]} */
-  const notes = [];
+  const notes = audit.warnings.map((warning) => `${warning.docPath}: ${warning.message}`);
   const markers = getSeedHeadings();
   for (const heading of out.headings) {
     const seedTitles = markers.get(heading);

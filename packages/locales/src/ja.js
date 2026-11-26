@@ -799,6 +799,7 @@ export const ja = {
   'studio/project/add-file': 'ファイルを追加',
   'studio/project/add-file-option': '+ ファイルを追加…',
   'studio/project/file-errors': 'このファイルにはエラーがあります',
+  'studio/project/file-warnings': 'このファイルには警告があります',
   'studio/project/file-delete': 'ファイルを削除',
   'studio/project/file-delete-title': 'このファイルを削除します',
   'studio/project/file-name': 'ファイル名',

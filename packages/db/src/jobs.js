@@ -406,8 +406,13 @@ export function createJobEngine(options) {
     });
   };
 
-  const get = (id) => chain(
-    prepared('get').get([id]),
+  /** One job by id. `{ lock: true }` reads it row-locked until the
+   * transaction ends (PostgreSQL's `FOR UPDATE`, as `assertLease` takes),
+   * so inside `tx.jobs` no other store's claim can lease it between the
+   * read and the commit; SQLite's writer already keeps a claim out.
+   * @param {string} id @param {{ lock?: boolean }} [options] */
+  const get = (id, options) => chain(
+    prepared(options?.lock === true ? 'getLocked' : 'get').get([id]),
     (row) => (row === undefined ? undefined : publicJob(row)));
 
   const counts = () => chain(

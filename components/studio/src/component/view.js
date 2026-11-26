@@ -179,7 +179,8 @@ const fileRow = {
     },
     ['span', { class: 'js-badge', 'data-badge': '$.badge' }, '$.kind'],
     ['span', { class: 'js-file-name' }, '$.name'],
-    { $if: ['$.valid', '', ['span', { class: 'js-file-warn', title: '$.w.errors' }, '●']] },
+    { $if: ['$.valid', { $if: ['$.warned', ['span', { class: 'js-file-note', title: '$.w.warnings' }, '○'], ''] },
+      ['span', { class: 'js-file-warn', title: '$.w.errors' }, '●']] },
     ],
     ['button', {
       type: 'button', class: 'js-file-del', title: '$.w.deleteTitle',
@@ -204,7 +205,7 @@ const templateRow = {
 const errorRow = {
   match: `${PROJECT_BASE}.problems[*]`, mode: PROJECT_MODE,
   body: ['button', {
-    class: 'js-errorline', type: 'button',
+    class: { $if: ['$.warning', 'js-errorline js-warnline', 'js-errorline'] }, type: 'button',
     on: { click: { action: 'project/active', with: '$.file' } },
   },
   ['strong', {}, '$.file'], ' ', ['code', {}, '$.code'], ' — ', '$.message'],

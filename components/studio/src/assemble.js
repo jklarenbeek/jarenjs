@@ -111,7 +111,8 @@ export function classifyChange(prevProject, nextProject) {
 
 /**
  * Per-file metadata for the IDE file rail and the AI `list_files` tool:
- * kind, validity, size, its role, and which runnable artifact it is (a
+ * kind, validity, size, its role, its `errors` and `warnings` (as
+ * `validateFile` reports them), and which runnable artifact it is (a
  * `state`/`data` input is not itself an artifact).
  * @param {any} project - a normalized project
  * @param {{ operators?: { toOptions: () => any } }} [options]
@@ -138,7 +139,7 @@ export function describe(project, options = {}) {
       }
       catch (error) {
         v = { valid: false, total: 1, errors: [{ code: error.code ?? null,
-          message: error.message, docPath: error.docPath ?? '' }] };
+          message: error.message, docPath: error.docPath ?? '' }], warnings: [] };
       }
       return {
         name: file.name,
@@ -148,6 +149,7 @@ export function describe(project, options = {}) {
         valid: v.valid,
         total: v.total,
         errors: v.errors,
+        warnings: v.warnings,
         artifact: RUNNABLE.has(file.kind) ? file.name : null,
       };
     }),

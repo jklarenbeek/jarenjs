@@ -31,7 +31,11 @@ against **that kind's grammar at its own boundary** — never composed into
 one meta-schema. `validateFile(file)` returns `{ valid, kind, total,
 errors: [{ code, message, docPath }], warnings }` — the shape an editor's
 error strip reads. `warnings` has the same item shape and never makes a
-file invalid; today only an `app` file can carry one (`JS0005`).
+file invalid; today only an `app` file can carry one (`JS0005`–`JS0007`).
+`describe(project)` carries each file's `errors` and `warnings`, and the
+IDE's error strip lists a file's warnings after its errors, marked as
+warnings; the file rail marks a valid file that carries one apart from
+an invalid file.
 
 | kind | the file is | validated by |
 |---|---|---|
@@ -54,7 +58,9 @@ comes back as its own coded code with a JSON Pointer (`JQ0002 — at /x:
 unknown operator '$flter'`). Composing every file into one gate would make
 that impossible; keeping each file on its own boundary is the honest
 design, not a compromise. A host embeds its own vocabulary with
-`validateFile(file, { operators })`.
+`validateFile(file, { operators })`; an `app`'s render audit renders its
+first frame with that registry too, so a function the host registers
+(`{"$call": ["twice", 21]}`) renders there as it does in the host.
 
 **An unknown operator is named, not its consequences.** The `app`, `fsm`
 and `dag` grammars place a query in a branch (an action is an awaiting
@@ -78,9 +84,17 @@ empty list, is read too — and over the first frame itself:
 - an object carrying `tag` or `type` together with `props`, `attrs` or
   `children`, where the view renders a vnode child (or as the root), is
   refused `JS0004` at its place. §2 has no object vnode: both renderers
-  draw any object there as nothing. Objects elsewhere — the state, an
-  element's props, a widget's props, an operator's operands — are data
-  and are not read;
+  draw any object there as nothing. Objects elsewhere — the state, a
+  widget's props, an operator's operands — are data and are not read;
+- any other object where the view renders a vnode child (or as the root)
+  is warned `JS0006`: it renders as nothing too (the DOM renderer refuses
+  one at the root), but an object of no element shape is as often a value
+  the author means to drop, so the file stays valid;
+- an element written as an object with a `tag` (`["ul", {"tag": "li",
+  "children": […]}]`) in an element's props position is warned `JS0007`:
+  the renderer reads it as that element's attributes, which renders, so
+  the file stays valid. `type` alone is not read as the shape there,
+  because it is an HTML attribute (`["input", {"type": "text", …}]`);
 - an authored text literal in a child position that holds another
   template language's expression is warned `JS0005`: `${…}`, `{{…}}`,
   `{%…%}`, a leading `for .` or `if .` (Schibsted JSLT, with or without
@@ -222,6 +236,8 @@ and `describe` report file problems as diagnostics.
 | `JS0003` | an import or execution reference cannot be resolved, or an artifact write conflicts |
 | `JS0004` | reported by `validateFile` for an `app`: the view renders an element written as an object (`{"tag": "li", "props": …}`, `{"type": …, "children": …}`), which renders as nothing; a vnode is an array `["li", {attrs}, …children]` |
 | `JS0005` | a **warning** `validateFile` reports for an `app`: an authored text literal holds another template language's expression (`${…}`, `{{…}}`, `{%…%}`, a leading `for .`/`if .`, a call `name([…])`); it renders as literal text, so the file stays valid |
+| `JS0006` | a **warning** `validateFile` reports for an `app`: the view places an object of no element shape where a vnode renders (`["div", {}, {"class": "x"}]`); it renders as nothing, so the file stays valid |
+| `JS0007` | a **warning** `validateFile` reports for an `app`: the view writes an element as an object with a `tag` in an element's props position (`["ul", {"tag": "li", "children": […]}]`); it is read as attributes, so the file stays valid |
 
 ## Status
 

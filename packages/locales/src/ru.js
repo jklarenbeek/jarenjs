@@ -824,6 +824,7 @@ export const ru = {
   'studio/project/add-file': 'добавить файл',
   'studio/project/add-file-option': '+ добавить файл…',
   'studio/project/file-errors': 'в этом файле есть ошибки',
+  'studio/project/file-warnings': 'в этом файле есть предупреждения',
   'studio/project/file-delete': 'удалить файл',
   'studio/project/file-delete-title': 'удалить этот файл',
   'studio/project/file-name': 'имя файла',

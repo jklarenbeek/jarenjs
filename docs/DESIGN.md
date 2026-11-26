@@ -16,8 +16,11 @@ always the code (`packages/website/src/styles.css` and each component's `theme.j
   (blue-600), dark `#60a5fa` (blue-400) — because white text on the logo blue itself is
   only 3.68:1. The logo keeps `#3b82f6`; UI text/fills never use it as a text-bearing
   background.
-- Status colors: green `--ok`, red `--fail`, amber `--warn` (+ `-soft` tints). These are
-  semantic — never use a status hue decoratively.
+- Status colors: green `--ok`, red `--fail`, amber `--warn` (+ `-soft` tints, + `-ink`
+  text steps). These are semantic — never use a status hue decoratively. A status colour
+  set as **text** is its `-ink` step (`--ok-ink`, `--fail-ink`, `--warn-ink`): the light
+  `--ok` and `--warn` are fills, strokes and borders, and fall below AA as text. Borders
+  and strokes keep the base colour.
 
 ### Contrast rules (WCAG AA is the floor)
 
@@ -30,7 +33,10 @@ always the code (`packages/website/src/styles.css` and each component's `theme.j
   exported token file by `test/view/tokens.test.js`): `--fg` on `--bg`, `--fg` on
   `--surface`, `--muted` on `--bg`, `--muted` on `--surface`, `--accent` on `--bg`,
   `--accent-fg` on `--accent`, `--accent-fg` on `--accent-hover`, `--code-fg` on
-  `--code-bg`. A pair that text is set in enters this list.
+  `--code-bg`, `--ok-ink` on `--bg`, `--ok-ink` on `--surface`, `--ok-ink` on `--ok-soft`,
+  `--fail-ink` on `--bg`, `--fail-ink` on `--surface`, `--fail-ink` on `--fail-soft`,
+  `--warn-ink` on `--bg`, `--warn-ink` on `--surface`, `--warn-ink` on `--warn-soft`. A pair
+  that text is set in enters this list.
 
 ## 2. The site token vocabulary (the "host token contract")
 
@@ -45,7 +51,7 @@ contract — a host imports that file, or defines these names itself:
 | `--muted` | secondary text, soft strokes |
 | `--surface` / `--border` | card fill / hairlines |
 | `--accent` / `--accent-fg` / `--accent-soft` / `--accent-hover` | interactive blue, its text color, its tint, its hover step |
-| `--ok`, `--fail`, `--warn` (+ `--ok-soft`, `--fail-soft`, `--warn-soft`) | semantic status + tints |
+| `--ok`, `--fail`, `--warn` (+ `--ok-soft`, `--fail-soft`, `--warn-soft`, `--ok-ink`, `--fail-ink`, `--warn-ink`) | semantic status + tints + text steps (§1) |
 | `--code-bg` / `--code-fg` | code block colors (dark navy in both themes) |
 | `--radius` (10px) / `--radius-sm` (8px) | cards & callouts / controls, inputs, code blocks |
 | `--font` / `--mono` | Inter / JetBrains Mono stacks (family names only: the faces are the host's) |

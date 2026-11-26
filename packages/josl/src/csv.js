@@ -10,7 +10,8 @@ import { admitOptions, CSV_READ, CSV_DOCUMENT, CSV_WRITE } from './options.js';
 /**
  * @typedef {Object} CsvWriterOptions
  * @property {string} [delimiter=','] - Field separator.
- * @property {string} [quote='"'] - Quote character; empty disables quoting.
+ * @property {string|null} [quote='"'] - Quote character; empty disables quoting and
+ * `null` keeps the default, as the reader reads them.
  * @property {string} [newline='\r\n'] - Record terminator.
  * @property {string[]} [fields] - Column order, inferred from the first object.
  * @property {boolean} [header=true] - Emit headers for object records.
@@ -34,7 +35,8 @@ import { admitOptions, CSV_READ, CSV_DOCUMENT, CSV_WRITE } from './options.js';
  * @param {string} text - CSV source text
  * @param {object} [options] - Reader options
  * @param {string} [options.delimiter=','] - Field separator, one character
- * @param {string|null} [options.quote='"'] - Quote character; `null` disables quoting
+ * @param {string|null} [options.quote='"'] - Quote character; `''` disables quoting
+ *  and `null` keeps the default, as the writers read them
  * @param {string|null} [options.comment] - Lines starting with it are skipped
  * @param {boolean|string[]} [options.headers=false] - `true` reads the first
  *  record as column names, an array supplies them; either way records become
@@ -89,7 +91,7 @@ export function parseCsvDocument(text, options = undefined) {
       opts = { ...opts, headers: sniffCsvDialect(text, opts).headers };
     dialect = {
       delimiter: opts.delimiter ?? ',',
-      quote: opts.quote === undefined ? '"' : opts.quote,
+      quote: opts.quote ?? '"',
       headers: opts.headers === true || Array.isArray(opts.headers),
       confidence: 1,
     };
@@ -172,7 +174,7 @@ function probeDelimiter(sample, delimiter, options) {
  * @param {object} [options] - Reader options, as `parseCsvDocument` takes
  *  them; those that affect parsing (`quote`, `comment`, and a `delimiter`
  *  other than `'auto'`, which fixes the candidate) shape the guess
- * @returns {{delimiter: string, quote: string|null, headers: boolean, width: number, confidence: number}}
+ * @returns {{delimiter: string, quote: string, headers: boolean, width: number, confidence: number}}
  *  The guess, with `confidence` in 0..1
  * @example
  * sniffCsvDialect('a;b;c\n1;2;3'); // { delimiter: ';', headers: true, ... }
@@ -198,7 +200,7 @@ export function sniffCsvDialect(text, options = undefined) {
 
   return {
     delimiter: bestDelim,
-    quote: opts.quote === undefined ? '"' : opts.quote,
+    quote: opts.quote ?? '"',
     headers: bestRows === null ? false : looksLikeHeader(bestRows),
     width: bestWidth,
     confidence: bestScore < 0 ? 0 : bestScore,

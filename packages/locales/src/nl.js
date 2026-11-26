@@ -803,6 +803,7 @@ export const nl = {
   'studio/project/add-file': 'een bestand toevoegen',
   'studio/project/add-file-option': '+ bestand toevoegen…',
   'studio/project/file-errors': 'dit bestand bevat fouten',
+  'studio/project/file-warnings': 'dit bestand bevat waarschuwingen',
   'studio/project/file-delete': 'bestand verwijderen',
   'studio/project/file-delete-title': 'dit bestand verwijderen',
   'studio/project/file-name': 'bestandsnaam',

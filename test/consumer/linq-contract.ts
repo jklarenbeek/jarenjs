@@ -12,15 +12,14 @@ import { openLocalClient } from '@jarenjs/contract/local';
 import { contractTools } from '@jarenjs/contract/project';
 import type {
   ByteContext, ByteResponse, ContractOf, Failure, HandlerContext, InvokableOf, InvokeContext, Meta,
-  OpaqueOf, Outcome, SnapshotInfo, SubscribableOf, TypedClient, TypedHttpClient, TypedTool, WireError,
+  OpaqueOf, Outcome, ReplayPage, SnapshotInfo, SnapshotOf, SubscribableOf, SubscriptionSource, TypedClient,
+  TypedHandlerTable, TypedHttpClient, TypedTool, WireError,
 } from '@jarenjs/linq/contract';
 import { typedClient, typedHttpClient, typedHandlers, typedTools } from '@jarenjs/linq/contract';
 import { openHttpClient } from '@jarenjs/contract/client';
-import { command, defineContract, error, http, read, subscribe } from '@jarenjs/linq/contract';
-import * as s from '@jarenjs/linq/schema';
 import type { DateTime } from '@jarenjs/linq';
 import type * as G from './linq-contract-generated.js';
-import { Docs, Health, Shop } from '../linq/contract-corpus.js';
+import { Docs, Health, Live, Shop } from '../linq/contract-corpus.js';
 
 /** Identical types, in both directions — the strict check, not assignability. */
 type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
@@ -191,20 +190,7 @@ const notATool: 'image_bytes' = tools[0]!.name;
 void notATool;
 
 // ——— a subscribe operation types the client's subscribe ———
-const Board = s.named('Board', s.object({ seq: s.integer(), rows: s.array(s.string()) }).open());
-const live = defineContract({ id: 'live' }, {
-  'board.watch': subscribe({
-    input: s.object({ id: s.string() }).open(),
-    output: Board,
-    policy: { task: 'switch', stream: { resume: 'replay', heartbeatMs: 2000 } },
-    http: http({ method: 'GET', path: '/board/{id}' }),
-  }),
-  'board.set': command({
-    input: s.object({ id: s.string(), rows: s.array(s.string()) }).open(),
-    output: Board,
-    errors: { conflict: error({ status: 409 }) },
-  }),
-});
+const live = Live;
 type LiveOps = ContractOf<typeof live>;
 const watchIsSubscribe: Equals<keyof SubscribableOf<typeof live>, 'board.watch'> = true;
 const watchNotOpaque: Equals<LiveOps['board.watch']['opaque'], false> = true;
@@ -226,3 +212,38 @@ void liveApi.subscribe('board.watch', { id: 'a' }, {
 });
 // @ts-expect-error — 'board.set' is a command, not a subscribe operation
 void liveApi.subscribe('board.set', { id: 'a', rows: [] }, {});
+
+// ——— the generated Handlers: a subscribe handler answers the live source ———
+// The projection's handler table is the pen's, member for member, and a
+// subscribe operation's handler answers the source its stream reads: the
+// snapshot itself is what the binding refuses (JC2010), so it is a
+// compile error, as an output-typed answer is for any other operation.
+// (The pen's members are readonly, the projection's are not; neither
+// modifier changes what a table may hold.)
+type LiveBoard = G.Live.BoardWatchOutput;
+const liveHandlersShape: Equals<TypedHandlerTable<typeof Live>, Readonly<G.Live.Handlers>> = true;
+const shopHandlersShape: Equals<TypedHandlerTable<typeof Shop>, Readonly<G.Shop.Handlers>> = true;
+const sourceShape: Equals<SubscriptionSource<LiveBoard>, G.Live.SubscriptionSource<LiveBoard>> = true;
+const snapshotShape: Equals<SnapshotOf<LiveBoard>, G.Live.SnapshotOf<LiveBoard>> = true;
+const replayShape: Equals<ReplayPage, G.Live.ReplayPage> = true;
+void [liveHandlersShape, shopHandlersShape, sourceShape, snapshotShape, replayShape];
+const generatedLive: G.Live.Handlers = {
+  'board.watch': () => ({ result: { seq: 1, rows: [] }, subscribe: () => () => {}, close: () => {} }),
+  'board.set': (input) => ({ seq: 1, rows: input.rows }),
+};
+const generatedLiveAsync: G.Live.Handlers = {
+  'board.watch': async (input, ctx) => (input.id === '' ? ctx.fail('conflict')
+    : { snapshot: () => ({ seq: 2, rows: ['a'] }), subscribe: () => () => {}, close: () => {} }),
+  'board.set': async (input) => ({ seq: 2, rows: input.rows }),
+};
+const generatedSnapshot: G.Live.Handlers = {
+  // @ts-expect-error — the snapshot is not a live source: the binding refuses it (JC2010)
+  'board.watch': () => ({ seq: 1, rows: [] }),
+  'board.set': (input) => ({ seq: 1, rows: input.rows }),
+};
+const generatedSourceForCommand: G.Live.Handlers = {
+  'board.watch': () => ({ result: { seq: 1, rows: [] }, subscribe: () => () => {}, close: () => {} }),
+  // @ts-expect-error — a command answers its output, never a live source
+  'board.set': () => ({ result: { seq: 1, rows: [] }, subscribe: () => () => {}, close: () => {} }),
+};
+void [generatedLive, generatedLiveAsync, generatedSnapshot, generatedSourceForCommand];

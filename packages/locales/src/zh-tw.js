@@ -802,6 +802,7 @@ export const zhTW = {
   'studio/project/add-file': '新增檔案',
   'studio/project/add-file-option': '+ 新增檔案…',
   'studio/project/file-errors': '此檔案有錯誤',
+  'studio/project/file-warnings': '此檔案有警告',
   'studio/project/file-delete': '刪除檔案',
   'studio/project/file-delete-title': '刪除此檔案',
   'studio/project/file-name': '檔案名稱',

@@ -131,10 +131,19 @@ export function createDbEffectStore(client, options) {
       if (['id', 'actor', 'reason'].some((key) => typeof proof[key] !== 'string' || !proof[key])
         || !['confirm', 'reject', 'retry'].includes(proof.action) || !Object.hasOwn(proof, 'evidence')) throw refuseRecord('reconciliation needs actor/reason and evidence');
       return inside(async (tx) => {
-        const record = await requireRecord(tx, id);
+        let record = await requireRecord(tx, id), job;
         if (lease !== null) {
           if (lease?.jobId !== record.plan.jobId) throw refuseRecord('foreign reconciliation job');
           await tx.jobs.assertLease(lease);
+        }
+        else {
+          // the plan's job row-locked in the transaction that moves the
+          // revision (PostgreSQL's FOR UPDATE; SQLite's writer keeps a claim
+          // out), then the record read again under that lock: no claim
+          // leases the job before the commit, and another lease-less
+          // decision on it commits before this one reads the revision
+          job = await tx.jobs.get(record.plan.jobId, { lock: true });
+          record = await requireRecord(tx, id);
         }
         const entry = { ...proof, legId };
         const prior = record.decisions.find((value) => value.id === proof.id);
@@ -144,11 +153,7 @@ export function createDbEffectStore(client, options) {
         }
         if (lease !== null) await guard(tx, record, revision, lease);
         else {
-          // read in the transaction that moves the revision, so the job
-          // cannot be claimed between this check and the decision's write
-          // on SQLite; a claim on PostgreSQL that lands between them meets
-          // the moved revision at its own next write
-          if ((await tx.jobs.get(record.plan.jobId))?.state === 'leased') throw refuseRecord('the operation job is leased: its lease holder decides');
+          if (job?.state === 'leased') throw refuseRecord('the operation job is leased: its lease holder decides');
           if (record.revision !== revision) throw refuseRecord('stale operation revision');
         }
         const leg = legOf(record, legId), plan = record.plan.legs.find((value) => value.id === legId);

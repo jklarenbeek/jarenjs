@@ -57,6 +57,7 @@ export const studioMessagesEn = Object.freeze({
   'studio/project/add-file': 'add a file',
   'studio/project/add-file-option': '+ add file…',
   'studio/project/file-errors': 'this file has errors',
+  'studio/project/file-warnings': 'this file has warnings',
   'studio/project/file-delete': 'delete file',
   'studio/project/file-delete-title': 'delete this file',
   'studio/project/file-name': 'file name',

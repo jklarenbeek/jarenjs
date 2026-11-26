@@ -41,10 +41,12 @@ export function mermaidPlugin(options = {}) {
     fences: Object.freeze(['mermaid', 'mmd']),
     node: 'mermaid',
     /**
-     * @param {{ value: string, meta?: any }} node
+     * @param {{ value: string | import('./ast.js').DiagramDocument, meta?: any }} node
      */
     render: (node) => {
-      const hash = hashContent(node.value);
+      // a parsed document renders as its source does, so it keys by the
+      // hash its parse recorded, as `diagramToVnode` reads it
+      const hash = typeof node.value === 'string' ? hashContent(node.value) : node.value?.meta?.hash ?? '0';
       const svg = diagramToVnode(node.value, options);
       const props = { class: 'md-mermaid mermaid-block', key: hash };
       // The hydrate marker is what the md component looks for; emitting it

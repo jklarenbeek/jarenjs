@@ -18,7 +18,7 @@
  */
 
 import * as s from '@jarenjs/linq/schema';
-import { command, defineContract, error, http, read } from '@jarenjs/linq/contract';
+import { command, defineContract, error, http, read, subscribe } from '@jarenjs/linq/contract';
 
 // —— §2: the whole document ——
 
@@ -102,6 +102,26 @@ export const Docs = defineContract({ id: 'docs' }, {
   'doc.remove': command({
     input: s.object({ id: s.string() }).open(),
     output: true,
+  }),
+});
+
+// —— not a worked example: a subscribe operation, which none of the
+// format's examples declares, so the generated `Handlers` is held to the
+// pen's `TypedHandlerTable` for a live source as much as for an output ——
+
+export const Board = s.named('Board', s.object({ seq: s.integer(), rows: s.array(s.string()) }).open());
+
+export const Live = defineContract({ id: 'live' }, {
+  'board.watch': subscribe({
+    input: s.object({ id: s.string() }).open(),
+    output: Board,
+    policy: { task: 'switch', stream: { resume: 'replay', heartbeatMs: 2000 } },
+    http: http({ method: 'GET', path: '/board/{id}' }),
+  }),
+  'board.set': command({
+    input: s.object({ id: s.string(), rows: s.array(s.string()) }).open(),
+    output: Board,
+    errors: { conflict: error({ status: 409 }) },
   }),
 });
 

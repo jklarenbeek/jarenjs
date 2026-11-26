@@ -34,9 +34,13 @@ delete it or fix it.
 
 ## @jarenjs/json — JSLT
 
-- [ ] **`renderQueryMessage` has no English default for a formula id.** A formula
-  diagnostic's id renders through `queryMessagesEn` only, so English needs
-  `formulaMessagesEn` passed (or the diagnostic's own `message`).
+- [ ] **A bare formula reference renders its id by default.**
+  `renderQueryMessageId('query/formula/detail', { formulaId, detail })` with
+  no `reason` answers the id unless `formulaMessagesEn` is passed: every
+  formula error and diagnostic carries its English as `params.reason`, but a
+  reference a host builds itself does not, and covering it in the query
+  engine's English catalog costs about 3,300 bytes in every pen that carries
+  the query messages.
 - [ ] **JSLT matcher: schema-aware pruning and the rest of the single walk** —
   a mode's match paths built from names, indexes and wildcards (child or
   descendant) already run as one walk of the input; three parts remain. Prune
@@ -58,19 +62,6 @@ delete it or fix it.
   reference reuse would answer it from stale matches. Even with the pre-pass
   pruned, a copy-on-write view loop stays O(n) per frame: its `$apply`
   dispatch and memo lookups run per item.
-- [ ] **JSLT compile options and transform, declared for strict consumers** —
-  `compileJsltStylesheet` and `transformJson` declare their options without
-  `extensions` and `functions`, though the dispatch reads both: a strict
-  TypeScript consumer's `compileJsltStylesheet(sheet, registry.toOptions())`
-  and `transformJson(sheet, data, {}, registry.toOptions())` fail TS2559 (no
-  properties in common). `compileJsltStylesheet`'s declaration also drops
-  `pathFunctions` (TS2353 on `{ pathFunctions }`; `transformJson`'s keeps it).
-  The transform is declared `Function`, and so is the registry's `compile`, so
-  the documented `transform.externals` and `transform.doc` are TS2339 and the
-  transform fits no typed callable (TS2322). Fix in the declarations only (a
-  patch): one options type naming every option the compile reads, and one
-  transform type, `((data, externals?) => any) & { externals, doc }`, that
-  both functions and the registry's `compile` return.
 
 ## @jarenjs/json — XQuery front-end & QT3
 
@@ -197,13 +188,6 @@ delete it or fix it.
 
 ## @jarenjs/view & @jarenjs/app
 
-- [ ] **Status colours as text on the page ground.** In the light theme `--ok` and
-  `--warn` fall below WCAG AA (4.5:1) against `--bg`, yet both are set as text: the
-  site's `.badge.ok` and the studio's warning notes (`.js-file-warn` and the
-  `--warn-soft` callouts). Wanted: an audit of every place a status colour is ink,
-  then darker text steps (or a `-fg` pair per status) that clear AA in both themes,
-  after which those pairs join DESIGN §1's guarded pairs, which
-  `test/view/tokens.test.js` checks. Changing the token values changes the site's rendering.
 - [ ] **Controlled inputs under `safe: 'interactive'`.** Inputs stay
   attribute-only, so app state cannot reset a field the user edited. Wanted:
   the controlled-value path for `value`/`checked` (not `file`) under the
@@ -335,14 +319,12 @@ costs a descriptor plus examples and no UI code at all.
 
 ## @jarenjs/studio
 
-- [ ] **The authoring gate's findings in the IDE, and one render audit.**
-  `validateFile` reports `warnings` (`JS0005`) and refuses an element written
-  as an object (`JS0004`), but the IDE's rail and error strip show `errors`
-  only and `describe` passes no `warnings`. The website's document host keeps
-  a second audit that refuses every bare object, where `validateFile` refuses
-  only the element-shaped one, and the app audit renders with the built-in
-  operator packs, not the host's `operators`. An object in an element's props
-  position (`["ul", {"tag": "li", …}]`) is read as props and not reported.
+- [ ] **App documents cannot use pack operators in the studio.** An `app` file's
+  meta-schema composes the query and JSLT grammars of the core operators only,
+  so `validateFile` refuses `{"$sqrt": 16}` in an app view with schema errors
+  whether or not the host's `operators` registry mounts the math pack (only a
+  function reached through `$call` passes the grammar), and the document host
+  boots apps with no pack and no function at all.
 - [ ] **Entity models and durable project stores** — collection models now
   run in private workers with explicit query routing, SQL plans, live results
   and seed files. The stage's operation contract addresses collections; an
@@ -353,12 +335,6 @@ costs a descriptor plus examples and no UI code at all.
 
 ## @jarenjs/contract
 
-- [ ] **The TypeScript projection's `Handlers` types a subscribe handler as its snapshot.**
-  `@jarenjs/contract/project`'s `toTypeScript` writes `Handlers` as `Operations[K]['output'] | Failure`
-  for every operation, so a generated table's subscribe handler is typed as the snapshot the binding
-  refuses (`JC2010`); the pen's `TypedHandlerTable` answers `SubscriptionSource<output>`. Changing the
-  projection changes generated text pinned byte-identically
-  (`test/consumer/linq-contract-generated.ts`), a planner-like output change of its own.
 - [ ] **`diffContracts` cannot tell whether some member schemas accept
   nothing.** A string-only member whose `pattern` holds no string only by
   a lookaround, a back-reference, a word boundary or a modifier group
@@ -711,15 +687,6 @@ costs a descriptor plus examples and no UI code at all.
   where SQLite compares every stored CREATE text. Wanted: status reads every
   table the model owns as the open verifies it.
 
-## @jarenjs/josl
-
-- [ ] **A CSV dialect with `quote: null` does not round-trip.** The writers
-  read `quote: null` as the default `"` and the reader reads it as no quoting,
-  so `parseCsv(stringifyCsv([['x,y']], { quote: null }), { quote: null })`
-  answers `[['"x', 'y"']]`. Both meanings are documented and answer that way
-  today. Wanted: one meaning of `null` on both sides, or a refusal of `null`
-  on the side that cannot honour it.
-
 ## @jarenjs/locales
 
 - [ ] **The uncataloged-text guard trusts a catalog's English.** A literal equal to an
@@ -728,13 +695,12 @@ costs a descriptor plus examples and no UI code at all.
 
 ## @jarenjs/core
 
-- [ ] **String helpers that answer for a non-string.** `countCodePoints(5)` and
-  `countCharCode(5, 48)` answer 0, `toCodePoints(5)` answers `[]`, and `fnv1a(5)` equals
-  `fnv1a('')` (so `hashContent({})` is `hashContent('')`), each because a non-string's missing
-  `length` ends the loop at once. `utf8ByteLength` now refuses such input with a named
-  `TypeError`; these siblings should follow once each caller is audited as that one was.
-- [ ] **One SHA-256 in the lexical db source.** `packages/db/src/search.js` hashes its canonical
-  source with its own `crypto.subtle.digest` and hex loop; `sha256Hex` answers the same digest.
+- [ ] **More string helpers that answer for a non-string.** `isAsciiString(5)`
+  answers `true`, `getStringLength(5)` `undefined` and `getStringLength(5,
+  true)` `NaN`, `fromCodePoints(5)` and `slugify(5)` `''`, each because a
+  non-string's missing `length` ends the loop at once; `countCodePoints`,
+  `fnv1a` and their siblings refuse such input with a named `TypeError`. These
+  should follow once each caller is audited.
 - [ ] **A frozen subtree inside a fresh tuple still walks.** `semanticKey` remembers the key of a
   wholly frozen root, but a key built per call over it (`[document, dialect, strict]`) is a new
   root and walks the whole document. Joining a remembered subtree's key inside a walk would make
@@ -854,18 +820,6 @@ production cutover. Streaming DAG input is not required by this composition.
   with synthetic restart, takeover and observer evidence that does not
   substitute for those runs. Source provenance, review decisions and posted
   history keep their domain schemas and rules.
-- [ ] **On PostgreSQL a claim can land inside a lease-less effect decision.**
-  `reconcile(id, legId, revision, null, decision)` reads the plan's job in the
-  transaction that moves the effect record's revision and refuses while it is
-  leased. On SQLite that transaction keeps a claim out until it commits; on
-  PostgreSQL the claim is one `UPDATE … FOR UPDATE SKIP LOCKED` outside the
-  store's writer lock and the job read takes no row lock, so another store can
-  claim the job between the read and the commit, and the decision lands while
-  the job is leased. The moved revision refuses that claimant's next write made
-  with the revision it read before (`JL2009`), so nothing is written wrongly;
-  the rule that the lease holder decides while the job is leased is what
-  lapses. Wanted: a row-locked job read on the transaction's `jobs` view
-  (`SELECT … FOR UPDATE`, as `assertLease` takes) for the lease-less decision.
 
 ## Native application adoption — external qualification
 

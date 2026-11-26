@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
 import { encodeShare } from '@jarenjs/app';
+import { validateFile } from '@jarenjs/studio';
 
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
@@ -393,11 +394,21 @@ describe('website — the Studio render audit (auditDocumentRender)', function (
   it('catches the valid-but-broken shapes the meta-schema accepts', function () {
     const base = /** @type {any} */ (studioTemplate('form')).doc;
 
-    // a bare object where a vnode belongs (a model patch clobbered a child)
+    // an object where a vnode belongs (a model patch clobbered a child):
+    // validateFile's own audit reads it — an element written as an object
+    // is a problem (JS0004), any other object a note (JS0006), as there
     const clobbered = JSON.parse(JSON.stringify(base));
     clobbered.view.rules[0].body[2] = { class: 'studio-app' };
     const bare = auditDocumentRender(clobbered);
-    assert.ok(bare.problems.some((p) => /bare object is not a vnode/.test(p)), bare.problems.join('; '));
+    assert.deepStrictEqual(bare.problems, []);
+    assert.deepStrictEqual(bare.notes, ["/view/rules/0/body/2: an object with 'class' is not a vnode and renders as nothing (the DOM renderer refuses one at the root); a child is text or an array: ['tag', {attrs}, …children]"]);
+    const element = JSON.parse(JSON.stringify(base));
+    element.view.rules[0].body[2] = { tag: 'h2', children: ['Sign up'] };
+    assert.deepStrictEqual(auditDocumentRender(element).problems,
+      ["/view/rules/0/body/2: an object with 'tag', 'children' is not a vnode and renders as nothing; a vnode is an array: ['h2', {attrs}, …children]"]);
+    const verdict = validateFile({ name: 'app.json', kind: 'app', text: JSON.stringify(element) });
+    assert.deepStrictEqual(verdict.errors.map((e) => `${e.docPath}: ${e.message}`), auditDocumentRender(element).problems,
+      'one audit: the IDE gate and the document host say the same');
 
     // a form widget whose schema resolves to nothing
     const misfed = JSON.parse(JSON.stringify(base));

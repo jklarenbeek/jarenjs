@@ -862,6 +862,7 @@ export const ar = {
   'studio/project/add-file': 'إضافة ملف',
   'studio/project/add-file-option': '+ إضافة ملف…',
   'studio/project/file-errors': 'في هذا الملف أخطاء',
+  'studio/project/file-warnings': 'في هذا الملف تحذيرات',
   'studio/project/file-delete': 'حذف الملف',
   'studio/project/file-delete-title': 'حذف هذا الملف',
   'studio/project/file-name': 'اسم الملف',

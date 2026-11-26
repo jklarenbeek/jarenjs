@@ -185,7 +185,10 @@ disabled cells. Diagnostic text/path are bounded by `maxMessageChars` (default
 256). A diagnostic of a formula or query error also carries its `messageId` and
 `params` (plain JSON, kept only while the params fit `maxMessageChars`), so
 `renderQueryMessage(diagnostic, pack)` renders it in a pack's language; a cell
-whose computed input produced no value names `query/formula/computed-missing`,
+whose computed input produced no value names `query/formula/computed-missing`
+with its English as `params.reason`, as every formula message does, so
+`renderQueryMessage(diagnostic)` renders that English with no catalog
+(*upgrade: it rendered the bare id*),
 and any other failure (a row that is not JSON, a host rejection) names none; `maxErrors` defaults to 100. `maxRows` defaults to 10000, `maxCells` to
 100000, and `memoSize` to 10000. Exceeding an admission limit refuses the batch,
 never silently reports a truncated result as complete. Batch compile options

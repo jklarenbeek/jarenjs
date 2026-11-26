@@ -955,7 +955,12 @@ rows stay until `sweep` (§10) removes them with the job.
 `jobs.assertLease(lease)` checks current execution authority without a write or
 renewal. It uses the same token/expiry guard and `JD2065`/`JD2066`/`JD2067` refusals
 as settlement; malformed authority is `JD2068`. Inside `tx.jobs`, this read and
-subsequent mapped writes share the transaction lock. Workers receive
+subsequent mapped writes share the transaction lock. A decision made without a
+lease reads the job the same way: `tx.jobs.get(id, { lock: true })` holds the
+row until the transaction ends (PostgreSQL's `FOR UPDATE`; SQLite's writer
+already keeps a claim out), so another store's claim cannot lease the job
+between that read and the commit — it skips the row and claims it after — and
+a second such decision waits at the row for the first one's commit. Workers receive
 `context.lease()` to read their current token after automatic renewal, and
 every task of a DAG job checks the same lease with `resources.assertLease(tx)` (§7).
 

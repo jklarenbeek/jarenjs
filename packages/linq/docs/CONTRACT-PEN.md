@@ -1087,11 +1087,10 @@ Two files, both compiled by `npm run test:types`:
 
 | File | What it proves |
 |---|---|
-| `test/consumer/linq-contract-generated.ts` | `toTypeScript`'s own declarations for the three documents `test/linq/contract-corpus.js` emits, produced by `scripts/generate-contract-pen-fixture.js`. `test/linq/contract-pen.test.js` asserts the committed file is exactly what the generator produces today, so it cannot drift |
-| `test/consumer/linq-contract.ts` | for all three corpus contracts and a fourth built in the file, `ContractOf<>`'s `input`, `output` and error codes EQUAL (not merely assignable) to what the projection declares; `Meta`, `WireError`, `Outcome<T>`, `InvokeContext`, `Failure` and `HandlerContext` equal to the projection's rendering of §10.1's fixed outcome shapes; a local round trip; and six negatives |
+| `test/consumer/linq-contract-generated.ts` | `toTypeScript`'s own declarations for the four documents `test/linq/contract-corpus.js` emits (the three worked examples and `Live`, a subscribe contract), produced by `scripts/generate-contract-pen-fixture.js`. `test/linq/contract-pen.test.js` asserts the committed file is exactly what the generator produces today, so it cannot drift |
+| `test/consumer/linq-contract.ts` | for the three worked examples, `ContractOf<>`'s `input`, `output` and error codes EQUAL (not merely assignable) to what the projection declares; `Meta`, `WireError`, `Outcome<T>`, `InvokeContext`, `Failure` and `HandlerContext` equal to the projection's rendering of §10.1's fixed outcome shapes; `TypedHandlerTable<>` equal to the projection's `Handlers` (members read-only on the pen's side) for `Shop` and `Live`, and `SubscriptionSource<T>`, `SnapshotOf<T>` and `ReplayPage` equal to the projection's, so a generated table's subscribe handler answers the live source and answering the snapshot does not compile; a local round trip; and eight negatives |
 
-The six negatives are the list of what the types forbid, each of which
-FAILS the build the day it starts compiling:
+The eight negatives are the list of what the types forbid, each of which FAILS the build the day it starts compiling:
 
 ```ts
 void api.invoke('product.saev', input);          // a misspelled operation id
@@ -1100,6 +1099,7 @@ void api.invoke('image.bytes', { id: 3 });       // opaque: reach it through url
 const short = typedHandlers(Shop, { 'catalog.load': () => catalog });  // a missing handler
 const notATool: 'image_bytes' = tools[0]!.name;  // the opaque operation is not a tool
 void liveApi.subscribe('board.set', input, {});  // 'board.set' is a command
+const table: G.Live.Handlers = { 'board.watch': () => snapshot, 'board.set': () => source };  // each answers the other's shape (two)
 ```
 
 ### 5.4 Three readings a caller will otherwise meet at run time

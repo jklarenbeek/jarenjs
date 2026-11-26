@@ -51,7 +51,9 @@ the draft-04 modifier is `false` (it read `false` as a bound); `utf8ByteLength`
 (`@jarenjs/core/string`) refuses anything but a string with a `TypeError` naming
 what was given, where a number, a boolean or an object measured 0 bytes and so
 passed a byte bound as empty (a `String` wrapper object is still measured as the
-string it wraps).
+string it wraps). `countCodePoints`, `countCharCode`, `toCodePoints`, `fnv1a` and
+`hashContent` refuse a non-string the same way, where a number, a boolean or an object
+answered as the empty string (`0`, `[]`, and `hashContent({})` equal to `hashContent('')`).
 
 `equalsJson` (`@jarenjs/core/object`) compares the two objects JOSL and JSONX
 read text into by what they hold: a `Date` equals a `Date` of the same instant

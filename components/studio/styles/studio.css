@@ -58,7 +58,9 @@
 }
 .js-file.active { color: var(--fg, #0f172a); background: var(--accent-soft, #eff6ff); border-inline-start-color: var(--accent, #2563eb); }
 .js-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.js-file-warn { color: var(--warn, #b45309); margin-inline-start: auto; }
+.js-file-warn { color: var(--warn-ink, var(--warn, #b45309)); margin-inline-start: auto; }
+/* a valid file that carries warnings: hollow, so an error's mark stays the one that reads as broken */
+.js-file-note { color: var(--warn-ink, var(--warn, #b45309)); margin-inline-start: auto; }
 
 /* a row is the select button + a delete affordance */
 .js-file-row { display: flex; align-items: center; gap: 2px; }
@@ -68,7 +70,7 @@
   color: var(--muted, #64748b); font-size: 1rem; line-height: 1;
   padding: 2px 6px; border-radius: var(--radius-sm, 6px);
 }
-.js-file-del:hover { color: var(--fail, #dc2626); background: var(--fail-soft, #fef2f2); }
+.js-file-del:hover { color: var(--fail-ink, var(--fail, #dc2626)); background: var(--fail-soft, #fef2f2); }
 
 /* add a file (rail head) */
 .js-addfile {
@@ -138,12 +140,12 @@
   display: flex; align-items: center; gap: var(--space-2, 0.5rem); flex-wrap: wrap;
   border: 1px solid var(--warn, #b45309); border-inline-start-width: 4px;
   border-radius: var(--radius-sm, 6px) var(--radius-sm, 6px) 0 0;
-  background: var(--warn-soft, #fffbeb); color: var(--warn, #b45309);
+  background: var(--warn-soft, #fffbeb); color: var(--warn-ink, var(--warn, #b45309));
   padding: var(--space-1, 0.25rem) var(--space-3, 0.75rem); font-size: 0.8rem;
 }
 .js-conflict-take {
   border: 1px solid var(--warn, #b45309); background: transparent; cursor: pointer;
-  color: var(--warn, #b45309); border-radius: var(--radius-sm, 6px);
+  color: var(--warn-ink, var(--warn, #b45309)); border-radius: var(--radius-sm, 6px);
   padding: 1px 8px; font-size: 0.75rem;
 }
 
@@ -152,17 +154,18 @@
 }
 .js-errorline {
   border: 1px solid var(--fail, #dc2626); border-inline-start-width: 4px;
-  border-radius: var(--radius-sm, 6px); background: var(--fail-soft, #fef2f2); color: var(--fail, #dc2626);
+  border-radius: var(--radius-sm, 6px); background: var(--fail-soft, #fef2f2); color: var(--fail-ink, var(--fail, #dc2626));
   font-family: var(--mono, monospace); font-size: 0.8rem;
   padding: var(--space-1, 0.25rem) var(--space-3, 0.75rem); text-align: start; cursor: pointer;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%;
 }
+.js-warnline { border-color: var(--warn, #b45309); background: var(--warn-soft, #fffbeb); color: var(--warn-ink, var(--warn, #b45309)); }
 
 /* ——— stage ——— */
 .js-stage-head { font-family: var(--mono, monospace); font-size: 0.75rem; color: var(--muted, #64748b); padding-bottom: var(--space-2, 0.5rem); }
 .js-stage-mount { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain;
   border: 1px solid var(--border, #e2e8f0); border-radius: var(--radius-sm, 6px); padding: var(--space-3, 0.75rem); }
-.js-stage-fail { border-color: var(--fail, #dc2626); color: var(--fail, #dc2626); }
+.js-stage-fail { border-color: var(--fail, #dc2626); color: var(--fail-ink, var(--fail, #dc2626)); }
 .js-stage-result { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 
 /* ——— the splitter (a pointer-capture widget; this is the grab bar) ——— */

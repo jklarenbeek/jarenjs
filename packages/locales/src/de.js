@@ -804,6 +804,7 @@ export const de = {
   'studio/project/add-file': 'eine Datei hinzufügen',
   'studio/project/add-file-option': '+ Datei hinzufügen…',
   'studio/project/file-errors': 'diese Datei enthält Fehler',
+  'studio/project/file-warnings': 'diese Datei enthält Warnungen',
   'studio/project/file-delete': 'Datei löschen',
   'studio/project/file-delete-title': 'diese Datei löschen',
   'studio/project/file-name': 'Dateiname',

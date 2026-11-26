@@ -391,15 +391,15 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   display: inline-block; border-radius: 999px; padding: var(--space-1) var(--space-3);
   font-size: 0.82rem; font-weight: 600;
 }
-.badge.ok { background: var(--ok-soft); color: var(--ok); }
-.badge.fail { background: var(--fail-soft); color: var(--fail); }
-.error-line { color: var(--fail); font-size: 0.85rem; font-family: var(--mono); }
+.badge.ok { background: var(--ok-soft); color: var(--ok-ink); }
+.badge.fail { background: var(--fail-soft); color: var(--fail-ink); }
+.error-line { color: var(--fail-ink); font-size: 0.85rem; font-family: var(--mono); }
 .error-list { list-style: none; padding: 0; margin: var(--space-2) 0; }
 .error-item {
   padding: var(--space-2) var(--space-3); border-inline-start: 3px solid var(--fail); background: var(--fail-soft);
   border-radius: 0 6px 6px 0; margin-bottom: var(--space-2); font-size: 0.85rem;
 }
-.error-item code { color: var(--fail); }
+.error-item code { color: var(--fail-ink); }
 
 /* the standard forms stylesheet chrome */
 .jaren-form { border: none; padding: 0; margin: 0; }
@@ -415,9 +415,9 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   padding: var(--space-2) var(--space-3); font-size: 0.9rem; font-family: var(--font);
 }
 .jaren-form-field input[type="checkbox"] { margin-inline-start: var(--space-2); }
-.jaren-form-required { color: var(--fail); }
+.jaren-form-required { color: var(--fail-ink); }
 .jaren-form-description { color: var(--muted); font-size: 0.78rem; margin: 0.15rem 0 0; }
-.jaren-form-error { color: var(--fail); font-size: 0.78rem; margin: 0.2rem 0 0; }
+.jaren-form-error { color: var(--fail-ink); font-size: 0.78rem; margin: 0.2rem 0 0; }
 .jaren-form-group, .jaren-form-array {
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   padding: var(--space-3) var(--space-4); margin: var(--space-3) 0;
@@ -450,7 +450,7 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   border: 1px solid var(--fail); border-inline-start-width: 4px; border-radius: var(--radius);
   background: var(--fail-soft); padding: var(--space-3) var(--space-4); margin: var(--space-3) 0;
 }
-.error-title { margin: 0; font-weight: 700; color: var(--fail); font-family: var(--mono); font-size: 0.85rem; }
+.error-title { margin: 0; font-weight: 700; color: var(--fail-ink); font-family: var(--mono); font-size: 0.85rem; }
 .error-message { margin: 0.2rem 0 0; font-size: 0.9rem; }
 .error-detail { margin: var(--space-1) 0 0; font-size: 0.78rem; color: var(--muted); font-family: var(--mono); }
 .details-card {
@@ -506,7 +506,7 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   border: none; background: transparent; color: var(--muted); cursor: pointer;
   padding: 0.15rem 0.55rem 0.15rem 0.25rem; font-size: 0.8rem;
 }
-.ide-delete:hover { color: var(--fail); }
+.ide-delete:hover { color: var(--fail-ink); }
 
 /* generic engine fields */
 .field { display: block; margin-bottom: var(--space-3); }
@@ -828,7 +828,7 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 }
 .md-dialog-close:hover {
   border-color: var(--fail);
-  color: var(--fail);
+  color: var(--fail-ink);
 }
 .md-dialog-navgroup {
   display: flex;

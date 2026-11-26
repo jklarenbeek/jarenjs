@@ -276,7 +276,11 @@ export function renderQueryMessageId(messageId, params, catalog = queryCatalogEn
  * The message of a query error (`JsonQueryCompileError`,
  * `JsonQueryRuntimeError`) in a catalog's language: its `messageId` and
  * `params` rendered through `catalog` — a `@jarenjs/locales` pack, say —
- * or in English. The error's own `reason` is the English rendering.
+ * or in English. The error's own `reason` is the English rendering. A
+ * formula error or diagnostic (`query/formula/*`, `@jarenjs/json/formula`)
+ * carries its English as `params.reason`, which the English default
+ * renders, so this module carries no formula catalog; a bare formula
+ * reference without it renders through `formulaMessagesEn` passed here.
  * @param {{ messageId?: string, params?: Record<string, any>, reason?: string }} error
  * @param {Record<string, any>} [catalog] - a locale pack, plain or compiled
  * @returns {string}

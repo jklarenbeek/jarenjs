@@ -7,17 +7,25 @@
  * operator whichever job of that kind comes first. `reconcile` with a
  * `null` lease fences the decision by the record's revision instead, in
  * the command's own transaction, and refuses while the job is leased —
- * then the lease holder decides. Every pause and requeue spends one claim
+ * then the lease holder decides. The job is read row-locked and the
+ * record read again under that lock, so on PostgreSQL another store's
+ * claim (one `UPDATE … FOR UPDATE SKIP LOCKED`) cannot lease the job
+ * between that read and the decision's commit, and another store's
+ * lease-less decision meets the revision this one moved.
+ * Every pause and requeue spends one claim
  * of the effect's job, so a plan declares that job's own claim budget
  * (`jobClaimBudget`), which no reader can take for a leg's send budget
  * (`maxAttempts`).
  */
 
-import { describe, it } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createDbEffectStore } from '@jarenjs/linq/db';
-import { fixture } from '../durable/fixtures.js';
+import { createDbEffectStore, open } from '@jarenjs/linq/db';
+import { postgresDialect, postgresDriver } from '@jarenjs/db/postgres';
+import { fixture, model } from '../durable/fixtures.js';
+import { jobStatements } from '../../packages/db/src/dialects/jobs.js';
+import { sqliteDialect } from '../../packages/db/src/dialects/sqlite.js';
 
 /** @param {string} id @param {string} jobId @param {any} [extra] */
 const plan = (id, jobId, extra = {}) => ({ id, jobId, kind: 'external', actor: 'reviewer', reason: 'approved',
@@ -222,5 +230,157 @@ describe("an effect's job takes the claim budget its plan declares", () => {
       assert.equal(await f.client.store.jobs.get('job-A'), undefined);
     }
     finally { await f.client.close(); }
+  });
+});
+
+describe('the row-locked job read a lease-less decision takes', () => {
+  it('is the plain read on SQLite, whose writer already keeps a claim out, and FOR UPDATE on PostgreSQL', () => {
+    const sqlite = jobStatements(sqliteDialect), postgres = jobStatements(postgresDialect());
+    assert.equal(sqlite.getLocked, sqlite.get);
+    assert.equal(postgres.getLocked, `${postgres.get} FOR UPDATE`);
+  });
+
+  it('answers what the plain read answers, inside a transaction and at the root', async () => {
+    const f = await fixture();
+    try {
+      const { record } = await paused(f);
+      const plain = await f.client.store.jobs.get('job-A');
+      assert.equal(plain.state, 'cancelled');
+      assert.deepEqual(await f.client.store.jobs.get('job-A', { lock: true }), plain);
+      assert.deepEqual(await f.client.transaction((tx) => tx.jobs.get('job-A', { lock: true })), plain);
+      assert.equal(await f.client.transaction((tx) => tx.jobs.get('job-none', { lock: true })), undefined);
+      assert.equal(record.legs[0].state, 'unresolved');
+    }
+    finally { await f.client.close(); }
+  });
+});
+
+const url = process.env.JAREN_PG_URL;
+describe('a lease-less decision on PostgreSQL, against another store\'s claim', { skip: !url && 'JAREN_PG_URL is not set' }, () => {
+  /** @type {any} */
+  let pg;
+  /** @type {any} */
+  let admin;
+  let schemas = 0;
+  before(async () => {
+    pg = (await import('pg')).default;
+    admin = new pg.Client({ connectionString: url });
+    await admin.connect();
+  });
+  after(async () => { await admin?.end(); });
+
+  const claimB = (/** @type {any} */ b) => b.store.jobs.claim({ kinds: ['external'], owner: 'other', leaseMs: 100 });
+
+  /** Two stores on one fresh schema, one clock; op-A paused, op-B's job
+   * leased by the other store, job-A requeued (pending), so the next
+   * claim by kind is job-A's.
+   * @param {(f: any, b: any, record: any) => Promise<void>} body */
+  async function twoStores(body) {
+    const schema = `jaren_effects_paused_${process.pid}_${schemas++}`;
+    await admin.query(`CREATE SCHEMA "${schema}"`);
+    const poolA = new pg.Pool({ connectionString: url, max: 1 });
+    const poolB = new pg.Pool({ connectionString: url, max: 1 });
+    let time = 100;
+    /** @type {any} */
+    let a;
+    /** @type {any} */
+    let b;
+    try {
+      const options = { validator: null, jobs: { now: () => time } };
+      a = await open(model, { driver: postgresDriver(poolA, { schema }), ...options });
+      b = await open(model, { driver: postgresDriver(poolB, { schema }), ...options });
+      const f = { client: a, advance: (/** @type {number} */ ms) => { time += ms; } };
+      const { record } = await paused(f);
+      f.advance(10);
+      await a.store.jobs.requeue('job-A');
+      assert.equal((await claimB(b))?.id, 'job-B');
+      await body(f, b, record);
+    }
+    finally {
+      try {
+        await a?.close();
+        await b?.close();
+        await poolA.end();
+        await poolB.end();
+      }
+      finally { await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); }
+    }
+  }
+
+  it('a claim between the job read and the commit leases nothing; after the commit it continues from the decision', async () => {
+    await twoStores(async (f, b, record) => {
+      /** @type {any} */
+      let inside = 'not reached';
+      const out = await f.client.transaction(async (/** @type {any} */ tx) => {
+        const decided = await createDbEffectStore(tx, { operations: 'effects' }).reconcile('op-A', 'leg', record.revision, null, decision);
+        inside = await claimB(b);
+        return decided;
+      });
+      assert.equal(inside, undefined, 'the locked job is skipped, not leased inside the decision');
+      assert.deepEqual([out.record.revision, out.record.legs[0].state], [record.revision + 1, 'confirmed']);
+      assert.equal((await f.client.store.jobs.get('job-A')).state, 'pending');
+      const next = await claimB(b);
+      assert.equal(next?.id, 'job-A');
+      const effects = createDbEffectStore(b, { operations: 'effects' });
+      const current = await effects.get('op-A');
+      assert.deepEqual(current, out.record);
+      const begun = await effects.begin('op-A', 'leg', current.revision, next.lease);
+      assert.deepEqual([begun.state, writes(begun)], ['confirmed', [0, 0, 0]]);
+    });
+  });
+
+  it('a claim that landed first is seen: the decision refuses and writes nothing', async () => {
+    await twoStores(async (f, b, record) => {
+      const held = await claimB(b);
+      assert.equal(held?.id, 'job-A');
+      await assert.rejects(f.client.transaction((/** @type {any} */ tx) => createDbEffectStore(tx, { operations: 'effects' })
+        .reconcile('op-A', 'leg', record.revision, null, decision)),
+      { code: 'JL2009', message: /the operation job is leased: its lease holder decides/ });
+      assert.deepEqual(await createDbEffectStore(f.client, { operations: 'effects' }).get('op-A'), record);
+    });
+  });
+
+  it('a second lease-less decision another store began meanwhile waits for the first and meets its revision', async () => {
+    await twoStores(async (f, b, record) => {
+      const reject = { ...decision, id: 'decision-2', actor: 'second operator', action: 'reject' };
+      /** @type {any} */
+      let second;
+      const first = await f.client.transaction(async (/** @type {any} */ tx) => {
+        const decided = await createDbEffectStore(tx, { operations: 'effects' }).reconcile('op-A', 'leg', record.revision, null, decision);
+        const pending = createDbEffectStore(b, { operations: 'effects' }).reconcile('op-A', 'leg', record.revision, null, reject)
+          .then(() => 'decided', (/** @type {any} */ error) => error);
+        // commit only once the second decision is held at the job's row lock
+        const stop = Date.now() + 10_000;
+        for (;;) {
+          const { rows } = await admin.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()");
+          if (rows[0].n > 0) break;
+          assert.ok(Date.now() < stop, 'the second decision waits on the job row');
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+        second = pending;
+        return decided;
+      });
+      const refused = await second;
+      assert.equal(refused?.code, 'JL2009');
+      assert.match(refused.message, /stale operation revision/);
+      const kept = await createDbEffectStore(f.client, { operations: 'effects' }).get('op-A');
+      assert.deepEqual(kept, first.record);
+      assert.deepEqual([kept.legs[0].state, kept.decisions.map((/** @type {any} */ d) => d.id)], ['confirmed', ['decision-1']]);
+    });
+  });
+
+  it('tx.jobs.get(id, { lock: true }) keeps another store\'s claim off the job until the commit; the plain read does not', async () => {
+    await twoStores(async (f, b) => {
+      const locked = await f.client.transaction(async (/** @type {any} */ tx) => {
+        const job = await tx.jobs.get('job-A', { lock: true });
+        return [job.state, await claimB(b)];
+      });
+      assert.deepEqual(locked, ['pending', undefined]);
+      const plain = await f.client.transaction(async (/** @type {any} */ tx) => {
+        const job = await tx.jobs.get('job-A');
+        return [job.state, (await claimB(b))?.id];
+      });
+      assert.deepEqual(plain, ['pending', 'job-A']);
+    });
   });
 });

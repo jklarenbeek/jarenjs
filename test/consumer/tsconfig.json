@@ -43,6 +43,7 @@
     "validate-narrow.ts",
     "strict-profile.ts",
     "registry-options.ts",
+    "jslt-compile-options.ts",
     "md-labels.ts"
   ],
   "include": [

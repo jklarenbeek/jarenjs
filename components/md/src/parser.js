@@ -1931,6 +1931,10 @@ export function createIncrementalParser(options = {}) {
      * @returns {MdNode[]}
      */
     feed(chunk) {
+      // the buffer appends a number, a boolean or a bigint as its text, so
+      // the hash reads that same text; fnv1a refuses any other non-string
+      const kind = typeof chunk;
+      if (kind === 'number' || kind === 'boolean' || kind === 'bigint') chunk = String(chunk);
       // fold the chunk into the running hash: seeding fnv1a with the
       // accumulator makes the streamed hash equal the whole-source one
       hash = fnv1a(chunk, hash);

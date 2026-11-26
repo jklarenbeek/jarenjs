@@ -448,6 +448,12 @@ A cell that begins with U+FEFF is written quoted, wherever it sits, because a
 reader drops a byte order mark at the start of its input and a formatter cannot
 know which cell opens a document; upgrade: such a cell used to be written bare
 and the first one lost the character on a round trip.
+`quote: ''` turns quoting off on every reader and writer, and `quote: null`
+keeps the default `"` on all of them, so one dialect object writes and reads
+back the same cells. *Upgrade: a reader used to read `quote: null` as no
+quoting (the writers read it as `"`), so `parseCsv(stringifyCsv([['x,y']],
+{ quote: null }), { quote: null })` answered `[['"x', 'y"']]`; pass
+`quote: ''` for the old reading.*
 The hostile-input limits (`maxTotalBytes`,
 `maxRecordBytes`, `maxFieldBytes`, `maxColumns`, the `CSV2xxx` codes) are
 listed under Streaming.

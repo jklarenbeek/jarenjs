@@ -218,13 +218,23 @@ export function getStringLength(str, useGrapheme = false) {
 
 /**
  * Count occurrences of a UTF-16 code unit in a slice of a string.
+ *
+ * Anything but a string is refused with a `TypeError` naming what was
+ * given, never scanned: a non-string has no `length`, so it would count
+ * as an empty string. A `String` wrapper object is scanned as the string
+ * it wraps.
  * @param {string} str - The string to scan
  * @param {number} code - The char code to count
  * @param {number} [start] - Inclusive start offset (defaults to 0)
  * @param {number} [end] - Exclusive end offset (defaults to full length)
  * @returns {number} Number of occurrences in [start, end)
+ * @throws {TypeError} When `str` is not a string
  */
-export function countCharCode(str, code, start = 0, end = str.length) {
+export function countCharCode(str, code, start = 0, end = undefined) {
+  if (typeof str !== 'string')
+    str = unwrapString(str, 'countCharCode');
+  if (end === undefined)
+    end = str.length;
   let n = 0;
   for (let i = start; i < end; ++i)
     if (str.charCodeAt(i) === code)
@@ -309,10 +319,17 @@ function unwrapString(value, name) {
 /**
  * Count the Unicode code points of a string (surrogate-pair aware;
  * a lone surrogate counts as one code point).
+ *
+ * Anything but a string is refused with a `TypeError` naming what was
+ * given, never counted as 0; a `String` wrapper object is counted as the
+ * string it wraps.
  * @param {string} str
  * @returns {number}
+ * @throws {TypeError} When `str` is not a string
  */
 export function countCodePoints(str) {
+  if (typeof str !== 'string')
+    str = unwrapString(str, 'countCodePoints');
   const slen = str.length;
   let count = 0;
   for (let i = 0; i < slen; i++) {
@@ -337,10 +354,17 @@ export function countCodePoints(str) {
  * {@link fromCodePoints} and a caller validating text can see the lone
  * surrogate and reject it.
  *
+ * Anything but a string is refused with a `TypeError` naming what was
+ * given, never decoded as `[]`; a `String` wrapper object is decoded as
+ * the string it wraps.
+ *
  * @param {string} str - The string to decode
  * @returns {number[]} The code points, in order
+ * @throws {TypeError} When `str` is not a string
  */
 export function toCodePoints(str) {
+  if (typeof str !== 'string')
+    str = unwrapString(str, 'toCodePoints');
   const slen = str.length;
   const out = [];
   for (let i = 0; i < slen; i++) {
@@ -436,6 +460,7 @@ export function compareCodePoints(a, b) {
  *
  * @param {string} prefix - The prefix to bound
  * @returns {string | null} The exclusive upper bound, or null when none exists
+ * @throws {TypeError} When `prefix` is not a string, as {@link toCodePoints} refuses it
  */
 export function codePointPrefixSuccessor(prefix) {
   const points = toCodePoints(prefix);
@@ -465,11 +490,20 @@ export const FNV1A_OFFSET_BASIS = 0x811c9dc5;
  * a fingerprint string should use {@link hashContent} instead, so the whole
  * suite agrees on one encoding.
  *
+ * Anything but a string is refused with a `TypeError` naming what was
+ * given, never hashed: a non-string has no `length`, so a number or an
+ * object would hash as the empty string (`hashContent({})` would equal
+ * `hashContent('')`). A `String` wrapper object is hashed as the string it
+ * wraps.
+ *
  * @param {string} str
  * @param {number} [seed] running hash to continue, unsigned 32-bit
  * @returns {number} unsigned 32-bit hash
+ * @throws {TypeError} When `str` is not a string
  */
 export function fnv1a(str, seed = FNV1A_OFFSET_BASIS) {
+  if (typeof str !== 'string')
+    str = unwrapString(str, 'fnv1a');
   let hash = seed;
   for (let i = 0; i < str.length; i++) {
     hash ^= str.charCodeAt(i);
@@ -487,11 +521,15 @@ export function fnv1a(str, seed = FNV1A_OFFSET_BASIS) {
  * do NOT invent a second hash — {@link fnv1a} is the one mixing step.
  * An identity that must never collide (a recorded digest, a revision two
  * processes compare) is {@link sha256Hex}'s, not a fingerprint's.
+ * A non-string is refused with a `TypeError`, as {@link fnv1a} refuses it.
  *
  * @param {string} str
  * @returns {string}
+ * @throws {TypeError} When `str` is not a string
  */
 export function hashContent(str) {
+  if (typeof str !== 'string')
+    str = unwrapString(str, 'hashContent');
   return fnv1a(str).toString(36);
 }
 

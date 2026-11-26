@@ -24,10 +24,13 @@
     --accent-hover: hsl(213 94% 74%);
     --ok: hsl(150 60% 55%);
     --ok-soft: hsl(150 40% 14%);
+    --ok-ink: hsl(150 60% 55%);
     --fail: hsl(0 75% 65%);
     --fail-soft: hsl(0 40% 15%);
+    --fail-ink: hsl(0 75% 65%);
     --warn: hsl(38 92% 55%);
     --warn-soft: hsl(40 35% 15%);
+    --warn-ink: hsl(38 92% 55%);
     --code-bg: hsl(224 28% 7%);
     --code-fg: hsl(210 30% 88%);
   }

@@ -75,7 +75,11 @@ describe('toTypeScript — what it declares', () => {
     assert.match(out, /^export interface InvokeContext \{ signal\?: AbortSignal; attempt\?: unknown; idempotencyKey\?: string; headers\?: Record<string, string>; ifNoneMatch\?: string; ifMatch\?: string \}$/m);
     assert.match(out, /invoke<K extends keyof Operations>\(op: K, input: Operations\[K\]\['input'\], ctx\?: InvokeContext\): Promise<Outcome<Operations\[K\]\['output'\]>>;/);
     assert.match(out, /url<K extends keyof UrlOperations>\(op: K, input: UrlOperations\[K\]\): string;/);
-    assert.match(out, /^export type Handlers<Host = null, Carrier extends CarrierName = 'http'> = \{ \[K in keyof Operations\]: \(input: Operations\[K\]\['input'\], ctx: HandlerContext<Host, Carrier>\) => Operations\[K\]\['output'\] \| Failure \| Promise<Operations\[K\]\['output'\] \| Failure> \};$/m);
+    assert.match(out, /^export type Handlers<Host = null, Carrier extends CarrierName = 'http'> = \{ \[K in keyof Operations\]: \(input: Operations\[K\]\['input'\], ctx: HandlerContext<Host, Carrier>\) => HandlerAnswer<Operations\[K\]> \};$/m);
+    // a subscribe operation's handler answers the live source its stream reads, never the snapshot (JC2010)
+    assert.match(out, /^export type HandlerAnswer<Op extends \{ kind: string; output: unknown \}> = \(Op\['kind'\] extends 'subscribe' \? SubscriptionSource<Op\['output'\]> : Op\['output'\]\) extends infer A \? A \| Failure \| Promise<A \| Failure> : never;$/m);
+    assert.match(out, /^export type SubscriptionSource<T> = \(\{ snapshot\(\): SnapshotOf<T>; result\?: SnapshotOf<T> \} \| \{ result: SnapshotOf<T>; snapshot\?: \(\) => SnapshotOf<T> \}\) & \{ /m);
+    assert.match(out, /^export interface ReplayPage \{ items: \{ patch: unknown\[\]; seq: number \}\[\]; next\?: number; earliestAvailable: number \| null; highWatermark: number; hasMore: boolean; resetRequired: boolean \}$/m);
     assert.match(out, /^export type CarrierName = 'http' \| 'port' \| 'local';$/m);
     assert.match(out, /^export interface HttpHandlerContext<Host = null> extends HandlerContextBase<Host> \{$/m);
     assert.match(out, /^export interface ChannelHandlerContext<Host = null, Carrier extends 'port' \| 'local' = 'port' \| 'local'> extends HandlerContextBase<Host> \{$/m);

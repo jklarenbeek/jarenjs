@@ -19,10 +19,13 @@
  * (`unknown`) is not rendered.
  *
  * `Meta`, `WireError`, `Outcome<T>`, `InvokeContext`, `Client`,
- * `Failure`, `HandlerContext` and `Handlers` are fixed text in the
- * stylesheet — the fixed outcome shapes as every binding carries them
- * (`OUTCOME_META_MEMBERS` / `OUTCOME_ERROR_MEMBERS` in the client module
- * are the runtime twins; a test holds the text to them).
+ * `Failure`, `HandlerContext`, `SubscriptionSource<T>` and `Handlers` are
+ * fixed text in the stylesheet — the fixed outcome shapes as every
+ * binding carries them (`OUTCOME_META_MEMBERS` / `OUTCOME_ERROR_MEMBERS`
+ * in the client module are the runtime twins; a test holds the text to
+ * them), and the handler table as `@jarenjs/linq/contract`'s
+ * `TypedHandlerTable` types it: a subscribe operation's handler answers
+ * the live source its stream reads, not the snapshot.
  *
  * One convention rides on top of emit's reading, the suite's: a string
  * with `format: "date-time"` or `format: "date"` is the `DateTime`
@@ -216,7 +219,8 @@ export function contractTypeModel(contract, ops, source) {
 /**
  * Project a compiled contract to TypeScript declarations: the operation
  * types, `Operations`, `UrlOperations`, `Meta`, `WireError`, `Outcome<T>`,
- * `InvokeContext`, `Client`, `Failure`, `HandlerContext`, `Handlers`.
+ * `InvokeContext`, `Client`, `Failure`, `HandlerContext`,
+ * `SubscriptionSource<T>`, `Handlers`.
  * @param {Contract} contract
  * @param {TypeScriptOptions} [options]
  * @returns {string} TypeScript source (`.d.ts`)

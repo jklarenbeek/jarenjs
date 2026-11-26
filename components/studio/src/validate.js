@@ -21,9 +21,10 @@
  *
  * Every result is `{ valid, kind, total, errors: [{ code, message,
  * docPath }], warnings }` — the shape the IDE's docked error strip reads.
- * `warnings` are findings that do not refuse (same item shape, `JS0005`
- * today: an app view's text that holds another template language's
- * expression); they are empty for every other kind.
+ * `warnings` are findings that do not refuse (same item shape, an app
+ * view's `JS0005`–`JS0007`: text that holds another template language's
+ * expression, an object where a vnode renders, an element written as an
+ * object in the props position); they are empty for every other kind.
  *
  * A grammar failure that a compiler can explain better yields to it: when
  * an `app`, `fsm` or `dag` document fails its meta-schema because an
@@ -206,19 +207,23 @@ function compileResult(kind, run) {
 
 /**
  * A headless render audit for an `app` document: compile the JSLT view
- * and render its first frame over the state. A view that throws is a
- * broken document even when the meta-schema passed it, and so is one that
- * renders an element written as an object (`JS0004`, see
+ * with the validation's operator registry (the host's, or the built-in
+ * packs) and render its first frame over the state. A view that throws is
+ * a broken document even when the meta-schema passed it, and so is one
+ * that renders an element written as an object (`JS0004`, see
  * `./render-audit.js`); text holding another template language's
- * expression is a warning (`JS0005`).
+ * expression (`JS0005`), any other object where a vnode renders
+ * (`JS0006`) and an element written as an object in the props position
+ * (`JS0007`) are warnings.
  * @param {any} doc
+ * @param {any} registryOptions - the registry's `toOptions()`
  * @returns {{ errors: Array<{ code: string | null, message: string, docPath: string }>,
  *   warnings: Array<{ code: string, message: string, docPath: string }> }}
  */
-function auditAppView(doc) {
+function auditAppView(doc, registryOptions) {
   let frame;
   try {
-    frame = compileJsltStylesheet(doc.view, { compileTypeTest, memo: false, ...defaultRegistryOptions })(doc.state ?? {});
+    frame = compileJsltStylesheet(doc.view, { compileTypeTest, memo: false, ...registryOptions })(doc.state ?? {});
   }
   catch (err) {
     return { errors: [{ code: null, message: `the view failed to render its first frame: ${String(/** @type {any} */ (err)?.message ?? err)}`, docPath: '/view' }], warnings: [] };
@@ -245,8 +250,8 @@ const verdicts = createWeakCache();
  * identity; pass a fresh object to force a re-check.
  * @param {{ name?: string, kind: string, text: string }} file
  * @param {{ operators?: { toOptions: () => any } }} [options] - a host
- *   operator registry for the `jslt`/`query` kinds (defaults to the
- *   built-in math/finance/stats packs)
+ *   operator registry for the `jslt`/`query` kinds and an `app`'s render
+ *   audit (defaults to the built-in math/finance/stats packs)
  * @returns {{ valid: boolean, kind: string, total: number,
  *   errors: Array<{ code: string | null, message: string, docPath?: string }>,
  *   warnings: Array<{ code: string, message: string, docPath: string }> }}
@@ -297,7 +302,7 @@ function validateFileUncached(file, options = {}) {
       const outcome = validateApp(doc);
       const structural = schemaResult(kind, outcome);
       if (!structural.valid) return schemaResult(kind, outcome, unknownOperators(kind, doc, registryOptions));
-      const audit = auditAppView(doc);
+      const audit = auditAppView(doc, registryOptions);
       return audit.errors.length === 0
         ? { ...structural, warnings: audit.warnings }
         : { valid: false, kind, total: audit.errors.length, errors: audit.errors, warnings: audit.warnings };

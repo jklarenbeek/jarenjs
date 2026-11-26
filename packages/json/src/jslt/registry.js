@@ -138,7 +138,8 @@ function validatePack(pack) {
  *   `$call` registry `compileJsonQuery` takes, so the pair spreads into its options as it is
  * @property {() => Record<string, any>} forSql - the SQL-pushable subset, as `{ name -> meta }`
  * @property {() => Record<string, any>} describe - the full registration metadata
- * @property {(stylesheet: any, opts?: any) => Function} compile - compile a JSLT stylesheet bound to this registry
+ * @property {(stylesheet: any, opts?: import('./index.js').JsltCompileOptions) => import('./index.js').JsltTransform} compile
+ *   compile a JSLT stylesheet bound to this registry
  * @property {(document: any, opts?: any) => import('../query/index.js').CompiledJsonQuery} compileQuery
  *   compile a bare query document bound to this registry (linq-over-memory)
  */

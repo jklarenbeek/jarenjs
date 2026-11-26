@@ -308,6 +308,14 @@ information that cannot be recovered downstream:
   truncating precision beyond milliseconds; invalid offsets stay text.
 - A BOM is stripped without comment; it is an encoding mark, not data.
 
+**The quote character** is `"` by default and the same option on every
+reader and writer: `quote: ''` turns quoting off on both sides, and
+`quote: null` keeps the default `"` on both, as `null` does for the
+delimiter, so a dialect handed to a writer and then to a reader reads back
+what was written. *Upgrade: a reader used to read `quote: null` as no
+quoting, so a quote character was cell text; pass `quote: ''` for that
+reading.*
+
 **Writing** quotes a field only when it contains the delimiter, the quote
 character, a newline, or edge whitespace a lenient reader might trim. The
 default terminator is CRLF, per RFC 4180 §2.1 and what spreadsheet

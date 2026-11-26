@@ -229,7 +229,9 @@ export class CsvMachine {
   constructor(options = {}) {
     this.delimiter = charCodeOption(options.delimiter, 'delimiter', CC_COMMA);
     this.delimChar = String.fromCharCode(this.delimiter);
-    this.quote = options.quote === null || options.quote === ''
+    // '' is the one spelling of no quoting; null keeps the default, as it
+    // does for the delimiter and for every writer
+    this.quote = options.quote === ''
       ? -1
       : charCodeOption(options.quote, 'quote', CC_DQUOTE);
     this.quoteChar = this.quote < 0 ? '' : String.fromCharCode(this.quote);

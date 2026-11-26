@@ -111,8 +111,16 @@
         "export type HandlerContext<Host = null, Carrier extends CarrierName = 'http'> = Extract<HttpHandlerContext<Host> | ChannelHandlerContext<Host, 'port'> | ChannelHandlerContext<Host, 'local'>, { carrier: Carrier }>;\n\n",
         "/** The context a binding's onError(error, ctx) observer receives: on HTTP the handler context of the request that failed; on port and local the operation id and the trace; null for a fault no request context reached. Only the HTTP context has a carrier to narrow on. */\n",
         "export type ErrorContext<Host = null> = HandlerContext<Host, 'http'> | { op: string; trace: string } | null;\n\n",
-        "/** The typed handler table of a server binding: one handler per invokable operation, answering the output, a declared failure, or a promise of either. */\n",
-        "export type Handlers<Host = null, Carrier extends CarrierName = 'http'> = { [K in keyof Operations]: (input: Operations[K]['input'], ctx: HandlerContext<Host, Carrier>) => Operations[K]['output'] | Failure | Promise<Operations[K]['output'] | Failure> };\n"
+        "/** A page of a replay log: the patches after the consumer's seq, where the next page starts, the log's two watermarks, whether more remain, and the total refusal resetRequired, under which items is empty. */\n",
+        "export interface ReplayPage { items: { patch: unknown[]; seq: number }[]; next?: number; earliestAvailable: number | null; highWatermark: number; hasMore: boolean; resetRequired: boolean }\n\n",
+        "/** A snapshot as the stream binding reads it: never written, so a read-only value (a live query's result, a frozen document) is one. */\n",
+        "export type SnapshotOf<T> = T extends readonly (infer E)[] ? readonly SnapshotOf<E>[] : T extends object ? { readonly [K in keyof T]: SnapshotOf<T[K]> } : T;\n\n",
+        "/** What a subscribe operation's handler answers: the live source the stream binding reads — its current snapshot, as snapshot() or a settled result, validated against the operation's output; subscribe(emit) answering the stop of the patch feed; close(); and, for resume: 'replay', replay(after, options) one page at a time. A handler that answers anything else (the snapshot itself included) is JC2010. */\n",
+        "export type SubscriptionSource<T> = ({ snapshot(): SnapshotOf<T>; result?: SnapshotOf<T> } | { result: SnapshotOf<T>; snapshot?: () => SnapshotOf<T> }) & { snapshotWithCursor?: (options: { signal: AbortSignal }) => { value: SnapshotOf<T>; seq: number } | Promise<{ value: SnapshotOf<T>; seq: number }>; subscribe(emit: (emission: any) => void): () => unknown; close(): unknown; replay?: (after: number, options: { limit: number; maxBytes: number; signal: AbortSignal }) => ReplayPage | null | undefined | Promise<ReplayPage | null | undefined>; mode?: unknown };\n\n",
+        "/** What one operation's handler answers: a subscribe operation's SubscriptionSource over its output, any other operation's output — either, or a declared failure, as a value or a promise. */\n",
+        "export type HandlerAnswer<Op extends { kind: string; output: unknown }> = (Op['kind'] extends 'subscribe' ? SubscriptionSource<Op['output']> : Op['output']) extends infer A ? A | Failure | Promise<A | Failure> : never;\n\n",
+        "/** The typed handler table of a server binding: one handler per invokable operation, answering what HandlerAnswer names for it. */\n",
+        "export type Handlers<Host = null, Carrier extends CarrierName = 'http'> = { [K in keyof Operations]: (input: Operations[K]['input'], ctx: HandlerContext<Host, Carrier>) => HandlerAnswer<Operations[K]> };\n"
       ]
     },
     {

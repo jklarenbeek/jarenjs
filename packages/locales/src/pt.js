@@ -802,6 +802,7 @@ export const pt = {
   'studio/project/add-file': 'adicionar um arquivo',
   'studio/project/add-file-option': '+ adicionar arquivo…',
   'studio/project/file-errors': 'este arquivo tem erros',
+  'studio/project/file-warnings': 'este arquivo tem avisos',
   'studio/project/file-delete': 'excluir arquivo',
   'studio/project/file-delete-title': 'excluir este arquivo',
   'studio/project/file-name': 'nome do arquivo',

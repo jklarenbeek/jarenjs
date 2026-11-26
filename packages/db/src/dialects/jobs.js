@@ -58,6 +58,7 @@ export function jobStatements(dialect) {
     schema: jobSchema(dialect),
     enqueue: `INSERT INTO ${jobs} (id,kind,payload,state,run_at,max_attempts,created_at,updated_at) VALUES (${p(1)},${p(2)},${p(3)},'pending',${p(4)},${p(5)},${p(6)},${p(7)}) ON CONFLICT (id) DO NOTHING`,
     get: `SELECT * FROM ${jobs} WHERE id=${p(1)}`,
+    getLocked: `SELECT * FROM ${jobs} WHERE id=${p(1)}${strategy.rowLock ?? ''}`,
     counts: `SELECT state, COUNT(*) AS n FROM ${jobs} GROUP BY state`,
     pendingKinds: `SELECT kind, COUNT(*) AS n FROM ${jobs} WHERE state IN ('pending', 'failed') GROUP BY kind`,
     // One statement claims the earliest eligible row. An expired lease at an

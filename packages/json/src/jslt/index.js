@@ -17,6 +17,52 @@ export { mathPack, financePack, statsPack, allPacks } from './packs/index.js';
 /** @typedef {import('./registry.js').JsltPack} JsltPack */
 
 /**
+ * Every option a JSLT compile reads: `compileJsltStylesheet` and
+ * `transformJson` take it, and a registry's `toOptions()` is one.
+ * @typedef {Object} JsltCompileOptions
+ * @property {(schemaJson: any, docPath: string) => ((value: any) => boolean)} [compileTypeTest]
+ *   validator-agnostic hook compiling schema match conditions and schema
+ *   literals inside query bodies
+ * @property {number} [maxDepth=1024] - maximum dispatch nesting depth
+ * @property {number} [maxDescentDepth=1000] - the deepest data nesting a
+ *   descendant segment (`..`) descends, in the rules' match paths and in
+ *   the paths inside rule bodies, before the transform is refused
+ *   (`JT2004` wrapping `JQ2009`); a positive integer, as `compileJSONPath`
+ *   takes it. Fixed by default so the answer is the same on every host; a
+ *   larger value lets the host's call stack decide
+ * @property {boolean} [memo=false] - memoize rule outputs by (location,
+ *   value reference): across repeated transforms of
+ *   copy-on-write-updated documents, unchanged subtrees return the
+ *   PREVIOUS output by reference — the fuel for reference-equality fast
+ *   paths downstream (the view package's patcher). Only rules whose output
+ *   provably depends on nothing but the matched value are cached (no
+ *   $root/$path/user externals, transitively through $apply, and no root
+ *   references inside match-path filters); everything else runs normally.
+ *   Memoized outputs MUST be treated as immutable, and the cache retains
+ *   the previous transform's outputs (two generations).
+ * @property {Record<string, import('../path.js').JSONPathFunction>} [pathFunctions]
+ *   custom JSONPath function extensions (RFC 9535 section 2.4), available
+ *   in rule match paths and in the path strings inside rule bodies
+ * @property {Record<string, any>} [extensions] - the operators a registry
+ *   hands in (`registry.toOptions().extensions`)
+ * @property {NonNullable<import('../query/index.js').JsonQueryOptions['functions']>} [functions]
+ *   the `$call` functions a registry hands in
+ *   (`registry.toOptions().functions`)
+ * @property {object} [calendar] - the calendar seam `$instant` and `$wall`
+ *   read a calendar value through in rule bodies: what `queryCalendar()` of
+ *   `@jarenjs/json/query/calendar` answers. Without it either operator is
+ *   refused when the stylesheet compiles
+ */
+
+/**
+ * A compiled stylesheet: `transform(data, externals?)` answers
+ * `undefined`, one JSON item, or an array of result items, and carries the
+ * user parameter names it reads (`externals`) and its stylesheet (`doc`).
+ * @typedef {((data: any, externals?: Record<string, any>) => any)
+ *   & { readonly externals: readonly string[], readonly doc: any }} JsltTransform
+ */
+
+/**
  * Compile a Jaren JSLT 0.1 stylesheet into a reusable transformation.
  *
  * The returned function maps the internal sequence result to plain JSON:
@@ -29,36 +75,8 @@ export { mathPack, financePack, statsPack, allPacks } from './packs/index.js';
  *
  * @param {any} doc - a bare rule array or `{"$jslt":"0.1","rules":[]}`
  *   stylesheet envelope
- * @param {object} [options] - compile options
- * @param {(schemaJson: any, docPath: string) => ((value: any) => boolean)}
- *   [options.compileTypeTest] - validator-agnostic hook compiling schema
- *   match conditions and schema literals inside query bodies
- * @param {number} [options.maxDepth=1024] - maximum dispatch nesting depth
- * @param {number} [options.maxDescentDepth=1000] - the deepest data
- *   nesting a descendant segment (`..`) descends, in the rules' match
- *   paths and in the paths inside rule bodies, before the transform is
- *   refused (`JT2004` wrapping `JQ2009`); a positive integer, as
- *   `compileJSONPath` takes it. Fixed by default so the answer is the
- *   same on every host; a larger value lets the host's call stack decide
- * @param {boolean} [options.memo=false] - memoize rule outputs by
- *   (location, value reference): across repeated transforms of
- *   copy-on-write-updated documents, unchanged subtrees return the
- *   PREVIOUS output by reference — the fuel for reference-equality
- *   fast paths downstream (the @jarenjs/view patcher). Only rules whose
- *   output provably depends on nothing but the matched value are cached
- *   (no $root/$path/user externals, transitively through $apply, and no
- *   root references inside match-path filters); everything else runs
- *   normally. Memoized outputs MUST be treated as immutable, and the
- *   cache retains the previous transform's outputs (two generations).
- * @param {Record<string, import('../path.js').JSONPathFunction>}
- *   [options.pathFunctions] - custom JSONPath function extensions (RFC
- *   9535 section 2.4), available in rule match paths and in the path
- *   strings inside rule bodies
- * @param {object} [options.calendar] - the calendar seam `$instant` and
- *   `$wall` read a calendar value through in rule bodies: what
- *   `queryCalendar()` of `@jarenjs/json/query/calendar` answers. Without
- *   it either operator is refused when the stylesheet compiles
- * @returns {function} reusable `transform(data, externals?)` function
+ * @param {JsltCompileOptions} [options] - compile options
+ * @returns {JsltTransform} reusable `transform(data, externals?)` function
  * @throws {import('./errors.js').JsltCompileError} when compilation fails
  * @example
  * const transform = compileJsltStylesheet([
@@ -98,19 +116,8 @@ function cachedTransform(stylesheet, options) {
  * @param {any} stylesheet - JSLT stylesheet document
  * @param {any} data - input JSON value
  * @param {object} [externals] - user parameter bindings
- * @param {object} [options] - compile options used on a cache miss
- * @param {(schemaJson: any, docPath: string) => ((value: any) => boolean)}
- *   [options.compileTypeTest] - schema type-test compiler
- * @param {number} [options.maxDepth=1024] - maximum dispatch nesting depth
- * @param {number} [options.maxDescentDepth=1000] - the descent bound of
- *   the stylesheet's descendant segments, as for `compileJsltStylesheet`
- * @param {boolean} [options.memo=false] - memoize rule outputs
- * @param {Record<string, import('../path.js').JSONPathFunction>}
- *   [options.pathFunctions] - custom JSONPath function extensions
- * @param {object} [options.calendar] - the calendar seam `$instant` and
- *   `$wall` read a calendar value through in rule bodies: what
- *   `queryCalendar()` of `@jarenjs/json/query/calendar` answers. Without
- *   it either operator is refused when the stylesheet compiles
+ * @param {JsltCompileOptions} [options] - compile options used on a cache
+ *   miss, as `compileJsltStylesheet` reads them
  * @returns {any} `undefined`, one JSON item, or an array of result items
  * @throws {import('./errors.js').JsltCompileError} when compilation fails
  * @throws {import('./errors.js').JsltRuntimeError} when dispatch fails

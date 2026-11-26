@@ -802,6 +802,7 @@ export const ko = {
   'studio/project/add-file': '파일 추가',
   'studio/project/add-file-option': '+ 파일 추가…',
   'studio/project/file-errors': '이 파일에 오류가 있습니다',
+  'studio/project/file-warnings': '이 파일에 경고가 있습니다',
   'studio/project/file-delete': '파일 삭제',
   'studio/project/file-delete-title': '이 파일을 삭제합니다',
   'studio/project/file-name': '파일 이름',
