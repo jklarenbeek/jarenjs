@@ -876,9 +876,11 @@ projection of the event, never the native event, and so is what a granted
 as `createFileTokenRegistry`'s `extract`, finds none). A granted dialog widget
 (§8.7) renders its `content` under the same profile and grants. Any other
 string for `safe` is a `TypeError`. Under either safe value `idPrefix`
-(forwarded to the renderer, default `'jaren-u-'`) is the id namespace every
-id and id reference of the document joins (VIEW-FORMAT §8 rule 7); a granted
-dialog's own id joins it too.
+(forwarded to the renderer) is the id namespace every id and id reference of
+the document joins (VIEW-FORMAT §8 rule 7); a granted dialog's own id joins it
+too. Absent, the app's root takes the first default namespace no other live
+safe root of the page holds (`'jaren-u-'`, then `'jaren-u2-'`, …) until
+`app.destroy()`.
 
 The action vocabulary is local to the app document. Effect/subscription/widget
 registries and custom event fields are host boundaries. These controls bound

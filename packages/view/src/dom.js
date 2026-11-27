@@ -159,13 +159,13 @@ const WIDGET_SKIP_PROPS = new Set(['name', 'props', 'tag']);
  *   `safe: 'interactive'`, the registered widget names the document may
  *   render; absent, none. A name that is not registered in `widgets` is a
  *   `TypeError`. Read by no other profile.
- * @property {string} [idPrefix='jaren-u-'] - Under either safe profile, the
+ * @property {string} [idPrefix] - Under either safe profile, the
  *   render's id namespace ({@link createSafePolicy}): every id the document
  *   declares and every id reference it makes is prefixed with it, so the
  *   document's references resolve among its own elements and never reach or
- *   shadow the host's. Pass the same prefix to {@link renderToString} for
- *   markup this renderer hydrates; give each untrusted document on a page its
- *   own. Never read in trusted mode.
+ *   shadow the host's. Absent: the first of `jaren-u-`, `jaren-u2-`, … no
+ *   other live safe root of the document holds, until `destroy()` (the
+ *   serializer writes `jaren-u-`; VIEW-FORMAT §8 rule 7). Never read in trusted mode.
  * @property {(info: { kind: 'tag' | 'prop' | 'event' | 'widget', name: string }) => void}
  *   [onUnsafe] - In safe mode, called for everything stripped: a disallowed
  *   `tag`, a rejected or sanitized-away `prop`, a stripped `on` binding
@@ -217,8 +217,14 @@ export function createDomRenderer(container, options = {}) {
   }
   const interactive = options.safe === 'interactive';
   const granted = interactive ? grantedWidgets(options.capabilities, options.widgets) : null;
+  const doc = options.document ?? container.ownerDocument;
+  // a safe render's ids live in a namespace no other live safe root of the
+  // same document holds unless the host gave both the same prefix
+  const ids = options.safe
+    ? claimIdPrefix(doc, container, options.idPrefix === undefined ? undefined : idPrefixOf(options.idPrefix))
+    : null;
   const ctx = {
-    doc: options.document ?? container.ownerDocument,
+    doc,
     onEvent: options.onEvent ?? null,
     /** Under the interactive profile, only the granted widgets. */
     widgets: granted === null ? options.widgets ?? EMPTY_PROPS
@@ -226,8 +232,8 @@ export function createDomRenderer(container, options = {}) {
     /** The safe render policy, or null for trusted (default) rendering.
      * Consulted for every tag and prop; the same object the SSR serializer
      * uses, so client and server strip an attack identically. */
-    policy: interactive ? createSafePolicy({ interactive: true, widgets: granted ?? [], idPrefix: options.idPrefix })
-      : options.safe ? createSafePolicy({ idPrefix: options.idPrefix }) : null,
+    policy: ids === null ? null
+      : createSafePolicy({ interactive, widgets: granted ?? [], idPrefix: ids.prefix }),
     /** What a fired `on` binding is delivered to: `onEvent` itself, or under
      * the interactive profile `onEvent` handed the event's data projection. */
     eventSink: /** @type {EventBindingHandler | null} */ (null),
@@ -299,7 +305,7 @@ export function createDomRenderer(container, options = {}) {
     ...(granted === null ? {} : {
       safe: /** @type {'interactive'} */ ('interactive'),
       capabilities: Object.freeze({ widgets: Object.freeze([...granted]) }),
-      idPrefix: idPrefixOf(options.idPrefix),
+      idPrefix: /** @type {{ prefix: string }} */ (ids).prefix,
       ...(ctx.onUnsafe === null ? {} : { onUnsafe: ctx.onUnsafe }),
     }),
   });
@@ -474,6 +480,7 @@ export function createDomRenderer(container, options = {}) {
   render.destroy = function destroy() {
     if (ctx.destroyed) return;
     ctx.destroyed = true;
+    if (ids !== null) releaseIdPrefix(container, ids);
     if (rendering) {
       // called from inside the active pass: the pass sees `destroyed`,
       // stops, and finishes the teardown as it unwinds
@@ -488,7 +495,86 @@ export function createDomRenderer(container, options = {}) {
     }
   };
 
+  if (ids !== null) RENDER_PREFIXES.set(render, ids.prefix);
   return render;
+}
+
+/**
+ * The id namespaces the live safe renderers of each document hold: per
+ * document, the claim each container's latest safe renderer made. A render
+ * that names no `idPrefix` takes the first namespace no other container of
+ * its document holds: `jaren-u-`, then `jaren-u2-`, `jaren-u3-`, … — no two
+ * of them a prefix of another, so no id of one namespace can spell an id of
+ * another. A host-supplied prefix is taken as given and occupies its
+ * namespace too. A claim is released by `destroy()`, and lapses once its
+ * container is out of the page (`isConnected` false) when another root
+ * claims; a new safe renderer on the same container replaces its claim (it
+ * replaces the content), keeping the default namespace that container held.
+ * @type {WeakMap<object, Map<any, { prefix: string, given: boolean }>>}
+ */
+const ID_CLAIMS = new WeakMap();
+
+/** The namespace each renderer's content lives in, for the helpers that
+ * write ids of their own beside it (a dialog's).
+ * @type {WeakMap<Function, string>} */
+const RENDER_PREFIXES = new WeakMap();
+
+/**
+ * @typedef {{ prefix: string, claims: Map<any, { prefix: string, given: boolean }> | null,
+ *   claim: { prefix: string, given: boolean } }} IdClaim
+ */
+
+/**
+ * Claim the id namespace a safe renderer's content lives in.
+ * @param {any} doc - The document the renderer creates nodes with.
+ * @param {any} container
+ * @param {string | undefined} given - The host's prefix, already checked.
+ * @returns {IdClaim}
+ */
+function claimIdPrefix(doc, container, given) {
+  const base = idPrefixOf(undefined);
+  if (doc === null || typeof doc !== 'object') {
+    const prefix = given ?? base;
+    return { prefix, claims: null, claim: { prefix, given: given !== undefined } };
+  }
+  let claims = ID_CLAIMS.get(doc);
+  if (claims === undefined) ID_CLAIMS.set(doc, claims = new Map());
+  // a root the host took out of the page without `destroy()` holds no id
+  // of the page: its claim lapses, so a dropped root is not retained and the
+  // namespaces of the roots that follow do not drift
+  for (const other of claims.keys()) if (other !== container && other.isConnected === false) claims.delete(other);
+  const prior = claims.get(container);
+  let prefix = given;
+  if (prefix === undefined && prior !== undefined && !prior.given) prefix = prior.prefix;
+  if (prefix === undefined) {
+    const held = new Set();
+    for (const [other, claim] of claims) if (other !== container) held.add(claim.prefix);
+    prefix = base;
+    for (let n = 2; held.has(prefix); n++) prefix = `${base.slice(0, -1)}${n}-`;
+  }
+  const claim = { prefix, given: given !== undefined };
+  claims.set(container, claim);
+  return { prefix, claims, claim };
+}
+
+/**
+ * Release a claim on `destroy()`, unless a later renderer on the same
+ * container has replaced it.
+ * @param {any} container
+ * @param {IdClaim} ids
+ */
+function releaseIdPrefix(container, ids) {
+  if (ids.claims !== null && ids.claims.get(container) === ids.claim) ids.claims.delete(container);
+}
+
+/**
+ * The id namespace a renderer's content lives in: its claimed prefix under a
+ * safe profile, `''` for a trusted renderer.
+ * @param {Function} render - A renderer {@link createDomRenderer} returned.
+ * @returns {string}
+ */
+export function idPrefixOfRenderer(render) {
+  return RENDER_PREFIXES.get(render) ?? '';
 }
 
 /**

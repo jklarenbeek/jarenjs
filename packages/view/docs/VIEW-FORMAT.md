@@ -772,10 +772,24 @@ Under the safe profile a renderer MUST:
    inside the document therefore still resolve, and none can reach — or a
    declared id or name shadow — an element or property of the host's page.
    Both renderers apply the same prefix, so markup serialized with a prefix
-   hydrates under the same prefix. A host rendering several untrusted
-   documents in one page gives each its own prefix, and uses no id of its
-   own that starts with one. Upgrade note: a safe document's ids, id
-   references and those names used to be written as given.
+   hydrates under the same prefix. A render that names no prefix takes a
+   default: the serializer always writes `jaren-u-`; a DOM root takes the
+   first of `jaren-u-`, `jaren-u2-`, `jaren-u3-`, … that no other live safe
+   root of its document holds (a given prefix occupies its namespace too, and
+   is never changed or refused), keeps it across frames and for a new
+   renderer on the same container, and frees it on `destroy()` (a root whose
+   container is out of the page, `isConnected` false, loses it when another
+   root claims one). No default is a prefix of another, so two untrusted
+   documents rendered into one page by one copy of the renderer never share
+   a namespace; roots built off the page and attached later, or rendered by
+   two separately bundled copies, are kept apart only by prefixes the host
+   gives. A page's first untrusted document therefore
+   serializes and renders alike; a host serializing several gives each its
+   own prefix, the same one its DOM root is given, and uses no id of its own
+   that starts with a prefix. Upgrade note: a safe document's ids, id
+   references and those names used to be written as given; a second live
+   root on a page used to share `jaren-u-` with the first (pass
+   `idPrefix: 'jaren-u-'` to keep that).
 
 A dropped element serializes to nothing and patches to an empty node; the
 patching and serializing renderers MUST make the **same** decision for a

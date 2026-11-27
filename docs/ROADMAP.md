@@ -174,11 +174,17 @@ delete it or fix it.
   attribute-only, so app state cannot reset a field the user edited. Wanted:
   the controlled-value path for `value`/`checked` (not `file`) under the
   interactive profile, with its serializer counterpart.
-- [ ] **One id namespace per untrusted document.** `idPrefix` defaults to
-  `jaren-u-` in both safe profiles; two untrusted documents on one page, or a
-  host id that starts with the prefix, must be kept apart by the host passing
-  its own prefix. Wanted: a check that refuses a second render with the same
-  prefix into one document, or a per-render default that DOM and SSR agree on.
+- [ ] **Host ids and serialized pages beside an untrusted document's namespace.**
+  Each live safe DOM root of a page takes its own default `idPrefix`
+  (`jaren-u-`, then `jaren-u2-`, …; VIEW-FORMAT §8 rule 7), but
+  `renderToString` has no page. Two untrusted documents serialized into one
+  page both write `jaren-u-` unless the host gives each its own prefix. The
+  same applies to roots built off the page and attached later, and to roots
+  rendered by two separately bundled copies of the renderer. A host id that
+  starts with a namespace in use (`jaren-u-name` beside a document declaring
+  `name`) still collides with the document's element. Wanted: a page-scoped
+  key the serializer and the DOM renderer agree on, or a check on a host id
+  inside a namespace in use that refuses nothing that answered right.
 - [ ] **Segmented logical scrolling past the CSS extent ceiling.** The [reusable collection](../components/collection/docs/COLLECTION.md) and [injected provider coordinator](../packages/app/docs/COLLECTION-PROVIDER.md) cover fixed/measured axes, keyed interaction and bounded page caches up to the conservative CSS extent ceiling; a source longer than that needs segmented logical scrolling. Complete sequential database snapshots and index seeks behind the provider also need an independently qualified source contract.
 
 - [ ] **Collection table semantics beyond activation and selection.** A host serving a record table still lacks per-column

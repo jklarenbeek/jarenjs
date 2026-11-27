@@ -1,8 +1,7 @@
 //@ts-check
 /** Native modal ownership inside one renderer-owned widget host. */
 import { CodedError } from '@jarenjs/core/errors';
-import { createDomRenderer } from '../dom.js';
-import { idPrefixOf } from '../safe.js';
+import { createDomRenderer, idPrefixOfRenderer } from '../dom.js';
 import { findByRef } from './focus.js';
 import { viewText } from '../messages.js';
 
@@ -91,7 +90,7 @@ export function createDialog(host, initial, options = {}) {
   catch (error) { host.removeChild(dialog); throw error; }
   let props = initial, disposed = false, opener = null, suppressedCloses = 0;
   /** The id namespace the dialog's own ids join: the content's, under a safe profile. */
-  const scope = options.safe ? idPrefixOf(options.idPrefix) : '';
+  const scope = idPrefixOfRenderer(render);
 
   function focusable() {
     // Native selectors handle disabled fieldsets. Layout checks exclude hidden

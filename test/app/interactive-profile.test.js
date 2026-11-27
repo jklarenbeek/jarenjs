@@ -293,3 +293,44 @@ describe('interactive app — a granted dialog renders the document\'s content u
     assert.equal(doc.body.contains(host), true);
   });
 });
+
+describe('two untrusted apps on one page — each root and its dialog keep their own ids', () => {
+  const documentWith = (title) => ({
+    state: { open: true },
+    actions: { close: { patch: [{ op: 'replace', path: '/open', value: false }] } },
+    view: [{ match: '$', body: ['div', {}, ['label', { for: 'q' }, title], ['input', { id: 'q' }],
+      ['jaren-widget', { name: 'dialog', props: { id: 'd', title, open: '$.open', content: [['p', { id: 'body' }, title]], close: 'close' } }]] }],
+  });
+
+  it('gives the second app the next namespace, its dialog included', () => {
+    const { doc, host, walk } = dialogHost();
+    const other = doc.createElement('div');
+    doc.body.appendChild(other);
+    const options = { document: doc, safe: /** @type {const} */ ('interactive'), schedule: (flush) => flush(),
+      widgets: { dialog: createDialogWidget() }, capabilities: { widgets: ['dialog'] } };
+    const first = createApp(documentWith('A'), { ...options, node: host });
+    const second = createApp(documentWith('B'), { ...options, node: other });
+    const ids = (root) => walk(root).map((node) => node.getAttribute?.('id') ?? node.getAttribute?.('for')).filter(Boolean);
+    assert.deepEqual(ids(host), ['jaren-u-q', 'jaren-u-q', 'jaren-u-d', 'jaren-u-d-title', 'jaren-u-body']);
+    assert.deepEqual(ids(other), ['jaren-u2-q', 'jaren-u2-q', 'jaren-u2-d', 'jaren-u2-d-title', 'jaren-u2-body']);
+    second.destroy();
+    first.destroy();
+  });
+
+  it('a host dialog rendering untrusted content beside a safe root joins the content\'s namespace', async () => {
+    const { createDialog } = await import('@jarenjs/view/helpers/dialog');
+    const { createDomRenderer } = await import('@jarenjs/view');
+    const { doc, host, walk } = dialogHost();
+    const page = doc.createElement('div');
+    doc.body.appendChild(page);
+    const render = createDomRenderer(page, { document: doc, safe: true });
+    render(['p', { id: 'd' }, 'page']);
+    const owner = createDialog(host, { id: 'd', title: 'T', open: true, content: ['p', { id: 'own' }, 'x'] }, { safe: true });
+    const dialog = walk(host).find((node) => node.tagName === 'dialog');
+    assert.equal(dialog.getAttribute('id'), 'jaren-u2-d');
+    assert.equal(dialog.getAttribute('aria-labelledby'), 'jaren-u2-d-title');
+    assert.ok(walk(host).find((node) => node.getAttribute?.('id') === 'jaren-u2-own'));
+    owner.dispose();
+    render.destroy();
+  });
+});

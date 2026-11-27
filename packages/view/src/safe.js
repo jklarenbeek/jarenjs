@@ -187,8 +187,9 @@ const URL_REF_ATTRS = new Set([
 const RE_URL_FRAGMENT = /(url\(\s*['"]?\s*)#/gi;
 const RE_HAS_URL_FRAGMENT = /url\(\s*['"]?\s*#/i;
 
-/** The id namespace a render uses when its host names none. Deterministic,
- * so the DOM renderer and the serializer agree without being told. */
+/** The id namespace a render uses when its host names none: what the
+ * serializer always writes, and what the first live safe root of a page
+ * takes, so a page's single document serializes and renders alike. */
 const DEFAULT_ID_PREFIX = 'jaren-u-';
 
 /** An id prefix a host may supply: a letter, then letters, digits, `_` or

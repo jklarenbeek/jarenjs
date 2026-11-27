@@ -175,10 +175,13 @@ client and the server neutralize an attack identically. In safe mode:
 - **ids live in the render's namespace**: every declared id, every id
   reference (`for`, `form`, `list`, `popovertarget`, `commandfor`, `headers`,
   the `aria-*` relations, `#fragment` hrefs, `url(#…)`) and `name` on `form`,
-  `img`, `embed`, `object` and `iframe` are prefixed with `idPrefix`
-  (default `jaren-u-`, the same on both renderers), so the document's
-  references resolve among its own elements and none reaches or shadows the
-  host's. Upgrade note: these used to be written as given.
+  `img`, `embed`, `object` and `iframe` are prefixed with `idPrefix`, so the
+  document's references resolve among its own elements and none reaches or
+  shadows the host's. Absent, the serializer writes `jaren-u-` and each live
+  safe DOM root of a page takes the first default namespace no other holds
+  (`jaren-u-`, then `jaren-u2-`, …) until `destroy()` (VIEW-FORMAT §8
+  rule 7), so two untrusted documents on one page do not share one. Upgrade note: these used to be written as given; a second
+  root on a page used to share `jaren-u-` too.
 
 A companion schema,
 [`schemas/jaren-vnode-safe.schema.json`](schemas/jaren-vnode-safe.schema.json),

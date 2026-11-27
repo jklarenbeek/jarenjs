@@ -187,3 +187,121 @@ describe('safe profiles — ids and references live in the render\'s namespace',
     assert.equal(renderToString(['label', { for: 'x', id: 'y' }, ['a', { href: '#x' }, 'go']]), '<label for="x" id="y"><a href="#x">go</a></label>');
   });
 });
+
+describe('safe profiles — each live root of a page has its own default namespace', () => {
+  const A = ['div', {}, ['input', { id: 'name' }], ['p', { id: '2-name' }, 'a']];
+  const B = ['div', {}, ['label', { for: 'name' }, 'Name'], ['input', { id: 'name', 'aria-describedby': 'hint' }], ['p', { id: 'hint' }, 'h']];
+  const walk = (node) => [node, ...(node.childNodes ?? []).flatMap(walk)];
+
+  /** Two containers in one page of one stub document. */
+  function page() {
+    const { document, container: a } = createStubHost();
+    const b = document.createElement('div');
+    const body = document.createElement('body');
+    body.appendChild(a);
+    body.appendChild(b);
+    const byId = (id) => walk(body).filter((node) => node.getAttribute?.('id') === id);
+    return { document, a, b, body, byId };
+  }
+
+  for (const safe of PROFILES) {
+    it(`gives a second root the next namespace, so its references reach only its own elements (safe: ${JSON.stringify(safe)})`, () => {
+      const { document, a, b, byId } = page();
+      createDomRenderer(a, { document, safe })(A);
+      createDomRenderer(b, { document, safe })(B);
+      // the first root renders what the serializer writes, byte for byte
+      assert.equal(childMarkup(a), renderToString(A, { safe }));
+      assert.equal(childMarkup(a), '<div><input id="jaren-u-name"><p id="jaren-u-2-name">a</p></div>');
+      assert.equal(childMarkup(b), '<div><label for="jaren-u2-name">Name</label>'
+        + '<input id="jaren-u2-name" aria-describedby="jaren-u2-hint"><p id="jaren-u2-hint">h</p></div>');
+      const label = b.childNodes[0].childNodes[0];
+      assert.deepEqual(byId(label.getAttribute('for')), [b.childNodes[0].childNodes[1]]);
+      // the first root's `2-name` cannot spell the second root's `name`
+      assert.equal(byId('jaren-u-2-name').length, 1);
+      assert.equal(byId('jaren-u2-name').length, 1);
+    });
+  }
+
+  it('keeps a root\'s namespace across frames, a new renderer on the same container, and frees it on destroy', () => {
+    const { document, a, b } = page();
+    const first = createDomRenderer(a, { document, safe: true });
+    first(A);
+    const second = createDomRenderer(b, { document, safe: true });
+    second(['p', { id: 'x' }, '1']);
+    second(['p', { id: 'x' }, '2']);
+    assert.equal(childMarkup(b), '<p id="jaren-u2-x">2</p>');
+    // a new renderer on the same container (its content replaced) keeps the namespace
+    const third = createDomRenderer(b, { document, safe: true });
+    third(['p', { id: 'x' }, '3']);
+    assert.equal(childMarkup(b), '<p id="jaren-u2-x">3</p>');
+    // unmount then mount: the namespace is free again for the next root
+    first.destroy();
+    const c = document.createElement('div');
+    createDomRenderer(c, { document, safe: true })(['p', { id: 'x' }, 'c']);
+    assert.equal(childMarkup(c), '<p id="jaren-u-x">c</p>');
+    first.destroy(); // idempotent: frees nothing it no longer holds
+    const d = document.createElement('div');
+    createDomRenderer(d, { document, safe: true })(['p', { id: 'x' }, 'd']);
+    assert.equal(childMarkup(d), '<p id="jaren-u3-x">d</p>');
+    // a new renderer on a container keeps its namespace even when a lower one is free
+    third.destroy();
+    createDomRenderer(d, { document, safe: true })(['p', { id: 'x' }, 'd2']);
+    assert.equal(childMarkup(d), '<p id="jaren-u3-x">d2</p>');
+  });
+
+  it('lets the claim of a root taken out of the page without destroy() lapse, so the next roots do not drift', () => {
+    const { document, a, b, body } = page();
+    for (const node of [a, b]) Object.defineProperty(node, 'isConnected', { get: () => node.parentNode === body });
+    createDomRenderer(a, { document, safe: true })(['p', { id: 'x' }, 'a']);
+    createDomRenderer(b, { document, safe: true })(['p', { id: 'x' }, 'b']);
+    assert.equal(childMarkup(b), '<p id="jaren-u2-x">b</p>');
+    body.removeChild(a);
+    const c = document.createElement('div');
+    createDomRenderer(c, { document, safe: true })(['p', { id: 'x' }, 'c']);
+    assert.equal(childMarkup(c), '<p id="jaren-u-x">c</p>');
+    // a connected root keeps its claim
+    const d = document.createElement('div');
+    createDomRenderer(d, { document, safe: true })(['p', { id: 'x' }, 'd']);
+    assert.equal(childMarkup(d), '<p id="jaren-u3-x">d</p>');
+  });
+
+  it('takes a host prefix as given, never refused, and lets it occupy its namespace', () => {
+    const { document, a, b } = page();
+    createDomRenderer(a, { document, safe: true, idPrefix: 'jaren-u-' })(['p', { id: 'x' }, 'a']);
+    createDomRenderer(b, { document, safe: 'interactive' })(['p', { id: 'x' }, 'b']);
+    assert.equal(childMarkup(a), '<p id="jaren-u-x">a</p>');
+    assert.equal(childMarkup(b), '<p id="jaren-u2-x">b</p>');
+    // two roots the host gave one prefix share it, as asked
+    const c = document.createElement('div');
+    const d = document.createElement('div');
+    createDomRenderer(c, { document, safe: true, idPrefix: 't-' })(['p', { id: 'x' }, 'c']);
+    createDomRenderer(d, { document, safe: true, idPrefix: 't-' })(['p', { id: 'x' }, 'd']);
+    assert.equal(childMarkup(c) + childMarkup(d), '<p id="t-x">c</p><p id="t-x">d</p>');
+  });
+
+  it('renders two documents without ids, roots of other documents and trusted roots as before', () => {
+    const { document, a, b } = page();
+    createDomRenderer(a, { document })(['p', { id: 'host' }, 'trusted']);
+    createDomRenderer(b, { document, safe: true })(['p', { class: 'x' }, 'b']);
+    const c = document.createElement('div');
+    createDomRenderer(c, { document, safe: true })(['p', { class: 'x' }, 'c']);
+    assert.equal(childMarkup(a) + childMarkup(b) + childMarkup(c), '<p id="host">trusted</p><p class="x">b</p><p class="x">c</p>');
+    const other = createStubHost();
+    createDomRenderer(other.container, { document: other.document, safe: true })(['p', { id: 'x' }, 'o']);
+    assert.equal(childMarkup(other.container), '<p id="jaren-u-x">o</p>');
+  });
+
+  it('hands a granted widget its root\'s namespace, and hydrates the first root the serializer wrote', () => {
+    const { document, a, b } = page();
+    /** @type {string[]} */
+    const prefixes = [];
+    const widgets = { box: { mount: (_host, _props, _emit, context) => { prefixes.push(context.idPrefix); } } };
+    const options = { document, safe: /** @type {const} */ ('interactive'), widgets, capabilities: { widgets: ['box'] } };
+    const vnode = ['div', {}, ['p', { id: 'x' }, 'x'], ['jaren-widget', { name: 'box' }]];
+    a.appendChild(document.createElement('div'));
+    createDomRenderer(a, { ...options, hydrate: true })(vnode);
+    createDomRenderer(b, options)(vnode);
+    assert.deepEqual(prefixes, ['jaren-u-', 'jaren-u2-']);
+    assert.equal(childMarkup(a), renderToString(vnode, { safe: 'interactive', widgets, capabilities: { widgets: ['box'] } }));
+  });
+});

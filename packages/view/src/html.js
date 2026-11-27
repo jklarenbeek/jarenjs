@@ -163,7 +163,9 @@ function serializeProps(props, skip, policy, onUnsafe, tag) {
  *   render, exactly as {@link createDomRenderer} reads it.
  * @property {string} [idPrefix='jaren-u-'] - Under either safe profile, the
  *   render's id namespace, exactly as {@link createDomRenderer} reads it: the
- *   same prefix on both sides gives the same markup.
+ *   same prefix on both sides gives the same markup. Absent, `jaren-u-`, the
+ *   namespace the first live safe DOM root of a page takes; a page holding
+ *   several untrusted documents serializes each with its own prefix.
  * @property {(info: { kind: 'tag' | 'prop' | 'event' | 'widget', name: string }) => void}
  *   [onUnsafe] - In safe mode, called for everything stripped: a `tag`, a
  *   `prop`, an `on` binding (`event`) or a `widget`.

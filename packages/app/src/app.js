@@ -64,7 +64,8 @@ import { rejectionText } from './tasks.js';
  * @property {import('@jarenjs/view').DomRendererOptions['onUnsafe']} [onUnsafe]
  * @property {string} [idPrefix] - Forwarded to the renderer: under either
  *   safe profile, the id namespace every id and id reference of the
- *   document joins (default `'jaren-u-'`; VIEW-FORMAT §8).
+ *   document joins (absent: the first default namespace no other live safe
+ *   root of the page holds, `'jaren-u-'` for the first; VIEW-FORMAT §8).
  * @property {{ effects?: string[], subs?: string[], widgets?: string[], eventFields?: string[] }} [capabilities]
  *   Restrict the host registry names the document may access. Omitted
  *   lists grant nothing when this option or `safe` is enabled.

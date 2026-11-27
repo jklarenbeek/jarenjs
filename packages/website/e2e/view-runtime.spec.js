@@ -261,8 +261,9 @@ test('interactive profile: the safe corpus renders as safe does, in the DOM and 
     document.body.append(safeHost, interactiveHost);
     window.attacked = false;
     let events = 0;
-    const safe = createDomRenderer(safeHost, { safe: true, onEvent: () => events++ });
-    const interactive = createDomRenderer(interactiveHost, { safe: 'interactive', onEvent: () => events++ });
+    // two live roots on one page: one namespace given to both, so their ids compare
+    const safe = createDomRenderer(safeHost, { safe: true, idPrefix: 'jaren-u-', onEvent: () => events++ });
+    const interactive = createDomRenderer(interactiveHost, { safe: 'interactive', idPrefix: 'jaren-u-', onEvent: () => events++ });
     const failures = [];
     for (const { name, vnode } of corpus) {
       for (const frame of [['div', { key: 'same' }, 'before'], vnode, ['span', {}, 'removed'], vnode]) {
