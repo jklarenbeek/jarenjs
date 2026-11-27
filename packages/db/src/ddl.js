@@ -938,8 +938,7 @@ export function planCollection(name, collection, dialect, options = undefined) {
     keyType,
     docColumn: DOC_COLUMN,
     generated,
-    checks: [...intervals.map((interval) => ({ name: interval.constraint, sql: interval.sql })),
-      ...temporals.map((/** @type {any} */ temporal) => ({ name: temporal.constraint, sql: temporal.sql }))],
+    checks: declaredChecks(intervals, temporals),
   };
   const containers = containerKeysOf(dialect, name, indexes, generated);
   const kindIndexes = [...kindIndexesOf(collection.schema, dialect, indexes, generated), ...containers.indexes];
@@ -1126,8 +1125,7 @@ export function withoutContainerKeys(dialect, plan, absent) {
   ]);
   const table = dialect.ddl.createTable({ table: plan.table, keyColumn: plan.keyColumn, keyType: plan.keyType, docColumn: plan.docColumn,
     generated: plan.generated, plain: kept.map((/** @type {any} */ key) => ({ name: key.column, type: key.type })),
-    checks: [...(plan.intervals ?? []).map((/** @type {any} */ interval) => ({ name: interval.constraint, sql: interval.sql })),
-      ...(plan.temporals ?? []).map((/** @type {any} */ temporal) => ({ name: temporal.constraint, sql: temporal.sql }))] });
+    checks: declaredChecks(plan.intervals ?? [], plan.temporals ?? []) });
   const held = { ...plan, containerKeys: kept, kindIndexes: plan.kindIndexes.filter((/** @type {any} */ index) => !lacks(index)),
     createSql: [table, ...plan.createSql.slice(1).filter((/** @type {string} */ sql) => !dropped.has(sql))],
     expected: { ...plan.expected, columns: plan.expected.columns.filter((/** @type {any} */ column) => !absent.has(column.name)) } };
@@ -2162,18 +2160,27 @@ function verifyIntervalChecks(connection, plan, disagree) {
       // a declared temporal member's CHECK, read back as the planned one
       for (const temporal of temporals)
         plan.temporalHooks.verifyCheck(temporal, stored.get(temporal.constraint), dialect, readsConforming, disagree);
+      const declared = new Set([...intervals, ...temporals].map((/** @type {any} */ check) => check.constraint));
       for (const name of stored.keys()) {
         // an entity table's columns carry CHECKs of their own (an enum's, a
         // number's, a key's), verified with the columns: a member names its
         // CHECK `<name>_temporal`, and only such a name is a member's
         if (plan.columnChecks === true && !name.endsWith('_temporal')) continue;
-        if (!intervals.some((interval) => interval.constraint === name)
-          && !temporals.some((/** @type {any} */ temporal) => temporal.constraint === name))
+        if (!declared.has(name))
           disagree(`the database has the CHECK '${name}', which the model does not declare`);
       }
       return null;
     }));
 }
+
+/**
+ * The CHECKs a table is created with: each declared interval's, then each
+ * declared temporal member's (the seam planned those).
+ * @param {any[]} intervals @param {any[]} temporals
+ * @returns {{ name: string, sql: string }[]}
+ */
+const declaredChecks = (intervals, temporals) =>
+  [...intervals, ...temporals].map((check) => ({ name: check.constraint, sql: check.sql }));
 
 /**
  * The expression a planned generated column is created with — a declared
@@ -2562,7 +2569,7 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
       : columns.map((column) => (deferred.has(column.name) ? { ...column, references: undefined } : column)),
     compositeKey: singleKey ? undefined : entityMapping.keys,
     ...(temporalPlan === null ? {} : { generated: temporalPlan.generated,
-      checks: temporalPlan.temporals.map((/** @type {any} */ temporal) => ({ name: temporal.constraint, sql: temporal.sql })) }),
+      checks: declaredChecks([], temporalPlan.temporals) }),
   })];
   // one index per column, keyed by its name: a declared `index`/`unique`
   // on a foreign-key column and the key's own index are ONE index —

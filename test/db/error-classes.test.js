@@ -18,7 +18,7 @@ import * as path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import {
-  openStore, classifyDriverError, wrapDriverError, isDriverError, DbRuntimeError, sqliteDialect,
+  openStore, classifyDriverError, wrapDriverError, isDriverError, DbRuntimeError, sqliteDialect, DB_CODES,
 } from '@jarenjs/db';
 import { nodeDriver, adaptNodeDatabase } from '@jarenjs/db/node';
 import { queryJson } from '@jarenjs/json/query';
@@ -647,6 +647,32 @@ describe('one classifier, two engines: a SQLSTATE lands in the same classes', ()
       assert.strictEqual(error.cause, locks);
       return true;
     });
+  });
+
+  it('a resource outside the disk is not a full disk: a configured limit and any other resource read as themselves', () => {
+    const full = (reason) => ({ class: 'full', code: 'JD2082', retryable: false, reason });
+    // a sort that spills past temp_file_limit, as PostgreSQL 17 reports it
+    const limit = pgError('53400', { message: 'temporary file size exceeds temp_file_limit (64kB)' });
+    assert.deepStrictEqual(classifyDriverError(limit),
+      full('the operation exceeded a limit the server\'s configuration sets'));
+    assert.strictEqual(wrapDriverError(limit, { collection: 'rows' }).message,
+      'JD2082: the operation exceeded a limit the server\'s configuration sets: temporary file size exceeds temp_file_limit (64kB)');
+    // insufficient_resources, and a class-53 code nobody enumerated
+    for (const state of ['53000', '53999']) {
+      assert.deepStrictEqual(classifyDriverError(pgError(state, { message: 'could not start background process' })),
+        full('the server ran out of a resource the operation needs'), state);
+    }
+    // the disk, the memory and too many connections keep their own rows
+    assert.deepStrictEqual(classifyDriverError(pgError('53100')), full('the database or its disk is full'));
+    assert.deepStrictEqual(classifyDriverError(pgError('53200')), full('the server ran out of memory'));
+    assert.deepStrictEqual(classifyDriverError(pgError('53300')),
+      { class: 'busy', code: 'JD2005', retryable: true, reason: 'the database is busy or locked' });
+    // SQLite's full disk keeps the sentence its engine reports
+    assert.strictEqual(classifyDriverError({ errcode: 13, message: 'database or disk is full' }).reason,
+      'the database or its disk is full');
+    // the catalogue sentence covers every reason the code carries
+    assert.strictEqual(DB_CODES.JD2082,
+      'the database or its server ran out of a resource');
   });
 
   it('an out-of-range number is the overflow row the query path re-runs', () => {

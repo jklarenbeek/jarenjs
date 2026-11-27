@@ -361,15 +361,13 @@ delete it or fix it.
   over counted once and multiplied, the EXDATEs and RDATEs in the span
   subtracted and added, and a sub-daily zoned span counted around the zone's
   offset changes.
-- [ ] **The client bundle carries the temporal seam's call sites.** The
-  declaration's reading, its key columns and CHECK, its read-back and an
-  entity's calendar writes run only behind `@jarenjs/db/temporals`; a store
-  client still carries the seam's option checks and the `JD0017` refusal,
-  which it needs, and the seam's call sites interleaved in the planner (a
-  member's comparison, overlap and order key), the collection DDL with its
-  CHECK verification, and the store's zoned writes, `rekey()` and open checks.
-  Wanted: those call sites gathered behind one seam entry per module where
-  that costs no per-query work.
+- [ ] **The planner asks the temporal seam from each predicate site.** The
+  collection DDL with its CHECK verification and a collection's zoned writes,
+  refusals and `rekey()` each reach the seam through one entry; a store client
+  still calls the planner's `memberType`, `comparison`, `overlap` and order
+  `key` from their own sites in plan.js (and keeps the open and option checks
+  and `JD0017`, which it needs). Wanted: one planner entry, measured to add no
+  work to a query over no calendar member.
 - [ ] **Applying a chain of links reads its whole history at every link.**
   `migrate()` checks a link's history and identity rows against the ones the
   run attested last and verifies only what the link adds, but to refuse a
@@ -378,13 +376,6 @@ delete it or fix it.
   link), so the rows read grow with the square of the chain while a dry run
   stays flat. Wanted: a guard that notices an earlier row's edit without
   reading it, before the next link's steps run.
-- [ ] **A PostgreSQL resource state outside the disk reads as a full disk.**
-  SQLSTATE class `53` falls back to `full` (`JD2082`, 'the database or its
-  disk is full'): `53000` insufficient_resources and `53400`
-  configuration_limit_exceeded read as a full disk, and `JD2082`'s catalogue
-  sentence names the disk while the code also carries a server out of memory
-  (`53200`). Wanted: the family's own reason, and a catalogue sentence that
-  covers what the code carries.
 - [ ] **A CHECK the model does not declare is read back as a declaration where
   the format has one.** On PostgreSQL a CHECK of someone else's opens, still
   refuses the writes it governs (`JD2005`) and is an `unmapped-constraint`

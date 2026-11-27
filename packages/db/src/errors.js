@@ -110,7 +110,7 @@ export const DB_CODES = Object.freeze({
   JD2079: 'the backup was cancelled',
   JD2080: 'the migration was cancelled between steps',
   JD2081: 'the maintenance operation was cancelled',
-  JD2082: 'the database or its disk is full',
+  JD2082: 'the database or its server ran out of a resource',
   JD2083: 'the database is read-only',
   JD2084: 'a disk I/O error',
   JD2085: 'the database file is corrupt or not a database',
@@ -362,7 +362,8 @@ export class DbCompileError extends CodedError {
  *    another type is a defect below the store, refused before the
  *    statement it would have bound runs
  *  - `JD2082`/`JD2083`/`JD2084`/`JD2085` — the driver reported a full
- *    disk (or a server out of memory), a read-only database, an I/O
+ *    disk (or, on PostgreSQL, a server out of memory, past a limit its
+ *    configuration sets or out of another resource), a read-only database, an I/O
  *    error, a corrupt file: one
  *    classifier (`classifyDriverError`) assigns them, whichever path met
  *    the failure, and every classified error carries `class`,
@@ -421,7 +422,10 @@ const CORRUPT = Object.freeze(classification('corrupt', 'JD2085', false, DB_CODE
 const IO = Object.freeze(classification('io', 'JD2084', false, DB_CODES.JD2084));
 const CONNECTION = Object.freeze(classification('connection', 'JD2087', true, DB_CODES.JD2087));
 const BUSY = Object.freeze(classification('busy', 'JD2005', true, 'the database is busy or locked'));
-const FULL = Object.freeze(classification('full', 'JD2082', false, DB_CODES.JD2082));
+const FULL = Object.freeze(classification('full', 'JD2082', false, 'the database or its disk is full'));
+/** A PostgreSQL resource of the server's other than its disk or memory
+ * (`53000`, and a class-`53` code nobody enumerated). */
+const RESOURCE = Object.freeze(classification('full', 'JD2082', false, 'the server ran out of a resource the operation needs'));
 const CONSTRAINT = Object.freeze(classification('constraint', 'JD2005', false, 'the database rejected the operation'));
 const READONLY = Object.freeze(classification('readonly', 'JD2083', false, DB_CODES.JD2083));
 const CANTOPEN = Object.freeze(classification('cantopen', 'JD2005', false, 'the database could not be opened'));
@@ -474,12 +478,17 @@ const SQLSTATE = Object.freeze({
   '57P01': CONNECTION,
   '57P02': CONNECTION,
   '57P03': CONNECTION,
-  // 53 — insufficient resources: a full disk, and the server's memory,
-  // which is the lock table's when the server's hint names its setting
-  // (`lockTableSetting`)
+  // 53 — insufficient resources, each under its own reason in the one
+  // `full` class: a full disk; the server's memory, which is the lock
+  // table's when the server's hint names its setting (`lockTableSetting`);
+  // a limit the server's configuration sets (temp_file_limit, the
+  // replication slots, ...); any other resource of the server's. Too many
+  // connections is the caller's to retry, as a busy database is
+  '53000': RESOURCE,
   '53100': FULL,
   '53200': classification('full', 'JD2082', false, 'the server ran out of memory'),
   '53300': BUSY,
+  '53400': classification('full', 'JD2082', false, 'the operation exceeded a limit the server\'s configuration sets'),
   // 58 — system error
   '58030': IO,
   // 25 — invalid transaction state
@@ -501,7 +510,7 @@ const SQLSTATE_FAMILY = Object.freeze({
   '23': CONSTRAINT,
   '40': classification('busy', 'JD2005', true, 'the transaction could not be completed'),
   '08': CONNECTION,
-  '53': FULL,
+  '53': RESOURCE,
   '55': BUSY,
   '57': CONNECTION,
   '58': IO,

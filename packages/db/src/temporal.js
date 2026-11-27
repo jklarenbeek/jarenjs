@@ -34,6 +34,7 @@ import { IDENTIFIER } from './engine-metadata.js';
 import { compileIndexPath, schemaNodeAt, canonicalOf } from './ddl.js';
 import { memberPath, COMPARISONS, refusal, exactly, promotion, constantOf, integerBound } from './plan.js';
 import { CONSTRAINT_NAME_BYTES } from './store.js';
+import { memberAt, storedMemberForm } from './derive.js';
 import { modelPath } from './model-path.js';
 import { temporalSpelling } from './dialects/temporal.js';
 
@@ -1099,6 +1100,25 @@ function planDateRangeOverlap(node, itSlot, shape) {
 }
 
 
+/**
+ * A collection's calendar writes in a store core's zone provider: a zoned
+ * member's key and stamp, the refusal of a document whose member its
+ * declaration does not hold (`JD2003`), and `rekey()`.
+ * @param {any} collection - a collection declaring temporal members
+ * @param {any} zoneProvider - the store's zone provider
+ */
+function collectionWrites(collection, zoneProvider) {
+  const readMember = (/** @type {any} */ doc, /** @type {any[]} */ segments) => storedMemberForm(memberAt(doc, segments));
+  return {
+    /** @param {any} column @param {unknown} member */
+    value: (column, member) => zonedValueFor(column, member, zoneProvider),
+    /** @param {any} doc */
+    refuse: (doc) => refuseFaults(collection, (segments) => readMember(doc, segments), zoneProvider),
+    /** @param {any} store - the core's connection, plan, dialect, stored columns and write runners */
+    rekey: (store) => rekey({ ...store, collection, zoneProvider, readMember }),
+  };
+}
+
 /** What a store's planner asks of a collection's declared temporal members. */
 const TEMPORAL_PLANNER = Object.freeze({
   memberType: temporalMemberType,
@@ -1131,11 +1151,10 @@ export const TEMPORAL_HOOKS = Object.freeze({
   keyColumn: zonedKeyColumn,
   keyValues: temporalKeyValues,
   refuse: refuseFaults,
+  collectionWrites,
   zonedColumnsOf,
-  zonedValueFor,
   /** The stamp a zoned key a store keyed through `provider` carries, or `null`
    * beside a provider that names no identity. @param {any} provider */
   zoneStamp: (provider) => (provider?.identity === undefined || provider?.identity === null ? null : stampOf(provider.identity)),
-  rekey,
   planner: TEMPORAL_PLANNER,
 });

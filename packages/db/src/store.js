@@ -1362,6 +1362,11 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
   const storedNames = new Set(plan.generated
     .filter((column) => column.stored === true).map((column) => column.name));
   const storedDerived = plan.derived.filter((column) => storedNames.has(column.name));
+  // a declared calendar member's writes — its zoned key and stamp, the
+  // refusal of a value its declaration does not hold, rekey() — are the
+  // seam's, read in this core's zone provider (`temporal.js`)
+  const calendar = collection.temporals.length === 0 ? null
+    : collection.temporalHooks.collectionWrites(collection, zoneProvider);
   const shape = {
     table: plan.table,
     keyColumn: plan.keyColumn,
@@ -1388,8 +1393,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
       }
       // a zoned key is resolved in the store's zone provider, beside the
       // identity of the provider that resolved it (`temporal.js`)
-      return column.temporal !== undefined ? collection.temporalHooks.zonedValueFor(column, member.value, zoneProvider)
-        : derivedValue(column, member.value);
+      return column.temporal !== undefined ? calendar.value(column, member.value) : derivedValue(column, member.value);
     });
   };
   /** @type {Map<string, any>} */
@@ -1441,8 +1445,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
     // a declared temporal member holds a calendar value of its kind (a zoned
     // one that resolves under its policy), or nothing: refused here, hook or
     // no hook, as the CHECK refuses every other writer
-    if (collection.temporals.length > 0)
-      collection.temporalHooks.refuse(collection, (/** @type {any} */ segments) => storedMemberForm(memberAt(doc, segments)), zoneProvider);
+    calendar?.refuse(doc);
     if (validate === null) return;
     const result = validate(doc);
     const valid = result === true || result?.valid === true;
@@ -1646,9 +1649,8 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
    * replaced. Answers how many rows it keyed.
    * @returns {any} value-or-promise of a count
    */
-  const rekey = () => (collection.temporals.length === 0 ? 0 : collection.temporalHooks.rekey({
-    connection, collection, plan, dialect, storedDerived, zoneProvider, atomically, runWrite, whereKey,
-    readMember: (/** @type {any} */ doc, /** @type {any} */ segments) => storedMemberForm(memberAt(doc, segments)) }));
+  const rekey = () => (calendar === null ? 0
+    : calendar.rekey({ connection, plan, dialect, storedDerived, atomically, runWrite, whereKey }));
 
   const core = {
     stats: () => ({ ...stats, ...engine.stats() }),
