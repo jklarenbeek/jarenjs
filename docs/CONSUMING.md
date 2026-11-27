@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->11 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->18 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -252,7 +252,7 @@ included.
 | `./bun` | 134 | core 63, db 42, json 23, validate 6 | 6.6 |
 | `./entity` | 137 | core 63, db 43, json 25, validate 6 | 7.5 |
 | `./model` | 125 | core 63, db 33, json 23, validate 6 | 6.3 |
-| `./node` | 135 | core 63, db 43, json 23, validate 6 | 7.0 |
+| `./node` | 135 | core 63, db 43, json 23, validate 6 | 7.1 |
 | `./node-pool` | 109 | core 62, db 24, json 23 | 5.1 |
 | `./node-process` | 105 | core 62, json 23, db 20 | 5.0 |
 | `./node-worker` | 105 | core 62, json 23, db 20 | 5.0 |
@@ -324,7 +324,7 @@ included.
 | `./load` | 41 | core 24, validate 11, json 6 | 1.8 |
 | `./normalize` | 126 | core 73, validate 29, json 24 | 5.9 |
 | `./output` | 42 | core 25, validate 11, json 6 | 2.0 |
-| `./query` | 124 | core 73, validate 27, json 24 | 5.6 |
+| `./query` | 124 | core 73, validate 27, json 24 | 5.5 |
 | `./references` | 24 | core 12, json 6, validate 6 | 1.1 |
 | `./strict-profile` | 127 | core 73, validate 30, json 24 | 6.1 |
 <!--/fact-->
