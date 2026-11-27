@@ -100,6 +100,36 @@ describe('pie render', function () {
   });
 });
 
+describe("a titled pie's accessible name", function () {
+  const SLICES = [{ label: 'Dogs', value: 3 }, { label: 'Cats', value: 1 }];
+  /** The root's aria-label and its first child's tag and text. @param {any} v */
+  const name = (v) => [v[1]['aria-label'] ?? null, v[2][0], typeof v[2][2] === 'string' ? v[2][2] : null];
+
+  it("stamps the title as the root's aria-label and a leading <title>, as a bar does", function () {
+    const pie = compileChart({ type: 'pie', title: 'Pets', slices: SLICES });
+    const bar = compileChart({ type: 'bar', title: 'Pets', categories: ['a'], series: [{ name: 's', values: [1] }] });
+    assert.deepEqual(name(pie.toVnode()), ['Pets', 'title', 'Pets']);
+    assert.deepEqual(name(bar.toVnode()), ['Pets', 'title', 'Pets']);
+    assert.match(pie.toSvgString(), /^<svg [^>]* aria-label="Pets"><title>Pets<\/title><text [^>]*class="chart-title">Pets<\/text><path /);
+    const donut = compileChart({ type: 'pie', title: 'Pets', donut: true, slices: SLICES });
+    assert.deepEqual(name(donut.toVnode()), ['Pets', 'title', 'Pets']);
+  });
+
+  it('escapes the title in the attribute and the text, and names no untitled pie', function () {
+    const svg = compileChart({ type: 'pie', title: 'Cats & "Dogs"', slices: SLICES }).toSvgString();
+    assert.match(svg, /aria-label="Cats &amp; &quot;Dogs&quot;"><title>Cats &amp; "Dogs"<\/title>/);
+    const untitled = compileChart({ type: 'pie', slices: SLICES });
+    assert.deepEqual(name(untitled.toVnode()), [null, 'path', null]);
+    assert.doesNotMatch(untitled.toSvgString(), /aria-label/);
+  });
+
+  it('names a mermaid pie drawn by the injected renderer the same way', function () {
+    const v = renderMermaid('pie\n  title Pets\n  "Dogs" : 3\n  "Cats" : 1', { renderers: { pie: mermaidPieRenderer } });
+    assert.deepEqual(name(v), ['Pets', 'title', 'Pets']);
+    assert.deepEqual(name(renderMermaid('pie\n  "Dogs" : 3', { renderers: { pie: mermaidPieRenderer } })), [null, 'path', null]);
+  });
+});
+
 describe('mermaid delegation', function () {
   it('mermaid pie output, with the renderer injected, equals charts render with mermaid options', function () {
     const source = 'pie showData\n  title Pets\n  "Dogs" : 40\n  "Cats" : 25\n  "Birds" : 10';

@@ -437,10 +437,11 @@ in [`@jarenjs/charts`](../charts), and mermaid imports no other component:
 `diagramToVnode(doc, { renderers: { pie } })` — and the same option on
 `renderMermaid`, `compileMermaid`, `mermaidPlugin` and
 `createMermaidComponent` — draws a pie with `mermaidPieRenderer` from
-`@jarenjs/charts/transforms/mermaid-adapter`, the SVG mermaid has always
-emitted (a test holds it byte-identical to fixtures rendered before the
-renderer was injected). Without a renderer a pie renders the placeholder
-(MERMAID-FORMAT §4.5).
+`@jarenjs/charts/transforms/mermaid-adapter` (a test holds its SVG byte
+for byte to fixtures rendered before the renderer was injected, save the
+differences the fixtures list: a titled pie names its root, and the host
+theme's text and separators follow the host). Without a renderer a pie
+renders the placeholder (MERMAID-FORMAT §4.5).
 
 ## Performance (measured)
 

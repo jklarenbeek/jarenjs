@@ -234,31 +234,19 @@ delete it or fix it.
   reader makes reads back and the search can go; such content costs both
   derivations and then the search.
 
-## @jarenjs/charts
-
-- [ ] **The Mermaid pie's slice separators stay white under a host theme.**
-  `mermaidPieRenderer` draws each slice's stroke `#fff` (the bytes mermaid
-  drew), so on a dark host the slices are ringed in white where a charts pie's
-  follow `--bg`; mermaid's theme has no separator token (`edgeLabelBg` is
-  `#1f2020` under `dark`, so mapping onto it would repaint the concrete dark
-  pie).
-- [ ] **A titled pie has no accessible name.** Every other chart type stamps its
-  title as the root's `aria-label` and a leading `<title>` (`annotateChart`);
-  `compileChart({ type: 'pie', title: 'Pets', … })` stamps neither (`bar` with
-  the same title: `aria-label="Pets"`).
-
 ## @jarenjs/mermaid
 
 - [ ] **Mermaid forms still read differently from Mermaid** — measured against
   Mermaid 11.16.1 on its own syntax-doc examples: an `<<enumeration>>` line
   inside a class body counts as a member; a subgraph nested in another is not
   its member, and one named by a quoted markdown title keeps the backticks in
-  its id; `state X` with its `{` on the next line reads a state `{`; and a few
-  lines Mermaid refuses still read: a node `@{ shape: … }` Mermaid has no name
-  for, a lone `"` inside an unquoted label (`A[He said "hi]`), a nested
-  generic in a class name (`class List~List~int~~`) and a bare `subgraph`
-  line; and `pie title Pets` reads no title: the title is read only from its
-  own line, while Mermaid reads it on the header line too (its docs' example).
+  its id; `state X` with its `{` on the next line reads a state `{`; a gantt
+  `title` followed by a tab (`title<TAB>Plan`) reads no title; and a few lines
+  Mermaid refuses still read: a node `@{ shape: … }` Mermaid has no name for,
+  a lone `"` inside an unquoted label (`A[He said "hi]`), a nested generic in
+  a class name (`class List~List~int~~`), a bare `subgraph` line, a pie slice
+  with an unquoted label (`Dogs : 1`) and a pie header with a word Mermaid has
+  no keyword for (`pie foo showData`, `pie titled`).
 - [ ] **Full layout for the secondary types** — class and ER render as structured panels, not domain-specific layouts; mindmap/gitGraph/journey/timeline parse-accept with a placeholder. Real layouts are the next coverage push (tracked honestly in the benchmark scorecard).
 - [ ] **Layout/perf workstream** — dagre-lite handles ranks and straight
   edges; orthogonal edge routing, subgraph clustering and crossing reduction

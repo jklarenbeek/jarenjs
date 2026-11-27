@@ -120,6 +120,9 @@
 .mermaid .mm-arrowhead-line { fill: none; stroke: var(--mm-line-color); }
 .mermaid .mm-edge-label { fill: var(--mm-edge-label-text); }
 .mermaid .mm-edge-label-bg { fill: var(--mm-edge-label-bg); }
+/* a pie slice's separator stroke under a host-linked theme only: the
+   charts pie renderer stamps it then, so a concrete theme keeps its #fff */
+.mermaid .mm-separator { stroke: var(--mm-edge-label-bg); }
 .mermaid .mm-cluster-rect { fill: var(--mm-cluster-fill); stroke: var(--mm-cluster-stroke); }
 .mermaid .mm-cluster-label { fill: var(--mm-node-text); }
 .mermaid .mm-panel { fill: var(--mm-node-fill); stroke: var(--mm-node-stroke); }

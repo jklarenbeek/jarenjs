@@ -2,15 +2,16 @@
 /**
  * @file The pie chart type, split into the geometry-free AST build and
  * the SVG render (the two-stage contract every chart type follows).
- * This is the extraction of the mermaid pie: `@jarenjs/mermaid` now
- * delegates its `pie` diagrams here, passing its own class names,
- * palette and theme through `render` options so its output is unchanged
- * — charts never imports mermaid (the dependency arrow is one-way).
+ * It is also the mermaid pie: `@jarenjs/mermaid` draws its `pie` diagrams
+ * with the renderer charts hands it, which passes mermaid's class names,
+ * palette and theme through `render` options — charts never imports
+ * mermaid (the dependency arrow is one-way).
  */
 
 import { svgRoot, rect, group, textAt, num, polarPoint, textWidth } from '@jarenjs/view/helpers';
 import { measurableUnit } from '../core/domain.js';
 import { CATEGORICAL } from '../core/palette.js';
+import { annotateChart } from '../core/cartesian.js';
 import { normalizeTooltip, markProps } from '../core/marks.js';
 
 /**
@@ -99,16 +100,17 @@ export function buildPieAST(data, config = {}) {
  *  `showData` draws.
  * @property {boolean} [titles] per-slice hover `<title>` (default true).
  *  `@jarenjs/mermaid` turns it off: a mermaid pie is a *diagram*, and
- *  its emitted SVG is a byte-stable contract that hover text would
- *  break — the delegation exists to share geometry, not to change what
- *  mermaid renders.
+ *  its emitted SVG is a byte-pinned contract that per-slice hover text
+ *  would break — the delegation exists to share geometry.
  * @property {import('../core/marks.js').ChartTooltipSpec} [tooltip]
  *  pointer bindings for a floating-tooltip host
  */
 
 /**
  * Render a pie AST to a pure-vnode SVG: angles → arc paths, plus a
- * swatch legend with percentages and an optional title. With
+ * swatch legend with percentages and an optional title, which also names
+ * the root (`aria-label` and a leading `<title>`, as every chart type's
+ * title does). With
  * `ast.inner === null` (no `donut` in the config) the slice path is
  * emitted by the same wedge template as before the donut variant
  * existed — solid-pie output is byte-stable, which is what keeps the
@@ -186,5 +188,5 @@ export function renderPieAST(ast, theme, hash, options = {}) {
   for (const part of legend) children.push(part);
   const width = legendX + legendW + 20;
   const height = 2 * R + 70;
-  return svgRoot(rootClass, width, height, theme, children, keyPrefix + hash);
+  return annotateChart(svgRoot(rootClass, width, height, theme, children, keyPrefix + hash), ast.title);
 }

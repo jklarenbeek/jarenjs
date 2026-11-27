@@ -509,12 +509,16 @@ import { mermaidPieRenderer } from '@jarenjs/charts/transforms/mermaid-adapter';
 diagramToVnode('pie title Pets\n "Dogs" : 3\n "Cats" : 1', { renderers: { pie: mermaidPieRenderer } });
 ```
 
-Under a theme whose text token links a host property (`theme: 'host'`),
-the pie's title and legend text carry mermaid's `mm-text` class, which
+A titled pie names its root (`aria-label` and a leading `<title>`), as
+every chart does. Under `theme: 'host'` the pie's title and legend text
+carry mermaid's `mm-text` class, which
 `@jarenjs/mermaid/styles/mermaid.css` paints with the host's text token,
-so they follow a light/dark flip; a concrete theme draws the same bytes
-as before. Slice and swatch fills are the categorical palette under every
-theme, as a charts pie's are.
+and each slice carries `mm-separator`, which it paints with the host's
+`--bg` (each class follows whether the theme links its token, so `vars`
+overrides choose), so text and slice separators follow a light/dark flip
+as a charts pie's do; a concrete theme carries neither class, and its
+separators stay white. Slice and swatch fills are the
+categorical palette under every theme, as a charts pie's are.
 
 The same module's `mermaidPieToChartAST` maps a mermaid pie AST onto
 `compileChart` inputs.

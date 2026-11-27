@@ -101,13 +101,19 @@ one, and `renderToString` drops `on`, so the SSR bytes are identical
 either way. `tooltipView` in the component layer is the floating host.
 
 `mermaidPieRenderer`, the pie a host injects into `@jarenjs/mermaid`,
-draws with `titles: false`. A mermaid diagram's SVG is a byte-stable
-contract; the delegation exists to share the geometry, not to change
-what mermaid draws. Under a theme that links mermaid's text token to a
-host property it passes `titleClass`/`textClass: 'mm-text'`, the class
-mermaid's stylesheet paints with that token, so its text follows the
-host; under a concrete theme it passes none. Charts' own pie titles
-with `chart-title`, as every chart type's title does.
+draws with `titles: false`. A mermaid diagram's SVG is a byte-pinned
+contract; the delegation exists to share the geometry. A titled pie
+names its root through `annotateChart` (`aria-label` and a leading
+`<title>`) in both packages, as every chart type does. Under a theme that
+links mermaid's text token to a host property it passes
+`titleClass`/`textClass: 'mm-text'`, the class mermaid's stylesheet paints
+with that token, so its text follows the host; under one that links
+mermaid's `edgeLabelBg` (the `'host'` theme: `--bg`) each slice also
+carries `mm-separator`, which that stylesheet paints with the token, so the
+separators follow the host's ground as a charts pie's follow `--bg`
+through `--chart-slice-stroke`. Under a concrete theme it passes neither,
+and the separators stay `#fff`. Charts' own pie titles with
+`chart-title`, as every chart type's title does.
 
 ## Scales and axes (`src/core/`)
 
@@ -253,7 +259,6 @@ the pie renderer a host injects into mermaid
 (`diagramToVnode(doc, { renderers: { pie: mermaidPieRenderer } })`): it
 calls `buildPieAST` + `renderPieAST` with options carrying mermaid's
 class names (`mm-pie-slice`, …), key prefix (`mmpie-`), palette and
-theme, so the emitted SVG is the one mermaid has always drawn while the
-geometry lives in exactly one place. The adapter reads mermaid's AST and
+theme, so the geometry lives in exactly one place. The adapter reads mermaid's AST and
 theme as data and imports no mermaid module; mermaid, handed no
 renderer, draws a placeholder instead of a pie.

@@ -254,7 +254,8 @@ const PINS = {
   },
   'mermaid-state': ({ source: r }) => assert.strictEqual(seen(r), 'start stop Idle Running'),
   // `pie showData`: the legend lists each value as written, as Mermaid's does
-  'mermaid-pie': ({ source: r }) => assert.strictEqual(seen(r), 'Time spent Parsing [20] Layout [35] Rendering [45]'),
+  // the title twice: the root's <title> names the pie, the drawn <text> shows it
+  'mermaid-pie': ({ source: r }) => assert.strictEqual(seen(r), 'Time spent Time spent Parsing [20] Layout [35] Rendering [45]'),
   'mermaid-gantt': ({ source: r }) => {
     const day = (/** @type {number} */ ms) => new Date(ms).toISOString().slice(0, 10);
     const tasks = json(r, 'ast').sections.flatMap((/** @type {any} */ s) => s.tasks).map((/** @type {any} */ t) => [t.name, day(t.start), day(t.end)]);

@@ -46,7 +46,8 @@
     ["× vs the fastest rival (log)", "not-prose"]
   ],
   "components/charts/src/transforms/mermaid-adapter.js": [
-    ["mermaid mm-svg", "not-prose"]
+    ["mermaid mm-svg", "not-prose"],
+    ["mm-pie-slice mm-separator", "not-prose"]
   ],
   "components/charts/src/types/bar.js": [
     ["chart chart-svg chart-bar-chart", "not-prose"]

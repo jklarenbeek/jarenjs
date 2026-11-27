@@ -28,13 +28,18 @@ export function mermaidPieToChartAST(ast) {
 /**
  * Render a mermaid pie with charts' own pie: the renderer mermaid's
  * dispatcher calls for a `pie` document. The options carry mermaid's
- * class names, palette and theme, so the SVG is the one mermaid has
- * always drawn. Under a theme whose text token links a host property
- * (`theme: 'host'`, or overrides with `vars`), the title and legend text
- * also carry mermaid's `mm-text` class, which mermaid's stylesheet paints
- * with that token, so they follow the host's light/dark flip; a concrete
- * theme's SVG carries no such class. Slice and swatch fills stay the
- * concrete categorical palette under every theme, as a charts pie's do.
+ * class names, palette and theme, and a title names the root
+ * (`aria-label` and a leading `<title>`) as it does every chart's. Under
+ * a theme whose text token links a host property (`theme: 'host'`, or
+ * overrides with `vars`), the title and legend text also carry mermaid's
+ * `mm-text` class, which mermaid's stylesheet paints with that token, so
+ * they follow the host's light/dark flip; under one whose `edgeLabelBg`
+ * links a host property (`theme: 'host'`: the host's `--bg`), each slice
+ * also carries `mm-separator`, which paints its separator stroke with
+ * that token, as a charts pie's separators follow `--bg`. A concrete
+ * theme's SVG carries neither class, so its separators stay `#fff`.
+ * Slice and swatch fills stay the concrete categorical palette under
+ * every theme, as a charts pie's do.
  * @param {{title?: string|null, showData?: boolean, slices: {label: string, value: number}[]}} ast - the pie AST
  * @param {any} theme - mermaid's resolved theme (`createTheme`)
  * @param {string} hash - the document hash, the SVG's key
@@ -48,10 +53,13 @@ export function mermaidPieRenderer(ast, theme, hash) {
   const { config, data } = mermaidPieToChartAST(ast);
   // the stamp links the text token to a host property only when the theme does
   const textClass = (theme.cssVars?.['--mm-node-text'] ?? theme.tokens.nodeText) === theme.tokens.nodeText ? null : 'mm-text';
+  // mermaid has no separator token: the ground a slice is cut out of is
+  // the one an edge label sits on, linked only under a host-linked theme
+  const separatorLinked = (theme.cssVars?.['--mm-edge-label-bg'] ?? theme.tokens.edgeLabelBg) !== theme.tokens.edgeLabelBg;
   return renderPieAST(buildPieAST(data, config), theme, hash, {
     rootClass: 'mermaid mm-svg',
     keyPrefix: 'mmpie-',
-    sliceClass: 'mm-pie-slice',
+    sliceClass: separatorLinked ? 'mm-pie-slice mm-separator' : 'mm-pie-slice',
     legendClass: 'mm-pie-legend',
     palette: CATEGORICAL,
     textColor: theme.tokens.nodeText,

@@ -324,7 +324,13 @@ the guard (nesting counted), the effect starts at the first `/` after
 it (or the first `/` at all when there is no guard), and a label that
 fits no pattern — an unmatched `[`, or text between `]` and `/` — reads
 whole as the event, which keeps plain labels meaning what they always
-meant. Pie: `{ title, showData, slices:[{ label, value }] }`; with
+meant. Pie: `{ title, showData, slices:[{ label, value }] }`; the title
+reads on the header line (`pie title Pets`, `pie showData title Pets`) as on
+a line of its own, a later one replacing an earlier one and a blank one
+leaving none, and `showData` is read only before the header's title
+(`pie title Pets showData` is titled `Pets showData`); a `%%` comment ends
+a title (quoted or not) and may follow a slice's value, as Mermaid reads
+them all; `toMermaid` prints the title on its own line. With
 `showData` the injected renderer's legend lists each slice's value as
 written (`Dogs [40]`), as Mermaid's does, and without it each share
 (`Dogs (53.3%)`).
