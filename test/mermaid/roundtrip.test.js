@@ -42,7 +42,8 @@ const FIXTURES = [
 
 describe('toMermaid round-trip fixed point', function () {
   it('preserves quotes and semicolons in node labels across repeated printing', function () {
-    for (const label of [`'He said "Hi"'`, '"a;b"', `'He said "Hi; there"'`, `"it's fine"`]) {
+    // a `"` is written as its entity code, as Mermaid reads one in a label
+    for (const label of ['"He said #34;Hi#34;"', '"a;b"', '"He said #34;Hi; there#34;"', `"it's fine"`]) {
       const doc = parseMermaid(`flowchart TD\nA[${label}]`);
       const printed = toMermaid(doc);
       assert.deepEqual(parseMermaid(printed).ast, doc.ast);

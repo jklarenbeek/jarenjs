@@ -703,6 +703,30 @@ is refused as `tickInterval 1decade` is). `toMermaid` writes a pie label holding
 `"` in `'…'` (Mermaid refused the `"…"` it wrote). A subgraph whose members are
 all nested subgraphs that edges also name as nodes now draws its frame around
 those nodes (it drew none).
+`toMermaid` writes a `"` inside a flowchart label as its code `#34;`, in `"…"`
+(`A["He said #34;Hi#34;"]`; it wrote `A['He said "Hi"']`, which Mermaid
+refuses), so such a label reads back spelled with the code and draws as
+before; ER and class quoted fields, and a pie label holding both quote kinds,
+print a `"` the same way (a pie slice's entity codes now read as the characters
+they draw, `"a#34;b" : 1` is the label `a"b`, so the printed pie reads back as
+itself and draws the quote), a link label or subgraph title holding a bracket
+prints quoted, and a label holding a link operator beside its closer prints
+whole in its quotes (it printed the closer as its code, `#124;`). These lines are refused, as Mermaid refuses them, where they
+read: a `"` inside a label in `'…'` or after a label's quoted unit
+(`mermaid/flowchart/quote-in-label`), in a link label or a bracketed subgraph
+title that opens with no quote (`mermaid/flowchart/quote-in-link-label`,
+`mermaid/flowchart/quote-in-title`),
+a quote that opens a label and nothing closes (`A["x]`,
+`mermaid/flowchart/quote-unclosed`), an empty subgraph title (`subgraph s []`,
+`mermaid/flowchart/subgraph-empty-title`), a bare `subgraph` after a `;`, a
+subgraph no `end` closes (`mermaid/flowchart/subgraph-unclosed`), a state `{`
+that follows no `state X` (`mermaid/state/brace-unopened`) or opens a choice,
+fork or join (`mermaid/state/stereotype-composite`), and a `"` inside a pie
+label in `"…"` (`mermaid/pie/line`). Labels read as Mermaid reads them: a
+quote that opens a label runs to the next quote wherever it stands
+(`A["x] --> B[y"]` is one node labelled `x] --> B[y`), the text after a quoted
+unit joins it (`A["x"y]` is `xy`), and an empty `""` in a label that opens
+with no quote is dropped (`A[a""b]` is `ab`).
 The marks Mermaid draws and this renderer read but drew plain are drawn, by
 Mermaid's shape class: a sequence participant's `type` as Mermaid's glyph for
 it (a boundary, a control and an entity as a circle with a bar, an arrow or a

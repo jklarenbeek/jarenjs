@@ -11,16 +11,18 @@
  */
 
 import { stripQuotes } from './flowchart.js';
+import { decodeEntityCodes } from '../label-text.js';
 import { failWith } from '../errors.js';
 
 /**
  * `"label" : 42` (the label quoted, with `"` or `'`; the value a number of
  * zero or more as Mermaid writes one: no sign, no leading zero, no bare `.`),
- * a `%%` comment after it ignored. A label in `"…"` may hold a `"`, as it
- * read before and as `toMermaid` prints a label holding both quote kinds
- * (Mermaid has no spelling for one).
+ * a `%%` comment after it ignored. A label in `"…"` holds no `"`, as
+ * Mermaid reads it (`"a"b" : 1` is refused; `toMermaid` writes a label
+ * holding both quote kinds with the `"` as its code `#34;`), and its entity
+ * codes read as the characters they draw.
  */
-const RE_SLICE = /^(".*"|'[^']*')\s*:\s*((?:0|[1-9][0-9]*)(?:\.[0-9]+)?)\s*(?:%%.*)?$/;
+const RE_SLICE = /^("[^"]*"|'[^']*')\s*:\s*((?:0|[1-9][0-9]*)(?:\.[0-9]+)?)\s*(?:%%.*)?$/;
 
 /** An accessibility line, `accTitle: …` or `accDescr: …`, which this tree does not keep. */
 const RE_ACCESSIBILITY = /^acc(?:Title|Descr)\s*:/;
@@ -72,7 +74,10 @@ export function parsePie(lines, lineOffset, header) {
     if (own !== null) { title = titleText(own); continue; }
     const m = RE_SLICE.exec(line);
     if (m === null) failWith('mermaid/pie/line', { line }, lineOffset + li + 1);
-    slices.push({ label: stripQuotes(m[1]), value: Number(m[2]) });
+    // an entity code is the character Mermaid draws for it (`#34;` is `"`),
+    // as every renderer here draws one: the slice is drawn by an injected
+    // renderer that takes the label as text
+    slices.push({ label: decodeEntityCodes(stripQuotes(m[1])), value: Number(m[2]) });
   }
   return { title, showData, slices };
 }

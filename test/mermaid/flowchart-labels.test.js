@@ -42,25 +42,29 @@ describe('flowchart — a quoted label may hold its own closing bracket', functi
     assert.deepEqual(summary(parse("A[it's] --> B")), { nodes: [['A', "it's", 'rect'], ['B', 'B', 'rect']], edges: [['A', 'B']] });
   });
 
-  it('keeps an unterminated quote lenient: the closer still ends the label', () => {
-    assert.deepEqual(summary(parse('A["open] --> B')), { nodes: [['A', '"open', 'rect'], ['B', 'B', 'rect']], edges: [['A', 'B']] });
+  it('refuses a quote that opens a label and nothing closes, as Mermaid refuses it', () => {
+    // it read as the label `"open`
+    assert.throws(() => parse('A["open] --> B'), { msgid: 'mermaid/flowchart/quote-unclosed', params: { id: 'A' }, line: 2 });
   });
 
-  it('a stray quote does not pair with a quote that belongs to the next node', () => {
-    assert.deepEqual(summary(parse('A["] --> B["]')), { nodes: [['A', '"', 'rect'], ['B', '"', 'rect']], edges: [['A', 'B']] });
-    assert.deepEqual(summary(parse('A["x] --> B[y"]')), { nodes: [['A', '"x', 'rect'], ['B', 'y"', 'rect']], edges: [['A', 'B']] });
+  it('reads a quote as Mermaid does, up to the next quote wherever it stands: one node', () => {
+    // these read as two nodes and a link, labelled with the stray quotes
+    assert.deepEqual(summary(parse('A["] --> B["]')), { nodes: [['A', '] --> B[', 'rect']], edges: [] });
+    assert.deepEqual(summary(parse('A["x] --> B[y"]')), { nodes: [['A', 'x] --> B[y', 'rect']], edges: [] });
     for (const arrow of ['-->', '---', '==>', '-.->', '--o', '--x', '<-->']) {
-      assert.equal(parse(`A["a] ${arrow} B["b]`).edges.length, 1, arrow);
+      assert.deepEqual(summary(parse(`A["a] ${arrow} B["b]`)), { nodes: [['A', `a] ${arrow} B[b`, 'rect']], edges: [] }, arrow);
     }
+    // the text after a quoted unit joins it, as in Mermaid
+    assert.deepEqual(summary(parse('A["x"y] --> B')), { nodes: [['A', 'xy', 'rect'], ['B', 'B', 'rect']], edges: [['A', 'B']] });
   });
 
   it('a quoted label may still contain text that looks like an arrow when no bracket needs protecting', () => {
     assert.deepEqual(summary(parse('A["a --> b"] --> C')), { nodes: [['A', 'a --> b', 'rect'], ['C', 'C', 'rect']], edges: [['A', 'C']] });
   });
 
-  it('does not let a quote that is never closed swallow the next node', () => {
-    assert.deepEqual(summary(parse('A["open] --> B["y"]')),
-      { nodes: [['A', '"open', 'rect'], ['B', 'y', 'rect']], edges: [['A', 'B']] });
+  it('refuses a quote that a later node\'s label leaves open, as Mermaid refuses it', () => {
+    // it read as the label `"open` and a node B labelled `y`
+    assert.throws(() => parse('A["open] --> B["y"]'), { msgid: 'mermaid/flowchart/quote-unclosed', params: { id: 'A' }, line: 2 });
   });
 });
 
@@ -114,8 +118,11 @@ describe('toMermaid — an edge label prints in a pipe form that reads back as t
   });
 
   it('reads a quoted pipe-form label as one unit', () => {
-    const edges = parseMermaid('flowchart LR\n  A -->|"x|y"| B -->|\'a|"b\'| C').ast.edges;
-    assert.deepEqual(edges.map((/** @type {any} */ e) => [e.from, e.label, e.to]), [['A', 'x|y', 'B'], ['B', 'a|"b', 'C']]);
+    const edges = parseMermaid('flowchart LR\n  A -->|"x|y"| B -->|"a|#34;b"| C').ast.edges;
+    assert.deepEqual(edges.map((/** @type {any} */ e) => [e.from, e.label, e.to]), [['A', 'x|y', 'B'], ['B', 'a|#34;b', 'C']]);
+    // `'…'` is no quoting to Mermaid: a `"` inside it is refused, as Mermaid refuses it
+    assert.throws(() => parseMermaid('flowchart LR\n  A -->|"x|y"| B -->|\'a|"b\'| C'),
+      { msgid: 'mermaid/flowchart/quote-in-link-label', params: { from: 'B' }, line: 2 });
   });
 
   it('leaves a label that needs no quotes bare', () => {
@@ -128,12 +135,9 @@ describe('toMermaid — every label text reads back as the same graph (round-tri
     'a"b\'c|d', 'a|b"c\'d', 'a"b\'c;d', 'a\'b"c;d', 'a --> b', 'a --> b|c', 'x -.- y|z', 'a ==> b', 'p\nq', 'p\nq|r',
     '#35;', 'x#124;y', '&amp;', '`**md**`', '`a|b`', '`a"b\'c|d`', 'a]b', 'a)b', 'a}b', '[x]', '(x)', '{x}', 'a --> b]',
     'a"b\'c]', '/x', 'x\\', 'é ü', 'x %% y'];
-  // Mermaid has no escape inside a quoted label: these print one character
-  // as its entity code, so they read back spelled with the code
-  const SPELLED = {
-    edge: ['a"b\'c|d', 'a|b"c\'d', 'a"b\'c;d', 'a\'b"c;d', 'a --> b|c', 'x -.- y|z', '`a"b\'c|d`'],
-    node: ['a"b\'c;d', 'a\'b"c;d', 'a --> b]', 'a"b\'c]'],
-  };
+  // Mermaid reads a `"` in no label, and has no escape inside a quoted one:
+  // a label holding a `"` prints it as its entity code, so it reads back
+  // spelled with the code
   const SHAPES = ['rect', 'round', 'stadium', 'subroutine', 'cylinder', 'circle', 'doublecircle', 'diamond', 'hexagon',
     'parallelogram', 'parallelogram_alt', 'trapezoid', 'trapezoid_alt', 'asymmetric'];
   const base = parseMermaid('flowchart LR\n  subgraph S [t]\n    C\n  end\n  A --> B');
@@ -168,7 +172,7 @@ describe('toMermaid — every label text reads back as the same graph (round-tri
     for (const label of CORPUS) {
       const doc = structuredClone(base);
       doc.ast.edges[0].label = label;
-      readsBack(doc, (ast) => ast.edges[0].label, SPELLED.edge.includes(label));
+      readsBack(doc, (ast) => ast.edges[0].label, label.includes('"'));
     }
   });
 
@@ -177,10 +181,7 @@ describe('toMermaid — every label text reads back as the same graph (round-tri
       for (const shape of SHAPES) {
         const doc = structuredClone(base);
         Object.assign(doc.ast.nodes.find((/** @type {any} */ n) => n.id === 'A'), { label, shape });
-        // a label spells a character only where it holds a `;` or its own shape's closer
-        const closer = /[\])}]$/.exec(toMermaid(doc).split('\n').find((line) => line.startsWith('A')) ?? '')?.[0] ?? '';
-        const spelled = SPELLED.node.includes(label) && (label.includes(';') || label.includes(closer));
-        readsBack(doc, (ast) => ast.nodes.find((/** @type {any} */ n) => n.id === 'A').label, spelled);
+        readsBack(doc, (ast) => ast.nodes.find((/** @type {any} */ n) => n.id === 'A').label, label.includes('"'));
       }
     }
   });
@@ -189,19 +190,21 @@ describe('toMermaid — every label text reads back as the same graph (round-tri
     for (const label of CORPUS) {
       const doc = structuredClone(base);
       doc.ast.subgraphs[0].label = label;
-      readsBack(doc, (ast) => ast.subgraphs[0].label, false);
+      readsBack(doc, (ast) => ast.subgraphs[0].label, label.includes('"'));
     }
   });
 
-  it('spells only the character no quoting can hold', () => {
+  it('spells a quote as its entity code, and nothing else', () => {
     const print = (/** @type {string} */ label) => {
       const doc = structuredClone(base);
       doc.ast.edges[0].label = label;
       return toMermaid(doc).split('\n').find((line) => line.startsWith('A -'));
     };
-    assert.equal(print('a --> b|c'), 'A -->|"a --> b#124;c"| B');
+    assert.equal(print('a --> b|c'), 'A -->|"a --> b|c"| B');
     assert.equal(print('a"b\'c|d'), 'A -->|"a#34;b\'c|d"| B');
-    assert.equal(print('a"b\'c'), 'A -->|a"b\'c| B');
+    assert.equal(print('a"b\'c'), 'A -->|"a#34;b\'c"| B');
+    assert.equal(print('a"b'), 'A -->|"a#34;b"| B');
+    assert.equal(print('x(y)'), 'A -->|"x(y)"| B');
     assert.equal(print('a --> b'), 'A -->|a --> b| B');
   });
 });

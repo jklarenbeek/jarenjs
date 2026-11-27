@@ -183,17 +183,34 @@ label may run over lines, as Mermaid reads it: a line holding an odd number
 of `"` that does not read on its own reads on to the line that closes the
 quote, each line trimmed and joined at a line break (`` n["`Line1
 Line 2`"] ``), in a node, an edge label or a subgraph title whose quote opens
-it (`subgraph s ["…`); a quote no line closes is refused at its line, as
-before. A `"` inside a node label that opens with no quote is refused, as
-Mermaid refuses it (`A[He said "hi]`, `mermaid/flowchart/quote-in-label`;
-write the quote as `#quot;` or quote the whole label): an empty `""` reads, a
-label in `'…'` (how `toMermaid` quotes one that holds a `"`) reads, and so
-does a `"` that may close a stray quote earlier in its statement
-(`A["x] --> B[y"]`, which Mermaid reads as one label). `subgraph` opens a subgraph
+it (`subgraph s ["…`); a quote no line closes is refused at its line (`A["x]`,
+`mermaid/flowchart/quote-unclosed`), as Mermaid refuses it. A label that opens
+with a `"` reads as Mermaid reads it: each `"…"` runs to the next `"` wherever
+it stands, past brackets and links (`A["x] --> B[y"]` is one node labelled
+`x] --> B[y`), and the text after a quoted unit joins it (`A["x"y]` is `xy`).
+A `"` outside the quoted unit a label opens with (in a label that opens with
+no quote, or a second quoted unit: `A["a"b"c"]`) is refused, as Mermaid
+refuses it: in a node (`A[He said "hi]`, `mermaid/flowchart/quote-in-label`), a
+link (`A -->|a"b| B`, `A -- a"b --> B`, `mermaid/flowchart/quote-in-link-label`)
+and a bracketed subgraph title (`subgraph s [say "x"]`,
+`mermaid/flowchart/quote-in-title`; a bare title reads as written, quotes and
+all, as Mermaid reads `subgraph a"b`); write the quote as `#quot;` or quote the
+whole label. `'…'` is no quoting to
+Mermaid, so a `"` inside it is refused too (`A['He said "Hi"']`); a label in
+`'…'` holding no `"` reads without its quotes, where Mermaid keeps them. An
+empty `""` in a node or link label, or a bracketed title, that opens with no
+quote is dropped, as Mermaid drops it (`A[a""b]` is `ab`). `subgraph` opens a subgraph
 only as a word of its own: `subgraph1 --> B` links a node `subgraph1`, as in
-Mermaid; a bare `subgraph` line (at most one blank after the keyword) is
+Mermaid; a bare `subgraph` (at most one blank after the keyword, on a line of
+its own or ending one after a `;`) is
 refused, as Mermaid refuses it (`mermaid/flowchart/subgraph-unnamed`), and two
-blanks or more open an untitled subgraph, as in Mermaid. A subgraph opened
+blanks or more open an untitled subgraph, as in Mermaid. An empty bracketed
+title (`subgraph s []`, `subgraph s [""]`) and a `subgraph ""` line with
+nothing after it are refused, as Mermaid refuses them
+(`mermaid/flowchart/subgraph-empty-title`); `subgraph s [ ]` reads with an empty
+title, and `subgraph "" ` (a blank after it) as an untitled subgraph, as in
+Mermaid. A subgraph no `end` closes is refused at the line that opens it, as
+Mermaid refuses it (`mermaid/flowchart/subgraph-unclosed`). A subgraph opened
 inside another is a member of it, and `toMermaid` prints it inside that one. Text after a node where a link belongs
 (`A --> B garbage`) is refused, as Mermaid refuses it. A `;` separates statements outside every label, where the
 statement reader finds labels (a quote counts only where it opens one, so the
@@ -335,7 +352,11 @@ guard, effect, parent }] }` — a composite state's members carry its id as
 inside `C`, or declaring an ancestor inside its own descendant, leaves it
 under the parent it already has); `state X` (or `state "Long" as X`, which
 labels X) whose `{` opens a later line opens X as `state X {` does, past
-comment lines (and blank ones, where Mermaid refuses a blank line between); a transition's `label` is the verbatim
+comment lines (and blank ones, where Mermaid refuses a blank line between);
+a `{` that follows no `state X` is refused, as Mermaid refuses it
+(`mermaid/state/brace-unopened`; it read as a state `{`), and so is the `{`
+of a choice, fork or join (`state X <<choice>> {`,
+`mermaid/state/stereotype-composite`), which holds no states; a transition's `label` is the verbatim
 text after `:` (what renderers draw and `toMermaid` prints), and
 `event`/`guard`/`effect` are its UML reading, parsed as
 `event [guard] / effect` with every part optional: the first `[` opens
@@ -352,8 +373,10 @@ a title (quoted or not) and may follow a slice's value, as Mermaid reads
 them all; `toMermaid` prints the title on its own line. `accTitle` and
 `accDescr` lines (and an `accDescr { … }` block) are no slices. Any other line
 is refused, as Mermaid refuses it (`mermaid/pie/line`): a slice's label is
-quoted (`"Dogs" : 1` or `'Dogs' : 1`; `Dogs : 1` is refused; a label in
-`"…"` may hold a `"`, as it read before, where Mermaid refuses it) and its value a
+quoted (`"Dogs" : 1` or `'Dogs' : 1`; `Dogs : 1` is refused, and so is a `"`
+inside `"…"`, `"a"b" : 1`, as Mermaid refuses it; an entity code in it reads
+as the character Mermaid draws, `"a#34;b"` is `a"b`, `#9829;` is ♥, as every
+renderer here decodes one) and its value a
 number of zero or more as Mermaid writes one (no sign, no leading zero, no
 bare `.`), and the header holds only `showData` and the title
 (`pie titled`, `pie foo showData` are refused, `mermaid/pie/header`). With
@@ -755,18 +778,23 @@ plain spelling would introduce the states in another order, it declares every
 state first. The class printer writes a member that holds a `}` or starts with
 `%%` as a `Name : member` line, because a body ends at its first `}` and drops
 comment-looking lines; the pie printer writes a label's line break as `<br/>`,
-a label holding a `"` (and no `'`) in `'…'`, which Mermaid reads, and a value
+a label holding a `"` (and no `'`) in `'…'`, which Mermaid reads, one holding
+both quote kinds in `"…"` with the `"` as its code `#34;`, a `#` that would
+open a code as `#35;` (so every label reads back as itself), and a value
 as a plain decimal. The flowchart printer writes a markdown string
 in quotes (`` ["`**a**`"] ``, `` |"`b`"| ``), which Mermaid needs to read it as
 one, its line breaks as newlines inside the quotes (one holding a quote of its
-own writes `<br/>`), and an edge label in the pipe form, quoted where it holds a `|` or a `;` or
-starts or ends with a quote or a space (`` |"semi;colon"| ``), so every label
-reads back as the same graph. Mermaid has no escape inside quotes, so a label
-that no quoting can hold prints one character as its decimal entity code, which
-draws as that character and reads back as the code: `"` as `#34;` where a label
-holds both quote kinds beside a `;` or its own closer, and the closer (`|`, `]`,
-`)`, `}`) where a label holds it beside a link operator (`a --> b|c` prints
-`` |"a --> b#124;c"| ``).
+own writes `<br/>`), and an edge label in the pipe form, quoted where it holds a `|`, a `;` or
+a bracket or starts or ends with a quote or a space (`` |"semi;colon"| ``,
+`` |"imports (one way)"| ``; a subgraph title is quoted where it holds a bracket
+or a `;`), so every label reads back as the same graph. Mermaid reads a `"` in
+no label and has no escape inside quotes, so a label holding a `"` prints in
+`"…"` with each `"` as its decimal entity code `#34;`, which draws as the quote
+and reads back as the code (`A['He said "Hi"']` reads, and prints
+`A["He said #34;Hi#34;"]`); the ER and class printers write a `"` inside any
+quoted name, alias, comment, label or cardinality the same way. A label
+holding a link operator beside its closer prints whole in its quotes
+(`` |"a --> b|c"| ``), since a quoted unit runs to its partner.
 
 The printer is canonical, not verbatim: it does not preserve source
 whitespace or comments. Two round-trip modes coexist:

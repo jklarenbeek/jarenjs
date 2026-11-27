@@ -4,9 +4,9 @@
  * The reverse arrow of `parseMermaid`, mirroring
  * `@jarenjs/md`'s `to-md.js`: one specialized closure per diagram type,
  * a **round-trip fixed point** — `parseMermaid(toMermaid(doc))`
- * deep-equals `doc.ast` for the fully-modeled types (but for a label no
- * quoting can hold, which reads back spelled with an entity code: see
- * `labelSource`).
+ * deep-equals `doc.ast` for the fully-modeled types (but for a label
+ * holding a `"` where Mermaid reads none, which reads back spelled with its
+ * entity code `#34;`: see `labelSource` and `inQuotes`).
  *
  * The printer is *canonical*, not verbatim: it does not preserve source
  * whitespace or comments (the stored Markdown fence `value` gives
@@ -17,7 +17,6 @@
 import { parseState, stateStatements, stateDeclaration } from './parser/state.js';
 import { sequenceStatements } from './parser/sequence.js';
 import { printClick, printNodeClick } from './parser/click.js';
-import { RE_LINK_INSIDE } from './parser/flowchart.js';
 import { isMarkdownString } from './label-text.js';
 import { FLOW_NAMED_SHAPES } from './ast.js';
 
@@ -81,52 +80,55 @@ const RE_NEEDS_QUOTE = /[[\](){}<>|"';]|^[\s/\\]|[\s/\\]$/;
 /**
  * What a pipe-form edge label needs its quotes for: a `|` (which ends it), a
  * `;` (quoted, so the label is one unit to a reader that splits statements
- * before it reads labels), and a quote or a space at either end (stripped or
- * trimmed on the way back in).
+ * before it reads labels), a bracket (Mermaid refuses one in an unquoted
+ * label), and a quote or a space at either end (stripped or trimmed on the
+ * way back in).
  */
-const RE_EDGE_NEEDS_QUOTE = /[|;]|^[\s"']|[\s"']$/;
+const RE_EDGE_NEEDS_QUOTE = /[|;[\](){}]|^[\s"']|[\s"']$/;
 
 /**
  * What a subgraph title, which runs to its line's last `]`, needs its quotes
- * for: a quote or a space at either end.
+ * for: a bracket (Mermaid refuses one in an unquoted title), a `;` (as an
+ * entity code ends with one, so a coded title prints as it did when it held
+ * the quote), and a quote or a space at either end.
  */
-const RE_TITLE_NEEDS_QUOTE = /^[\s"']|[\s"']$/;
+const RE_TITLE_NEEDS_QUOTE = /[[\](){};]|^[\s"']|[\s"']$/;
 
 /**
  * A label as source text that reads back as the same label. A line break
  * prints as `<br/>` (printed raw it would end the statement), but in a
  * markdown string as itself, the quoted label running on to the next line. A label that
  * `needsQuote` matches, and a markdown string (unquoted, its backticks are
- * plain text), print quoted, in the quote kind the label does not hold; a
- * quoted label is one unit, so its delimiters are text.
+ * plain text), print in `"…"`; a quoted label is one unit, so its delimiters
+ * are text.
  *
- * Mermaid has no escape inside a quoted label, so two labels no quoting can
- * hold print one character as its entity code, which renders as that
- * character and reads back as the code: a label holding both quote kinds
- * beside a `;` or its own `closer` prints `"` as `#34;`, and a label holding
- * its `closer` beside a link operator (which ends a quoted unit) prints the
- * closer as its code (`|` as `#124;`).
+ * Mermaid reads a `"` in no label (it has no escape inside a quoted one, and
+ * refuses one in an unquoted one; `'…'` is no quoting to it), so a label
+ * holding a `"` prints in `"…"` with each `"` as its entity code `#34;`,
+ * which renders as the quote and reads back as the code.
  * @param {string} label
- * @param {string | null} closer the last character of the delimiter that ends
- *   the label in its statement (`]`, `)`, `}`, `|`), or `null` where the
- *   label runs to the end of its line
  * @param {RegExp} needsQuote what the label needs its quotes for where it stands
  * @returns {string}
  */
-function labelSource(label, closer, needsQuote) {
+function labelSource(label, needsQuote) {
   // a markdown string breaks its lines as Mermaid writes it, at a newline
   // inside its quotes (one with a quote of its own prints `<br/>`)
   let text = isMarkdownString(label) && !/["']/.test(label) ? label : label.replace(/\n/g, '<br/>');
-  if (closer !== null) {
-    const closes = text.includes(closer);
-    if (closes || text.includes(';')) {
-      if (text.includes('"') && text.includes("'")) text = text.replaceAll('"', '#34;');
-      if (closes && RE_LINK_INSIDE.test(text)) text = text.replaceAll(closer, `#${closer.charCodeAt(0)};`);
-    }
-  }
-  if (!needsQuote.test(text) && !isMarkdownString(text)) return text;
-  const quote = text.includes('"') && !text.includes("'") ? "'" : '"';
-  return quote + text + quote;
+  const coded = text.includes('"');
+  if (coded) text = text.replaceAll('"', '#34;');
+  if (!coded && !needsQuote.test(text) && !isMarkdownString(text)) return text;
+  return '"' + text + '"';
+}
+
+/**
+ * Text in `"…"`, where Mermaid has no escape: each `"` it holds written as
+ * its entity code `#34;`, which renders as the quote and reads back as the
+ * code.
+ * @param {string} text
+ * @returns {string}
+ */
+function inQuotes(text) {
+  return `"${text.replaceAll('"', '#34;')}"`;
 }
 
 /**
@@ -197,7 +199,7 @@ function printFlowchart(ast) {
   const inner = nestedSubgraphs(ast);
   const printSubgraph = (/** @type {any} */ sg, /** @type {string} */ indent) => {
     out.push(indent + (sg.label && sg.label !== ''
-      ? `subgraph ${sg.id} [${labelSource(sg.label, null, RE_TITLE_NEEDS_QUOTE)}]`
+      ? `subgraph ${sg.id} [${labelSource(sg.label, RE_TITLE_NEEDS_QUOTE)}]`
       : `subgraph ${sg.id}`));
     if (sg.direction) out.push(indent + '  direction ' + sg.direction);
     for (const id of sg.nodes) {
@@ -213,7 +215,7 @@ function printFlowchart(ast) {
   // 3. Edges in AST order.
   for (const e of ast.edges) {
     const op = edgeOp(e);
-    const label = e.label != null ? `|${labelSource(e.label, '|', RE_EDGE_NEEDS_QUOTE)}|` : '';
+    const label = e.label != null ? `|${labelSource(e.label, RE_EDGE_NEEDS_QUOTE)}|` : '';
     out.push(`${e.from} ${op}${label} ${e.to}`);
   }
 
@@ -268,7 +270,7 @@ const SHAPE_DELIMITERS = /** @type {Record<string, [string, string]>} */ ({
  */
 function wrapShape(shape, label) {
   const [open, close] = Object.hasOwn(SHAPE_DELIMITERS, shape) ? SHAPE_DELIMITERS[shape] : ['[', ']'];
-  return open + labelSource(label, close[close.length - 1], RE_NEEDS_QUOTE) + close;
+  return open + labelSource(label, RE_NEEDS_QUOTE) + close;
 }
 
 /**
@@ -409,7 +411,7 @@ function printClass(ast) {
     // refuses it in a bare one)
     const written = cls.generic == null ? name(cls.name)
       : cls.generic.includes('~') ? `\`${cls.name}~${cls.generic}~\`` : `${name(cls.name)}~${cls.generic}~`;
-    const head = `class ${written}${cls.label !== cls.name ? `["${cls.label}"]` : ''}`;
+    const head = `class ${written}${cls.label !== cls.name ? `[${inQuotes(cls.label)}]` : ''}`;
     if (cls.members.length === 0) {
       out.push(head);
     }
@@ -426,8 +428,8 @@ function printClass(ast) {
     }
   }
   for (const r of ast.relations) {
-    const fromCard = r.fromCardinality === undefined ? '' : ` "${r.fromCardinality}"`;
-    const toCard = r.toCardinality === undefined ? '' : `"${r.toCardinality}" `;
+    const fromCard = r.fromCardinality === undefined ? '' : ` ${inQuotes(r.fromCardinality)}`;
+    const toCard = r.toCardinality === undefined ? '' : `${inQuotes(r.toCardinality)} `;
     out.push(`${name(r.from)}${fromCard} ${r.type} ${toCard}${name(r.to)}${r.label ? ' : ' + r.label : ''}`);
   }
   for (const click of ast.clicks ?? []) out.push(printNodeClick(click));
@@ -545,14 +547,15 @@ function printStateLines(ast, declareAll) {
 }
 
 /**
- * A relationship label as Mermaid reads it: one word that does not open
- * with a quote as it stands, anything else (a space, nothing at all) in quotes — Mermaid has no escape inside
- * them, so a quote there prints as its entity code, which the drawing decodes.
+ * A relationship label as Mermaid reads it: one word with no quote and no
+ * `;` as it stands, anything else (a space, a quote, nothing at all) in
+ * quotes (`inQuotes`), so a coded label prints as it did when it held the
+ * quote.
  * @param {string} label
  * @returns {string}
  */
 function erLabel(label) {
-  return /^[^\s"]\S*$/.test(label) ? label : `"${label.replaceAll('"', '#34;')}"`;
+  return /^[^\s";]+$/.test(label) ? label : inQuotes(label);
 }
 
 /**
@@ -561,14 +564,16 @@ function erLabel(label) {
  */
 function printEr(ast) {
   const out = ['erDiagram'];
-  // a name with a space must be quoted to read back as one name
-  const name = (/** @type {string} */ n) => (/\s/.test(n) ? `"${n}"` : n);
+  // a name with a space must be quoted to read back as one name, and one
+  // with a quote is quoted with the quote as its code (a `;` quoted too, so
+  // a coded name prints as it did when it held the quote)
+  const name = (/** @type {string} */ n) => (/[\s";]/.test(n) ? inQuotes(n) : n);
   for (const e of ast.entities) {
-    const head = name(e.name) + (e.alias === undefined ? '' : /^[^\s"\]]+$/.test(e.alias) ? `[${e.alias}]` : `["${e.alias}"]`);
+    const head = name(e.name) + (e.alias === undefined ? '' : /^[^\s"\];]+$/.test(e.alias) ? `[${e.alias}]` : `[${inQuotes(e.alias)}]`);
     if (e.attributes.length === 0) { out.push(head); continue; }
     out.push(`${head} {`);
     for (const a of e.attributes) {
-      out.push(`  ${a.type} ${a.name}${a.keys.length ? ' ' + a.keys.join(', ') : ''}${a.comment === undefined ? '' : ` "${a.comment}"`}`);
+      out.push(`  ${a.type} ${a.name}${a.keys.length ? ' ' + a.keys.join(', ') : ''}${a.comment === undefined ? '' : ` ${inQuotes(a.comment)}`}`);
     }
     out.push('}');
   }
@@ -602,13 +607,20 @@ function printPie(ast) {
   const out = ['pie' + (ast.showData ? ' showData' : '')];
   if (ast.title) out.push('title ' + ast.title);
   for (const s of ast.slices) {
-    const label = s.label.replace(/\n/g, '<br/>');
-    // a label holding a `"` (and no `'`) is written in `'…'`, which Mermaid reads
-    const quote = label.includes('"') && !label.includes("'") ? "'" : '"';
-    out.push(`${quote}${label}${quote} : ${plainDecimal(s.value)}`);
+    // the reader decodes a slice's entity codes, so a `#` that would open one
+    // is written as its code `#35;`
+    const label = s.label.replace(/\n/g, '<br/>').replace(RE_CODE_HASH, '#35;');
+    // a label holding a `"` (and no `'`) is written in `'…'`, which Mermaid
+    // reads; one holding both kinds in `"…"`, each `"` as its code `#34;`
+    // (Mermaid has no escape inside the quotes)
+    const quoted = label.includes('"') && !label.includes("'") ? `'${label}'` : inQuotes(label);
+    out.push(`${quoted} : ${plainDecimal(s.value)}`);
   }
   return out.join('\n') + '\n';
 }
+
+/** A `#` that opens an entity code (`#34;`, `#quot;`). */
+const RE_CODE_HASH = /#(?=\w+;)/g;
 
 /**
  * A number as the plain decimal a pie row reads (`1e-7` is not one).

@@ -55,7 +55,8 @@ describe('flowchart — an inline edge label reads a quoted label as one unit', 
     assert.deepEqual(summary(parse('A == z ==> B')).edges, [['A', 'B', 'z']]);
     assert.deepEqual(summary(parse('A <-- w --> B')).edges, [['A', 'B', 'w']]);
     assert.deepEqual(summary(parse("A -- it's --> B")).edges, [['A', 'B', "it's"]]);
-    assert.deepEqual(summary(parse('A -- "a" b --> B')).edges, [['A', 'B', '"a" b']]);
+    // a quoted unit and the text after it join, as Mermaid reads them (it read `"a" b`)
+    assert.deepEqual(summary(parse('A -- "a" b --> B')).edges, [['A', 'B', 'a b']]);
   });
 });
 

@@ -61,9 +61,9 @@ describe('flowchart — a subgraph inside another', () => {
       [['two', 'two', ['b1', 'b2']], ['one', 'one', ['a1', 'a2', 'two']]]);
     assert.deepEqual(subgraphs('flowchart TB\n  subgraph A\n    subgraph B\n      subgraph C\n        c\n      end\n    end\n    x\n  end'),
       [['C', 'C', ['c']], ['B', 'B', ['C']], ['A', 'A', ['B', 'x']]]);
-    // one left open (which Mermaid refuses, and this reader closes at the end
-    // of the diagram) closes inside the one around it
-    assert.deepEqual(subgraphs('flowchart TB\n  subgraph one\n    subgraph two\n      b'), [['two', 'two', ['b']], ['one', 'one', ['two']]]);
+    // one left open is refused, as Mermaid refuses it (it was closed at the
+    // end of the diagram)
+    refuses('flowchart TB\n  subgraph one\n    subgraph two\n      b', 'mermaid/flowchart/subgraph-unclosed', 3, { id: 'two' });
   });
 
   it('prints inside the subgraph around it, and reads back as the same tree', () => {
@@ -136,11 +136,11 @@ describe('flowchart — a quote inside a node label that is not quoted', () => {
     refuses('flowchart LR\n  A[x] --> B[y"z]', 'mermaid/flowchart/quote-in-label', 2, { id: 'B' });
   });
 
-  it('still reads the shapes that read before: an empty `""`, a label in quotes, and a quote that may close a stray one', () => {
+  it('still reads the shapes that read before: an empty `""` (dropped, as Mermaid drops it), a quote as its code, and a quote closed in a later bracket (one label, as Mermaid reads it)', () => {
     const labels = (/** @type {string} */ source) => ast(source).nodes.map((/** @type {any} */ n) => [n.id, n.label]);
-    assert.deepEqual(labels('flowchart LR\n  A[a""b]'), [['A', 'a""b']]);
-    assert.deepEqual(labels('flowchart LR\n  A[\'He said "Hi"\']'), [['A', 'He said "Hi"']]);
-    assert.deepEqual(labels('flowchart LR\n  A["x] --> B[y"]'), [['A', '"x'], ['B', 'y"']]);
+    assert.deepEqual(labels('flowchart LR\n  A[a""b]'), [['A', 'ab']]);
+    assert.deepEqual(labels('flowchart LR\n  A["He said #34;Hi#34;"]'), [['A', 'He said #34;Hi#34;']]);
+    assert.deepEqual(labels('flowchart LR\n  A["x] --> B[y"]'), [['A', 'x] --> B[y']]);
     assert.deepEqual(labels('flowchart LR\n  A[He said &quot;hi]'), [['A', 'He said &quot;hi']]);
   });
 });
@@ -179,12 +179,13 @@ describe('pie — a line that is no slice, title or accessibility line', () => {
     }
   });
 
-  it('prints a label holding a `"` in `\'…\'`, which Mermaid reads, and reads every printed label back', () => {
+  it('prints a label holding a `"` in `\'…\'`, which Mermaid reads, one holding both kinds with the `"` as its code, and reads every printed label back as itself', () => {
     const tree = { diagram: 'pie', title: null, showData: false,
       slices: [{ label: 'a"b', value: 1 }, { label: "it's", value: 2 }, { label: 'both "x" it\'s', value: 3 }] };
     const text = toMermaid(tree);
-    // Mermaid has no spelling for a label holding both quote kinds; it reads here, as before
-    assert.equal(text, 'pie\n\'a"b\' : 1\n"it\'s" : 2\n"both "x" it\'s" : 3\n');
+    // Mermaid has no escape inside quotes: a label holding both quote kinds
+    // prints its `"` as the code, which reads back as the quote it draws
+    assert.equal(text, 'pie\n\'a"b\' : 1\n"it\'s" : 2\n"both #34;x#34; it\'s" : 3\n');
     assert.deepEqual(ast(text).slices, tree.slices);
   });
 

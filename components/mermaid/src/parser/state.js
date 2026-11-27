@@ -118,6 +118,8 @@ const RE_TRANSITION_AT = new RegExp(`${ID}\\s*-->\\s*${ID}(?:\\s*:(?!::)(.*))?`,
 const RE_STATE_AT = new RegExp(`${ID}(?=\\s|$)`, 'y');
 /** `state X <<choice>>` (the fork/join/choice kind is not kept), `state X:::class <<fork>>`. */
 const RE_STATE_DECL = new RegExp(`^state\\s+${ID}\\s+<<\\w+>>$`);
+/** A composite head that names a kind: `state X <<choice>>`, its id and its kind. */
+const RE_STEREOTYPE_HEAD = /^state\s+(\S+?)(?::::\S+)?\s+<<(\w+)>>$/;
 /** `state X` or `state X:::class` with nothing after it, which Mermaid reads as no state. */
 const RE_STATE_PLAIN = new RegExp(`^state\\s+${ID}$`);
 /** Lines Mermaid reads as styling or accessibility text, which this tree does not keep. */
@@ -262,10 +264,17 @@ export function parseState(lines, lineOffset = 0) {
    */
   const read = (line, lineNo) => {
     if (line === 'end' || line === '}') { parentStack.pop(); return; }
+    // a `{` that follows no `state X` (on its line or the next) opens
+    // nothing, and Mermaid refuses it, where it was read as a state `{`
+    if (line.startsWith('{')) failWith('mermaid/state/brace-unopened', {}, lineNo);
 
     // Composite state opener: `state Foo {`, `state "Long name" as Foo {`
     if (line.startsWith('state ') && line.endsWith('{')) {
-      openComposite(line.slice(0, -1).trim());
+      const head = line.slice(0, -1).trim();
+      // a choice, fork or join holds no states: Mermaid refuses its `{`
+      const kind = RE_STEREOTYPE_HEAD.exec(head);
+      if (kind !== null) failWith('mermaid/state/stereotype-composite', { id: kind[1], kind: kind[2] }, lineNo);
+      openComposite(head);
       return;
     }
 
