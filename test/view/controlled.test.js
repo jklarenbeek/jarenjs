@@ -14,11 +14,15 @@
  * browser does; a test simulates a user edit by writing the property directly.
  * Caret/IME behavior across real engines is the browser-suite follow-up the
  * review calls for — not expressible against a Node stub.
+ *
+ * The controlled reading is the serializer's: an `input`'s `checked` is
+ * checked when its attribute is present, its `value` the attribute's text,
+ * so the live control shows what server markup shows.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
-import { createDomRenderer } from '@jarenjs/view';
+import { createDomRenderer, renderToString } from '@jarenjs/view';
 
 import { createStubHost, fire } from './dom.stub.js';
 
@@ -296,5 +300,108 @@ describe("controlled: 'focus' — the operator's focused edit holds until blur",
       assert.throws(() => createDomRenderer(container, { document, controlled: /** @type {any} */ (controlled) }),
         (/** @type {any} */ error) => error instanceof TypeError && /controlled option is 'focus'/.test(error.message));
     }
+  });
+});
+
+describe('controlled inputs — read as the attribute the serializer writes', () => {
+  it('a checkbox is checked when its attribute is present: any value but null and false', () => {
+    /** @type {Array<[any, boolean, string]>} */
+    const cases = [
+      ['x', true, '<input type="checkbox" checked="x">'],
+      [1, true, '<input type="checkbox" checked="1">'],
+      [0, true, '<input type="checkbox" checked="0">'],
+      ['', true, '<input type="checkbox" checked="">'],
+      ['false', true, '<input type="checkbox" checked="false">'],
+      [true, true, '<input type="checkbox" checked>'],
+      [false, false, '<input type="checkbox">'],
+      [null, false, '<input type="checkbox">'],
+    ];
+    for (const [checked, want, markup] of cases) {
+      const vnode = ['input', { type: 'checkbox', checked }];
+      assert.strictEqual(renderToString(vnode), markup, JSON.stringify(checked));
+      const h = host();
+      h.render(vnode);
+      assert.strictEqual(h.root().checked, want, JSON.stringify(checked));
+      // and reasserted over the user's toggle
+      h.root().checked = !want;
+      h.render(['input', { type: 'checkbox', checked }]);
+      assert.strictEqual(h.root().checked, want, `${JSON.stringify(checked)} reasserted`);
+    }
+  });
+
+  it('an input\'s value is its attribute\'s text: true is the empty value, false and null none', () => {
+    /** @type {Array<[any, string, string]>} */
+    const cases = [
+      [true, '', '<input value>'],
+      [false, '', '<input>'],
+      [null, '', '<input>'],
+      [0, '0', '<input value="0">'],
+      ['v', 'v', '<input value="v">'],
+      [['a', 'b'], 'a,b', '<input value="a,b">'],
+    ];
+    for (const [value, want, markup] of cases) {
+      const vnode = ['input', { value }];
+      assert.strictEqual(renderToString(vnode), markup, JSON.stringify(value));
+      const h = host();
+      h.render(vnode);
+      assert.strictEqual(h.root().value, want, JSON.stringify(value));
+      h.root().value = 'typed';
+      h.render(['input', { value }]);
+      assert.strictEqual(h.root().value, want, `${JSON.stringify(value)} reasserted`);
+    }
+  });
+
+  it('a textarea\'s and a select\'s value keep the text the serializer writes for it', () => {
+    for (const [value, want] of [[true, 'true'], [false, 'false'], [null, ''], [0, '0']]) {
+      const h = host();
+      h.render(['textarea', { value }]);
+      assert.strictEqual(h.root().value, want);
+      assert.strictEqual(renderToString(['textarea', { value }]), `<textarea>${want}</textarea>`);
+    }
+    const h = host();
+    h.render(['select', { value: true }, ['option', { value: 'true' }, 'T'], ['option', { value: '' }, '-']]);
+    assert.strictEqual(h.root().value, 'true');
+    assert.strictEqual(renderToString(['select', { value: true }, ['option', { value: 'true' }, 'T']]), '<select><option value="true" selected>T</option></select>');
+  });
+
+  it('a widget\'s host control takes its value and checked as the attribute the serializer writes; the widget owns the live value', () => {
+    const widgets = { w: { mount() {} } };
+    /** @type {Array<[any, Array<[string, string]>, string]>} */
+    const cases = [
+      [{ tag: 'input', value: 'x' }, [['value', 'x']], '<input value="x"></input>'],
+      [{ tag: 'input', type: 'checkbox', checked: true }, [['type', 'checkbox'], ['checked', '']], '<input type="checkbox" checked></input>'],
+      [{ tag: 'input', type: 'checkbox', checked: 0 }, [['type', 'checkbox'], ['checked', '0']], '<input type="checkbox" checked="0"></input>'],
+      [{ tag: 'textarea', value: 'x' }, [['value', 'x']], '<textarea value="x"></textarea>'],
+      [{ tag: 'select', value: 'x' }, [['value', 'x']], '<select value="x"></select>'],
+      [{ tag: 'input', value: false, checked: null }, [], '<input></input>'],
+    ];
+    for (const [props, attributes, markup] of cases) {
+      const vnode = ['jaren-widget', { name: 'w', ...props }];
+      assert.strictEqual(renderToString(vnode, { widgets }), markup);
+      const { document, container } = createStubHost();
+      const render = createDomRenderer(container, { document, widgets });
+      render(vnode);
+      const node = /** @type {any} */ (container.childNodes[0]);
+      assert.deepStrictEqual([...node.attributes], attributes, JSON.stringify(props));
+      assert.strictEqual(node.__jarenControlled, undefined);
+      // the widget's live edit is its own: a re-render does not reassert it
+      node.value = 'widget';
+      render(['jaren-widget', { name: 'w', ...props, class: 'c' }]);
+      assert.strictEqual(node.value, 'widget');
+      render.destroy();
+    }
+  });
+
+  it('a widget host\'s value attribute follows a patch and leaves with the prop', () => {
+    const widgets = { w: { mount() {} } };
+    const { document, container } = createStubHost();
+    const render = createDomRenderer(container, { document, widgets });
+    render(['jaren-widget', { name: 'w', tag: 'input', value: 'a', checked: true }]);
+    const node = /** @type {any} */ (container.childNodes[0]);
+    render(['jaren-widget', { name: 'w', tag: 'input', value: true, checked: false }]);
+    assert.deepStrictEqual([...node.attributes], [['value', '']]);
+    render(['jaren-widget', { name: 'w', tag: 'input' }]);
+    assert.deepStrictEqual([...node.attributes], []);
+    render.destroy();
   });
 });

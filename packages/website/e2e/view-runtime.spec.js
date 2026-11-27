@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { renderToString } from '../../view/src/index.js';
-import { SAFE_CORPUS } from '../../../test/view/interactive-corpus.js';
+import { CONTROLLED_CORPUS, SAFE_CORPUS } from '../../../test/view/interactive-corpus.js';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const bundle = await build({ stdin: { contents: "export * from '@jarenjs/view';", resolveDir: root },
@@ -281,6 +281,31 @@ test('interactive profile: the safe corpus renders as safe does, in the DOM and 
     return { failures, events, attacked: window.attacked };
   }, SAFE_CORPUS);
   expect(result).toEqual({ failures: [], events: 0, attacked: false });
+});
+
+test('interactive profile: a textarea and a select show the value the serializer writes', async ({ page }) => {
+  const failures = await page.evaluate((corpus) => {
+    const { createDomRenderer, renderToString } = window.JarenTest;
+    const host = document.createElement('div');
+    document.body.append(host);
+    const render = createDomRenderer(host, { safe: 'interactive', onEvent: () => {} });
+    const state = (node) => ({ value: node.value, selected: [...(node.options ?? [])].map((o) => o.selected) });
+    const failures = [];
+    for (const { name, vnode } of corpus) {
+      for (const frame of [['div', { key: 'same' }, 'before'], vnode, ['span', {}, 'removed'], vnode]) {
+        render(frame);
+        if (frame !== vnode) continue;
+        const parsed = document.createElement('div');
+        // Test-only: compare how the browser parses the interactive serializer.
+        parsed.innerHTML = renderToString(frame, { safe: 'interactive' });
+        const live = state(host.firstElementChild), server = state(parsed.firstElementChild);
+        if (JSON.stringify(live) !== JSON.stringify(server) || host.firstElementChild.hasAttribute('value')) failures.push({ name, live, server });
+      }
+    }
+    render.destroy();
+    return failures;
+  }, CONTROLLED_CORPUS);
+  expect(failures).toEqual([]);
 });
 
 test('interactive profile: only gesture bindings fire, and the handler sees data, never the Event', async ({ page }) => {

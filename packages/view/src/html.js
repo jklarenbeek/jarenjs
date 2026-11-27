@@ -155,9 +155,10 @@ function serializeProps(props, skip, policy, onUnsafe, tag) {
  *   {@link createDomRenderer} applies, so a document renders to the same safe
  *   markup on the server as on the client. `'interactive'` serializes a
  *   widget `capabilities.widgets` grants (its host element, around its `ssr`
- *   fallback, both through the policy) and reports the `on` bindings the
- *   DOM renderer would drop; no binding is ever markup. Any other truthy
- *   value is `true`.
+ *   fallback, both through the policy), writes a `textarea`'s and a
+ *   `select`'s `value` in the trusted form (the text, `selected` options),
+ *   and reports the `on` bindings the DOM renderer would drop; no binding
+ *   is ever markup. Any other truthy value is `true`.
  * @property {{ widgets?: string[] }} [capabilities] - Under
  *   `safe: 'interactive'`, the registered widget names the document may
  *   render, exactly as {@link createDomRenderer} reads it.
@@ -292,14 +293,24 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
     if (policy.dropsEvents) onUnsafe({ kind: 'event', name: 'on' });
     else reportEvents(policy, props.on, onUnsafe);
   }
-  const controlledTextarea = policy === null && tag === 'textarea' && 'value' in props;
-  const controlledSelect = policy === null && tag === 'select' && 'value' in props;
+  // A controlled textarea or select is written in the form a parser reads
+  // its value from: trusted, and under the interactive profile, which
+  // controls the value the policy keeps (`control`); `safe: true` keeps the
+  // attribute.
+  const control = policy !== null && (tag === 'textarea' || tag === 'select') ? policy.control(tag, props) : null;
+  const controlledTextarea = tag === 'textarea' && (policy === null ? 'value' in props : control !== null);
+  const controlledSelect = tag === 'select' && (policy === null ? 'value' in props : control !== null);
+  const controlValue = control !== null ? control.value : props.value;
+  // the value the DOM renderer's `setProp` reports stripped before it drops
+  // the attribute, reported alike
+  if (control !== null && onUnsafe !== null && props.value != null && policy?.prop('value', props.value, tag)?.value == null)
+    onUnsafe({ kind: 'prop', name: 'value' });
   if (tag === 'select') {
     const multiple = props.multiple != null && props.multiple !== false;
     selection = controlledSelect ? {
-      values: new Set(multiple && Array.isArray(props.value)
-        ? props.value.map(String) : [props.value == null ? '' : String(props.value)]),
-      multiple: multiple && Array.isArray(props.value), matched: false,
+      values: new Set(multiple && Array.isArray(controlValue)
+        ? controlValue.map(String) : [controlValue == null ? '' : String(controlValue)]),
+      multiple: multiple && Array.isArray(controlValue), matched: false,
     } : null;
   }
   const controlledOption = tag === 'option' && selection !== null;
@@ -307,9 +318,12 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
     controlledTextarea || controlledSelect ? VALUE_SKIP_PROPS
       : controlledOption ? OPTION_SKIP_PROPS : SKIP_PROPS, policy, onUnsafe, tag);
   if (controlledOption) {
-    const value = props.value == null || props.value === false
+    // the option's value as its markup says it: the attribute the policy
+    // writes, else the option's text
+    const own = policy === null ? props.value : policy.prop('value', props.value, tag)?.value;
+    const value = own == null || own === false
       ? optionText(vnode).replace(/[\t\n\f\r ]+/g, ' ').replace(/^ | $/g, '')
-      : props.value === true ? '' : String(props.value);
+      : own === true ? '' : String(own);
     if (selection.values.has(value) && (selection.multiple || !selection.matched)) {
       out += ' selected';
       selection.matched = true;
@@ -320,7 +334,7 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
   }
   out += '>';
   if (controlledTextarea) {
-    const value = props.value == null ? '' : String(props.value);
+    const value = controlValue == null ? '' : String(controlValue);
     // HTML normalizes CR/CRLF to LF and consumes one leading LF in a
     // textarea. Protect an authored newline with an extra LF.
     return out + (/^[\r\n]/.test(value) ? '\n' : '') + escapeText(value) + '</' + tag + '>';

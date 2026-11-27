@@ -4,9 +4,11 @@
  * `value`/`checked` is authoritative there as in trusted mode, so app state
  * resets a field the user edited — reasserted to what the control's
  * attributes say, which is what the serializer's markup starts from. The
- * attribute itself is written as before, so markup is unchanged; `safe: true`
- * stays attribute-only, a file input's value is never assigned, and a
- * `textarea` or `select` keeps the attribute-only display.
+ * attribute itself is written as before, so markup is unchanged. A
+ * `textarea`'s and a `select`'s `value` is authoritative too, written by the
+ * serializer in the trusted form (the text, `selected` options) and by the
+ * DOM renderer as no attribute. `safe: true` stays attribute-only and a file
+ * input's value is never assigned.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
@@ -153,18 +155,148 @@ describe('interactive profile — state resets an input the user edited', () => 
     assert.equal(h.root().value, 'typed', 'an uncontrolled field keeps what the user typed');
   });
 
-  it('a textarea and a select keep the attribute-only display', () => {
+  it('reasserts a textarea and a select, as the trusted renderer does; safe: true keeps the attribute', () => {
+    const OPTIONS = [['option', { value: '' }, '-'], ['option', { value: 'a' }, 'A'], ['option', { value: 'b' }, 'B']];
+    /** @param {string} v */
+    const doc = (v) => ['div', {}, ['textarea', { value: v }], ['select', { value: v }, ...OPTIONS],
+      ['select', { multiple: true, value: v === '' ? [] : ['a', v] }, ...OPTIONS]];
+    /** @type {Record<string, any>} */
+    const answers = {};
+    for (const safe of [false, INTERACTIVE, true]) {
+      const h = host({ safe });
+      h.render(doc('b'));
+      const [area, select, multi] = h.root().childNodes;
+      const initial = { area: area.value, select: select.value, multi: multi.options.map((o) => o.selected === true) };
+      area.value = 'typed';
+      select.value = 'a';
+      multi.options[0].selected = true;
+      h.render(doc(''));
+      answers[String(safe)] = {
+        initial, reset: { area: area.value, select: select.value, multi: multi.options.map((o) => o.selected === true) },
+        attributes: [area, select, multi].map((node) => node.getAttribute('value')),
+      };
+    }
+    assert.deepEqual(answers.false, {
+      initial: { area: 'b', select: 'b', multi: [false, true, true] },
+      reset: { area: '', select: '', multi: [false, false, false] },
+      attributes: [null, null, null],
+    });
+    assert.deepEqual(answers.interactive, answers.false);
+    // attribute-only: the stub reflects no attribute, and the edit survives
+    assert.deepEqual(answers.true, {
+      initial: { area: '', select: '', multi: [false, false, false] },
+      reset: { area: 'typed', select: 'a', multi: [true, false, false] },
+      attributes: ['', '', ''],
+    });
+  });
+
+  it('serializes a textarea\'s text and a select\'s selection as trusted mode does', () => {
+    const vnode = ['div', {}, ['textarea', { value: 'x' }, 'y'], ['select', { value: 'b' }, ['option', { value: 'a' }, 'A'], ['option', { value: 'b' }, 'B']]];
+    const expected = '<div><textarea>x</textarea><select><option value="a">A</option><option value="b" selected>B</option></select></div>';
+    assert.equal(renderToString(vnode, { safe: INTERACTIVE }), expected);
+    assert.equal(renderToString(vnode), expected);
+    assert.equal(renderToString(vnode, { safe: true }),
+      '<div><textarea value="x">y</textarea><select value="b"><option value="a">A</option><option value="b">B</option></select></div>');
+    // a leading newline survives the parser, as in trusted mode
+    assert.equal(renderToString(['textarea', { value: '\nx' }], { safe: INTERACTIVE }), '<textarea>\n\nx</textarea>');
+  });
+
+  it('reads a textarea\'s and a select\'s value as trusted mode does, of the value the policy keeps', () => {
+    /** @type {Array<[any, string]>} */
+    const areas = [[null, ''], [true, 'true'], [false, 'false'], [0, '0'], ['<b>', '&lt;b&gt;'], [['a', 'b'], 'a,b']];
+    for (const [value, text] of areas) {
+      const vnode = ['textarea', { value }];
+      assert.equal(renderToString(vnode, { safe: INTERACTIVE }), `<textarea>${text}</textarea>`, JSON.stringify(value));
+      assert.equal(renderToString(vnode), `<textarea>${text}</textarea>`, JSON.stringify(value));
+      const h = host({ safe: INTERACTIVE });
+      h.render(vnode);
+      assert.equal(h.root().value, renderToString(vnode).slice(10, -11).replace('&lt;', '<').replace('&gt;', '>'), JSON.stringify(value));
+    }
+    // a value the policy strips (an object) is reported by both renderers and reads ''
+    const stripped = ['textarea', { value: { a: 1 } }, 'kept'];
     const h = host({ safe: INTERACTIVE });
-    const vnode = ['div', {}, ['textarea', { value: 'x' }], ['select', { value: 'b' }, ['option', { value: 'a' }, 'A'], ['option', { value: 'b' }, 'B']]];
-    h.render(vnode);
-    const [area, select] = h.root().childNodes;
-    area.value = 'typed';
-    select.value = 'a';
-    h.render(vnode);
-    assert.deepEqual({ area: area.value, select: select.value }, { area: 'typed', select: 'a' });
-    assert.equal(area.getAttribute('value'), 'x');
-    assert.equal(renderToString(vnode, { safe: INTERACTIVE }),
-      '<div><textarea value="x"></textarea><select value="b"><option value="a">A</option><option value="b">B</option></select></div>');
+    h.render(stripped);
+    assert.deepEqual({ value: h.root().value, attribute: h.root().getAttribute('value'), seen: h.seen }, { value: '', attribute: null, seen: ['prop:value'] });
+    /** @type {string[]} */
+    const seen = [];
+    assert.equal(renderToString(stripped, { safe: INTERACTIVE, onUnsafe: (info) => seen.push(`${info.kind}:${info.name}`) }), '<textarea></textarea>');
+    assert.deepEqual(seen, ['prop:value']);
+    // and `safe: true` reports it alike
+    seen.length = 0;
+    assert.equal(renderToString(stripped, { safe: true, onUnsafe: (info) => seen.push(`${info.kind}:${info.name}`) }), '<textarea>kept</textarea>');
+    assert.deepEqual(seen, ['prop:value']);
+  });
+
+  it('matches a select\'s options as their markup says: text, a stripped value, an optgroup, no match, a scalar on a multiple', () => {
+    const cases = [
+      // an option with no value matches by its normalized text
+      [['select', { value: 'Two words' }, ['option', {}, ' Two   words '], ['option', { value: 'x' }, 'X']],
+        '<select><option selected> Two   words </option><option value="x">X</option></select>'],
+      // a stripped (object) option value writes no attribute: its text is its value
+      [['select', { value: 'T' }, ['option', { value: { a: 1 } }, 'T'], ['option', { value: '[object Object]' }, 'O']],
+        '<select><option selected>T</option><option value="[object Object]">O</option></select>'],
+      // through an optgroup
+      [['select', { value: 'b' }, ['optgroup', { label: 'g' }, ['option', { value: 'a' }, 'A'], ['option', { value: 'b' }, 'B']]],
+        '<select><optgroup label="g"><option value="a">A</option><option value="b" selected>B</option></optgroup></select>'],
+      // no match: nothing selected, an authored `selected` overridden
+      [['select', { value: 'z' }, ['option', { value: 'a', selected: true }, 'A']], '<select><option value="a">A</option></select>'],
+      // a scalar on a multiple select selects the one option
+      [['select', { multiple: true, value: 'b' }, ['option', { value: 'a' }, 'A'], ['option', { value: 'b' }, 'B']],
+        '<select multiple><option value="a">A</option><option value="b" selected>B</option></select>'],
+      // a single select marks its first match only
+      [['select', { value: 'a' }, ['option', { value: 'a' }, '1'], ['option', { value: 'a' }, '2']],
+        '<select><option value="a" selected>1</option><option value="a">2</option></select>'],
+    ];
+    for (const [vnode, expected] of cases) {
+      assert.equal(renderToString(vnode, { safe: INTERACTIVE }), expected);
+    }
+  });
+
+  it('an inherited value is controlled, as trusted mode reads it; a Value spelling stays an attribute', () => {
+    const inherited = ['textarea', Object.create({ value: 'x' })];
+    const h = host({ safe: INTERACTIVE });
+    h.render(inherited);
+    assert.deepEqual({ value: h.root().value, markup: childMarkup(h.container) }, { value: 'x', markup: '<textarea></textarea>' });
+    assert.equal(renderToString(inherited, { safe: INTERACTIVE }), '<textarea>x</textarea>');
+    const spelled = ['select', { Value: 'b' }, ['option', { value: 'b' }, 'B']];
+    const g = host({ safe: INTERACTIVE });
+    g.render(spelled);
+    assert.equal(g.root().__jarenControlled, undefined);
+    assert.equal(childMarkup(g.container), '<select Value="b"><option value="b">B</option></select>');
+    assert.equal(renderToString(spelled, { safe: INTERACTIVE }), '<select Value="b"><option value="b">B</option></select>');
+  });
+
+  it('dropping a textarea\'s value releases its control and its listeners', () => {
+    const h = host({ safe: INTERACTIVE });
+    h.render(['textarea', { value: 'x' }]);
+    assert.equal(h.root().listeners.get('compositionstart')?.size, 1);
+    h.render(['textarea', {}]);
+    assert.equal(h.root().__jarenControlled, undefined);
+    assert.equal(h.root().listeners.get('compositionstart')?.size ?? 0, 0);
+    h.root().value = 'typed';
+    h.render(['textarea', {}]);
+    assert.equal(h.root().value, 'typed');
+    assert.equal(h.root().getAttribute('value'), null);
+  });
+
+  it('a textarea waits for composition and controlled: \'focus\' as in trusted mode', async () => {
+    /** @type {Record<string, any>} */
+    const answers = {};
+    for (const safe of [false, INTERACTIVE]) {
+      const h = host({ safe, controlled: 'focus' });
+      h.render(['textarea', { value: 'a' }]);
+      const area = h.root();
+      h.document.activeElement = area;
+      area.value = 'typing';
+      h.render(['textarea', { value: 'b' }]);
+      const focused = area.value;
+      h.document.activeElement = null;
+      fire(area, 'focusout');
+      await tick();
+      answers[String(safe)] = { focused, settled: area.value };
+    }
+    assert.deepEqual(answers.false, { focused: 'typing', settled: 'b' });
+    assert.deepEqual(answers.interactive, answers.false);
   });
 
   it('a granted widget\'s host input stays attribute-only: the widget owns it', () => {
@@ -173,16 +305,33 @@ describe('interactive profile — state resets an input the user edited', () => 
     const node = h.root();
     assert.equal(node.getAttribute('value'), 'x');
     assert.equal(node.__jarenControlled, undefined);
+    // a host textarea or select keeps its attribute too, in both renderers
+    for (const tag of ['textarea', 'select']) {
+      const g = host({ safe: INTERACTIVE, widgets: { w: { mount() {} } }, capabilities: { widgets: ['w'] } });
+      const vnode = ['jaren-widget', { name: 'w', tag, value: 'x' }];
+      g.render(vnode);
+      assert.equal(g.root().getAttribute('value'), 'x', tag);
+      assert.equal(g.root().__jarenControlled, undefined, tag);
+      assert.equal(renderToString(vnode, { safe: INTERACTIVE, widgets: { w: {} }, capabilities: { widgets: ['w'] } }), `<${tag} value="x"></${tag}>`);
+    }
   });
 });
 
 describe('createSafePolicy — the control decision', () => {
-  it('answers for an interactive input only, from the attributes it writes', () => {
+  it('answers for an interactive input from the attributes it writes, and a textarea and a select in the trusted form', () => {
     const plain = createSafePolicy();
     const policy = createSafePolicy({ interactive: true });
     assert.equal(plain.control('input', { value: 'a' }), null);
-    assert.equal(policy.control('textarea', { value: 'a' }), null);
-    assert.equal(policy.control('select', { value: 'a' }), null);
+    assert.equal(plain.control('textarea', { value: 'a' }), null);
+    assert.equal(plain.control('select', { value: 'a' }), null);
+    assert.equal(policy.control('div', { value: 'a' }), null);
+    assert.equal(policy.control('textarea', {}), null);
+    assert.equal(policy.control('select', { checked: true }), null);
+    assert.deepEqual(policy.control('textarea', { value: true }), { hasValue: true, hasChecked: false, value: 'true', checked: undefined });
+    assert.deepEqual(policy.control('textarea', { value: { a: 1 } }), { hasValue: true, hasChecked: false, value: '', checked: undefined });
+    assert.deepEqual(policy.control('select', { value: 7 }), { hasValue: true, hasChecked: false, value: '7', checked: undefined });
+    assert.deepEqual(policy.control('select', { value: null }), { hasValue: true, hasChecked: false, value: '', checked: undefined });
+    assert.deepEqual(policy.control('select', { value: ['a', 1] }), { hasValue: true, hasChecked: false, value: ['a', 1], checked: undefined });
     assert.equal(policy.control('input', { type: 'text' }), null);
     assert.deepEqual(policy.control('input', { value: 7 }), { hasValue: true, hasChecked: false, value: '7', checked: undefined });
     assert.deepEqual(policy.control('input', { checked: 'yes' }), { hasValue: false, hasChecked: true, value: undefined, checked: true });

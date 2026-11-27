@@ -335,3 +335,26 @@ export function removeProperty(node, name, oldValue) {
   }
   if (oldValue != null && oldValue !== false) node[name] = '';
 }
+
+/**
+ * The text an `input`'s `value` attribute holds, as the serializer writes
+ * it: `true` is the empty attribute, `false` and `null` write none, and
+ * any other value its string. The live value a controlled `input` is
+ * reasserted to, in every mode (VIEW-FORMAT §3).
+ * @param {any} value - the prop value
+ * @returns {string}
+ */
+export function attributeText(value) {
+  return value == null || typeof value === 'boolean' ? '' : String(value);
+}
+
+/**
+ * Whether a boolean attribute such as `checked` is present, as the
+ * serializer writes it and as `writeProperty` reads a boolean property:
+ * every value but `null`, `undefined` and `false` (`0` and `''` too).
+ * @param {any} value - the prop value
+ * @returns {boolean}
+ */
+export function attributePresent(value) {
+  return value != null && value !== false;
+}

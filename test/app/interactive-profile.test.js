@@ -143,6 +143,36 @@ describe('interactive app — a binding runs a declared action, and nothing else
     app.destroy();
   });
 
+  it('a state change resets a textarea and a select the user edited: both are controlled, their edits reach state through $event', () => {
+    const { app, root, errors } = boot({
+      state: { note: 'start', size: 'm' },
+      actions: {
+        write: { patch: [{ op: 'replace', path: '/note', value: '$event.value' }] },
+        pick: { patch: [{ op: 'replace', path: '/size', value: '$event.value' }] },
+        clear: { patch: [{ op: 'replace', path: '/note', value: '' }, { op: 'replace', path: '/size', value: 's' }] },
+      },
+      view: [{ match: '$', body: ['form', {},
+        ['textarea', { value: '$.note', on: { input: 'write' } }],
+        ['select', { value: '$.size', on: { change: 'pick' } },
+          ['option', { value: 's' }, 'S'], ['option', { value: 'm' }, 'M'], ['option', { value: 'l' }, 'L']],
+        ['button', { type: 'button', on: { click: 'clear' } }, 'clear']] }],
+    });
+    const [area, select, button] = root().childNodes;
+    assert.deepEqual({ area: area.value, select: select.value }, { area: 'start', select: 'm' });
+    assert.deepEqual([area.getAttribute('value'), select.getAttribute('value')], [null, null]);
+    area.value = 'typed';
+    fire(area, 'input', { target: area });
+    select.value = 'l';
+    fire(select, 'change', { target: select });
+    assert.deepEqual(app.getState(), { note: 'typed', size: 'l' });
+    assert.deepEqual({ area: area.value, select: select.value }, { area: 'typed', select: 'l' });
+    fire(button, 'click');
+    assert.deepEqual(app.getState(), { note: '', size: 's' });
+    assert.deepEqual({ area: area.value, select: select.value }, { area: '', select: 's' });
+    assert.deepEqual(errors, []);
+    app.destroy();
+  });
+
   it('withholds what was typed into a password field', () => {
     const { app, root } = boot({ ...COUNTER, view: [{ match: '$', body: ['input', { type: 'password', on: { input: { action: 'remember', event: ['selectionEnd'] }, keydown: { action: 'remember', event: ['code'] } } }] }] });
     const field = root();

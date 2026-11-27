@@ -53,13 +53,14 @@
  *  - **Widgets render only when the host granted their name** (`widget`), and
  *    only with data props; the renderers also hold a granted widget's host
  *    tag to the tag allow-list.
- *  - **An `input`'s `value` and `checked` are controlled** (`control`): the
- *    attribute is written as under `safe: true`, and the DOM renderer
- *    reasserts the live value to what that attribute says, so app state
- *    resets a field the user edited. The document writes only the value it
- *    owns; it reads what was typed only through the event projection. A file
- *    input's value is never assigned, and a `textarea` or `select` stays
- *    attribute-only.
+ *  - **Form controls are controlled** (`control`): an `input`'s `value` and
+ *    `checked` attribute is written as under `safe: true`, and the DOM
+ *    renderer reasserts the live value to what that attribute says; a
+ *    `textarea`'s and a `select`'s `value` is written in the trusted form (a
+ *    textarea's text, `selected` on the matching option) and reasserted, so
+ *    app state resets a field the user edited. The document writes only the
+ *    value it owns; it reads what was typed only through the event
+ *    projection. A file input's value is never assigned.
  *
  * The policy is a set of pure decisions. The DOM renderer and the SSR
  * serializer call the *same* functions, which is what guarantees the client
@@ -68,6 +69,7 @@
 
 import { sanitizeUrl } from './helpers/url.js';
 import { isElementName } from './vnode.js';
+import { attributePresent, attributeText } from './properties.js';
 
 /** A property name that is a bare identifier: a letter, then letters,
  * digits or hyphens. No spaces, `>`, `=`, `/`, colons or quotes — the
@@ -229,18 +231,23 @@ const RE_ID_PREFIX = /^[A-Za-z][A-Za-z0-9_-]*$/;
  *   this name, configured by these props, may render: granted by the host and
  *   fed data (always false for the default policy).
  * @property {(tag: string, props: Record<string, any>) => SafeControl | null} control -
- *   The authoritative state of a form control: for an `input` of the
- *   interactive profile with an own `value` or `checked`, what its attributes
- *   say, which the DOM renderer reasserts over a user edit; `null` for every
- *   other element and always for the default policy (attribute-only).
+ *   The authoritative state of a form control under the interactive
+ *   profile, which the DOM renderer reasserts over a user edit: for an
+ *   `input` with an own `value` or `checked`, what its attributes say; for a
+ *   `textarea` or `select` with a `value`, the text or the selection the
+ *   serializer writes in its place. `null` for every other element and
+ *   always for the default policy (attribute-only).
  */
 
 /**
  * @typedef {Object} SafeControl
  * @property {boolean} hasValue - Whether the control's `value` is authoritative.
  * @property {boolean} hasChecked - Whether its `checked` is authoritative.
- * @property {string | undefined} value - The value its `value` attribute
- *   writes (`''` when the attribute is absent or empty).
+ * @property {string | ReadonlyArray<string | number | boolean | null> | undefined} value -
+ *   An `input`'s: the value its `value` attribute writes (`''` when the
+ *   attribute is absent or empty). A `textarea`'s: its text (`''` for
+ *   `null` or a stripped value). A `select`'s: the option value it selects,
+ *   or a `multiple` select's list of them.
  * @property {boolean | undefined} checked - Whether its `checked` attribute
  *   is present.
  */
@@ -249,7 +256,7 @@ const RE_ID_PREFIX = /^[A-Za-z][A-Za-z0-9_-]*$/;
  * @typedef {Object} SafePolicyOptions
  * @property {boolean} [interactive=false] - Build the interactive profile's
  *   policy: data-only `on` bindings on {@link INTERACTIVE_EVENTS}, the
- *   granted widgets, and controlled `input` values.
+ *   granted widgets, and controlled form controls.
  * @property {Iterable<string>} [widgets] - The widget names the host granted
  *   (interactive only; none when absent).
  * @property {string} [idPrefix='jaren-u-'] - The render's id namespace: every
@@ -338,7 +345,23 @@ export function createSafePolicy(options = {}) {
     },
 
     control(tag, props) {
-      if (!interactive || tag !== 'input') return null;
+      if (!interactive) return null;
+      if (tag === 'textarea' || tag === 'select') {
+        // read as trusted mode reads it (an inherited `value` too: their
+        // attribute is one a parser ignores, so nothing falls back to it).
+        // The trusted form, of the value the policy keeps: a textarea's
+        // text, a select's value (a `multiple` one's list), which the
+        // serializer writes as text and `selected` options
+        if (!('value' in props)) return null;
+        const value = this.prop('value', props.value, tag)?.value;
+        return {
+          hasValue: true,
+          hasChecked: false,
+          value: tag === 'select' && Array.isArray(value) ? value : value == null ? '' : String(value),
+          checked: undefined,
+        };
+      }
+      if (tag !== 'input') return null;
       const hasValue = Object.hasOwn(props, 'value');
       const hasChecked = Object.hasOwn(props, 'checked');
       if (!hasValue && !hasChecked) return null;
@@ -349,8 +372,8 @@ export function createSafePolicy(options = {}) {
       return {
         hasValue,
         hasChecked,
-        value: hasValue ? (value == null || typeof value === 'boolean' ? '' : String(value)) : undefined,
-        checked: hasChecked ? checked != null && checked !== false : undefined,
+        value: hasValue ? attributeText(value) : undefined,
+        checked: hasChecked ? attributePresent(checked) : undefined,
       };
     },
 

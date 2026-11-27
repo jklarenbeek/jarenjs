@@ -61,9 +61,11 @@ describe('studio widgets under the interactive profile', () => {
     render(['jaren-widget', { name: 'data', props: { files: [], name: 'missing' } }]);
     const textarea = walk(container).find((node) => node.tagName === 'textarea');
     assert.ok(textarea, 'the widget drew');
-    // under the profile a control is attribute-only: the draft is the
-    // textarea's text, and the value is an attribute, not a property write
-    assert.equal(textarea.getAttribute('value'), '{"id":"n1","title":"New note","points":20}');
+    // under the profile the textarea is controlled: the draft is its live
+    // value, it writes no `value` attribute (a parser ignores one), and the
+    // widget's own text child still carries the draft
+    assert.equal(textarea.getAttribute('value'), null);
+    assert.equal(textarea.value, '{"id":"n1","title":"New note","points":20}');
     assert.equal(textarea.childNodes[0]?.nodeValue, '{"id":"n1","title":"New note","points":20}');
     // its own binding reads the typed text from the projection's target slice
     textarea.value = '{"id":"n2"}';

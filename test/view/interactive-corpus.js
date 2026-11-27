@@ -7,7 +7,9 @@
  * serializer. The vectors are the ones the safe-profile tests pin one by one
  * (safe.test.js, safe-update.test.js, safe-values.test.js and the browser
  * corpus), plus the neighbours of each: other spellings of a scheme, other
- * casings of a sink, other carriers of a document.
+ * casings of a sink, other carriers of a document. The controls the
+ * interactive profile controls, and so writes apart from `safe: true`, are
+ * in {@link CONTROLLED_CORPUS}.
  */
 import { escapeAttribute, escapeText } from '@jarenjs/view';
 
@@ -72,9 +74,6 @@ export const SAFE_CORPUS = [
   // shapes a safe document keeps, which the interactive one must keep alike
   { name: 'ordinary document', vnode: ['main', { class: 'app' }, ['h1', {}, 'Title'], ['a', { href: '/x', title: 'T' }, 'link'], ['input', { value: 'v', type: 'text' }]] },
   { name: 'safe image', vnode: ['img', { src: 'https://x.test/y.png', alt: 'y', srcset: '/a.png 1x, /b.png 2x' }] },
-  { name: 'multiple select', vnode: ['select', { multiple: true, value: ['b', 'c'] }, ...OPTIONS] },
-  { name: 'select value', vnode: ['select', { value: 'b' }, ...OPTIONS] },
-  { name: 'textarea value', vnode: ['textarea', { value: 'x' }, 'y'] },
   { name: 'scalar values', vnode: ['p', { title: 'a', tabindex: 3, hidden: true, lang: null, 'data-n': 0, 'data-f': false, style: { color: 'red', width: 10, margin: null } }, 'x'] },
   { name: 'aria and role', vnode: ['div', { role: 'button', tabindex: 0, 'aria-label': 'x', 'aria-pressed': 'false' }, 'x'] },
   // vectors the safe profile does NOT close (the record's open questions):
@@ -87,6 +86,42 @@ export const SAFE_CORPUS = [
   { name: 'external style url', vnode: ['div', { style: 'background:url(https://evil.test/beacon)' }, 'x'] },
   { name: 'fixed overlay', vnode: ['div', { style: { position: 'fixed', inset: 0, 'z-index': 2147483647 } }, 'x'] },
   { name: 'popover', vnode: ['div', {}, ['button', { popovertarget: 'p' }, 'x'], ['div', { popover: 'auto', id: 'p' }, 'y']] },
+];
+
+/**
+ * The documents the two profiles write apart: a `textarea`'s and a
+ * `select`'s `value`, which `safe: true` keeps as an attribute a parser
+ * ignores and the interactive profile controls. `safe` is the markup both
+ * renderers write under `safe: true`; under the interactive profile `ssr` is
+ * the serializer's trusted form and `dom` the DOM renderer's markup (no
+ * `value` attribute, the authored children), whose live `value`, and each
+ * option's `selected`, is `live`. The DOM's markup and the serializer's
+ * differ, as they do in trusted mode: the live selection and a textarea's
+ * live value are properties, not markup.
+ * @type {Array<{ name: string, vnode: any, safe: string, ssr: string, dom: string, live: { value: string, selected: Array<boolean | null> } }>}
+ */
+export const CONTROLLED_CORPUS = [
+  {
+    name: 'multiple select', vnode: ['select', { multiple: true, value: ['b', 'c'] }, ...OPTIONS],
+    safe: '<select multiple value="b,c"><option value="a">A</option><option value="b">B</option><option value="c">C</option></select>',
+    ssr: '<select multiple><option value="a">A</option><option value="b" selected>B</option><option value="c" selected>C</option></select>',
+    dom: '<select multiple><option value="a">A</option><option value="b">B</option><option value="c">C</option></select>',
+    live: { value: '', selected: [false, true, true] },
+  },
+  {
+    name: 'select value', vnode: ['select', { value: 'b' }, ...OPTIONS],
+    safe: '<select value="b"><option value="a">A</option><option value="b">B</option><option value="c">C</option></select>',
+    ssr: '<select><option value="a">A</option><option value="b" selected>B</option><option value="c">C</option></select>',
+    dom: '<select><option value="a">A</option><option value="b">B</option><option value="c">C</option></select>',
+    live: { value: 'b', selected: [null, null, null] },
+  },
+  {
+    name: 'textarea value', vnode: ['textarea', { value: 'x' }, 'y'],
+    safe: '<textarea value="x">y</textarea>',
+    ssr: '<textarea>x</textarea>',
+    dom: '<textarea>y</textarea>',
+    live: { value: 'x', selected: [] },
+  },
 ];
 
 /** The elements a parser closes by itself: serialized without an end tag. */

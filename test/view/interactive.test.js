@@ -7,7 +7,8 @@
  * Three claims, each pinned on the DOM renderer AND the serializer:
  *  1. every document of the safe attack corpus renders to the same bytes and
  *     the same reports under both profiles, and the DOM agrees with the
- *     serializer;
+ *     serializer — except the `textarea` and `select` values the profile
+ *     controls, pinned to their exact bytes;
  *  2. a binding is kept only when it is JSON data on an allowed event, and the
  *     handler receives a frozen data projection, never the native Event or a
  *     node;
@@ -21,7 +22,7 @@ import assert from 'node:assert/strict';
 import { createDomRenderer, renderToString, createSafePolicy } from '@jarenjs/view';
 
 import { createStubHost, fire } from './dom.stub.js';
-import { SAFE_CORPUS, childMarkup } from './interactive-corpus.js';
+import { CONTROLLED_CORPUS, SAFE_CORPUS, childMarkup } from './interactive-corpus.js';
 
 const INTERACTIVE = /** @type {const} */ ('interactive');
 
@@ -111,6 +112,54 @@ describe('interactive profile — the safe attack corpus renders identically', (
         const expected = node.__jarenControlled === undefined ? [] : ['compositionend', 'compositionstart'];
         assert.deepEqual(types, expected, `${name}: a listener on <${node.tagName}>`);
       }
+      assert.equal(h.events.length, 0);
+    }
+  });
+});
+
+describe('interactive profile — the controls it controls are written apart from safe: true', () => {
+  it('serializes a textarea\'s and a select\'s value in the trusted form, with the same reports', () => {
+    for (const { name, vnode, safe, ssr: expected } of CONTROLLED_CORPUS) {
+      const strict = ssr(vnode, { safe: true });
+      const interactive = ssr(vnode, { safe: INTERACTIVE });
+      assert.equal(strict.html, safe, `${name}: safe markup`);
+      assert.equal(interactive.html, expected, `${name}: interactive markup`);
+      // the trusted serializer writes the same form (no fixed attribute here)
+      assert.equal(renderToString(vnode), expected, `${name}: trusted markup`);
+      assert.deepEqual(interactive.seen, strict.seen, `${name}: reports`);
+    }
+  });
+
+  it('patches it with no value attribute and its live value controlled, through update, removal and reinsertion', () => {
+    for (const { name, vnode, safe, dom, live } of CONTROLLED_CORPUS) {
+      const strict = host({ safe: true });
+      const interactive = host({ safe: INTERACTIVE });
+      for (const frame of [['div', { key: 'same' }, 'before'], vnode, ['span', {}, 'removed'], vnode]) {
+        strict.render(frame);
+        interactive.render(frame);
+        if (frame !== vnode) {
+          assert.equal(childMarkup(interactive.container), childMarkup(strict.container), `${name}: DOM`);
+          continue;
+        }
+        assert.equal(childMarkup(strict.container), safe, `${name}: safe DOM`);
+        assert.equal(childMarkup(interactive.container), dom, `${name}: interactive DOM`);
+        const node = interactive.container.childNodes[0];
+        assert.deepEqual({ value: node.value, selected: (node.options ?? []).map((option) => option.selected ?? null) }, live, `${name}: live`);
+      }
+      assert.deepEqual(sorted(interactive.seen), sorted(strict.seen), `${name}: reports`);
+      assert.equal(interactive.events.length, 0);
+    }
+  });
+
+  it('listens for nothing but a textarea\'s composition', () => {
+    for (const { name, vnode } of CONTROLLED_CORPUS) {
+      const h = host({ safe: INTERACTIVE });
+      h.render(vnode);
+      const node = h.container.childNodes[0];
+      assert.notEqual(node.__jarenControlled, undefined, `${name}: controlled`);
+      const expected = node.tagName === 'textarea' ? ['compositionend', 'compositionstart'] : [];
+      for (const option of node.childNodes) assert.equal(option.listeners?.size ?? 0, 0);
+      assert.deepEqual([...node.listeners.keys()].sort(), expected, `${name}: listeners`);
       assert.equal(h.events.length, 0);
     }
   });

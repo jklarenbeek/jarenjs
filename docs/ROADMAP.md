@@ -170,21 +170,14 @@ delete it or fix it.
 
 ## @jarenjs/view & @jarenjs/app
 
-- [ ] **Controlled `textarea` and `select` under `safe: 'interactive'`.** An
-  `input`'s `value`/`checked` is controlled under the profile (VIEW-FORMAT
-  §8.1 item 3), but a `textarea`'s and a `select`'s `value` stay attributes,
-  which an HTML parser ignores: the field shows no value and app state cannot
-  reset it. Wanted: the controlled path for both, with the serializer writing
-  the trusted form (a `textarea`'s text, `selected` on the matching `option`)
-  so server markup and the DOM show the same value.
-- [ ] **Trusted controlled readings disagree with the markup.** The trusted DOM
-  renderer reads `checked` as `=== true` and `value` as `String(value)`, while
-  the serializer writes the attribute: `checked: 'x'` (or `1`, `0`) renders
-  unchecked but serializes `checked="x"` (checked after parsing); `value:
-  true` renders `'true'` but serializes `<input value>` (`''`). A granted or
-  trusted widget host `['jaren-widget', { tag: 'input', value: 'x' }]` gets no
-  value at all (the property path skips it and the host is never registered as
-  controlled). Wanted: one reading for both renderers.
+- [ ] **A widget hosted on a void element serializes an end tag.**
+  `renderToString(['jaren-widget', { name: 'w', tag: 'input', value: 'x' }], {
+  widgets: { w: {} } })` writes `<input value="x"></input>`, where an element
+  `input` writes no end tag; a parser drops `</input>` as an error, but reads
+  `</br>` as a second `<br>`, so a `br` host serializes two elements where the
+  DOM renderer builds one. Wanted: a void host tag written without an end tag
+  (and its `ssr` fallback, which a void element cannot hold, refused or
+  dropped).
 - [ ] **Host ids and serialized pages beside an untrusted document's namespace.**
   Each live safe DOM root of a page takes its own default `idPrefix`
   (`jaren-u-`, then `jaren-u2-`, …; VIEW-FORMAT §8 rule 7), but

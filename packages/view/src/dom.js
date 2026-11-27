@@ -52,7 +52,7 @@ import {
   EMPTY_PROPS,
   WIDGET_TAG,
 } from './vnode.js';
-import { ENUMERATED_ALIASES, enumeratedAttribute, isAliased, isInlineHandler, removeProperty, writeProperty, writingSpelling } from './properties.js';
+import { ENUMERATED_ALIASES, attributePresent, attributeText, enumeratedAttribute, isAliased, isInlineHandler, removeProperty, writeProperty, writingSpelling } from './properties.js';
 import { createSafePolicy, grantedWidgets, idPrefixOf, projectEvent } from './safe.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -246,7 +246,7 @@ export function createDomRenderer(container, options = {}) {
      * the live DOM at the END of every render pass — so an authoritative
      * value is reasserted even when the `===`/`memo` fast paths skip the
      * subtree the control lives in. Under a safe profile only the
-     * interactive profile's `input`s join it (the policy's `control`).
+     * interactive profile's controls join it (the policy's `control`).
      * @type {Set<any>} */
     controlled: new Set(),
     /** `controlled: 'focus'`: a focused text control's value write waits
@@ -857,7 +857,9 @@ function patchAliased(ctx, node, oldProps, newProps, ns) {
  * reconciliation can reassert it against the live DOM — even for a control
  * inside a subtree a later frame skips. Under a safe profile the policy
  * decides (`control`): the interactive profile's `input` is reasserted to
- * what its attributes say, every other safe control stays attribute-only.
+ * what its attributes say, its `textarea` and `select` to the text and the
+ * selection the serializer writes, and every `safe: true` control stays
+ * attribute-only.
  * Stores the intended value on the DOM node (never the vnode — §5.1) and
  * keeps the node in `ctx.controlled`.
  * @param {any} ctx
@@ -909,11 +911,15 @@ function registerControlled(ctx, node, props) {
     node.addEventListener('compositionend', end, true);
     if (blur !== null) node.addEventListener('focusout', blur, true);
   }
+  // An `input` reads its props as the attributes the serializer writes
+  // (`checked: 0` is present, `value: true` the empty value), so the live
+  // control shows what server markup shows; a `textarea`'s and a `select`'s
+  // value is the text and the selection the serializer writes.
   node.__jarenControlled = decided !== null ? { ...decided, safe: true } : {
     hasValue,
     hasChecked,
-    value: hasValue ? props.value : undefined,
-    checked: hasChecked ? props.checked === true : undefined,
+    value: hasValue ? (kind === 'INPUT' ? attributeText(props.value) : props.value) : undefined,
+    checked: hasChecked ? attributePresent(props.checked) : undefined,
     safe: false,
   };
   ctx.controlled.add(node);
@@ -1080,7 +1086,8 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
   }
   if (SKIP_PROPS.has(name)) return;
   if (ctx.policy !== null) {
-    const decided = ctx.policy.prop(name, newValue, node.localName ?? String(node.tagName).toLowerCase());
+    const tag = node.localName ?? String(node.tagName).toLowerCase();
+    const decided = ctx.policy.prop(name, newValue, tag);
     // A rejected NAME (scripting sink, inline `on*`, injection-shaped) is
     // dropped; a sanitized-away URL or dangerous style keeps its (safe) name
     // and clears the value.
@@ -1098,6 +1105,12 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
     // binding read what the browser filled in
     if (typeof newValue === 'string' && name.toLowerCase() === 'type' && newValue.trim().toLowerCase() === 'password') node.__jarenSecret = true;
     if (newValue === null && given != null && ctx.onUnsafe !== null) ctx.onUnsafe({ kind: 'prop', name });
+    // The interactive profile controls a textarea's and a select's value
+    // (the policy's `control`): a parser ignores their `value` attribute, so
+    // none is written, and the serializer writes the text and the selection
+    // the reconciliation reasserts. A widget's host keeps the attribute.
+    if (name === 'value' && (tag === 'textarea' || tag === 'select') && node.__jarenWidget === undefined
+      && ctx.policy.control(tag, { value: given }) !== null) return;
     // SAFE MODE IS ATTRIBUTE-ONLY. Never `node[name] = …`: a live DOM property
     // write can THROW (`input.files` is read-only) and it diverges from SSR
     // for a cleared value (an empty reflected attribute vs an omitted one).
@@ -1126,8 +1139,15 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
   // value the property would convert into markup the serializer never
   // writes.
   // Controlled values settle after children and never interrupt composition.
+  // A widget's host is the widget's: its `value`/`checked` is the attribute
+  // the serializer writes, and the widget owns the live value.
   if ((name === 'value' || name === 'checked')
-    && (node.nodeName === 'INPUT' || node.nodeName === 'TEXTAREA' || node.nodeName === 'SELECT')) return;
+    && (node.nodeName === 'INPUT' || node.nodeName === 'TEXTAREA' || node.nodeName === 'SELECT')) {
+    if (node.__jarenWidget === undefined) return;
+    if (newValue == null || newValue === false) node.removeAttribute(name);
+    else node.setAttribute(name, newValue === true ? '' : String(newValue));
+    return;
+  }
   const attrNs = name.startsWith('xlink:') ? 'http://www.w3.org/1999/xlink'
     : name.startsWith('xml:') ? 'http://www.w3.org/XML/1998/namespace' : null;
   if (attrNs !== null && typeof node.setAttributeNS === 'function') {
@@ -1320,10 +1340,7 @@ function createWidgetNode(ctx, vnode, ns) {
     ? ctx.doc.createElementNS(ns, tag)
     : ctx.doc.createElement(tag);
   if (ctx.policy !== null) writeFixed(ctx, node, tag);
-  for (const name in props) {
-    if (WIDGET_SKIP_PROPS.has(name)) continue;
-    setProp(ctx, node, name, undefined, props[name], ns);
-  }
+  // the bookkeeping first: it is what marks the node a host to `setProp`
   node.__jarenWidget = {
     name: props.name,
     def,
@@ -1336,6 +1353,10 @@ function createWidgetNode(ctx, vnode, ns) {
      * poisoned widget is replaced on the next render that revisits it. */
     failed: /** @type {false | 'mount' | 'update'} */ (false),
   };
+  for (const name in props) {
+    if (WIDGET_SKIP_PROPS.has(name)) continue;
+    setProp(ctx, node, name, undefined, props[name], ns);
+  }
   ctx.hasWidgets = true;
   ctx.mountQueue.push(node);
   return node;
