@@ -500,3 +500,48 @@ for (const safe of [true, 'interactive']) {
     expect(after.submits).toEqual(safe === 'interactive' ? [[{ action: 'login' }, 'submit'], [{ action: 'login' }, 'submit']] : []);
   });
 }
+
+test('a safe root reports a prefixed name of document the page already holds, by name or by id', async ({ page }) => {
+  const result = await page.evaluate(() => {
+    const host = document.getElementById('host');
+    // Test-only host markup: the page's own elements before the root.
+    host.insertAdjacentHTML('beforebegin', '<object id="jaren-u-logo"></object><form name="jaren-u-pic"></form>'
+      + '<img id="jaren-u-alt" name="other"><form id="jaren-u-ok"></form><img id="jaren-u-bare">');
+    const seen = [];
+    const render = window.JarenTest.createDomRenderer(host, { safe: true, onUnsafe: (info) => seen.push(`${info.kind}:${info.name}`) });
+    render(['div', {}, ['img', { name: 'logo' }], ['img', { id: 'pic', name: 'p' }], ['form', { name: 'alt' }],
+      ['img', { name: 'ok' }], ['img', { name: 'bare' }]]);
+    const kind = (key) => {
+      const value = document[key];
+      return value instanceof HTMLCollection ? `collection(${value.length})` : host.contains(value) ? 'own' : String(value);
+    };
+    return { seen, answers: ['jaren-u-logo', 'jaren-u-pic', 'jaren-u-alt', 'jaren-u-ok', 'jaren-u-bare'].map(kind) };
+  });
+  expect(result).toEqual({
+    seen: ['name:jaren-u-logo', 'name:jaren-u-pic', 'name:jaren-u-alt'],
+    answers: ['collection(2)', 'collection(2)', 'collection(2)', 'own', 'own'],
+  });
+});
+
+test('a form whose controls are named after its DOM members neither throws nor hangs a pass, and stays a form to the policy', async ({ page }) => {
+  const result = await page.evaluate(() => {
+    const host = document.getElementById('host');
+    const names = ['parentNode', 'getAttribute', 'namespaceURI', 'localName'];
+    // Test-only host markup: a page form holding a prefixed name, its controls named after the same members.
+    host.insertAdjacentHTML('beforebegin', `<form name="jaren-u-g">${names.map((name) => `<input name="${name}">`).join('')}</form>`);
+    const seen = [];
+    const controls = (value) => ['form', { name: 'f' }, ...names.map((name) => ['input', { name }]), ['input', { value }]];
+    const render = window.JarenTest.createDomRenderer(host, { safe: 'interactive', onUnsafe: (info) => seen.push(`${info.kind}:${info.name}`) });
+    render(['div', {}, controls('typed'), ['form', { name: 'g' }]]);
+    render(['div', {}, controls('next'), ['form', { name: 'g' }]]);
+    const value = host.querySelectorAll('input')[4].value;
+    // a patch deciding the form's props as some other tag would write where it sends
+    render(['div', {}, ['form', { action: 'https://example.invalid/', method: 'post', target: '_blank', name: 'f' }, ...controls('next').slice(2)]]);
+    const form = host.querySelector('form');
+    // the form's own members are shadowed by its controls: read it through Element's
+    const attributes = Element.prototype.getAttributeNames.call(form);
+    return { seen, value, form: attributes.map((name) => `${name}=${Element.prototype.getAttribute.call(form, name)}`) };
+  });
+  expect(result).toEqual({ seen: ['name:jaren-u-g', 'prop:action', 'prop:method', 'prop:target'], value: 'next',
+    form: ['method=dialog', 'name=jaren-u-f'] });
+});

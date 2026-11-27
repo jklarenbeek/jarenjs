@@ -147,10 +147,14 @@ removed nothing and is not reported (upgrade note: it used to be). A DOM root
 also reports, once and without removing anything, `{ kind: 'id', name }` for a
 prefixed id its page already holds outside the root (`jaren-u-name` on a host
 element beside a document declaring `name`): the two elements share the id.
-Likewise `{ kind: 'name', name }`, once, for a prefixed `name` the root writes
-on a `form` or `img` that a page `form`, `img`, `embed`, `object` or `iframe`
-outside the root already holds, looked up as the pass ends: `document[name]`
-then answers both.
+Likewise `{ kind: 'name', name }`, once, for a prefixed name of `document` the
+root writes that a page element outside the root already holds, looked up as
+the pass ends: `document[name]` then answers both. A name of `document` is the
+`name` of a `form`, `img`, `embed`, `object` or `iframe`, the id of an
+`object`, and the id of an `img` that has a `name` too. So a page
+`<object id="jaren-u-logo">` collides with the root's `img` named `logo`, and
+a page `<form name="jaren-u-pic">` with a named `img` of the root whose id is
+`pic`.
 
 Both build the **same** policy ([`createSafePolicy`](src/safe.js)), so the
 client and the server neutralize an attack identically. In safe mode:

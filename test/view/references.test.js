@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 
 import { createDomRenderer, renderToString } from '@jarenjs/view';
 
-import { createStubHost } from './dom.stub.js';
+import { StubElement, createStubHost } from './dom.stub.js';
 import { childMarkup } from './interactive-corpus.js';
 
 const PROFILES = /** @type {const} */ ([true, 'interactive']);
@@ -448,21 +448,32 @@ describe('safe profiles — a prefixed id the page already holds outside the roo
 });
 
 describe('safe profiles — a prefixed name the page already holds on a named element outside the root is reported, never refused', () => {
+  const SCAN = 'form[name], img[name], embed[name], object[name], iframe[name], object[id]';
   const walk = (/** @type {any} */ node) => [node, ...(node.childNodes ?? []).flatMap(walk)];
-  const NAMED = new Set(['form', 'img', 'embed', 'object', 'iframe']);
+  const readAttribute = StubElement.prototype.getAttribute;
+  /**
+   * Whether a stub element matches a list of `tag[attr]...` selectors, as the
+   * page's `querySelectorAll` would.
+   * @param {any} node
+   * @param {string} selector
+   */
+  const matches = (node, selector) => selector.split(',').some((one) => {
+    const [, tag, attrs] = /** @type {RegExpMatchArray} */ (/^\s*([a-z]+)((?:\[[a-z]+\])*)\s*$/.exec(one));
+    return node.tagName === tag && [...attrs.matchAll(/\[([a-z]+)\]/g)].every(([, attr]) => readAttribute.call(node, attr) != null);
+  });
 
   /**
    * A page whose stub document answers the renderer's one scan of named
    * elements, holding host elements before the root and after it.
-   * @param {Array<[string, string]>} before - [tag, name] host elements before the root
-   * @param {Array<[string, string]>} [after] - and after it
+   * @param {Array<[string, string | Record<string, string>]>} before - [tag, name or attributes] host elements before the root
+   * @param {Array<[string, string | Record<string, string>]>} [after] - and after it
+   * @param {{ document: any, container: any }} [host] - the stub document and the root's container
    */
-  function page(before, after = []) {
-    const { document, container: a } = createStubHost();
+  function page(before, after = [], { document, container: a } = createStubHost()) {
     const body = document.createElement('body');
-    const hostOf = ([tag, name]) => {
+    const hostOf = ([tag, attrs]) => {
       const node = document.createElement(tag);
-      node.setAttribute('name', name);
+      for (const [name, value] of Object.entries(typeof attrs === 'string' ? { name: attrs } : attrs)) node.setAttribute(name, value);
       return node;
     };
     for (const entry of before) body.appendChild(hostOf(entry));
@@ -473,8 +484,9 @@ describe('safe profiles — a prefixed name the page already holds on a named el
     Object.assign(document, {
       querySelectorAll(/** @type {string} */ selector) {
         scans.push(selector);
-        return walk(body).filter((node) => NAMED.has(node.tagName) && node.getAttribute?.('name') != null);
+        return walk(body).filter((node) => node.nodeType === 1 && matches(node, selector));
       },
+      getElementById: (/** @type {string} */ id) => walk(body).find((node) => node.nodeType === 1 && readAttribute.call(node, 'id') === id) ?? null,
     });
     return { document, a, body, scans };
   }
@@ -490,7 +502,7 @@ describe('safe profiles — a prefixed name the page already holds on a named el
         ['input', { name: 'q' }], ['img', { name: 'late' }], ['img', { name: 'own' }], ['img', { name: 'own' }]];
       render(vnode('a.png'));
       assert.deepEqual(seen, [{ kind: 'name', name: 'jaren-u-f' }, { kind: 'name', name: 'jaren-u-logo' }, { kind: 'name', name: 'jaren-u-late' }]);
-      assert.deepEqual(scans, ['form[name], img[name], embed[name], object[name], iframe[name]']);
+      assert.deepEqual(scans, [SCAN]);
       // a frame writing no name scans nothing; a frame renaming one scans once and reports nothing twice
       render(vnode('b.png'));
       assert.equal(scans.length, 1);
@@ -566,8 +578,169 @@ describe('safe profiles — a prefixed name the page already holds on a named el
     assert.deepEqual(seen, ['name:jaren-u-host']);
     // a pass that throws part-way leaves no written name for the next pass to look up
     const before = scans.length;
-    assert.throws(() => render(['div', {}, ['img', { name: 'y' }], ['script', {}]]), { message: 'sink' });
+    assert.throws(() => render(['div', {}, ['img', { id: 'z', name: 'y' }], ['script', {}]]), { message: 'sink' });
     render(['p', {}]);
     assert.equal(scans.length, before);
   });
+
+  for (const safe of PROFILES) {
+    it(`reports a written name the page holds as an object's id, or an img's beside a name, in the same scan (safe: ${JSON.stringify(safe)})`, () => {
+      const { document, a, scans } = page([['object', { id: 'jaren-u-logo' }], ['img', { id: 'jaren-u-pic', name: 'other' }]],
+        [['object', { id: 'jaren-u-f' }], ['img', { id: 'jaren-u-logo', name: 'jaren-u-logo' }], ['img', { id: 'jaren-u-twice', name: 'jaren-u-twice' }]]);
+      /** @type {any[]} */
+      const seen = [];
+      const render = createDomRenderer(a, { document, safe, onUnsafe: (info) => seen.push(info) });
+      render(['div', {}, ['img', { name: 'logo' }], ['form', { name: 'pic' }], ['form', { name: 'f' }], ['img', { name: 'other' }], ['img', { name: 'twice' }]]);
+      // an img holding the name as its name and its id is reported once
+      assert.deepEqual(seen, [{ kind: 'name', name: 'jaren-u-logo' }, { kind: 'name', name: 'jaren-u-pic' }, { kind: 'name', name: 'jaren-u-f' },
+        { kind: 'name', name: 'jaren-u-twice' }]);
+      assert.deepEqual(scans, [SCAN]);
+      assert.equal(childMarkup(a), '<div><img name="jaren-u-logo"><form method="dialog" name="jaren-u-pic"></form>'
+        + '<form method="dialog" name="jaren-u-f"></form><img name="jaren-u-other"><img name="jaren-u-twice"></div>');
+    });
+
+    it(`reports a written img id the page holds as a name, the img named in either order or later (safe: ${JSON.stringify(safe)})`, () => {
+      const { document, a, scans } = page([['form', 'jaren-u-a'], ['embed', 'jaren-u-b'], ['iframe', 'jaren-u-c'], ['object', 'jaren-u-d'], ['form', 'jaren-u-g']]);
+      /** @type {any[]} */
+      const seen = [];
+      const render = createDomRenderer(a, { document, safe, onUnsafe: (info) => seen.push(info) });
+      // an img without a name gives document no id: nothing is looked up
+      render(['div', {}, ['img', { id: 'a', name: 'x' }], ['img', { name: 'y', id: 'c' }], ['img', { id: 'b' }], ['img', { id: 'd', name: '' }]]);
+      assert.deepEqual(seen, [{ kind: 'name', name: 'jaren-u-a' }, { kind: 'name', name: 'jaren-u-c' }]);
+      assert.equal(scans.length, 1);
+      // a frame that only names the img exposes its unchanged id
+      render(['div', {}, ['img', { id: 'a', name: 'x' }], ['img', { name: 'y', id: 'c' }], ['img', { id: 'b', name: 'z' }], ['img', { id: 'd', name: '' }]]);
+      assert.deepEqual(seen.slice(2), [{ kind: 'name', name: 'jaren-u-b' }]);
+      assert.equal(scans.length, 2);
+      // nothing is reported twice, and a frame writing only an unnamed img's id scans nothing
+      render(['div', {}, ['img', { id: 'a', name: 'x2' }], ['img', { id: 'e' }]]);
+      render(['div', {}, ['img', { id: 'a', name: 'x2' }], ['img', { id: 'f' }]]);
+      assert.equal(seen.length, 3);
+      assert.equal(scans.length, 3);
+      // a frame that only changes a named img's id looks the new one up
+      render(['div', {}, ['img', { id: 'g', name: 'x2' }], ['img', { id: 'f' }]]);
+      assert.deepEqual(seen.slice(3), [{ kind: 'name', name: 'jaren-u-g' }]);
+      assert.equal(scans.length, 4);
+    });
+  }
+
+  it('reports nothing for a page id that is no name of document, and an id the page holds as an id only as the id', () => {
+    /** @type {any[]} */
+    const seen = [];
+    const onUnsafe = (/** @type {any} */ info) => seen.push(info);
+    // an img id without a name, or with an empty one, and the id of a form, embed, iframe or div is no property of document
+    const ids = page([['img', { id: 'jaren-u-a' }], ['img', { id: 'jaren-u-b', name: '' }], ['form', { id: 'jaren-u-c' }],
+      ['embed', { id: 'jaren-u-d' }], ['iframe', { id: 'jaren-u-e' }], ['div', { id: 'jaren-u-g' }]]);
+    const svg = ids.document.createElementNS('http://www.w3.org/2000/svg', 'object');
+    svg.setAttribute('id', 'jaren-u-h');
+    ids.body.appendChild(svg);
+    createDomRenderer(ids.a, { document: ids.document, safe: true, onUnsafe })(['div', {},
+      ...['a', 'b', 'c', 'd', 'e', 'g', 'h'].map((name) => ['img', { name }])]);
+    assert.deepEqual(seen, []);
+    assert.equal(ids.scans.length, 1);
+    // a form's id is no name of document, so a page name equal to it is no collision either; nothing is scanned
+    const names = page([['img', 'jaren-u-a']]);
+    createDomRenderer(names.a, { document: names.document, safe: true, onUnsafe })(['form', { id: 'a' }]);
+    assert.deepEqual(names.scans, []);
+    assert.deepEqual(seen, []);
+    // an id against a page id is the id report's, reported once as an id
+    const same = page([['object', { id: 'jaren-u-o' }], ['img', { id: 'jaren-u-p', name: 'q' }]]);
+    createDomRenderer(same.a, { document: same.document, safe: true, onUnsafe })(['div', {},
+      ['img', { id: 'o', name: 'r' }], ['img', { id: 'p', name: 's' }]]);
+    assert.deepEqual(seen, [{ kind: 'id', name: 'jaren-u-o' }, { kind: 'id', name: 'jaren-u-p' }]);
+    assert.equal(same.scans.length, 1);
+  });
+
+  /**
+   * A stub page whose forms answer a member through a control of that name, as
+   * a browser's do (`<input name="parentNode">` is the form's `parentNode`),
+   * and whose `defaultView` holds the DOM's own accessors, which read the form
+   * itself. A walk that keeps reading a form's members through its controls
+   * throws instead of never ending. A detached form answers its own (null)
+   * parent, which the stub's own insertion reads.
+   */
+  function shadowingHost() {
+    const host = createStubHost();
+    /** @type {WeakMap<any, Record<string, any>>} */
+    const own = new WeakMap();
+    let reads = 0;
+    const member = (/** @type {any} */ node, /** @type {string} */ key) => {
+      const members = own.get(node);
+      return members !== undefined && key in members ? members[key] : node[key];
+    };
+    Object.assign(host.document, {
+      defaultView: {
+        Node: { prototype: Object.defineProperty({}, 'parentNode', { get() { return member(this, 'parentNode'); } }) },
+        Element: {
+          prototype: Object.defineProperties({ getAttribute: readAttribute }, {
+            localName: { get() { return String(this.tagName).toLowerCase(); } },
+            namespaceURI: { get() { return member(this, 'namespaceURI'); } },
+          }),
+        },
+      },
+    });
+    const create = host.document.createElement.bind(host.document);
+    host.document.createElement = (/** @type {string} */ tag) => {
+      const node = create(tag);
+      if (tag !== 'form') return node;
+      /** @type {Record<string, any>} */
+      const members = { parentNode: node.parentNode, namespaceURI: node.namespaceURI };
+      own.set(node, members);
+      for (const key of ['parentNode', 'namespaceURI', 'getAttribute', 'localName']) {
+        Object.defineProperty(node, key, {
+          get() {
+            if (++reads > 10_000) throw new Error(`read the form's ${key} through its controls`);
+            const control = node.childNodes.find((/** @type {any} */ c) => c.nodeType === 1 && readAttribute.call(c, 'name') === key);
+            if (key === 'parentNode' && members.parentNode === null) return null;
+            return control ?? (key in members ? members[key] : /** @type {any} */ (StubElement.prototype)[key]);
+          },
+          set(value) { members[key] = value; },
+        });
+      }
+      return node;
+    };
+    return host;
+  }
+
+  it('reads a form through the DOM\'s own accessors, so a control named after one of its members neither throws nor hangs a pass', () => {
+    const controls = ['parentNode', 'getAttribute', 'namespaceURI', 'localName'];
+    // the interactive profile reconciles a controlled input inside such a form at the end of every pass
+    const controlled = shadowingHost();
+    const render = createDomRenderer(controlled.container, { document: controlled.document, safe: 'interactive' });
+    const form = (/** @type {string} */ value) => ['form', {}, ...controls.map((name) => ['input', { name }]), ['input', { value }]];
+    render(form('typed'));
+    render(form('next'));
+    assert.equal(childMarkup(controlled.container), '<form method="dialog"><input name="parentNode"><input name="getAttribute">'
+      + '<input name="namespaceURI"><input name="localName"><input value="next"></form>');
+    assert.equal(/** @type {any} */ (controlled.container.childNodes[0].childNodes[4]).value, 'next');
+    // the name scan reads the root's own form, and a page form holding the name, through the same accessors
+    const host = shadowingHost();
+    const { document, a, body, scans } = page([], [], host);
+    const held = document.createElement('form');
+    held.setAttribute('name', 'jaren-u-g');
+    for (const name of controls) {
+      const control = document.createElement('input');
+      control.setAttribute('name', name);
+      held.appendChild(control);
+    }
+    body.insertBefore(held, a);
+    /** @type {any[]} */
+    const seen = [];
+    createDomRenderer(a, { document, safe: true, onUnsafe: (info) => seen.push(info) })(['div', {},
+      ['form', { name: 'f' }, ...controls.map((name) => ['input', { name }])], ['form', { name: 'g' }]]);
+    assert.deepEqual(seen, [{ kind: 'name', name: 'jaren-u-g' }]);
+    assert.deepEqual(scans, [SCAN]);
+  });
+
+  for (const safe of PROFILES) {
+    it(`decides a patched form's props as a form's, whatever its controls are named (safe: ${JSON.stringify(safe)})`, () => {
+      const { document, container } = shadowingHost();
+      const render = createDomRenderer(container, { document, safe });
+      const controls = [['input', { name: 'localName' }], ['button', { type: 'submit' }, 'go']];
+      const hostile = { action: 'https://example.invalid/', method: 'post', target: '_blank', name: 'cookie' };
+      render(['form', {}, ...controls]);
+      render(['form', hostile, ...controls]);
+      assert.equal(childMarkup(container), '<form method="dialog" name="jaren-u-cookie"><input name="localName"><button type="submit">go</button></form>');
+    });
+  }
 });

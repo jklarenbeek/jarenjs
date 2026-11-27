@@ -179,13 +179,30 @@ delete it or fix it.
   one page gives each its own `idPrefix` on both renderers (the host-given
   prefix is the page-scoped key: `renderToString` has no page), and a DOM root
   reports through `onUnsafe` a prefixed id it writes that the page already
-  holds outside the root (`{ kind: 'id' }`) and a prefixed `name` it writes on
-  a `form`, `img`, `embed`, `object` or `iframe` that an element of those tags
-  outside the root already holds (`{ kind: 'name' }`, VIEW-FORMAT §8 rule 7).
-  Neither report sees a host element added after its lookup (the id's as it is
-  written, the names' as the pass ends), and a page element whose `id` equals
-  a prefixed name (an `img` or `object` id is a `document` property too) is
-  not looked for. Closing the first needs an observer on every reporting root.
+  holds outside the root (`{ kind: 'id' }`) and a prefixed name of `document`
+  it writes that an element outside the root already holds (`{ kind: 'name'
+  }`: a `form`, `img`, `embed`, `object` or `iframe` name, an `object` id, an
+  `img` id beside a name; VIEW-FORMAT §8 rule 7). Neither report sees a host
+  element added after its lookup (the id's as it is written, the names' as the
+  pass ends): an observer on every reporting root was measured costly on the
+  root's own patches and per host mutation, would report outside a pass, and
+  keeps a root dropped without `destroy()` alive, so it waits on the owner's
+  choice (or a host-called re-check). Neither looks at `window`: any page
+  element whose id equals a prefixed name the root writes is `window[name]`
+  too.
+- [ ] **A document's form control named after a DOM member breaks its own render.**
+  A `form` answers a member through its controls' names. So `['form', {},
+  ['input', { name: 'insertBefore' }], …]` throws `TypeError:
+  parent.insertBefore is not a function` on the next patch that inserts into
+  the form, in every mode; the same holds for `appendChild`, `setAttribute`
+  and `childNodes`. The parent walks, the reports and the policy's tag already
+  read through the document's own accessors, and no probed member let a form
+  escape the safe profile. A document made by `createHTMLDocument` or
+  `DOMParser` has no `defaultView`, so it is still read through the element
+  there: a `parentNode` control still hangs its controlled reconciliation.
+  Wanted: either read and write a form through those accessors on the patch
+  path (a cost on every patch) or, under a safe profile, namespace a control
+  `name` that shadows a form member, as a `form`'s or an `img`'s `name` is.
 - [ ] **Segmented logical scrolling past the CSS extent ceiling.** The [reusable collection](../components/collection/docs/COLLECTION.md) and [injected provider coordinator](../packages/app/docs/COLLECTION-PROVIDER.md) cover fixed/measured axes, keyed interaction and bounded page caches up to the conservative CSS extent ceiling; a source longer than that needs segmented logical scrolling. Complete sequential database snapshots and index seeks behind the provider also need an independently qualified source contract.
 
 - [ ] **Collection table semantics beyond activation and selection.** A host serving a record table still lacks per-column

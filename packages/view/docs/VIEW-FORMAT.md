@@ -870,12 +870,20 @@ Under the safe profile a renderer MUST:
    namespace (a dialog's) counts as the root's own, as a duplicate inside one
    root does. It is looked up, by `getElementById`, as the id is written: an
    element the host adds later is not seen. A DOM root reports alike
-   (`{ kind: 'name', name: 'jaren-u-logo' }`, once per name) a prefixed `name`
-   it writes on a `form`, `img`, `embed`, `object` or `iframe` that an HTML
-   element of those tags outside the root already holds, so that
-   `document[name]` answers both; the names a pass writes are looked up in one
-   scan of the page as it ends, and an element the host adds later is not
-   seen either. Upgrade note: a safe document's ids, id
+   (`{ kind: 'name', name: 'jaren-u-logo' }`, once per name) a prefixed name
+   of `document` it writes that an HTML element outside the root already
+   holds, so that `document[name]` answers both. A name of `document` is the
+   non-empty `name` of a `form`, `img`, `embed`, `object` or `iframe`, the
+   non-empty id of an `object`, and the non-empty id of an `img` that has a
+   non-empty `name` as well; any other element's id is none. So a page
+   `object` whose id is the name the root writes is reported, as is a page
+   name equal to the id of a named `img` of the root; an id the page holds as
+   an id is the id report's alone. An `object` is looked for whatever it
+   holds: Chromium and WebKit leave one showing an `object` or `embed` as its
+   fallback off `document`, Firefox does not. The names a pass writes are
+   looked up in one scan of the page as it ends, and an element the host adds
+   later is not seen either (upgrade note: the `name` report used to compare
+   the root's names with the page's names only). Upgrade note: a safe document's ids, id
    references and those names used to be written as given; a second live
    root on a page used to share `jaren-u-` with the first (pass
    `idPrefix: 'jaren-u-'` to keep that).

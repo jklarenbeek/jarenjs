@@ -170,8 +170,8 @@ const WIDGET_SKIP_PROPS = new Set(['name', 'props', 'tag']);
  *   [onUnsafe] - In safe mode, called for everything stripped: a disallowed `tag`, a rejected or
  *   sanitized-away `prop`, a stripped `on` binding (`event`; under the interactive profile named by
  *   its event type, `on` when the member is not an object, `emit` for a widget's) or a `widget`; and,
- *   nothing stripped, once per prefixed `id`, and per prefixed `name` (`form`, `img`, ...) a page
- *   element of that tag holds, that the page holds outside the root.
+ *   nothing stripped, once per prefixed `id`, and per prefixed name of `document` (a `form`'s or an
+ *   `img`'s `name`, an `img` id beside a name), that the page holds outside the root.
  * @property {(thrown: unknown) => void} [onCleanupError] - Receives
  *   the first VALUE a widget `unmount` threw during TERMINAL teardown
  *   (`destroy()`, direct or deferred) — by identity, whatever host
@@ -225,6 +225,9 @@ export function createDomRenderer(container, options = {}) {
     : null;
   const ctx = {
     doc,
+    /** How the renderer reads an element's parent, tag, namespace and
+     * attributes where a member of the element may be shadowed. */
+    dom: domReaderOf(doc),
     onEvent: options.onEvent ?? null,
     /** Under the interactive profile, only the granted widgets. */
     widgets: granted === null ? options.widgets ?? EMPTY_PROPS
@@ -249,12 +252,16 @@ export function createDomRenderer(container, options = {}) {
     /** The prefixed ids reported as held outside the root, each once.
      * @type {Set<string>} */
     heldIds: new Set(),
-    /** The prefixed names (`form`, `img`, ...) reported as held outside the
-     * root, each once, and the names this pass wrote, looked up as it ends.
+    /** The prefixed names of `document` (a `form`'s, an `img`'s, ... `name`,
+     * an `object`'s id) reported as held outside the root, each once; the
+     * names this pass wrote, and the `img` and `object` elements whose id it
+     * wrote or exposed, looked up as it ends.
      * @type {Set<string>} */
     heldNames: new Set(),
     /** @type {Set<string>} */
     writtenNames: new Set(),
+    /** @type {Set<any>} */
+    writtenOwners: new Set(),
     /** Controlled form-control nodes (`value`/`checked`), reconciled against
      * the live DOM at the END of every render pass — so an authoritative
      * value is reasserted even when the `===`/`memo` fast paths skip the
@@ -387,7 +394,7 @@ export function createDomRenderer(container, options = {}) {
       if (!ctx.destroyed && ctx.controlled.size > 0) {
         reconcileControlledSet(ctx, container);
       }
-      if (!ctx.destroyed && ctx.writtenNames.size > 0) reportHeldNames(ctx);
+      if (!ctx.destroyed && (ctx.writtenNames.size > 0 || ctx.writtenOwners.size > 0)) reportHeldNames(ctx);
     }
     catch (error) {
       // A pass that threw part-way (a refused tag, an unregistered widget)
@@ -402,6 +409,7 @@ export function createDomRenderer(container, options = {}) {
       const parked = ctx.frameError;
       ctx.frameError = null;
       ctx.writtenNames.clear();
+      ctx.writtenOwners.clear();
       teardown();
       container.textContent = '';
       destroyPending = false;
@@ -704,7 +712,7 @@ function adoptChildren(ctx, parent, children, ns) {
     const namespace = tag === 'svg' ? SVG_NS : ns;
     if (node && tag && tag !== WIDGET_TAG && node.nodeType === 1
       && (node.localName ?? node.tagName?.toLowerCase()) === tag
-      && (namespace === null ? isHtmlElement(node) : node.namespaceURI === namespace)) {
+      && (namespace === null ? isHtmlNamespace(node.namespaceURI) : node.namespaceURI === namespace)) {
       const props = propsOf(vnode);
       // the attributes the vnode writes: an inline handler value writes none,
       // so the one server markup carried from before that rule is removed
@@ -985,7 +993,7 @@ function releaseControlled(ctx, node) {
  * from the registry here, which is why registration needs no destroy hook. */
 function reconcileControlledSet(ctx, container) {
   for (const node of ctx.controlled) {
-    if (!isConnectedTo(node, container)) {
+    if (!isConnectedTo(ctx, node, container)) {
       releaseControlled(ctx, node);
       continue;
     }
@@ -1084,14 +1092,91 @@ function reconcileControlled(node) {
 }
 
 /** Whether `node` is still attached beneath `root` (the render container).
- * A detached node's ancestor chain stops before the container. */
-function isConnectedTo(node, root) {
+ * A detached node's ancestor chain stops before the container. The chain is
+ * read through {@link parentOf}: a `form` holding `<input name="parentNode">`
+ * answers that input as its `parentNode`, and the walk would never end. */
+function isConnectedTo(ctx, node, root) {
   let n = node;
   while (n != null) {
     if (n === root) return true;
-    n = n.parentNode;
+    n = parentOf(ctx, n);
   }
   return false;
+}
+
+/**
+ * @typedef {object} DomReader
+ * @property {((this: any) => any) | null} parentNode
+ * @property {((this: any) => string) | null} localName
+ * @property {((this: any) => string | null) | null} namespaceURI
+ * @property {((this: any, name: string) => string | null) | null} getAttribute
+ */
+
+/**
+ * The DOM's own member accessors of a document's realm. An element answers a
+ * member looked up on it through its own named properties first: a `form`
+ * through its controls' names (`<input name="getAttribute">` is the form's
+ * `getAttribute`), and in Chromium a lookup on a page `object` costs many
+ * times one through the accessor. Reading through these accessors reads the
+ * element itself. A document without a `defaultView` (a stub, or one made by
+ * `createHTMLDocument`) is read through the element.
+ * @param {any} doc
+ * @returns {DomReader}
+ */
+function domReaderOf(doc) {
+  const view = doc?.defaultView;
+  const element = view?.Element?.prototype;
+  return {
+    parentNode: accessorOf(view?.Node?.prototype, 'parentNode'),
+    localName: accessorOf(element, 'localName'),
+    namespaceURI: accessorOf(element, 'namespaceURI'),
+    getAttribute: typeof element?.getAttribute === 'function' ? element.getAttribute : null,
+  };
+}
+
+/**
+ * The getter a prototype defines for `name`, or null.
+ * @param {any} proto
+ * @param {string} name
+ * @returns {any}
+ */
+function accessorOf(proto, name) {
+  const get = proto == null ? undefined : Object.getOwnPropertyDescriptor(proto, name)?.get;
+  return typeof get === 'function' ? get : null;
+}
+
+/**
+ * `node`'s parent, read as {@link domReaderOf} says.
+ * @param {any} ctx
+ * @param {any} node
+ * @returns {any}
+ */
+function parentOf(ctx, node) {
+  const get = ctx.dom.parentNode;
+  return get !== null ? get.call(node) : node.parentNode;
+}
+
+/**
+ * `node`'s attribute `name`, read as {@link domReaderOf} says.
+ * @param {any} ctx
+ * @param {any} node
+ * @param {string} name
+ * @returns {string | null}
+ */
+function attributeOf(ctx, node, name) {
+  const get = ctx.dom.getAttribute;
+  return get !== null ? get.call(node, name) : node.getAttribute(name);
+}
+
+/**
+ * `node`'s lower-case tag name, read as {@link domReaderOf} says.
+ * @param {any} ctx
+ * @param {any} node
+ * @returns {string}
+ */
+function localNameOf(ctx, node) {
+  const get = ctx.dom.localName;
+  return get !== null ? get.call(node) : node.localName ?? String(node.tagName).toLowerCase();
 }
 
 /**
@@ -1124,44 +1209,78 @@ function reportHeldId(ctx, id) {
  * @returns {boolean}
  */
 function isHeldOutside(ctx, held) {
-  if (isConnectedTo(held, ctx.container)) return false;
+  if (isConnectedTo(ctx, held, ctx.container)) return false;
   const { claims, prefix } = /** @type {IdClaim} */ (ctx.ids);
   if (claims !== null) for (const [other, claim] of claims) {
-    if (other !== ctx.container && claim.prefix === prefix && isConnectedTo(ctx.container, other) && isConnectedTo(held, other)) return false;
+    if (other !== ctx.container && claim.prefix === prefix && isConnectedTo(ctx, ctx.container, other) && isConnectedTo(ctx, held, other)) return false;
   }
   return true;
 }
 
 /**
- * Whether `node` is an HTML element: in the HTML namespace, or in none (a
- * document that keeps no namespaces).
- * @param {any} node
+ * Whether an element of namespace `namespace` is an HTML element: in the
+ * HTML namespace, or in none (a document that keeps no namespaces).
+ * @param {string | null | undefined} namespace
  * @returns {boolean}
  */
-function isHtmlElement(node) {
-  return node.namespaceURI == null || node.namespaceURI === 'http://www.w3.org/1999/xhtml';
+function isHtmlNamespace(namespace) {
+  return namespace == null || namespace === 'http://www.w3.org/1999/xhtml';
 }
 
 /**
- * Report a prefixed `name` the pass wrote on a `form`, `img`, `embed`,
- * `object` or `iframe` (the elements whose name becomes a property of
- * `document`) that an HTML element of those tags outside the root already
- * holds, once per name, as {@link reportHeldId} reports an id: the page's
- * `document[name]` then answers a collection holding both. Looked up once as
- * the pass ends, in one scan of the page's named elements, so a pass writing
- * many names walks the page once; an element the host adds later is not seen,
- * and a document without `querySelectorAll` is not looked in.
+ * The id an element gives `document` as a named property: an `object`'s
+ * non-empty id, and an `img`'s when it has a non-empty `name` too. Any other
+ * element's id is no property of `document`.
+ * @param {any} ctx
+ * @param {any} node
+ * @param {string | null} name - The element's `name`.
+ * @returns {string | null}
+ */
+function documentIdOf(ctx, node, name) {
+  const tag = localNameOf(ctx, node);
+  if (tag !== 'object' && (tag !== 'img' || !name)) return null;
+  return attributeOf(ctx, node, 'id') || null;
+}
+
+/**
+ * Report a prefixed name of `document` the pass wrote that an HTML element
+ * outside the root already holds, once per name, as {@link reportHeldId}
+ * reports an id: the page's `document[name]` then answers a collection
+ * holding both. A name of `document` is the `name` of a `form`, `img`,
+ * `embed`, `object` or `iframe`, and the id {@link documentIdOf} reads, so a
+ * written name is looked for among the page's names and those ids, and a
+ * written `img` id among the page's names (an id the page holds as an id is
+ * the id report's). Looked up once as the pass ends, in one scan of the page,
+ * so a pass writing many names walks the page once; an element the host adds
+ * later is not seen, and a document without `querySelectorAll` is not looked
+ * in.
  * @param {any} ctx
  */
 function reportHeldNames(ctx) {
-  const written = ctx.writtenNames;
+  const names = ctx.writtenNames;
+  const owners = ctx.writtenOwners;
   ctx.writtenNames = new Set();
-  if (typeof ctx.doc?.querySelectorAll !== 'function') return;
-  for (const held of ctx.doc.querySelectorAll('form[name], img[name], embed[name], object[name], iframe[name]')) {
-    const name = held.getAttribute('name');
-    if (!written.has(name) || ctx.heldNames.has(name) || !isHtmlElement(held) || !isHeldOutside(ctx, held)) continue;
-    ctx.heldNames.add(name);
-    ctx.onUnsafe({ kind: 'name', name });
+  ctx.writtenOwners = new Set();
+  /** @type {Set<string>} */
+  const ids = new Set();
+  for (const owner of owners) {
+    const id = documentIdOf(ctx, owner, attributeOf(ctx, owner, 'name'));
+    if (id !== null && !ctx.heldNames.has(id)) ids.add(id);
+  }
+  if ((names.size === 0 && ids.size === 0) || typeof ctx.doc?.querySelectorAll !== 'function') return;
+  const namespaceOf = ctx.dom.namespaceURI;
+  for (const held of ctx.doc.querySelectorAll('form[name], img[name], embed[name], object[name], iframe[name], object[id]')) {
+    const name = attributeOf(ctx, held, 'name');
+    const id = documentIdOf(ctx, held, name);
+    const byName = name !== null && (names.has(name) || ids.has(name)) && !ctx.heldNames.has(name) ? name : null;
+    const byId = id !== null && id !== name && names.has(id) && !ctx.heldNames.has(id) ? id : null;
+    if ((byName === null && byId === null) || !isHtmlNamespace(namespaceOf !== null ? namespaceOf.call(held) : held.namespaceURI)
+      || !isHeldOutside(ctx, held)) continue;
+    for (const key of [byName, byId]) {
+      if (key === null) continue;
+      ctx.heldNames.add(key);
+      ctx.onUnsafe({ kind: 'name', name: key });
+    }
   }
 }
 
@@ -1195,7 +1314,9 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
   }
   if (SKIP_PROPS.has(name)) return;
   if (ctx.policy !== null) {
-    const tag = node.localName ?? String(node.tagName).toLowerCase();
+    // read through the DOM's own accessor: a form holding a control named
+    // `localName` would otherwise reach the policy as some other tag
+    const tag = localNameOf(ctx, node);
     const decided = ctx.policy.prop(name, newValue, tag);
     // A rejected NAME (scripting sink, inline `on*`, injection-shaped) is
     // dropped; a sanitized-away URL or dangerous style keeps its (safe) name
@@ -1228,8 +1349,15 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
     // has its live value/checked reasserted to it at the end of the pass.)
     if (ctx.onUnsafe !== null && typeof newValue === 'string') {
       const lower = name.toLowerCase();
-      if (lower === 'id') reportHeldId(ctx, newValue);
-      else if (lower === 'name' && newValue !== '' && NAMED_TAGS.has(tag) && !ctx.heldNames.has(newValue)) ctx.writtenNames.add(newValue);
+      if (lower === 'id') {
+        reportHeldId(ctx, newValue);
+        if (tag === 'img' || tag === 'object') ctx.writtenOwners.add(node);
+      }
+      else if (lower === 'name' && NAMED_TAGS.has(tag)) {
+        if (newValue !== '' && !ctx.heldNames.has(newValue)) ctx.writtenNames.add(newValue);
+        // a name on an `img` makes its id a name of `document` too
+        if (tag === 'img') ctx.writtenOwners.add(node);
+      }
     }
     if (name === 'style' && typeof newValue === 'object' && newValue !== null) {
       // an object with no declaration is no attribute, as the serializer omits it
