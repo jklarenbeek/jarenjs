@@ -288,18 +288,12 @@ delete it or fix it.
 
 ## @jarenjs/flow
 
-- [ ] **Statecharts, workflows and dag jobs take no operator registry.**
-  `compileFsm`, `compileDag` and `fsmToApp` take `operators`, but
-  `compileStatechart`, `compileWorkflow`, `fsmStateSchema` and `@jarenjs/db`'s
-  dag job compile with the core operators only, so a guard or node using
-  `{"$sqrt": …}` that `compileFsm`/`compileDag` accept under a registry is
-  `JF0007`/`JF0014` there (`fsmStateSchema` refuses a machine `fsmToApp`
-  accepts).
-- [ ] **Flow guards cannot use schema operators.** `compileFsm` and `compileDag`
-  take no `compileTypeTest`, so a guard or query node using `{"$valid": …}` is
-  `JF0007`/`JF0014` with `JQ0008` ("schema operators require a type-test
-  compiler") — in the studio too, where a `query` file with the same `$valid`
-  validates.
+- [ ] **A workflow guard's refusal names its place in the lowered machine.**
+  `compileWorkflow` and `lowerWorkflow` refuse a guard that fails to compile
+  as `JF0007` at `/transitions/<i>/guard` of the lowered statechart, while a
+  task `with`, `input` or embedded DAG refusal is re-based onto the workflow
+  document (`/states/work/work/with`, `/states/work/input`); `lowerWorkflow`'s
+  `sources` already maps each lowered state to its source pointer.
 
 ## @jarenjs/contract
 

@@ -1,5 +1,5 @@
 import { validateDagDoc } from '../../flow-document.js';
-import { defaultOperators } from '../../validate.js';
+import { defaultOperators, compileTypeTest } from '../../validate.js';
 //@ts-check
 /**
  * The Flow studio's JS boundary: the projection chain (flow document →
@@ -388,7 +388,9 @@ const message = errorMessage;
  *   answering the current one, the run's lines and refusals speak;
  *   `operators`: the operator registry a machine's guards and effect
  *   props and a dag's embedded documents compile with (absent: the one
- *   `validateFile` reads when given none, so a valid flow runs)
+ *   `validateFile` reads when given none, so a valid flow runs). They
+ *   compile with `validateFile`'s type-test compiler too, so a `$valid`
+ *   guard or node that validates also runs.
  */
 export function createFlowRuntime(env = {}) {
   const words = () => studioTextOf(env.messages);
@@ -397,7 +399,7 @@ export function createFlowRuntime(env = {}) {
 
   const boot = (handle, props) => {
     try {
-      const { slice, actions } = fsmToApp(props.doc, { operators });
+      const { slice, actions } = fsmToApp(props.doc, { operators, compileTypeTest });
       /** @type {Record<string, any>} */
       const effects = {
 };
@@ -417,6 +419,7 @@ export function createFlowRuntime(env = {}) {
         schedule: env.schedule,
         effects,
         operators,
+        compileTypeTest,
         onError: (err) => handle.emit({ action: 'flow/run-log', with: { run: 'error', props: message(err) } }),
       });
       app.observe((tx) => handle.emit({
@@ -478,7 +481,7 @@ export function createFlowRuntime(env = {}) {
         // dag: a text-projected SKELETON is deliberately incomplete
         // (all-task stubs, no output yet), so the gate is the published
         // schema — compile problems surface at run, where they belong.
-        if (props.kind === 'fsm') compileFsm(doc, { operators });
+        if (props.kind === 'fsm') compileFsm(doc, { operators, compileTypeTest });
         else if (!validateDagDoc(doc)) throw new Error(words()('studio/flow/dag-schema'));
         dispatch('flow/parsed', { doc });
       }
@@ -506,7 +509,7 @@ export function createFlowRuntime(env = {}) {
         }
       }
       let dag;
-      try { dag = compileDag(props.doc, { tasks: env.tasks ?? {}, operators }); }
+      try { dag = compileDag(props.doc, { tasks: env.tasks ?? {}, operators, compileTypeTest }); }
       catch (err) {
         send('flow/dag-fail', { message: message(err) });
         return Promise.resolve({ ok: false, error: message(err) });

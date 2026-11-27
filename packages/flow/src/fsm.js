@@ -26,28 +26,51 @@ import { asError, FlowCompileError, FlowRuntimeError } from './errors.js';
  */
 
 /**
- * The compile options an `operators` option gives the embedded query
- * and JSLT documents: the registry's `{ extensions, functions }`, so
- * they compile with its operators (`$sqrt` with the math pack) and its
- * `$call` functions. Absent (`undefined` or `null`), they compile with
- * the core operators only.
- * @param {unknown} operators - an operator registry
- *   (`createJsltRegistry().use(pack)` from `@jarenjs/json/jslt`, or any
- *   object whose `toOptions()` answers `{ extensions, functions }`)
- * @param {string} caller - the compiler a refusal names
- * @returns {{ extensions?: Record<string, any>, functions?: Record<string, any> } | undefined}
- * @throws {TypeError} when `operators` is no registry
+ * The registry and type-test hook a flow compiler hands its embedded
+ * query and JSLT documents.
+ * @typedef {{ toOptions: () => { extensions?: Record<string, any>, functions?: Record<string, any> } }} OperatorRegistry
+ * @typedef {(schemaJson: any, docPath: string) => ((value: any) => boolean)} TypeTestCompiler
+ * @typedef {{ extensions?: Record<string, any>, functions?: Record<string, any>, compileTypeTest?: TypeTestCompiler }} EmbeddedCompileOptions
  */
-export function operatorOptions(operators, caller) {
-  if (operators === undefined || operators === null) return undefined;
-  if (typeof operators !== 'object' || typeof (/** @type {any} */ (operators)).toOptions !== 'function') {
+
+/**
+ * The compile options a flow compiler's `operators` and `compileTypeTest`
+ * options give the embedded query and JSLT documents: the registry's
+ * `{ extensions, functions }`, so they compile with its operators
+ * (`$sqrt` with the math pack) and its `$call` functions, and the
+ * type-test compiler, so the schema operators (`$valid`, `$instanceOf`)
+ * and JSLT schema matches compile. Each one absent (`undefined` or
+ * `null`) leaves the embedded documents as they compile without it: the
+ * core operators only, and a schema operator refused (`JQ0008`).
+ * @param {{ operators?: unknown, compileTypeTest?: unknown } | null | undefined} options -
+ *   `operators`: an operator registry (`createJsltRegistry().use(pack)`
+ *   from `@jarenjs/json/jslt`, or any object whose `toOptions()` answers
+ *   `{ extensions, functions }`); `compileTypeTest`: a type-test compiler
+ *   (`createTypeTestCompiler()` from `@jarenjs/validate/query`)
+ * @param {string} caller - the compiler a refusal names
+ * @returns {EmbeddedCompileOptions | undefined} `undefined` when neither is given
+ * @throws {TypeError} when `operators` is no registry or `compileTypeTest` no function
+ */
+export function embeddedCompileOptions(options, caller) {
+  const operators = options?.operators;
+  const compileTypeTest = options?.compileTypeTest;
+  const hasOperators = operators !== undefined && operators !== null;
+  const hasTypeTest = compileTypeTest !== undefined && compileTypeTest !== null;
+  if (hasOperators && (typeof operators !== 'object' || typeof (/** @type {any} */ (operators)).toOptions !== 'function')) {
     throw new TypeError(`${caller}: "operators" must be an operator registry (an object with a toOptions function)`);
   }
-  const { extensions, functions } = /** @type {any} */ (operators).toOptions();
-  /** @type {{ extensions?: Record<string, any>, functions?: Record<string, any> }} */
+  if (hasTypeTest && typeof compileTypeTest !== 'function') {
+    throw new TypeError(`${caller}: "compileTypeTest" must be a function (a type-test compiler)`);
+  }
+  if (!hasOperators && !hasTypeTest) return undefined;
+  /** @type {EmbeddedCompileOptions} */
   const compileOptions = {};
-  if (extensions !== undefined) compileOptions.extensions = extensions;
-  if (functions !== undefined) compileOptions.functions = functions;
+  if (hasOperators) {
+    const { extensions, functions } = /** @type {any} */ (operators).toOptions();
+    if (extensions !== undefined) compileOptions.extensions = extensions;
+    if (functions !== undefined) compileOptions.functions = functions;
+  }
+  if (hasTypeTest) compileOptions.compileTypeTest = /** @type {TypeTestCompiler} */ (compileTypeTest);
   return compileOptions;
 }
 
@@ -57,8 +80,8 @@ export function operatorOptions(operators, caller) {
  * `{ run, with? }` descriptors.
  * @param {any} list
  * @param {string} docPath - JSON Pointer of the list member.
- * @param {{ extensions?: Record<string, any>, functions?: Record<string, any> }} [compileOptions] -
- *   what each `with` compiles with ({@link operatorOptions})
+ * @param {EmbeddedCompileOptions} [compileOptions] -
+ *   what each `with` compiles with ({@link embeddedCompileOptions})
  * @returns {CompiledEffect[]}
  */
 export function compileEffectList(list, docPath, compileOptions) {
@@ -181,15 +204,19 @@ export function resolveEffect(effect, scope, out, errors) {
  * `event: null` mean no guard / any event.
  *
  * @param {any} doc - the jaren-fsm document
- * @param {{ operators?: { toOptions: () => { extensions?: Record<string, any>, functions?: Record<string, any> } } | null }} [options] -
+ * @param {{ operators?: OperatorRegistry | null, compileTypeTest?: TypeTestCompiler | null }} [options] -
  *   `operators`: an operator registry (`createJsltRegistry().use(mathPack)`
  *   from `@jarenjs/json/jslt`); every guard and effect `with` compiles with
  *   its operators and `$call` functions. Without it they compile with the
  *   core operators, and a pack operator is refused (`JF0007` for a guard,
  *   `JF0009` for a `with`, each with the `JQ0002` in its cause chain).
+ *   `compileTypeTest`: a type-test compiler (`createTypeTestCompiler()`
+ *   from `@jarenjs/validate/query`), so a guard or `with` may use the
+ *   schema operators (`{"$valid": ["$.context.n", {"type": "number"}]}`);
+ *   without it they are refused the same way, with `JQ0008`.
  * @returns {CompiledFsm}
  * @throws {FlowCompileError} when the document violates the format (JF0xxx)
- * @throws {TypeError} when `operators` is no registry
+ * @throws {TypeError} when `operators` is no registry or `compileTypeTest` no function
  * @example
  * const fsm = compileFsm({
  *   initial: 'idle',
@@ -199,7 +226,7 @@ export function resolveEffect(effect, scope, out, errors) {
  * fsm.step('idle', 'start').state; // 'busy'
  */
 export function compileFsm(doc, options) {
-  const compileOptions = operatorOptions(options?.operators, 'compileFsm');
+  const compileOptions = embeddedCompileOptions(options, 'compileFsm');
   if (!isJsonObject(doc)) {
     throw new FlowCompileError('JF0001', 'the fsm document must be an object', '');
   }

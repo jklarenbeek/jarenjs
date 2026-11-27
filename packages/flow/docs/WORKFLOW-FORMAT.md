@@ -1,6 +1,6 @@
 # Composed workflows — jaren-workflow 0.2
 
-`compileWorkflow(document, {tasks, store?})` lowers a neutral JSON workflow
+`compileWorkflow(document, {tasks, store?, operators?, compileTypeTest?})` lowers a neutral JSON workflow
 onto `compileStatechart` and `compileDag`. The statechart chooses control;
 the DAG executor owns dependency scheduling, fan-out/fan-in and task abort.
 The bridge transfers results, persists snapshots and dispatches completion.
@@ -83,6 +83,13 @@ Guards and a work state's `input` query read
 - `event`: the last accepted external `{type,payload?}` event, initially null;
 - `results`: the latest completed work result by qualified state id;
 - `visits`: entry counts by qualified state id.
+
+Every guard, `input` query, task `with` and embedded DAG compiles with the
+core operators, or with the operators and `$call` functions of a registry
+passed as `operators`, and with the schema operators (`$valid`) when a
+type-test compiler is passed as `compileTypeTest` (both as `compileFsm` and
+`compileDag` take them); `lowerWorkflow(document, {operators?, compileTypeTest?})`
+checks the control machine's guards under the same two options.
 
 The default work input is `$.context.data`. A custom `input` query also sees
 `$.context.activation = {runId,state,visit,key}`. `key` is the canonical JSON

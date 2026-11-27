@@ -108,8 +108,9 @@ them is the host's business, the same boundary discipline as
 import { compileFsm, createFsmSession } from '@jarenjs/flow';
 
 const fsm = compileFsm(doc);        // throws FlowCompileError (JF0xxx) on a bad document
-// compileFsm(doc, { operators: createJsltRegistry().use(mathPack) }) compiles the
-// guards and effect props with a registry's operators; compileDag takes the same option
+// compileFsm(doc, { operators: createJsltRegistry().use(mathPack), compileTypeTest })
+// compiles the guards and effect props with a registry's operators and the schema
+// operators ($valid); compileDag, compileStatechart and compileWorkflow take the same options
 fsm.initial;                        // 'idle'
 fsm.states;                         // ['idle', 'loading', 'done'] (frozen)
 fsm.events('loading');              // ['ok', 'fail'] (frozen)

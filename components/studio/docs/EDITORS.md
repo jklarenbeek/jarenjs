@@ -57,7 +57,8 @@ kind stays fixed while a document is open; templates open a new document.
 `run({ input, event? })` uses the injected task registry or the mounted machine.
 Guards, effect props and a DAG's embedded documents compile with the editor's
 `operators` registry (the built-in math/finance/stats packs when none is
-given), and a replacement validates under the same registry.
+given) and with the type-test compiler `validateFile` reads, so the schema
+operators (`$valid`) compile; a replacement validates under the same two.
 A DAG returns its settled output or failure. `event` sends a machine event
 through the same sandbox used by the run controls.
 

@@ -64,7 +64,9 @@ assets from its host; it has no filesystem, fetch or DOM dependency.
   meta-schema (over the registry's grammars when the document names one of
   its operators) + a headless render audit; jslt/query compiled with the
   operator packs; fsm/dag read against their grammars over the registry's
-  and compiled with it. When an app/fsm/dag document fails its grammar, its
+  and compiled with it. Every kind compiles with one type-test compiler
+  (exported for the project's runs and the flow host, so a `$valid` that
+  validates also runs). When an app/fsm/dag document fails its grammar, its
   query-bearing members are compiled too, and an unknown operator the
   compiler names (`JQ0002`, with the nearest known one) replaces the
   branch errors it caused. Memoized on the file's IDENTITY (a `createWeakCache`

@@ -3,7 +3,7 @@
 import { deepFreeze, isJsonObject } from '@jarenjs/core/object';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { cloneJson } from '@jarenjs/json/canonical';
-import { compileEffectList, passesGuard, resolveEffect } from './fsm.js';
+import { compileEffectList, embeddedCompileOptions, passesGuard, resolveEffect } from './fsm.js';
 import { asError, FlowCompileError, FlowRuntimeError } from './errors.js';
 
 /** @typedef {Readonly<{ active: readonly string[], history: Readonly<Record<string, readonly string[]>>,
@@ -28,10 +28,20 @@ const finiteTime = (value) => typeof value === 'number' && Number.isFinite(value
 
 /** Compile jaren-fsm 0.2 without creating a clock, timer or effect handler.
  * @param {any} doc
- * @param {{ maxMicrosteps?: number }} [options]
+ * @param {{ maxMicrosteps?: number, operators?: import('./fsm.js').OperatorRegistry | null,
+ *   compileTypeTest?: import('./fsm.js').TypeTestCompiler | null }} [options] -
+ *   `operators` and `compileTypeTest` as `compileFsm` takes them: every
+ *   guard and effect `with` compiles with the registry's operators and
+ *   `$call` functions, and with the type-test compiler the schema
+ *   operators (`$valid`) compile; without either they are refused
+ *   (`JF0007` for a guard, `JF0009` for a `with`, with the `JQ0002` or
+ *   `JQ0008` in the cause chain)
  * @returns {CompiledStatechart}
+ * @throws {FlowCompileError} when the document violates the format (JF0xxx)
+ * @throws {TypeError} on a malformed option
  */
 export function compileStatechart(doc, options = {}) {
+  const compileOptions = embeddedCompileOptions(options, 'compileStatechart');
   const maxMicrosteps = options.maxMicrosteps ?? 1000;
   if (!Number.isSafeInteger(maxMicrosteps) || maxMicrosteps < 1)
     throw new TypeError('maxMicrosteps must be a positive safe integer');
@@ -65,8 +75,8 @@ export function compileStatechart(doc, options = {}) {
     if ((s.final === true && type !== 'final') || (s.history && type !== 'history'))
       defect('conflicting state types', path);
     nodes.set(s.id, { ...s, type, parent: s.parent ?? null, path, index, children: [],
-      entry: compileEffectList(s.entry, `${path}/entry`),
-      exit: compileEffectList(s.exit, `${path}/exit`) });
+      entry: compileEffectList(s.entry, `${path}/entry`, compileOptions),
+      exit: compileEffectList(s.exit, `${path}/exit`, compileOptions) });
   }
   for (const s of nodes.values()) {
     if (s.parent === null) roots.push(s.id);
@@ -142,7 +152,7 @@ export function compileStatechart(doc, options = {}) {
       defect('internal transitions must target their source or a descendant', `${path}/type`);
     let guard = null;
     if (t.guard !== undefined && t.guard !== null) {
-      try { guard = compileJsonQuery(t.guard); }
+      try { guard = compileJsonQuery(t.guard, compileOptions); }
       catch (err) { throw new FlowCompileError('JF0007', 'statechart guard failed to compile', `${path}/guard`, asError(err)); }
     }
     // A history pseudo-state is a child of its owner. Using the owner as
@@ -152,7 +162,7 @@ export function compileStatechart(doc, options = {}) {
     const domain = type === 'internal' ? t.from
       : ancestors(t.from).find((id) => nodes.get(id).type !== 'parallel' && below(target, id)) ?? null;
     const compiled = { ...t, type, domain, index, path, guard,
-      effects: compileEffectList(t.effects, `${path}/effects`) };
+      effects: compileEffectList(t.effects, `${path}/effects`, compileOptions) };
     byFrom.get(t.from).push(compiled);
     return compiled;
   });

@@ -128,7 +128,12 @@ Guards and effect `with` members are Jaren JSON Query documents
 operators, or with the operators and `$call` functions of the registry
 passed as `compileFsm(doc, { operators })` (`createJsltRegistry().use(mathPack)`
 from `@jarenjs/json/jslt`); a pack operator the registry does not mount is
-`JF0007`/`JF0009` with its `JQ0002` in the cause chain. At step time each
+`JF0007`/`JF0009` with its `JQ0002` in the cause chain. The schema
+operators (`{"$valid": ["$.context.n", {"type": "number"}]}`) compile when
+a type-test compiler is passed as `compileTypeTest`
+(`createTypeTestCompiler()` from `@jarenjs/validate/query`), as a query
+compiles them; without one they are `JF0007`/`JF0009` with `JQ0008`. A
+`compileTypeTest` that is no function is a `TypeError`. At step time each
 evaluates with `$` bound to one scope object:
 
 | member | value |
@@ -352,9 +357,11 @@ compiles every embedded query, stylesheet, `with` and `select` exactly
 once, resolves every `task` node against the registry (a missing
 handler is compile-time JF0018 — fail early, not mid-run), and proves
 acyclicity. Those embedded documents compile with the core operators, or
-with an operator registry's passed as `operators` (as `compileFsm`'s,
-§3); an operator it does not mount is `JF0014` with its `JQ0002` in the
-cause chain. `run(input, { signal?, onNode? })` may then be called any
+with an operator registry's passed as `operators`, and with a type-test
+compiler passed as `compileTypeTest` (both as `compileFsm`'s, §3): an
+operator the registry does not mount is `JF0014` with its `JQ0002` in the
+cause chain, and a schema operator or stylesheet schema match without a
+type-test compiler is `JF0014` with `JQ0008` or `JT0006`. `run(input, { signal?, onNode? })` may then be called any
 number of times, concurrently; runs share nothing but the compiled
 closures.
 

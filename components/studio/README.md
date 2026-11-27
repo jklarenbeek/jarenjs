@@ -124,7 +124,9 @@ before, and an app that names none of the registry's operators answers as
 before. The same holds for an `fsm` or `dag` file: a guard, effect `with`,
 query or jslt node, task `with` or edge `select` using the registry's
 operators validates and runs (in the project's flow host and in Run), where
-both refused it with `JQ0002`.
+both refused it with `JQ0002`; and one using a schema operator
+(`{"$valid": [...]}`) validates and runs as in a `query` file, where both
+refused it with `JQ0008`.
 
 ## Exports
 

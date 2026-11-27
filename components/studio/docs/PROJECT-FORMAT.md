@@ -44,7 +44,7 @@ an invalid file.
 | `query` | a query document | **compiled** by the engine with the operator registry |
 | `state` / `data` | any JSON value (an input) | structural JSON only |
 | `schema` | a JSON Schema | must be an object/boolean and compile |
-| `fsm` / `dag` | a `jaren-fsm` / `jaren-dag` machine | its grammar (admitting the operator registry's operators) and its compiler, with the registry; named tasks are checked without execution |
+| `fsm` / `dag` | a `jaren-fsm` / `jaren-dag` machine | its grammar (admitting the operator registry's operators) and its compiler, with the registry and the type-test compiler a `query` file compiles with; named tasks are checked without execution |
 | `model` | a `jaren-model` store definition | its grammar, normalization and SQLite collection/entity planning |
 | `contract` | a `jaren-contract` document | `compileContract`, with coded diagnostics |
 
@@ -84,7 +84,12 @@ grammars and compiled with the registry (`compileFsm` and `compileDag`'s
 validates under a registry that mounts the math pack. A run of the file
 (`runProjectFile`) and the project's flow host step the machine and run
 the graph under the registry the files validate under; an operator it
-does not mount is refused as `JQ0002` at its own place, as before.
+does not mount is refused as `JQ0002` at its own place, as before. The
+schema operators are read as a `query` file reads them: a guard or node
+such as `{"$valid": ["$.context.n", {"type": "number"}]}`, and a jslt
+node's schema match, compile with the same type-test compiler
+(`compileFsm` and `compileDag`'s `compileTypeTest`), and the runs and the
+flow host step and run them with it.
 
 **An unknown operator is named, not its consequences.** The `app`, `fsm`
 and `dag` grammars place a query in a branch (an action is an awaiting

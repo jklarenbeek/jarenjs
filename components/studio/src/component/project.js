@@ -1,7 +1,7 @@
 //@ts-check
 /** Complete project-stage behavior over injected execution and preview services. */
 import { resolveProjectFile, projectFileContext } from '../index.js';
-import { defaultOperators } from '../validate.js';
+import { defaultOperators, compileTypeTest } from '../validate.js';
 import { contentKey, semanticKey } from '@jarenjs/core/object';
 import { createSplitterWidget } from '@jarenjs/app';
 import { createStudioComponent } from './index.js';
@@ -151,12 +151,13 @@ function runProjectFile(slice, name, options = {}) {
     try {
       const doc = resolveProjectFile(project, name).doc;
       const data = JSON.parse(dataText);
-      // the registry the files validate under, so a valid flow also runs
+      // the registry and type-test compiler the files validate under, so a
+      // valid flow also runs
       const operators = operatorRegistry ?? defaultOperators;
-      if (file.kind === 'dag') return compileDag(doc, { operators }).run(data).then(
+      if (file.kind === 'dag') return compileDag(doc, { operators, compileTypeTest }).run(data).then(
         (output) => ({ nodes: [code(t('studio/run/dag-output'), JSON.stringify(output, null, 2) ?? t('studio/run/empty-sequence'))] }),
         (err) => ({ nodes: [error(err, t('studio/run/dag-failed'))] }));
-      const machine = compileFsm(doc, { operators });
+      const machine = compileFsm(doc, { operators, compileTypeTest });
       let state = machine.initial;
       const trace = [];
       for (const event of data?.events ?? []) {

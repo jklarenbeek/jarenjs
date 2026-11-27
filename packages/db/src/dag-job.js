@@ -46,9 +46,10 @@ export const RUN_IDENTITY_NODE = '\u001Fidentity';
  * sees. A unit separator, so no job id can carry one by accident. */
 const RUN_KEY_SEPARATOR = '\u001F';
 
-/** Every member `createDagJobRunner` reads: the worker's own, which it hands on, and the four that make it a runner. */
-const RUNNER_OPTIONS = Object.freeze(['compileDag', 'documents', 'tasks', 'resources', 'concurrency', 'pollInterval',
-  'leaseMs', 'owner', 'renew', 'onOutcome', 'backoffBase', 'backoffCap', 'stopGraceMs', 'effectSafety']);
+/** Every member `createDagJobRunner` reads: the worker's own, which it hands on, and the six that make it a runner. */
+const RUNNER_OPTIONS = Object.freeze(['compileDag', 'documents', 'tasks', 'resources', 'operators', 'compileTypeTest',
+  'concurrency', 'pollInterval', 'leaseMs', 'owner', 'renew', 'onOutcome', 'backoffBase', 'backoffCap', 'stopGraceMs',
+  'effectSafety']);
 
 /**
  * The members the runner adds to every task's resources, so no host
@@ -78,10 +79,15 @@ const ATTEMPT_RESOURCES = Object.freeze(['jobId', 'assertLease', 'signal']);
  *   documents: Record<string, any>,
  *   tasks?: Record<string, Function | { run: Function, version?: string, taskVersions?: Record<string, string> }>,
  *   resources?: Record<string | symbol, unknown>,
+ *   operators?: { toOptions: () => any } | null, compileTypeTest?: Function | null,
  *   concurrency?: number, pollInterval?: number, leaseMs?: number,
  *   owner?: string, renew?: boolean, onOutcome?: (event: any) => void,
  *   backoffBase?: number, backoffCap?: number,
- *   stopGraceMs?: number, effectSafety?: (job: any, context: any) => any }} options
+ *   stopGraceMs?: number, effectSafety?: (job: any, context: any) => any }} options -
+ *   `operators` (an operator registry) and `compileTypeTest` (a type-test
+ *   compiler) reach the injected `compileDag` with every document, so a
+ *   query, stylesheet, task `with` or edge `select` may use a registry's
+ *   operators and the schema operators; the compiler checks them
  * @returns {{ start: () => any, stop: (options?: any) => Promise<any>, stats: () => any }}
  */
 export function createDagJobRunner(store, options) {
@@ -101,6 +107,14 @@ export function createDagJobRunner(store, options) {
     throw new TypeError(
       'createDagJobRunner: "documents" must map job kinds to dag documents');
   }
+  // what every document's queries, stylesheets, task `with` and edge
+  // `select` compile with: handed to the injected compiler as given (it
+  // checks them), and only when given, so a runner without them makes
+  // the very call it always made
+  /** @type {Record<string, unknown>} */
+  const embedded = {};
+  if (options.operators !== undefined) embedded.operators = options.operators;
+  if (options.compileTypeTest !== undefined) embedded.compileTypeTest = options.compileTypeTest;
   const hostResources = options.resources ?? {};
   if (!isPlainOptions(hostResources)) {
     throw new DbCompileError('JD0013',
@@ -256,8 +270,7 @@ export function createDagJobRunner(store, options) {
   /** @type {Record<string, Function>} */
   const handlers = {};
   for (const kind of Object.keys(documents)) {
-    const compiled = compileDag(documents[kind],
-      { tasks: options.tasks ?? {}, checkpoint });
+    const compiled = compileDag(documents[kind], { ...embedded, tasks: options.tasks ?? {}, checkpoint });
     // Every attempt compares the same canonical document. The short
     // revision is diagnostic only: different documents can hash alike.
     const workflowIdentity = canonicalizeJson(documents[kind] ?? null);

@@ -2827,6 +2827,15 @@ export declare function createDagJobRunner(store: Store, options: {
    * member with one of those three names is `JD0013`. Never input, never
    * checkpoint identity. */
   resources?: Record<string | symbol, unknown>;
+  /** An operator registry (`createJsltRegistry().use(pack)` from
+   * `@jarenjs/json/jslt`), handed to `compileDag` with every document so
+   * its queries, stylesheets, task `with` and edge `select` compile with
+   * the registry's operators and `$call` functions. */
+  operators?: { toOptions: () => { extensions?: Record<string, unknown>; functions?: Record<string, unknown> } } | null;
+  /** A type-test compiler (`createTypeTestCompiler()` from
+   * `@jarenjs/validate/query`), handed to `compileDag` the same way, so
+   * the schema operators (`$valid`) and stylesheet schema matches compile. */
+  compileTypeTest?: ((schemaJson: unknown, docPath: string) => (value: unknown) => boolean) | null;
   concurrency?: number;
   pollInterval?: number;
   leaseMs?: number;

@@ -9,6 +9,7 @@ import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileDag, nonblank } from './dag.js';
 import { compileStatechart } from './statechart.js';
+import { embeddedCompileOptions } from './fsm.js';
 import { asError, FlowCompileError, FlowRuntimeError } from './errors.js';
 
 const NEXT = '@workflow/next';
@@ -32,8 +33,15 @@ const malformed = (reason) => { throw new FlowRuntimeError('JF2016', reason); };
 /** Lower one neutral workflow to inspectable JSON, without resolving host tasks.
  * Work states carry work:{task,version,with?} or work:{dag}; choose/on/flow/final
  * are the other mutually exclusive control forms. @param {any} document
- * @returns {LoweredWorkflow} */
-export function lowerWorkflow(document) {
+ * @param {{ operators?: import('./fsm.js').OperatorRegistry | null,
+ *   compileTypeTest?: import('./fsm.js').TypeTestCompiler | null }} [options] -
+ *   what the lowered control machine's guards are checked under
+ *   (`compileStatechart`'s `operators` and `compileTypeTest`)
+ * @returns {LoweredWorkflow}
+ * @throws {TypeError} on a malformed option */
+export function lowerWorkflow(document, options) {
+  const embedded = { operators: options?.operators, compileTypeTest: options?.compileTypeTest };
+  embeddedCompileOptions(embedded, 'lowerWorkflow');
   let doc;
   try { doc = cloneJson(document); }
   catch (err) { throw new FlowCompileError('JF0021', 'workflow must be JSON', '', asError(err)); }
@@ -164,7 +172,7 @@ export function lowerWorkflow(document) {
   };
   for (const id of automatic.keys()) prove(id);
   const fsm = { $fsm: '0.2', initial, states, transitions };
-  compileStatechart(fsm);
+  compileStatechart(fsm, embedded);
   return deepFreeze({ version: '0.1', revision: doc.revision, document: doc, fsm, dags, sources, specs });
 }
 
@@ -195,12 +203,21 @@ function relocate(err, id, work) {
 /** Compile once; each run owns its control and checkpoint records.
  * Store save MUST atomically compare expectedGeneration (0 means absent).
  * @param {any} document
- * @param {{tasks?: NonNullable<Parameters<typeof compileDag>[1]>['tasks'], store?: WorkflowStore}} [options]
+ * @param {{tasks?: NonNullable<Parameters<typeof compileDag>[1]>['tasks'], store?: WorkflowStore,
+ *   operators?: import('./fsm.js').OperatorRegistry | null,
+ *   compileTypeTest?: import('./fsm.js').TypeTestCompiler | null}} [options] -
+ *   `operators` and `compileTypeTest` as `compileFsm` and `compileDag` take
+ *   them: every guard, task `with`, embedded DAG and `input` query
+ *   compiles with the registry's operators and `$call` functions, and with
+ *   the type-test compiler the schema operators (`$valid`) compile
  * @returns {CompiledWorkflow}
+ * @throws {TypeError} on a malformed option
  */
 export function compileWorkflow(document, options = {}) {
-  const lowered = lowerWorkflow(document);
-  const chart = compileStatechart(lowered.fsm);
+  const compileOptions = embeddedCompileOptions(options, 'compileWorkflow');
+  const embedded = { operators: options?.operators, compileTypeTest: options?.compileTypeTest };
+  const lowered = lowerWorkflow(document, embedded);
+  const chart = compileStatechart(lowered.fsm, embedded);
   const store = options.store;
   if (store && (typeof store.load !== 'function' || typeof store.save !== 'function'))
     throw new TypeError('workflow store requires load and compare-and-swap save');
@@ -220,7 +237,7 @@ export function compileWorkflow(document, options = {}) {
     setObjectMember(revisions.dags, id, revision);
     let dag;
     try {
-      dag = compileDag(doc, { tasks: options.tasks, revision, checkpoint: {
+      dag = compileDag(doc, { ...embedded, tasks: options.tasks, revision, checkpoint: {
         load: (key, identity) => route(key).load(identity),
         save: (key, node, value) => route(key).save(node, value),
         complete: (key, result) => route(key).complete(result),
@@ -230,7 +247,7 @@ export function compileWorkflow(document, options = {}) {
     dags.set(id, dag);
     for (const [node, version] of Object.entries(dag.taskVersions))
       setObjectMember(taskVersions, `${id}/${node}`, version);
-    try { inputs.set(id, compileJsonQuery(lowered.specs[id].input ?? '$.context.data')); }
+    try { inputs.set(id, compileJsonQuery(lowered.specs[id].input ?? '$.context.data', compileOptions)); }
     catch (err) { throw new FlowCompileError('JF0014', 'workflow input query failed to compile', `${id}/input`, asError(err)); }
   }
   const versions = deepFreeze(Object.fromEntries(Object.entries(taskVersions).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)));

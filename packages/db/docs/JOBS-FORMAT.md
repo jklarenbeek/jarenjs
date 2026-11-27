@@ -477,10 +477,16 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
   `@jarenjs/db`'s manifest and import graph name `@jarenjs/flow`
   nowhere, asserted by test.
 - The options are a closed set: `compileDag`, `documents`, `tasks`,
-  `resources`, and the worker's own (`concurrency`, `pollInterval`, `leaseMs`, `owner`, `renew`,
+  `resources`, `operators`, `compileTypeTest`, and the worker's own (`concurrency`, `pollInterval`, `leaseMs`, `owner`, `renew`,
   `onOutcome`, `backoffBase`, `backoffCap`, `stopGraceMs`, `effectSafety`). A
   member outside it is `JD0013` naming the nearest (`concurency` ran one loop);
   `maxAttempts` belongs to the job (`enqueue`).
+- `operators` (an operator registry, `createJsltRegistry().use(mathPack)`)
+  and `compileTypeTest` (a type-test compiler, `createTypeTestCompiler()`
+  from `@jarenjs/validate/query`) reach the injected `compileDag` with every
+  document, as given and only when given, so a job's queries, stylesheets,
+  task `with` and edge `select` compute with the registry's operators and the
+  schema operators (FLOW-FORMAT §7.1); `compileDag` checks them.
 - The job id is the run id. Node values save into
   `_jaren_job_checkpoints` as the run progresses, each stamped with the
   writing attempt's generation; `complete` records the DAG result AND

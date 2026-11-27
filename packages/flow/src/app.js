@@ -105,13 +105,15 @@ function bakeEffect(effect) {
  *
  * @param {any} fsmDoc - a jaren-fsm document (FLOW-FORMAT §2)
  * @param {{ pointer?: string, namespace?: string,
- *   operators?: { toOptions: () => { extensions?: Record<string, any>, functions?: Record<string, any> } } | null }} [options] -
+ *   operators?: import('./fsm.js').OperatorRegistry | null,
+ *   compileTypeTest?: import('./fsm.js').TypeTestCompiler | null }} [options] -
  *   `pointer` (default `/fsm`) is where the slice lives in app state,
  *   as a chain of identifier-safe segments; `namespace` (default
- *   `fsm/`) prefixes the generated action names; `operators` is the
- *   registry the machine is checked under (`compileFsm`'s), so a guard
- *   using a pack operator is accepted — the app that hosts the actions
- *   then needs the same registry (`createApp`'s `operators`).
+ *   `fsm/`) prefixes the generated action names; `operators` and
+ *   `compileTypeTest` are what the machine is checked under
+ *   (`compileFsm`'s), so a guard using a pack operator or a schema
+ *   operator (`$valid`) is accepted — the app that hosts the actions
+ *   then needs the same (`createApp`'s `operators` and `compileTypeTest`).
  * @returns {{ slice: { current: string|null }, actions: Record<string, any>, events: string[] }}
  * @throws {import('./errors.js').FlowCompileError} on a bad machine
  *   document (the same JF0xxx codes as `compileFsm`)
@@ -119,7 +121,7 @@ function bakeEffect(effect) {
  *   reserved `__fsm` variable name
  */
 export function fsmToApp(fsmDoc, options) {
-  compileFsm(fsmDoc, { operators: options?.operators });
+  compileFsm(fsmDoc, { operators: options?.operators, compileTypeTest: options?.compileTypeTest });
 
   const pointer = options?.pointer ?? '/fsm';
   const namespace = options?.namespace ?? 'fsm/';
@@ -192,11 +194,16 @@ export function fsmToApp(fsmDoc, options) {
  * slice pointer so no hand-written action can corrupt the control
  * state (APP-INTEGRATION.md §fail-closed).
  * @param {any} fsmDoc - a jaren-fsm document
+ * @param {{ operators?: import('./fsm.js').OperatorRegistry | null,
+ *   compileTypeTest?: import('./fsm.js').TypeTestCompiler | null }} [options] -
+ *   what the machine is checked under (`compileFsm`'s), so it accepts the
+ *   machines `fsmToApp` accepts under the same options
  * @returns {{ type: 'object', required: string[], properties: { current: { description: string, enum: string[] } } }}
  * @throws {import('./errors.js').FlowCompileError} on a bad machine document
+ * @throws {TypeError} on a malformed option
  */
-export function fsmStateSchema(fsmDoc) {
-  const fsm = compileFsm(fsmDoc);
+export function fsmStateSchema(fsmDoc, options) {
+  const fsm = compileFsm(fsmDoc, { operators: options?.operators, compileTypeTest: options?.compileTypeTest });
   return {
     type: 'object',
     required: ['current'],

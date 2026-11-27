@@ -10,6 +10,8 @@ import * as assert from 'node:assert';
 import { compileDag } from '@jarenjs/flow';
 import { openStore, createDagJobRunner } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
+import { createJsltRegistry, mathPack } from '@jarenjs/json/jslt';
+import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
 const MODEL = { $model: '0.1', collections: { x: { schema: { type: 'object' }, key: '/id' } } };
 const DAG = { $dag: '0.1', nodes: { in: { kind: 'input' }, out: { kind: 'output' } }, edges: [{ from: 'in', to: 'out' }] };
@@ -42,6 +44,60 @@ describe('createDagJobRunner options', () => {
         backoffCap: 1000, stopGraceMs: 100, effectSafety: undefined });
       assert.strictEqual(typeof runner.start, 'function');
       assert.throws(() => createDagJobRunner(store, /** @type {any} */ (null)), /compileDag/);
+    }
+    finally { await store.close(); }
+  });
+});
+
+describe('createDagJobRunner: what the documents compile with', () => {
+  const math = createJsltRegistry().use(mathPack);
+  const compileTypeTest = createTypeTestCompiler();
+  const COMPUTE = { $dag: '0.1', nodes: { in: { kind: 'input' },
+    q: { kind: 'query', query: { root: { $sqrt: '$.n' }, number: { $valid: ['$.n', { type: 'number' }] } } }, out: { kind: 'output' } },
+  edges: [{ from: 'in', to: 'q' }, { from: 'q', to: 'out' }] };
+
+  it('hands operators and compileTypeTest to the injected compiler only when given', async () => {
+    const store = await openStore(MODEL, { driver: nodeDriver(), jobs: true });
+    try {
+      /** @type {any[]} */
+      const seen = [];
+      const spy = (/** @type {any} */ doc, /** @type {any} */ options) => { seen.push(options); return compileDag(doc, options); };
+      createDagJobRunner(store, { compileDag: spy, documents: { k: DAG } });
+      createDagJobRunner(store, { compileDag: spy, documents: { k: DAG }, operators: math, compileTypeTest });
+      assert.deepStrictEqual(seen.map((options) => Object.keys(options)), [['tasks', 'checkpoint'], ['operators', 'compileTypeTest', 'tasks', 'checkpoint']]);
+      assert.strictEqual(seen[1].operators, math);
+      assert.strictEqual(seen[1].compileTypeTest, compileTypeTest);
+    }
+    finally { await store.close(); }
+  });
+
+  it('a job computes with the registry\'s operators and the schema operators', async () => {
+    const store = await openStore(MODEL, { driver: nodeDriver(), jobs: true });
+    const runner = createDagJobRunner(store, { compileDag, documents: { k: COMPUTE }, operators: math, compileTypeTest, pollInterval: 10 });
+    try {
+      runner.start();
+      const id = await store.jobs.enqueue('k', { input: { n: 16 } }, { id: 'j1' });
+      const deadline = Date.now() + 5_000;
+      for (;;) {
+        const job = await store.jobs.get(id);
+        if (job.state === 'done') break;
+        assert.ok(Date.now() < deadline, `stalled in ${job.state}`);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.deepStrictEqual((await store.jobs.get(id)).result, { root: 4, number: true });
+    }
+    finally { await runner.stop(); await store.close(); }
+  });
+
+  it('without them a document using either is refused when the runner is built', async () => {
+    const store = await openStore(MODEL, { driver: nodeDriver(), jobs: true });
+    try {
+      /** @type {Array<[any, string]>} */
+      const cases = [[{}, 'JQ0002'], [{ operators: math }, 'JQ0008'], [{ compileTypeTest }, 'JQ0002']];
+      for (const [extra, cause] of cases) {
+        assert.throws(() => createDagJobRunner(store, { compileDag, documents: { k: COMPUTE }, ...extra }),
+          (/** @type {any} */ error) => error.code === 'JF0014' && error.docPath === '/nodes/q/query' && error.cause?.code === cause, cause);
+      }
     }
     finally { await store.close(); }
   });

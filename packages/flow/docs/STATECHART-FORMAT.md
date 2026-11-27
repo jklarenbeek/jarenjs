@@ -103,6 +103,13 @@ implicit context assignment, raised-event queue or invocation machinery.
 `maxMicrosteps` (default 1000, positive safe integer) bounds one call's
 automatic transitions and timer processing. Exhaustion throws JF2012; pure
 inputs and session state remain unchanged. There is no partial-result commit.
+
+Guards and effect `with` members compile as `compileFsm`'s do
+(FLOW-FORMAT §3): with the core operators, or with a registry's passed as
+`operators`, and with the schema operators (`$valid`) when a type-test
+compiler is passed as `compileTypeTest`. An operator the registry does not
+mount is `JF0007`/`JF0009` with `JQ0002` in the cause chain, a schema
+operator without a type-test compiler the same with `JQ0008`.
 These rules borrow hierarchy/history and transition-domain definitions from
 [SCXML's control semantics](https://www.w3.org/TR/scxml/), but this JSON format
 is not an SCXML implementation or an SCXML conformance claim.

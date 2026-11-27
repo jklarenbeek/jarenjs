@@ -60,7 +60,12 @@ import { createGrammarValidators } from './operator-grammar.js';
 /** Errors kept per report: enough to repair, bounded for the IDE. */
 const MAX_ERRORS = 20;
 
-const compileTypeTest = createTypeTestCompiler();
+/** The type-test compiler every file's queries and stylesheets compile
+ * with, so the schema operators (`$valid`) and JSLT schema matches compile:
+ * a query, jslt or app file's, and an fsm or dag file's guards and nodes.
+ * The project's runs and flow host compile with the same one, so what
+ * validates here also runs there. */
+export const compileTypeTest = createTypeTestCompiler();
 
 // the studio mounts the built-in operator packs so a query/jslt/data file
 // may compute with $npv/$sqrt/$mean/… (host opt-in; a plain compile would
@@ -190,11 +195,11 @@ function unknownOperators(kind, doc, registryOptions) {
     }
   }
   // the flow compilers read a registry, never its options
-  else if (kind === 'fsm') probe('', () => compileFsm(doc, { operators: { toOptions: () => registryOptions } }));
+  else if (kind === 'fsm') probe('', () => compileFsm(doc, { operators: { toOptions: () => registryOptions }, compileTypeTest }));
   else if (kind === 'dag') {
     const tasks = Object.fromEntries(Object.values(isPlainNodes(doc.nodes) ? doc.nodes : {})
       .filter((node) => node?.kind === 'task' && typeof node.run === 'string').map((node) => [node.run, () => null]));
-    probe('', () => compileDag(doc, { tasks, operators: { toOptions: () => registryOptions } }));
+    probe('', () => compileDag(doc, { tasks, operators: { toOptions: () => registryOptions }, compileTypeTest }));
   }
   return found;
 }
@@ -333,7 +338,7 @@ function validateFileUncached(file, options = {}) {
     case 'fsm': {
       const outcome = fsmValidatorFor(doc, registryOptions)(doc);
       const structural = schemaResult(kind, outcome);
-      return structural.valid ? compileResult(kind, () => compileFsm(doc, { operators }))
+      return structural.valid ? compileResult(kind, () => compileFsm(doc, { operators, compileTypeTest }))
         : schemaResult(kind, outcome, unknownOperators(kind, doc, registryOptions));
     }
     case 'dag': {
@@ -343,7 +348,7 @@ function validateFileUncached(file, options = {}) {
       // Validate named task nodes without acquiring or running host tasks.
       const tasks = Object.fromEntries(Object.values(doc.nodes ?? {})
         .filter((node) => node.kind === 'task').map((node) => [node.run, () => null]));
-      return compileResult(kind, () => compileDag(doc, { tasks, operators }));
+      return compileResult(kind, () => compileDag(doc, { tasks, operators, compileTypeTest }));
     }
     case 'model': {
       const structural = schemaResult(kind, validateModel(doc));

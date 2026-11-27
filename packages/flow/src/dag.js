@@ -20,7 +20,7 @@ import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
 import { asError, FlowCompileError, FlowRuntimeError } from './errors.js';
-import { operatorOptions } from './fsm.js';
+import { embeddedCompileOptions } from './fsm.js';
 
 const KINDS = ['input', 'output', 'const', 'query', 'jslt', 'task'];
 
@@ -41,8 +41,9 @@ const NEEDS_INBOUND = new Set(['query', 'jslt', 'task', 'output']);
  * @param {(d: any, compileOptions?: any) => any} compile
  * @param {any} embedded
  * @param {string} docPath
- * @param {{ extensions?: Record<string, any>, functions?: Record<string, any> }} [compileOptions] -
- *   the operator registry's options, when `compileDag` was given one
+ * @param {import('./fsm.js').EmbeddedCompileOptions} [compileOptions] -
+ *   the registry's options and the type-test compiler, when `compileDag`
+ *   was given either
  */
 function compileEmbedded(compile, embedded, docPath, compileOptions) {
   try {
@@ -135,21 +136,26 @@ function normalizeTaskEntry(entry, name) {
  *     | { run: (props: { with: any, input: any }, signal: AbortSignal, resources?: any) => any, version?: string,
  *         taskVersions?: Record<string, string> }>,
  *   checkpoint?: DagCheckpointStore, revision?: string,
- *   operators?: { toOptions: () => { extensions?: Record<string, any>, functions?: Record<string, any> } } | null }} [options] -
+ *   operators?: import('./fsm.js').OperatorRegistry | null,
+ *   compileTypeTest?: import('./fsm.js').TypeTestCompiler | null }} [options] -
  *   `operators`: an operator registry (`createJsltRegistry().use(mathPack)`
  *   from `@jarenjs/json/jslt`); every query, stylesheet, task `with` and
  *   edge `select` compiles with its operators and `$call` functions.
  *   Without it they compile with the core operators, and a pack operator
  *   is refused (`JF0014`, with the `JQ0002` in its cause chain).
+ *   `compileTypeTest`: a type-test compiler (`createTypeTestCompiler()`
+ *   from `@jarenjs/validate/query`), so a query may use the schema
+ *   operators (`$valid`) and a stylesheet schema matches; without it they
+ *   are refused the same way, with `JQ0008` (a query) or `JT0006` (a match).
  * @returns {CompiledDag}
  * @throws {FlowCompileError} when the document violates the format (JF0xxx)
  * @throws {TypeError} when the options are malformed (a registry that is
  *   not an object, a registered handler that is not a function, a
- *   checkpoint store missing one of load/save/complete, or `operators`
- *   that is no operator registry)
+ *   checkpoint store missing one of load/save/complete, `operators`
+ *   that is no operator registry, or a `compileTypeTest` that is no function)
  */
 export function compileDag(doc, options) {
-  const compileOptions = operatorOptions(options?.operators, 'compileDag');
+  const compileOptions = embeddedCompileOptions(options, 'compileDag');
   const tasks = options?.tasks ?? {};
   if (!isJsonObject(tasks)) {
     throw new TypeError('compileDag: "tasks" must be an object of handler functions');
