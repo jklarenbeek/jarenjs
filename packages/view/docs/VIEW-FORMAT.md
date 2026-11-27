@@ -342,12 +342,23 @@ reorder efficiency is only specified for fully keyed lists.
 ### 5.4 Namespaces
 
 An element with tag `svg` and its descendants are created in the SVG
-namespace. Children of SVG `foreignObject` re-enter the HTML namespace;
-a nested `svg` enters SVG again. A widget host (§7) whose `tag` is `svg` is
-built in the SVG namespace too. `xlink:*` and `xml:*` attributes use their
+namespace. Children of an SVG `foreignObject`, `desc` or `title` re-enter
+the HTML namespace, where an HTML parser reads the serializer's markup as
+HTML (§6); a nested `svg` enters SVG again. Inside an `svg` a tag is built
+in the case it is written, where an HTML parser reads the serializer's
+markup in its own case (lower case, and the SVG names it knows, such as
+`clipPath` and `linearGradient`, in their SVG case): write SVG names in
+their SVG case, and `svg` in lower case, which alone switches the namespace.
+A `Circle` there is built as an element that draws nothing, while a parser
+reads `<Circle>` as a `circle`; outside an `svg`, `SVG` is built as an HTML
+element, while a parser reads `<SVG>` as an `svg`. The safe profiles drop
+both (§8: their allow-list matches a tag exactly). A widget host (§7) whose
+`tag` is `svg` is built in the SVG namespace too. `xlink:*` and `xml:*` attributes use their
 namespace URIs for setting and removal. Safe mode excludes `foreignObject`.
 Upgrade note: a widget host on `svg` outside an `svg` used to be built in the
-HTML namespace, where it draws nothing.
+HTML namespace, where it draws nothing; the children of an SVG `desc` or
+`title` used to be built as SVG elements, where a parser builds HTML ones from
+the same document's markup (so hydration rebuilt them).
 
 ### 5.5 The memo marker
 
@@ -386,9 +397,14 @@ Serialization is pure: no state, no DOM, safe in any runtime.
 Inside an `svg`, where an HTML parser reads foreign content, no element is
 void: an `input`, `area`, `base`, `col`, `link`, `param`, `source`, `track`
 or `wbr` is written with its end tag, which closes it as `</circle>` closes a
-`circle`, so its next sibling is not read as its child. `br`, `embed`, `hr`,
-`img` and `meta`, in any case, have no such markup: their start tag ends the
-`svg` for a parser, which reads them and every later sibling outside it,
+`circle`, so its next sibling is not read as its child. The elements whose
+start tag ends the `svg` for a parser have no such markup: `b`, `big`,
+`blockquote`, `body`, `br`, `center`, `code`, `dd`, `div`, `dl`, `dt`, `em`,
+`embed`, `h1`–`h6`, `head`, `hr`, `i`, `img`, `li`, `listing`, `menu`,
+`meta`, `nobr`, `ol`, `p`, `pre`, `ruby`, `s`, `small`, `span`, `strong`,
+`strike`, `sub`, `sup`, `table`, `tt`, `u`, `ul` and `var`, in any case, and
+a `font` that writes a `color`, `face` or `size` attribute (in any case). A
+parser reads such an element, and every later sibling, outside the `svg`,
 where the patching renderer builds them inside. The serializer refuses one
 with a `TypeError` naming where it sits (the patching renderer builds it, as
 for raw text it cannot carry), and both renderers drop one under a safe
@@ -397,7 +413,8 @@ reads HTML again, so these rules do not apply there: an HTML void element is
 written without an end tag, as outside `svg`. Upgrade note: inside an `svg`
 these elements used to be written as HTML void elements, which a parser read
 with the next sibling inside the `input`, or with the rest of the drawing
-outside the `svg`.
+outside the `svg`, and the HTML elements of that list (`div`, `p`, `span`,
+...) were written as they are, with the same effect.
 
 The text of an HTML `style` or `script` element (its tag in any case) is
 raw text, which an HTML parser never decodes, so it is written verbatim —
@@ -407,8 +424,10 @@ cannot carry — the element's own end tag as a parser recognizes one
 `>`), or `<!--` in a script — is refused with a `TypeError` naming where
 the element sits; it used to be escaped, which shipped `&gt;` and `&amp;`
 to the browser as CSS or script source. Inside `svg` (back in HTML under
-`foreignObject`), where a parser reads `style` and `script` as foreign
-elements and decodes their text, it stays escaped.
+`foreignObject`, `desc` and `title`), where a parser reads `style` and
+`script` as foreign elements and decodes their text, it stays escaped.
+Upgrade note: under an SVG `desc` or `title` their text used to be escaped
+too, where a parser reads raw text there.
 
 In trusted mode, a `textarea` carrying a `value` prop serializes that
 value as escaped text content, overriding its children; nullish values
@@ -689,9 +708,9 @@ or under its `desc`, `title` or `foreignObject`) is written without an end
 tag and without a fallback, and `ssr` is not read: a parser would read the fallback as the host's next siblings, and
 `</br>` as a second `<br>`, where the DOM renderer builds one empty host.
 Upgrade note: such a host used to be written with an end tag and its
-fallback inside it. Inside an `svg` a host is not void, and one on `br`,
-`embed`, `hr`, `img` or `meta` is refused or dropped as such an element is
-(§6). Serialization stays pure
+fallback inside it. Inside an `svg` a host is not void, and one whose start
+tag ends the `svg` (`br`, `div`, `span`, `font` with a `color`, ..., §6) is
+refused or dropped as such an element is. Serialization stays pure
 — no state, no DOM, no widget is mounted; the client-side first render
 mounts widgets as usual (§6).
 
@@ -778,9 +797,12 @@ Under the safe profile a renderer MUST:
    document-embedding or script/style-carrying elements MUST NOT be on the
    allow-list. Inside an `svg`, where an HTML parser reads foreign content
    (not under its `desc` or `title`), an element whose start tag ends the
-   `svg` for a parser (`br`, `hr`, `img`, §6) is dropped too: no markup
-   builds it where the patching renderer would. Upgrade note: the patching
-   renderer used to build one there as an inert SVG element.
+   `svg` for a parser (`br`, `div`, `p`, `span`, `table`, ..., §6) is
+   dropped too: no markup builds it where the patching renderer would, and
+   the one place an `svg` shows HTML, `foreignObject`, is excluded from the
+   profiles. Upgrade note: the patching renderer used to build one there
+   as an inert SVG element, and the serializer wrote the allow-listed HTML
+   ones (`div`, `p`, `span`, `b`, `table`, ...) as they are.
 2. **Reject a property whose name is not a bare identifier** (closing
    attribute-name injection), **whose name begins with `on`** (no inline
    handlers), **which is an HTML-parsing sink** (`innerHTML`, `outerHTML`,

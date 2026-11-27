@@ -121,21 +121,41 @@ export function rawTextError(root, vnode, tag, found) {
 }
 
 /**
- * The HTML void elements whose start tag, in any spelling, ends an `svg`
- * where an HTML parser reads foreign content: it closes the `svg` and reads
- * the element, and every later sibling, as HTML.
+ * The HTML elements whose start tag, in any spelling, ends an `svg` where an
+ * HTML parser reads foreign content: it closes the `svg` and reads the
+ * element, and every later sibling, as HTML. A `font` joins them only with a
+ * `color`, `face` or `size` attribute ({@link breaksOutOfSvg}).
  */
-const SVG_BREAKOUT_TAGS = new Set(['br', 'embed', 'hr', 'img', 'meta']);
+const SVG_BREAKOUT_TAGS = new Set([
+  'b', 'big', 'blockquote', 'body', 'br', 'center', 'code', 'dd', 'div', 'dl', 'dt', 'em', 'embed',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'hr', 'i', 'img', 'li', 'listing', 'menu', 'meta',
+  'nobr', 'ol', 'p', 'pre', 'ruby', 's', 'small', 'span', 'strong', 'strike', 'sub', 'sup',
+  'table', 'tt', 'u', 'ul', 'var',
+]);
+
+/** The attributes, in any case, that make a `font` end the `svg` it is written in. */
+const FONT_BREAKOUT_ATTRIBUTES = new Set(['color', 'face', 'size']);
 
 /**
  * Whether an element named `tag` ends the `svg` it is written in, where an
  * HTML parser reads foreign content: no markup builds it there, as the DOM
- * renderer builds it, inside the `svg`.
+ * renderer builds it, inside the `svg`. A `font` ends it when it writes a
+ * `color`, `face` or `size` attribute (a prop of that name, in any case,
+ * holding neither a nullish value nor `false`); without `props` only the
+ * name is read.
  * @param {string} tag
+ * @param {Record<string, any>} [props] - the props its start tag is written from
  * @returns {boolean}
  */
-export function breaksOutOfSvg(tag) {
-  return SVG_BREAKOUT_TAGS.has(tag.toLowerCase());
+export function breaksOutOfSvg(tag, props) {
+  const lower = tag.toLowerCase();
+  if (SVG_BREAKOUT_TAGS.has(lower)) return true;
+  if (lower !== 'font' || props === undefined) return false;
+  for (const name in props) {
+    const value = props[name];
+    if (value != null && value !== false && FONT_BREAKOUT_ATTRIBUTES.has(name.toLowerCase())) return true;
+  }
+  return false;
 }
 
 /**

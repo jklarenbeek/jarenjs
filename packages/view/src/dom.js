@@ -621,6 +621,19 @@ function flushMounts(ctx) {
 }
 
 /**
+ * The namespace the children of an element `tag` built in `ns` are built
+ * in: the element's own, and HTML again under an SVG `foreignObject`,
+ * `desc` or `title`, where an HTML parser reads the serializer's markup as
+ * HTML (VIEW-FORMAT §5.4).
+ * @param {string} tag
+ * @param {string | null} ns
+ * @returns {string | null}
+ */
+function childNamespace(tag, ns) {
+  return ns !== null && (tag === 'foreignObject' || tag === 'desc' || tag === 'title') ? null : ns;
+}
+
+/**
  * Create a fresh DOM node for a vnode.
  * @param {any} ctx
  * @param {any} vnode
@@ -669,7 +682,7 @@ function createNode(ctx, vnode, ns, foreign) {
   // only a policy reads the parser's state, so a trusted root never computes it
   const below = ctx.policy !== null && foreignBelow(tag, foreign);
   for (let i = 0; i < children.length; i++) {
-    node.appendChild(createNode(ctx, children[i], tag === 'foreignObject' ? null : ns, below));
+    node.appendChild(createNode(ctx, children[i], childNamespace(tag, ns), below));
   }
   registerControlled(ctx, node, props);
   return node;
@@ -704,7 +717,7 @@ function adoptChildren(ctx, parent, children, ns) {
       // A textarea's server text is its default value, not a vnode child
       // when `value` supplies the authoritative content.
       if (!(tag === 'textarea' && Object.hasOwn(props, 'value')))
-        adoptChildren(ctx, node, childrenOf(vnode), tag === 'foreignObject' ? null : namespace);
+        adoptChildren(ctx, node, childrenOf(vnode), childNamespace(tag, namespace));
       registerControlled(ctx, node, props);
     }
     else {
@@ -816,7 +829,7 @@ function patchNode(ctx, parent, node, oldV, newV, ns, foreign) {
       return node;
     }
     patchProps(ctx, node, propsOf(oldV), propsOf(newV), ns);
-    patchChildren(ctx, node, childrenOf(oldV), childrenOf(newV), newV[0] === 'foreignObject' ? null : ns,
+    patchChildren(ctx, node, childrenOf(oldV), childrenOf(newV), childNamespace(newV[0], ns),
       ctx.policy !== null && foreignBelow(newV[0], foreign));
     return node;
   }

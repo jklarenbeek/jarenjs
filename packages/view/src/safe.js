@@ -213,7 +213,8 @@ const RE_ID_PREFIX = /^[A-Za-z][A-Za-z0-9_-]*$/;
  *   to render, or `null` to drop the element and its subtree. `foreign`: the
  *   element sits where an HTML parser reads foreign content (inside an `svg`,
  *   not under its `desc` or `title`), where an element that would end the
- *   `svg` (`br`, `hr`, `img`, ...) is dropped: no markup builds it there.
+ *   `svg` (`br`, `div`, `p`, `span`, `table`, ...) is dropped: no markup
+ *   builds it there.
  * @property {(tag: string) => ReadonlyArray<readonly [string, string]> | null} fixed -
  *   Attributes an element of this tag carries whatever the document says,
  *   written before its props (a `form`'s `method="dialog"`), or `null`.

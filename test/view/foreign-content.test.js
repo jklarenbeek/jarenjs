@@ -4,16 +4,19 @@
  * markup the serializer writes there must read back as the tree the DOM
  * renderer builds (VIEW-FORMAT §5.4, §6). In foreign content no element is
  * void, so an end tag closes `<input>` as it closes `<circle>`; an element
- * whose start tag ends the `svg` for a parser (`br`, `embed`, `hr`, `img`,
- * `meta`, in any case) has no such markup: the trusted serializer refuses
- * it and the safe profiles drop it on both renderers. Under an SVG `desc`,
- * `title` or `foreignObject` a parser reads HTML again. A widget hosted on
- * `svg` is built in the SVG namespace, as an `svg` element is.
+ * whose start tag ends the `svg` for a parser (`br`, `div`, `p`, `span`,
+ * `table`, ..., in any case, and `font` with a `color`, `face` or `size`
+ * attribute) has no such markup: the trusted serializer refuses it and the
+ * safe profiles drop it on both renderers. Under an SVG `desc`, `title` or
+ * `foreignObject` a parser reads HTML again, and the DOM renderer builds
+ * their children in the HTML namespace. A widget hosted on `svg` is built in
+ * the SVG namespace, as an `svg` element is.
  */
 
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 
+import { JSDOM } from 'jsdom';
 import { createDomRenderer, renderToString } from '@jarenjs/view';
 import { StubDocument, createStubHost } from './dom.stub.js';
 
@@ -78,15 +81,15 @@ describe('void element names inside svg', () => {
     const widgets = { w: { mount() { return {}; }, ssr: () => ['b', {}, 'f'] } };
     assert.equal(renderToString(['svg', {}, ['desc', {}, ['jaren-widget', { name: 'w', tag: 'br' }], 'x']], { widgets }),
       '<svg><desc><br>x</desc></svg>');
-    // the DOM renderer builds them as it did
-    assert.equal(dom(['svg', {}, ['desc', {}, ['br', {}], 'x']]).shape, 'svg(svg)[desc(svg)[br(svg),"x"]]');
+    // the DOM renderer builds them as a parser reads them: HTML elements
+    assert.equal(dom(['svg', {}, ['desc', {}, ['br', {}], 'x']]).shape, 'svg(svg)[desc(svg)[br,"x"]]');
     // under safe profiles they are kept
     for (const safe of PROFILES) {
       /** @type {string[]} */
       const seen = [];
       const onUnsafe = (/** @type {any} */ i) => seen.push(`${i.kind}:${i.name}`);
       assert.equal(renderToString(['svg', {}, ['desc', {}, ['br', {}], 'x']], { safe, onUnsafe }), '<svg><desc><br>x</desc></svg>');
-      assert.equal(dom(['svg', {}, ['desc', {}, ['br', {}], 'x']], { safe, onUnsafe }).shape, 'svg(svg)[desc(svg)[br(svg),"x"]]');
+      assert.equal(dom(['svg', {}, ['desc', {}, ['br', {}], 'x']], { safe, onUnsafe }).shape, 'svg(svg)[desc(svg)[br,"x"]]');
       assert.deepEqual(seen, []);
     }
   });
@@ -191,5 +194,189 @@ describe('a widget hosted on svg', () => {
     // the serializer's markup, which a parser builds as an SVG element
     assert.equal(renderToString(['jaren-widget', { name: 'w', tag: 'svg' }], { widgets: { w: { ssr: () => ['circle', {}] } } }),
       '<svg><circle></circle></svg>');
+  });
+});
+
+/** The parser the oracle tests read the serializer's markup with. */
+const parser = new JSDOM('<!doctype html><body></body>').window.document;
+
+/**
+ * Whether an HTML parser reads `markup` (an `svg` whose last child is a
+ * `circle`) with the `svg` ended early: anything but one `svg` holding the
+ * `circle` as its last child.
+ * @param {string} markup
+ * @returns {boolean}
+ */
+function endsTheSvg(markup) {
+  const holder = parser.createElement('div');
+  holder.innerHTML = markup;
+  const svg = holder.firstChild;
+  return !(holder.childNodes.length === 1 && svg?.namespaceURI === SVG_NS
+    && svg.lastChild?.localName === 'circle' && svg.lastChild.namespaceURI === SVG_NS);
+}
+
+/** Element names an `svg` may meet: HTML's, SVG's, the parser's list in other cases. */
+const NAMES = [
+  'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio', 'b', 'base', 'bdi', 'bdo', 'big', 'blockquote',
+  'body', 'br', 'button', 'canvas', 'caption', 'center', 'cite', 'code', 'col', 'colgroup', 'data', 'datalist',
+  'dd', 'del', 'details', 'dfn', 'dialog', 'div', 'dl', 'dt', 'em', 'embed', 'fieldset', 'figcaption', 'figure',
+  'font', 'footer', 'form', 'frame', 'frameset', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup',
+  'hr', 'html', 'i', 'iframe', 'img', 'input', 'ins', 'kbd', 'label', 'legend', 'li', 'link', 'listing', 'main',
+  'map', 'mark', 'marquee', 'math', 'menu', 'meta', 'meter', 'nav', 'nobr', 'noembed', 'noframes', 'noscript',
+  'object', 'ol', 'optgroup', 'option', 'output', 'p', 'param', 'picture', 'plaintext', 'pre', 'progress', 'q',
+  'rp', 'rt', 'ruby', 's', 'samp', 'script', 'search', 'section', 'select', 'slot', 'small', 'source', 'span',
+  'strike', 'strong', 'style', 'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'template', 'textarea', 'tfoot',
+  'th', 'thead', 'time', 'tr', 'track', 'tt', 'u', 'ul', 'var', 'video', 'wbr', 'xmp',
+  'svg', 'g', 'defs', 'symbol', 'use', 'marker', 'mask', 'clipPath', 'pattern', 'path', 'rect', 'circle',
+  'ellipse', 'line', 'polyline', 'polygon', 'text', 'tspan', 'textPath', 'image', 'linearGradient', 'stop',
+  'title', 'desc', 'foreignObject',
+  'DIV', 'Span', 'TABLE', 'H1', 'Font', 'BR',
+];
+
+/** `font` with each attribute spelling: a parser reads `color`, `face` and `size` in any case. */
+const FONT_PROPS = [{}, { color: 'red' }, { FACE: 'serif' }, { Size: 0 }, { size: true }, { size: null },
+  { size: false }, { color: undefined }, { colour: 'red' }, { class: 'f' }];
+
+describe('HTML start tags that end an svg', () => {
+  it('refuses, in the trusted serializer, exactly the elements a parser reads outside the svg', () => {
+    for (const name of NAMES) {
+      for (const props of name.toLowerCase() === 'font' ? FONT_PROPS : [{}]) {
+        // the markup the serializer would write, read by a parser
+        const attributes = Object.entries(props).filter(([, v]) => v != null && v !== false)
+          .map(([k, v]) => v === true ? ` ${k}` : ` ${k}="${v}"`).join('');
+        const ends = endsTheSvg(`<svg><${name}${attributes}>x</${name}><circle></circle></svg>`);
+        const vnode = ['svg', {}, [name, props, 'x'], ['circle', {}]];
+        const label = `${name} ${JSON.stringify(props)}`;
+        if (ends) {
+          assert.throws(() => renderToString(vnode), {
+            name: 'TypeError', message: `view: the <${name}> at /2 sits inside an svg, where an HTML parser reads it as an HTML `
+              + 'element that ends the svg: no markup keeps it inside. Move it out of the svg, or under a foreignObject',
+          }, label);
+        } else {
+          const markup = renderToString(vnode);
+          assert.equal(endsTheSvg(markup), false, label);
+          assert.equal(markup, `<svg><${name}${attributes}>x</${name}><circle></circle></svg>`, label);
+        }
+        // the trusted DOM renderer builds it inside the svg, as before
+        const built = dom(vnode).container.childNodes[0];
+        assert.equal(built.childNodes.length, 2, label);
+      }
+    }
+  });
+
+  for (const safe of PROFILES) {
+    it(`drops on both renderers what a parser reads outside the svg, and keeps what it reads inside (safe: ${JSON.stringify(safe)})`, () => {
+      for (const name of NAMES) {
+        for (const props of name.toLowerCase() === 'font' ? FONT_PROPS : [{}]) {
+          const label = `${name} ${JSON.stringify(props)}`;
+          const attributes = Object.entries(props).filter(([, v]) => v != null && v !== false)
+            .map(([k, v]) => v === true ? ` ${k}` : ` ${k}="${v}"`).join('');
+          const ends = endsTheSvg(`<svg><${name}${attributes}>x</${name}><circle></circle></svg>`);
+          // whether the profile keeps the element outside svg
+          const kept = renderToString(['div', {}, [name, props]], { safe }) !== '<div></div>';
+          /** @type {string[]} */
+          const ssr = [];
+          /** @type {string[]} */
+          const live = [];
+          const vnode = ['svg', {}, [name, props, 'x'], ['circle', {}]];
+          const markup = renderToString(vnode, { safe, onUnsafe: (i) => ssr.push(`${i.kind}:${i.name}`) });
+          const r = dom(vnode, { safe, onUnsafe: (/** @type {any} */ i) => live.push(`${i.kind}:${i.name}`) });
+          if (ends || !kept) {
+            assert.equal(markup, '<svg><circle></circle></svg>', label);
+            assert.equal(r.shape, 'svg(svg)["",circle(svg)]', label);
+            assert.deepEqual(ssr.filter((k) => k.startsWith('tag:')), [`tag:${name}`], label);
+          } else {
+            assert.match(markup, new RegExp(`^<svg><${name}[ >]`), label);
+            assert.equal(endsTheSvg(markup), false, label);
+            assert.equal(r.shape.startsWith(`svg(svg)[${name}(svg)`), true, label);
+            assert.deepEqual(ssr, [], label);
+          }
+          assert.deepEqual(live, ssr, label);
+        }
+      }
+    });
+  }
+
+  it('reads a widget host as its element: refused trusted, dropped under the interactive profile', () => {
+    const widgets = { w: { mount() { return {}; }, ssr: () => 'f' } };
+    for (const props of [{ tag: 'div' }, { tag: 'Span' }, { tag: 'font', props: { a: 1 }, color: 'red' }]) {
+      assert.throws(() => renderToString(['svg', {}, ['jaren-widget', { name: 'w', ...props }]], { widgets }),
+        { message: new RegExp(`^view: the <${props.tag}> at /2 sits inside an svg`) }, props.tag);
+    }
+    // a host on font writing no such attribute stays inside
+    assert.equal(renderToString(['svg', {}, ['jaren-widget', { name: 'w', tag: 'font', size: null }]], { widgets }),
+      '<svg><font>f</font></svg>');
+    const options = { safe: /** @type {const} */ ('interactive'), widgets, capabilities: { widgets: ['w'] } };
+    /** @type {string[]} */
+    const ssr = [];
+    /** @type {string[]} */
+    const live = [];
+    const vnode = ['svg', {}, ['jaren-widget', { name: 'w', tag: 'span' }], ['jaren-widget', { name: 'w', tag: 'g' }]];
+    assert.equal(renderToString(vnode, { ...options, onUnsafe: (i) => ssr.push(`${i.kind}:${i.name}`) }), '<svg><g>f</g></svg>');
+    const r = dom(vnode, { ...options, onUnsafe: (/** @type {any} */ i) => live.push(`${i.kind}:${i.name}`) });
+    assert.equal(r.shape, 'svg(svg)["",g(svg)]');
+    assert.deepEqual(ssr, ['tag:span']);
+    assert.deepEqual(live, ssr);
+  });
+});
+
+describe('the HTML namespace under an SVG desc and title', () => {
+  it('builds the children of desc and title as HTML elements, and a nested svg as SVG again', () => {
+    const vnode = ['svg', {}, ['desc', {}, ['b', {}, 'x'], ['svg', {}, ['circle', {}]]], ['title', {}, ['span', {}, 't']],
+      ['g', {}, ['circle', {}]]];
+    const expected = 'svg(svg)[desc(svg)[b["x"],svg(svg)[circle(svg)]],title(svg)[span["t"]],g(svg)[circle(svg)]]';
+    assert.equal(dom(vnode).shape, expected);
+    for (const safe of PROFILES) assert.equal(dom(vnode, { safe }).shape, expected);
+    // the serializer's markup, read by a parser, builds the same tree
+    const holder = parser.createElement('div');
+    holder.innerHTML = renderToString(vnode);
+    assert.equal(holder.innerHTML, renderToString(vnode));
+    /** @param {any} node @returns {string} */
+    const read = (node) => node.nodeType === 3 ? JSON.stringify(node.nodeValue)
+      : node.localName + (node.namespaceURI === SVG_NS ? '(svg)' : '')
+        + (node.childNodes.length === 0 ? '' : `[${[...node.childNodes].map(read).join(',')}]`);
+    assert.equal(read(holder.firstChild), expected);
+    // an HTML title (outside svg) is unchanged
+    assert.equal(dom(['title', {}, 'x']).shape, 'title["x"]');
+  });
+
+  it('builds them as HTML on a patch, and a widget host there in the HTML namespace', () => {
+    /** @type {string[]} */
+    const mounted = [];
+    const widgets = { w: { mount(/** @type {any} */ host) { mounted.push(`${host.tagName}:${host.namespaceURI}`); return {}; } } };
+    const r = dom(['svg', {}, ['desc', {}]], { widgets });
+    r.render(['svg', {}, ['desc', {}, ['b', {}, 'x'], ['jaren-widget', { name: 'w', tag: 'span' }]]]);
+    assert.equal(r.container.childNodes.map(shape).join(','), 'svg(svg)[desc(svg)[b["x"],span]]');
+    r.render(['svg', {}, ['desc', {}, ['b', {}, 'y'], ['i', {}]]]);
+    assert.equal(r.container.childNodes.map(shape).join(','), 'svg(svg)[desc(svg)[b["y"],i]]');
+    assert.equal(mounted[0].split(':')[1], 'null');
+  });
+
+  it('adopts server markup under desc on hydration, without rebuilding it', () => {
+    const window = new JSDOM('<!doctype html><body></body>').window;
+    const container = window.document.createElement('div');
+    const vnode = ['svg', {}, ['desc', {}, ['b', {}, 'x']], ['circle', {}]];
+    container.innerHTML = renderToString(vnode);
+    const b = container.querySelector('b');
+    createDomRenderer(container, { document: window.document, hydrate: true })(vnode);
+    assert.equal(container.querySelector('b'), b);
+    assert.equal(b.namespaceURI, 'http://www.w3.org/1999/xhtml');
+    assert.equal(container.innerHTML, '<svg><desc><b>x</b></desc><circle></circle></svg>');
+  });
+
+  it('writes a style under desc or title as raw text, as a parser reads it, and refuses an end tag in it', () => {
+    assert.equal(renderToString(['svg', {}, ['desc', {}, ['style', {}, 'a>b{}']]]), '<svg><desc><style>a>b{}</style></desc></svg>');
+    assert.equal(renderToString(['svg', {}, ['title', {}, ['script', {}, 'a&&b']]]), '<svg><title><script>a&&b</script></title></svg>');
+    assert.throws(() => renderToString(['svg', {}, ['desc', {}, ['style', {}, '</style>']]]),
+      { message: /^view: the text of the <style> at \/2\/2 contains "<\/style>"/ });
+    // directly inside svg, a parser decodes a style's text: it stays escaped
+    assert.equal(renderToString(['svg', {}, ['style', {}, 'a>b{}']]), '<svg><style>a&gt;b{}</style></svg>');
+    // a widget host on desc: its fallback reads as HTML too
+    const widgets = { w: { mount() { return {}; }, ssr: () => ['style', {}, 'a>b{}'] } };
+    assert.equal(renderToString(['svg', {}, ['jaren-widget', { name: 'w', tag: 'desc' }]], { widgets }),
+      '<svg><desc><style>a>b{}</style></desc></svg>');
+    const holder = parser.createElement('div');
+    holder.innerHTML = '<svg><desc><style>a>b{}</style></desc></svg>';
+    assert.equal(holder.querySelector('style')?.textContent, 'a>b{}');
   });
 });

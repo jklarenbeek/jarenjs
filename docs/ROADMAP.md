@@ -173,19 +173,6 @@ delete it or fix it.
 
 ## @jarenjs/view & @jarenjs/app
 
-- [ ] **HTML elements inside `svg` read by a parser where the DOM renderer does not
-  build them.** `renderToString(['svg', {}, ['div', {}], ['circle', {}]])`
-  writes markup a parser reads with the `div` and the `circle` outside the
-  `svg`; so do `p`, `span`, `b`, `table`, `font` with `color`/`face`/`size`
-  and the rest of the parser's list, where the DOM renderer builds them
-  inside. Under an SVG `desc` or `title` a parser reads HTML where the DOM
-  renderer builds SVG elements, and a `style` there is escaped (`a&gt;b`)
-  where a parser reads raw text; inside `svg` an upper-case tag (`INPUT`) is
-  built as written where a parser lower-cases it, and an `SVG` tag is built as
-  an HTML element where a parser enters SVG. The void names of the list (`br`,
-  `embed`, `hr`, `img`, `meta`) are refused by the serializer and dropped
-  under `safe`. Wanted: the same for the rest of the list, and a decision for
-  the namespace and case divergences.
 - [ ] **The id and name reports see only elements present when they look.** Each
   live safe DOM root of a page takes its own default `idPrefix` (`jaren-u-`,
   then `jaren-u2-`, …), a host serializing several untrusted documents into

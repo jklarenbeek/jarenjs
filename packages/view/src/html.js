@@ -66,6 +66,19 @@ const RAW_TEXT_BREAKOUT = new Map([
   ['style', /<\/style[\t\n\f\r />]/i],
 ]);
 
+/**
+ * Whether the DOM renderer builds the children of an element `tag` in the
+ * SVG namespace, given whether it builds `tag` there (`svg`): from an `svg`
+ * element down, and HTML again under an SVG `foreignObject`, `desc` or
+ * `title`, as a parser reads them (VIEW-FORMAT §5.4).
+ * @param {string} tag
+ * @param {boolean} svg
+ * @returns {boolean}
+ */
+function svgBelow(tag, svg) {
+  return svg ? tag !== 'foreignObject' && tag !== 'desc' && tag !== 'title' : tag === 'svg';
+}
+
 /** The text of an option whose value attribute is absent. @param {any} vnode */
 function optionText(vnode) {
   if (isTextNode(vnode)) return String(vnode);
@@ -244,7 +257,8 @@ function reportEvents(policy, on, onUnsafe) {
  * @param {any} root - the document `renderToString` was handed, where a
  *   refused tag is located
  * @param {boolean} svg - inside an `svg` element (and not back in HTML
- *   under a `foreignObject`), where the DOM renderer builds SVG elements
+ *   under a `foreignObject`, `desc` or `title`: {@link svgBelow}), where
+ *   the DOM renderer builds SVG elements
  * @param {boolean} foreign - where an HTML parser reads the markup written
  *   here as foreign content: inside an `svg`, but not under its `desc` or
  *   `title` ({@link foreignBelow}), where it reads HTML
@@ -280,7 +294,7 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg, fore
     }
     const hostTag = props.tag ?? 'div';
     if (!isElementName(hostTag)) throw elementNameError(root, vnode, hostTag);
-    if (foreign && breaksOutOfSvg(hostTag)) throw svgBreakoutError(root, vnode, hostTag);
+    if (foreign && breaksOutOfSvg(hostTag, props)) throw svgBreakoutError(root, vnode, hostTag);
     // An HTML void host holds no content and takes no end tag, so the
     // fallback a parser would read as the host's next siblings is not
     // written, and `ssr` is not read: the host as the DOM renderer builds it
@@ -295,7 +309,7 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg, fore
     const ssr = def !== undefined ? def.ssr : undefined;
     const inner = ssr !== undefined
       ? renderNode(ssr.call(def, props.props ?? null), widgets, policy, onUnsafe, selection, root,
-        hostTag === 'foreignObject' ? false : svg || hostTag === 'svg', foreignBelow(hostTag, foreign))
+        svgBelow(hostTag, svg), foreignBelow(hostTag, foreign))
       : '';
     const open = '<' + hostTag + fixedAttributes(policy, hostTag) + serializeProps(props, WIDGET_SKIP_PROPS, policy, onUnsafe, hostTag) + '>';
     return voidHost ? open : open + inner + '</' + hostTag + '>';
@@ -311,7 +325,7 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg, fore
   if (!isElementName(tag)) throw elementNameError(root, vnode, tag);
   // An element whose start tag ends the `svg` for a parser has no markup
   // there: refused, as the trusted renderer refuses raw text it cannot carry.
-  if (foreign && breaksOutOfSvg(tag)) throw svgBreakoutError(root, vnode, tag);
+  if (foreign && breaksOutOfSvg(tag, props)) throw svgBreakoutError(root, vnode, tag);
   // Report a stripped `on` binding for observability parity with the DOM
   // renderer — SSR never emits `on`, but a host still wants to know an
   // untrusted document tried to bind an action.
@@ -368,9 +382,7 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg, fore
     return out + (/^[\r\n]/.test(value) ? '\n' : '') + escapeText(value) + '</' + tag + '>';
   }
   const children = childrenOf(vnode);
-  // the namespace the DOM renderer builds the children in: SVG from an
-  // `svg` element down, HTML again under a `foreignObject`
-  const inSvg = tag === 'foreignObject' ? false : svg || tag === 'svg';
+  const inSvg = svgBelow(tag, svg);
   const inForeign = foreignBelow(tag, foreign);
   const breakout = svg ? undefined : RAW_TEXT_BREAKOUT.get(tag.toLowerCase());
   if (breakout !== undefined) {
