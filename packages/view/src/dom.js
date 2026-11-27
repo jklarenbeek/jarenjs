@@ -245,9 +245,9 @@ export function createDomRenderer(container, options = {}) {
     /** Controlled form-control nodes (`value`/`checked`), reconciled against
      * the live DOM at the END of every render pass — so an authoritative
      * value is reasserted even when the `===`/`memo` fast paths skip the
-     * subtree the control lives in. Trusted mode only: safe mode strips
-     * events, so a safe-mode view has no controlled inputs to fight the user
-     * over. @type {Set<any>} */
+     * subtree the control lives in. Under a safe profile only the
+     * interactive profile's `input`s join it (the policy's `control`).
+     * @type {Set<any>} */
     controlled: new Set(),
     /** `controlled: 'focus'`: a focused text control's value write waits
      * for its blur, through the same deferral composition uses. */
@@ -855,20 +855,21 @@ function patchAliased(ctx, node, oldProps, newProps, ns) {
 /**
  * Record a form control's authoritative `value`/`checked` so the end-of-pass
  * reconciliation can reassert it against the live DOM — even for a control
- * inside a subtree a later frame skips. Trusted mode only: a safe-mode view
- * strips events and is display-oriented, so there is no controlled state to
- * fight the user over. Stores the intended value on the DOM node (never the
- * vnode — §5.1) and keeps the node in `ctx.controlled`.
+ * inside a subtree a later frame skips. Under a safe profile the policy
+ * decides (`control`): the interactive profile's `input` is reasserted to
+ * what its attributes say, every other safe control stays attribute-only.
+ * Stores the intended value on the DOM node (never the vnode — §5.1) and
+ * keeps the node in `ctx.controlled`.
  * @param {any} ctx
  * @param {any} node
  * @param {Record<string, any>} props
  */
 function registerControlled(ctx, node, props) {
-  if (ctx.policy !== null) return;
   const kind = node.nodeName;
   if (kind !== 'INPUT' && kind !== 'TEXTAREA' && kind !== 'SELECT') return;
-  const hasValue = 'value' in props;
-  const hasChecked = kind === 'INPUT' && 'checked' in props;
+  const decided = ctx.policy === null ? null : ctx.policy.control(node.localName ?? kind.toLowerCase(), props);
+  const hasValue = ctx.policy === null ? 'value' in props : decided !== null && decided.hasValue;
+  const hasChecked = ctx.policy === null ? kind === 'INPUT' && 'checked' in props : decided !== null && decided.hasChecked;
   if (!hasValue && !hasChecked) {
     if (node.__jarenControlled !== undefined) {
       releaseControlled(ctx, node);
@@ -908,11 +909,12 @@ function registerControlled(ctx, node, props) {
     node.addEventListener('compositionend', end, true);
     if (blur !== null) node.addEventListener('focusout', blur, true);
   }
-  node.__jarenControlled = {
+  node.__jarenControlled = decided !== null ? { ...decided, safe: true } : {
     hasValue,
     hasChecked,
     value: hasValue ? props.value : undefined,
     checked: hasChecked ? props.checked === true : undefined,
+    safe: false,
   };
   ctx.controlled.add(node);
 }
@@ -961,9 +963,20 @@ const TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'pass
 function isTextControl(node) {
   if (node.nodeName === 'TEXTAREA') return true;
   if (node.nodeName !== 'INPUT') return false;
+  const type = inputType(node);
+  return type === '' || TEXT_INPUT_TYPES.has(type);
+}
+
+/**
+ * An `input`'s type, lowercased, as the live node reports it (`''` when it
+ * has none).
+ * @param {any} node
+ * @returns {string}
+ */
+function inputType(node) {
   const type = typeof node.type === 'string' ? node.type
     : (typeof node.getAttribute === 'function' ? node.getAttribute('type') : null) ?? '';
-  return type === '' || TEXT_INPUT_TYPES.has(type.toLowerCase());
+  return type.toLowerCase();
 }
 
 /**
@@ -984,6 +997,11 @@ function reconcileControlled(node) {
     if (node.checked !== want) node.checked = want;
   }
   if (!c.hasValue) return;
+  // A file input's value is the user's file choice: a script may only clear
+  // it, and assigning anything else throws. An untrusted document's value
+  // stays its attribute, so it can neither abort the render nor touch the
+  // choice (read at reconcile time — a `type` can change).
+  if (c.safe && node.nodeName === 'INPUT' && inputType(node) === 'file') return;
   // a composition in progress, or (opted in) the operator's focused edit
   // of a text control, holds the authoritative write back until it
   // settles (§3); a focused range, colour or date takes its value at once
@@ -1084,6 +1102,8 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
     // write can THROW (`input.files` is read-only) and it diverges from SSR
     // for a cleared value (an empty reflected attribute vs an omitted one).
     // Writing/removing the attribute matches exactly what the serializer does.
+    // (The interactive profile's controlled `input` keeps this attribute and
+    // has its live value/checked reasserted to it at the end of the pass.)
     if (name === 'style' && typeof newValue === 'object' && newValue !== null) {
       // an object with no declaration is no attribute, as the serializer omits it
       newValue = styleToString(newValue) || null;

@@ -40,8 +40,8 @@
  *    display-oriented by construction.
  *
  * **The interactive profile** (`{ safe: 'interactive' }`) is this policy with
- * the SAME tag, name, sink, URL and style decisions, and exactly two more —
- * the two places it differs from `safe: true`:
+ * the SAME tag, name, sink, URL and style decisions, and exactly three more —
+ * the three places it differs from `safe: true`:
  *
  *  - **`on` bindings are kept when they are data** ({@link createSafePolicy}'s
  *    `events`): a binding is JSON (a string, a finite number, a boolean,
@@ -53,6 +53,13 @@
  *  - **Widgets render only when the host granted their name** (`widget`), and
  *    only with data props; the renderers also hold a granted widget's host
  *    tag to the tag allow-list.
+ *  - **An `input`'s `value` and `checked` are controlled** (`control`): the
+ *    attribute is written as under `safe: true`, and the DOM renderer
+ *    reasserts the live value to what that attribute says, so app state
+ *    resets a field the user edited. The document writes only the value it
+ *    owns; it reads what was typed only through the event projection. A file
+ *    input's value is never assigned, and a `textarea` or `select` stays
+ *    attribute-only.
  *
  * The policy is a set of pure decisions. The DOM renderer and the SSR
  * serializer call the *same* functions, which is what guarantees the client
@@ -221,13 +228,28 @@ const RE_ID_PREFIX = /^[A-Za-z][A-Za-z0-9_-]*$/;
  * @property {(name: any, props: any) => boolean} widget - Whether a widget of
  *   this name, configured by these props, may render: granted by the host and
  *   fed data (always false for the default policy).
+ * @property {(tag: string, props: Record<string, any>) => SafeControl | null} control -
+ *   The authoritative state of a form control: for an `input` of the
+ *   interactive profile with an own `value` or `checked`, what its attributes
+ *   say, which the DOM renderer reasserts over a user edit; `null` for every
+ *   other element and always for the default policy (attribute-only).
+ */
+
+/**
+ * @typedef {Object} SafeControl
+ * @property {boolean} hasValue - Whether the control's `value` is authoritative.
+ * @property {boolean} hasChecked - Whether its `checked` is authoritative.
+ * @property {string | undefined} value - The value its `value` attribute
+ *   writes (`''` when the attribute is absent or empty).
+ * @property {boolean | undefined} checked - Whether its `checked` attribute
+ *   is present.
  */
 
 /**
  * @typedef {Object} SafePolicyOptions
  * @property {boolean} [interactive=false] - Build the interactive profile's
- *   policy: data-only `on` bindings on {@link INTERACTIVE_EVENTS}, and the
- *   granted widgets.
+ *   policy: data-only `on` bindings on {@link INTERACTIVE_EVENTS}, the
+ *   granted widgets, and controlled `input` values.
  * @property {Iterable<string>} [widgets] - The widget names the host granted
  *   (interactive only; none when absent).
  * @property {string} [idPrefix='jaren-u-'] - The render's id namespace: every
@@ -270,8 +292,8 @@ const MAX_DATA_VALUES = 65536;
  * `on` binding, a widget) with one contract.
  *
  * With `{ interactive: true }` it builds the interactive profile's policy:
- * `tag` and `prop` are the very same decisions, and `events`, `binding` and
- * `widget` keep what the profile keeps.
+ * `tag` and `prop` are the very same decisions, and `events`, `binding`,
+ * `widget` and `control` keep what the profile keeps.
  * @param {SafePolicyOptions} [options]
  * @returns {SafePolicy}
  */
@@ -313,6 +335,23 @@ export function createSafePolicy(options = {}) {
 
     widget(name, props) {
       return interactive && typeof name === 'string' && granted.has(name) && isData(props ?? null);
+    },
+
+    control(tag, props) {
+      if (!interactive || tag !== 'input') return null;
+      const hasValue = Object.hasOwn(props, 'value');
+      const hasChecked = Object.hasOwn(props, 'checked');
+      if (!hasValue && !hasChecked) return null;
+      // the state the attribute the renderers write stands for, so a
+      // reasserted control shows what the serializer's markup starts from
+      const value = hasValue ? this.prop('value', props.value, tag)?.value : undefined;
+      const checked = hasChecked ? this.prop('checked', props.checked, tag)?.value : undefined;
+      return {
+        hasValue,
+        hasChecked,
+        value: hasValue ? (value == null || typeof value === 'boolean' ? '' : String(value)) : undefined,
+        checked: hasChecked ? checked != null && checked !== false : undefined,
+      };
     },
 
     tag(tag) {

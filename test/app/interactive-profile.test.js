@@ -117,6 +117,32 @@ describe('interactive app — a binding runs a declared action, and nothing else
     app.destroy();
   });
 
+  it('a state change resets a field the user edited: the input is controlled, its typing reaches state through $event', () => {
+    const { app, root, errors } = boot({
+      state: { name: 'start', agreed: false },
+      actions: {
+        type: { patch: [{ op: 'replace', path: '/name', value: '$event.value' }] },
+        clear: { patch: [{ op: 'replace', path: '/name', value: '' }, { op: 'replace', path: '/agreed', value: false }] },
+      },
+      view: [{ match: '$', body: ['form', {},
+        ['input', { value: '$.name', on: { input: 'type' } }],
+        ['input', { type: 'checkbox', checked: '$.agreed' }],
+        ['button', { type: 'button', on: { click: 'clear' } }, 'clear']] }],
+    });
+    const [field, box, button] = root().childNodes;
+    assert.deepEqual({ field: field.value, box: box.checked }, { field: 'start', box: false });
+    field.value = 'typed';
+    fire(field, 'input', { target: field });
+    assert.equal(app.getState().name, 'typed');
+    assert.equal(field.value, 'typed');
+    box.checked = true;
+    fire(button, 'click');
+    assert.deepEqual(app.getState(), { name: '', agreed: false });
+    assert.deepEqual({ field: field.value, box: box.checked }, { field: '', box: false });
+    assert.deepEqual(errors, []);
+    app.destroy();
+  });
+
   it('withholds what was typed into a password field', () => {
     const { app, root } = boot({ ...COUNTER, view: [{ match: '$', body: ['input', { type: 'password', on: { input: { action: 'remember', event: ['selectionEnd'] }, keydown: { action: 'remember', event: ['code'] } } }] }] });
     const field = root();

@@ -389,7 +389,8 @@ including an option's normalized text when it has no value attribute,
 and works through `optgroup`. HTML cannot encode a single select's
 `selectedIndex = -1`: with no match, the browser may select its default
 option until the DOM renderer reconciles the control.
-Safe mode keeps its attribute-only policy (§8).
+Both safe profiles keep a `textarea`'s and a `select`'s `value` an
+attribute (§8).
 
 Both renderers accept a single vnode, a root list, or an empty/skipped root.
 Lists flatten with the ordinary child rules and need no wrapper element.
@@ -817,8 +818,9 @@ reflection, controlled inputs, multiple selects and composition in Chromium,
 Firefox and WebKit. Trusted controlled text writes defer through composition
 and the final input event, then settle while retaining a clamped caret range.
 Composition cleanup cancels pending settlement on removal or destruction.
-Safe controls retain the attribute-only display policy rather than the trusted
-controlled-input policy.
+Under `safe: true` controls retain the attribute-only display policy rather than
+the trusted controlled-input policy; the interactive profile controls an `input`
+(§8.1).
 
 Native OS IME fidelity and assistive-technology behavior still require manual
 audits. MathML and Trusted Types integration remain outside this version.
@@ -830,7 +832,7 @@ A host that must render an untrusted *interactive* document without a
 sandboxed frame selects `safe: 'interactive'` on either renderer. It is the
 safe profile — rules 1–4, 6 and 7 above are the **same decisions**, made by the same
 policy object, with the same results and the same reports — except for rule 5,
-where it keeps two things:
+where it keeps three things:
 
 1. **Data-only `on` bindings on gesture events.** A binding is kept when its
    event type is one of `click`, `dblclick`, `mousedown`, `mouseup`,
@@ -865,6 +867,23 @@ where it keeps two things:
    under the same profile, grants and id namespace — a widget does that by
    spreading the context into its renderer's options when `context.safe` is
    set. The dialog's own `id` joins the namespace too.
+3. **Controlled `input` values.** An `input`'s own `value` and `checked`
+   are written as their attributes, exactly as under `safe: true` (the
+   markup and the serializer's output do not change), and are then
+   authoritative (§3): the DOM renderer reasserts the live value to what the
+   attribute says at the end of every pass — the attribute's text for
+   `value` (`''` when it is absent or empty), its presence for `checked` —
+   so app state resets a field the user edited, through composition, the
+   caret and `controlled: 'focus'` as in trusted mode (one difference: the
+   attribute is still written, so a field the user has not edited yet shows
+   a new value at once, even focused). The document writes only the value it
+   owns; what a user typed reaches it only through the event projection
+   below, and a password field's value never does — so a controlled password
+   field can only be cleared, and a document leaves `value` off one. A
+   `file` input's value is never assigned (a script cannot choose a file,
+   and the assignment throws), whatever its `type` was on an earlier frame.
+   A `Value` spelling, an inherited member, a `textarea`, a `select` and a
+   granted widget's host element stay attribute-only.
 
 **What the handler receives.** Under the profile a `submit` event's default is prevented before the
 binding is delivered, so a submission reaches the app only as data. `onEvent(binding, event)`
@@ -882,9 +901,9 @@ object is reachable from it. What a user typed — `key`, `code` and the whole
 the event rose from inside a widget's subtree, which is the host's DOM, not
 the document's. A binding is delivered verbatim and never evaluated.
 
-**What it keeps from the safe profile.** Controls stay attribute-only (a
-state change does not reset a control the user has edited), hydration still
-rebuilds the server's markup, and the serializer writes no trace of a
+**What it keeps from the safe profile.** A `textarea` and a `select` stay
+attribute-only (a state change does not reset what the user edited there),
+hydration still rebuilds the server's markup, and the serializer writes no trace of a
 binding. Under `safe: true`, or any other truthy value, nothing changes: every
 binding and widget is stripped, and `capabilities` is not read.
 
@@ -900,7 +919,7 @@ binding and widget is stripped, and `capabilities` is not read.
 | widgets | any registered | stripped | granted by name, data props, allowed host tag |
 | forms | as written | `method="dialog"`, no destination | the same; a `submit`'s default is always prevented |
 | ids and id references | as written | in the render's `idPrefix` namespace | the same, shared with granted widgets' content |
-| controlled inputs | property writes | attributes only | attributes only |
+| controlled inputs | property writes | attributes only | an `input`'s attributes, reasserted as its live `value`/`checked` (not `file`); `textarea` and `select` attributes only |
 
 **What it does not defend.** It narrows what a document can do inside the
 host's page; it does not move the document out of it. Rule 3 denies script and

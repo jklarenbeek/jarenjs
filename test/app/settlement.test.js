@@ -54,6 +54,21 @@ describe('app settlement — a DOM-originated no-op reconciles the control', () 
     assert.strictEqual(input().value, 'server', 'a rejected transition still settles the control');
   });
 
+  it("settles the same way under safe: 'interactive', where an input is controlled too", () => {
+    const noop = inputApp('noop', { noop: { patch: [] } }, { safe: 'interactive' });
+    noop.input().value = 'user';
+    fire(noop.input(), 'input', { target: noop.input() });
+    assert.strictEqual(noop.input().value, 'server', 'the no-op settles the field back to state');
+    const errors = [];
+    const rejected = inputApp('reject',
+      { reject: { patch: [{ op: 'replace', path: '/text', value: 'nope' }] } },
+      { safe: 'interactive', validateState: (next) => next.text !== 'nope', onError: (e) => errors.push(e.code) });
+    rejected.input().value = 'user';
+    fire(rejected.input(), 'input', { target: rejected.input() });
+    assert.deepStrictEqual(errors, ['JA2005']);
+    assert.strictEqual(rejected.input().value, 'server', 'a rejected transition settles the field too');
+  });
+
   it('does not force a settle for a programmatic no-op dispatch', () => {
     // A programmatic dispatch is not a DOM event and cannot have desynced a
     // control, so it must not incur an extra render.

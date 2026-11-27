@@ -254,7 +254,7 @@ render(untrusted);
 | widgets | stripped | only names in `capabilities.widgets`, with data props and an allowed host tag; the widget's context carries the profile to any content it renders |
 | forms | submit nowhere (`method="dialog"`) | the same; a `submit` reaches the app only through its binding, default prevented |
 | ids and id references | prefixed with `idPrefix` | the same, shared with granted widgets' content |
-| controlled inputs | attributes only | attributes only |
+| controlled inputs | attributes only | an `input`'s `value`/`checked` reasserted to its attributes, so state resets a field the user edited (never a `file` input's); `textarea` and `select` attributes only |
 
 Events that fire with no gesture (`load`, `error`, `toggle`, animation and
 transition events, `autofocus`'s `focus`, hover, `scroll`) cannot be bound.

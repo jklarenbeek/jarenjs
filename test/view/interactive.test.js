@@ -99,14 +99,19 @@ describe('interactive profile — the safe attack corpus renders identically', (
     }
   });
 
-  it('keeps the corpus inert: no listener anywhere, nothing reaches onEvent', () => {
+  it('keeps the corpus inert: no binding listener anywhere, nothing reaches onEvent', () => {
     for (const { name, vnode } of SAFE_CORPUS) {
       const h = host({ safe: INTERACTIVE });
       h.render(vnode);
       const walk = (node) => [node, ...(node.childNodes ?? []).flatMap(walk)];
       for (const node of walk(h.container)) {
-        assert.equal(node.listeners?.size ?? 0, 0, `${name}: a listener on <${node.tagName}>`);
+        // a controlled input listens for composition, which holds its
+        // authoritative write back; that is the renderer's, never a binding
+        const types = [...(node.listeners?.keys() ?? [])].sort();
+        const expected = node.__jarenControlled === undefined ? [] : ['compositionend', 'compositionstart'];
+        assert.deepEqual(types, expected, `${name}: a listener on <${node.tagName}>`);
       }
+      assert.equal(h.events.length, 0);
     }
   });
 });

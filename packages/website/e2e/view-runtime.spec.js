@@ -354,7 +354,7 @@ test('the teeth of the gesture allow-list: trusted rendering of the same nodes f
   expect(fired).toEqual(expect.arrayContaining(['auto-anim', 'auto-error']));
 });
 
-test('interactive profile keeps controls attribute-only: a state change does not reset what the user typed', async ({ page }) => {
+test('interactive profile controls an input: a state change resets what the user typed', async ({ page }) => {
   await page.evaluate(() => {
     const host = document.getElementById('host');
     window.renderField = window.JarenTest.createDomRenderer(host, { safe: 'interactive', onEvent: () => {} });
@@ -366,8 +366,8 @@ test('interactive profile keeps controls attribute-only: a state change does not
     const field = document.getElementById('jaren-u-field');
     return { value: field.value, attribute: field.getAttribute('value') };
   });
-  // the documented limitation the profile shares with safe: true
-  expect(after).toEqual({ value: 'typed', attribute: '' });
+  // the state's value wins, and the attribute is what the serializer writes
+  expect(after).toEqual({ value: '', attribute: '' });
 });
 
 const appBundle = await build({ stdin: { contents: "export { createApp } from '@jarenjs/app'; export { createDialogWidget } from '@jarenjs/app/dialog';", resolveDir: root },
