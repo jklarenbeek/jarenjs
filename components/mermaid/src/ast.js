@@ -48,10 +48,29 @@ export function diagramDocument(diagram, config, ast, meta) {
 //#region flowchart -------------------------------------------------
 
 /**
+ * A node's shape: one with a bracket form by that form's name (`rect` …
+ * `asymmetric`), and each of Mermaid's other shapes, which only a node's
+ * `@{ shape: … }` names, by Mermaid's short name for it (`doc`, `flip-tri`, …).
  * @typedef {'rect'|'round'|'stadium'|'subroutine'|'cylinder'|'circle'
  *   |'doublecircle'|'diamond'|'hexagon'|'parallelogram'|'parallelogram_alt'
- *   |'trapezoid'|'trapezoid_alt'|'asymmetric'} FlowShape
+ *   |'trapezoid'|'trapezoid_alt'|'asymmetric'
+ *   |'datastore'|'bang'|'cloud'|'text'|'notch-rect'|'lin-rect'|'sm-circ'|'fr-circ'|'fork'
+ *   |'hourglass'|'brace'|'brace-r'|'braces'|'bolt'|'doc'|'delay'|'h-cyl'|'lin-cyl'|'curv-trap'
+ *   |'div-rect'|'tri'|'win-pane'|'f-circ'|'notch-pent'|'flip-tri'|'sl-rect'|'docs'|'st-rect'
+ *   |'bow-rect'|'cross-circ'|'tag-doc'|'tag-rect'|'flag'|'lin-doc'} FlowShape
  */
+
+/**
+ * The shapes only a node's `@{ shape: … }` names: Mermaid's shapes with no
+ * bracket form, by Mermaid's short name.
+ * @type {ReadonlySet<string>}
+ */
+export const FLOW_NAMED_SHAPES = new Set([
+  'datastore', 'bang', 'cloud', 'text', 'notch-rect', 'lin-rect', 'sm-circ', 'fr-circ', 'fork',
+  'hourglass', 'brace', 'brace-r', 'braces', 'bolt', 'doc', 'delay', 'h-cyl', 'lin-cyl', 'curv-trap',
+  'div-rect', 'tri', 'win-pane', 'f-circ', 'notch-pent', 'flip-tri', 'sl-rect', 'docs', 'st-rect',
+  'bow-rect', 'cross-circ', 'tag-doc', 'tag-rect', 'flag', 'lin-doc',
+]);
 
 /**
  * A flowchart vertex.
@@ -149,7 +168,7 @@ export function flowchartAst(direction, nodes, edges, subgraphs, classDefs, clas
  * A declared participant/actor. A participant whose `@{ "type": … }` names
  * one of Mermaid's other boxes (`boundary`, `control`, `entity`, `database`,
  * `collections`, `queue`) also carries it as `type`, which the renderer
- * does not draw.
+ * draws as Mermaid's glyph for it.
  * @param {string} id
  * @param {string} label
  * @param {'participant'|'actor'} kind
@@ -164,7 +183,7 @@ export function seqParticipant(id, label, kind) {
  * (`-)`), `both` (the two-way `<<->>`), and the half arrows: `half-top`
  * (`-|\`), `half-bottom` (`-|/`), `stick-top` (`-\\`), `stick-bottom`
  * (`-//`), and each written before the line (`/|-`, `\|-`, `//-`, `\\-`) as
- * its `-reverse`. The renderer draws the last nine as an `arrow`.
+ * its `-reverse`, which stands at the sender's end and points at it.
  * @typedef {'arrow'|'open'|'cross'|'point'|'both'|'half-top'|'half-bottom'|'stick-top'|'stick-bottom'
  *   |'half-top-reverse'|'half-bottom-reverse'|'stick-top-reverse'|'stick-bottom-reverse'} SeqHead
  */
@@ -172,7 +191,7 @@ export function seqParticipant(id, label, kind) {
 /**
  * A message statement. A message written with Mermaid's central-connection
  * marks (`A()->>()B`) also carries `central`: `from`, `to` or `both`, the
- * ends the marks stand at, which the renderer does not draw.
+ * ends the marks stand at, which the renderer draws as a dot on the lifeline.
  * @param {string} from
  * @param {string} to
  * @param {string} text

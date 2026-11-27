@@ -120,7 +120,7 @@ member order (monomorphic; the structural hash is deterministic).
 
 | Shape | Members |
 |-------|---------|
-| node | `{ id, label, shape }` — shape ∈ rect, round, stadium, subroutine, cylinder, circle, doublecircle, diamond, hexagon, parallelogram, parallelogram_alt, trapezoid, trapezoid_alt, asymmetric |
+| node | `{ id, label, shape }` — shape ∈ rect, round, stadium, subroutine, cylinder, circle, doublecircle, diamond, hexagon, parallelogram, parallelogram_alt, trapezoid, trapezoid_alt, asymmetric (the bracket forms), or one of Mermaid's 34 shapes only `@{ shape: … }` names, by Mermaid's short name: datastore, bang, cloud, text, notch-rect, lin-rect, sm-circ, fr-circ, fork, hourglass, brace, brace-r, braces, bolt, doc, delay, h-cyl, lin-cyl, curv-trap, div-rect, tri, win-pane, f-circ, notch-pent, flip-tri, sl-rect, docs, st-rect, bow-rect, cross-circ, tag-doc, tag-rect, flag, lin-doc |
 | edge | `{ from, to, stroke, head, tail, length, label }` — stroke ∈ solid/thick/dotted/invisible (`~~~`, which places its ends and draws no line); head/tail ∈ none/arrow/circle/cross (`A o--o B`, `A x--x B`); `length` preserved so the printer is a fixed point |
 | subgraph | `{ id, label, direction, nodes[] }` |
 | classDef / class / style | `{ name, styles }` / `{ node, name }` / `{ node, styles }` |
@@ -163,9 +163,16 @@ statement naming an edge id is skipped. A node's `A@{ shape: …, label: … }`
 metadata sets its label (an empty one leaves the id) and its shape, by
 Mermaid's name for it or an alias (`diam`, `cyl`, `lean-r`, `fr-rect`, …),
 as the statement written later does with brackets (`A["x"]@{ shape: diamond }`
-is a diamond `x`); a shape of Mermaid's this tree has not (`manual-file`,
-`doc`, …) is a `rect`, a name Mermaid has not (which it refuses) leaves the
-shape as it was, and the metadata's other entries are not kept. A quoted
+is a diamond `x`); a shape with no bracket form is named by Mermaid's short
+name, whichever alias wrote it (`manual-file` is `flip-tri`, `document` is
+`doc`), and `toMermaid` prints it as the metadata after the label in brackets
+(`A[x]@{ shape: doc }`, or `A@{ shape: doc }` where the label is the id); a
+name Mermaid has not (which it refuses) leaves the shape as it was, and the
+metadata's other entries are not kept. The renderer draws each of these in
+Mermaid's shape class (a document's wave, a card's cut corner, a cylinder on
+its side, …), and the seven Mermaid draws as a mark without its label
+(`sm-circ`, `f-circ`, `fr-circ`, `fork`, `hourglass`, `bolt`, `cross-circ`)
+at a mark's size and without it. A quoted
 label may run over lines, as Mermaid reads it: a line holding an odd number
 of `"` that does not read on its own reads on to the line that closes the
 quote, each line trimmed and joined at a line break (`` n["`Line1
@@ -232,11 +239,17 @@ naming an actor no line declared. A participant's `@{ "type": …, "alias": … 
 metadata gives the label by its alias unless `as` names one, and its type:
 `actor` and `participant` are the `kind`, and Mermaid's other boxes
 (`boundary`, `control`, `entity`, `database`, `collections`, `queue`) are a
-`participant` that keeps the name as `type`, which the renderer does not draw.
+`participant` that keeps the name as `type`, which the renderer draws as
+Mermaid's glyph for it: a boundary, a control and an entity as a circle with a
+bar on its left, an arrow on its top or a line under it, above the name (every
+actor box of such a diagram grows to hold the glyph); a database as a
+cylinder, a collection as two boxes one behind the other, and a queue as a
+cylinder on its side, around the name.
 `statements` is ordered; each is a `message`
 (`{ kind, from, to, text, line, head, activation }`, plus `central` when the
 arrow carries Mermaid's central-connection marks: `A()->>()B` is `both`,
-`A->>()B` `to`, `A()->>B` `from`; not drawn), a `note`
+`A->>()B` `to`, `A()->>B` `from`; each drawn as a dot on its lifeline, where
+the line stops), a `note`
 (`{ kind, placement, actors[], text }`), an `activate`/`deactivate`
 (`{ kind, actor }`), or a `block`
 (`{ kind:'block', blockType, branches:[{ label, statements[] }] }`) for
@@ -244,8 +257,12 @@ loop/opt/alt/par/critical/break. A message's `line` is `solid` or `dotted`
 (`--`) and its `head` one of `arrow` (`->>`), `open` (`->`), `cross` (`-x`),
 `point` (`-)`), `both` (`<<->>`), and the half arrows `half-top` (`-|\`),
 `half-bottom` (`-|/`), `stick-top` (`-\\`), `stick-bottom` (`-//`) and,
-written before the line (`/|-`, `\|-`, `//-`, `\\-`), each one's `-reverse`;
-the renderer draws `both` and the half arrows as an `arrow`.
+written before the line (`/|-`, `\|-`, `//-`, `\\-`), each one's `-reverse`.
+The renderer draws `both` with a head at each end, and a half head as Mermaid
+does: a filled half triangle (`half-*`) or one stroke (`stick-*`) on the side
+`top` or `bottom` names, which is the side left or right of the way the line
+travels (so `B-|\A`, right to left, draws its half under the line), at the
+receiver's end, or at the sender's, pointing back at it, for a `-reverse`.
 
 A `;` ends a statement, as in Mermaid: `A->>B: hi; B->>A: yo` is two
 messages, and `A->>B: hi;` and `participant A;` end at the `;`. A line splits
@@ -264,7 +281,9 @@ relation being `{ from, to, type, label }` plus `fromCardinality` and
 relation reads with or without blanks around its operator (`A<|--B`), a name
 in backticks (`` `Animal Class!` ``) or as words Mermaid joins (`A --> B C`
 names `BC`), and the lollipop operators (`bar ()-- foo`), whose lollipop end
-names an interface that is no class. A class is named without its generic
+names an interface that is no class: the relation keeps the written name as
+that end, and the relations box marks the end (`data-lollipop`, §7), so a
+class of the same name is not taken as it. A class is named without its generic
 wherever the generic is written (`class Square~Shape~`, `class Square~Shape~ {`,
 `Square~Shape~ <|-- Rect`, `Square~Shape~ : x` all name `Square`), as Mermaid
 names it, and keeps it as `generic` (`Shape`), which `toMermaid` prints after
@@ -792,8 +811,12 @@ a compact dagre-lite (longest-path ranks, banded coordinates, straight
 border-clipped edges); sequence layout resolves lifelines — spaced one gap
 apart, or as far as a message's, a self-message's or a side note's text
 between them needs, as Mermaid widens an actor gap — message
-y-advance, activation bars, notes and block frames. Geometry is
-deterministic, so golden-JSON tests catch drift.
+y-advance, activation bars, notes and block frames; every actor box is
+as tall as the one with the most lines, and taller by a glyph's room where
+a boundary, control or entity participant draws its glyph above its name.
+A flowchart node is sized for its label, save the seven shapes Mermaid
+draws as a mark without one (§4.1), which take a mark's fixed size.
+Geometry is deterministic, so golden-JSON tests catch drift.
 
 **State diagrams lay out through the flowchart engine** via an adapter
 (`layoutState`), not a second algorithm: states become rounded nodes,
@@ -860,7 +883,11 @@ the participant id and a message an edge (`data-edge` its position among the
 messages); a class's or an entity's box is a node of its name and each row of
 the relations box an edge (its position among the relations); a gantt row is a
 node of its task id and a dependency connector an edge from the prerequisite
-to the dependent task (its position among the connectors). A pie, a
+to the dependent task (its position among the connectors). A relations row
+whose class relation has a lollipop at one end also carries
+`data-lollipop="from"` or `"to"`: that end's `data-from` or `data-to` is the
+interface's written name, which is no node even where a class has the name,
+so a reader keys no node on it. A pie, a
 placeholder and an error draw none. A node a `click` gave tooltip text carries
 it as the text of its first child `<desc>`, which draws nothing and is escaped
 like any label, so the author's text never becomes markup and the standalone

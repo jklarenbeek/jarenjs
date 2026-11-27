@@ -19,6 +19,7 @@ import { sequenceStatements } from './parser/sequence.js';
 import { printClick, printNodeClick } from './parser/click.js';
 import { RE_LINK_INSIDE } from './parser/flowchart.js';
 import { isMarkdownString } from './label-text.js';
+import { FLOW_NAMED_SHAPES } from './ast.js';
 
 //#region public ----------------------------------------------------
 
@@ -176,10 +177,16 @@ function printFlowchart(ast) {
  */
 function nodeDecl(node) {
   if (node.shape === 'rect' && node.label === node.id) return node.id;
-  return node.id + wrapShape(node.shape, node.label);
+  if (!FLOW_NAMED_SHAPES.has(node.shape)) return node.id + wrapShape(node.shape, node.label);
+  // a shape with no bracket form is named by its metadata, after the label
+  // in brackets where the label is not the id (`A["x"]@{ shape: doc }`)
+  return node.id + (node.label === node.id ? '' : wrapShape('rect', node.label)) + `@{ shape: ${node.shape} }`;
 }
 
-/** Each shape's opening and closing delimiters; any other shape is a rectangle. */
+/**
+ * Each bracket shape's opening and closing delimiters; a shape only metadata
+ * names prints as metadata (`nodeDecl`), and any other as a rectangle.
+ */
 const SHAPE_DELIMITERS = /** @type {Record<string, [string, string]>} */ ({
   round: ['(', ')'],
   stadium: ['([', '])'],

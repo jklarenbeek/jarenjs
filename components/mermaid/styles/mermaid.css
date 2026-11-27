@@ -102,6 +102,9 @@
 
 /* Cascade over the render pass's presentation attributes. */
 .mermaid .mm-node-shape { fill: var(--mm-node-fill); stroke: var(--mm-node-stroke); }
+.mermaid .mm-node-detail { stroke: var(--mm-node-stroke); }
+.mermaid .mm-node-mark { fill: var(--mm-node-stroke); stroke: var(--mm-node-stroke); }
+.mermaid .mm-node-bare { fill: none; stroke: none; }
 .mermaid .mm-label,
 .mermaid .mm-node text { fill: var(--mm-node-text); }
 .mermaid .mm-edge-line { stroke: var(--mm-line-color); }
@@ -111,6 +114,8 @@
 .mermaid .mm-cluster-rect { fill: var(--mm-cluster-fill); stroke: var(--mm-cluster-stroke); }
 .mermaid .mm-actor rect { fill: var(--mm-actor-fill); stroke: var(--mm-actor-stroke); }
 .mermaid .mm-actor text { fill: var(--mm-actor-text); }
+.mermaid .mm-actor-shape { fill: var(--mm-actor-fill); stroke: var(--mm-actor-stroke); }
+.mermaid .mm-actor-mark { fill: var(--mm-actor-stroke); stroke: var(--mm-actor-stroke); }
 .mermaid .mm-lifeline { stroke: var(--mm-lifeline); }
 .mermaid .mm-activation { fill: var(--mm-activation-fill); stroke: var(--mm-activation-stroke); }
 .mermaid .mm-note rect { fill: var(--mm-note-fill); stroke: var(--mm-note-stroke); }

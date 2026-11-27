@@ -279,7 +279,7 @@
           ]
         },
         "type": {
-          "description": "Mermaid's other participant box, from the participant's @{ \"type\": … } metadata; not drawn",
+          "description": "Mermaid's other participant box, from the participant's @{ \"type\": … } metadata; drawn as Mermaid's glyph for it",
           "enum": [
             "boundary",
             "control",

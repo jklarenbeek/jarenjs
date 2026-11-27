@@ -39,6 +39,14 @@ const SELF_TEXT_GAP = 6;
 const TEXT_ROOM = 10;
 /** A note beside a lifeline sits this far from it. */
 const NOTE_GAP = 10;
+/**
+ * The participant types Mermaid draws as a glyph above the name (a circle
+ * with a bar, an arrow or a line) rather than as a box around it.
+ * @type {ReadonlySet<string>}
+ */
+export const GLYPH_TYPES = new Set(['boundary', 'control', 'entity']);
+/** The room a glyph takes above its participant's name. */
+export const GLYPH_ROOM = 32;
 
 /**
  * The distance each pair of actors' lifelines needs, so that no message's
@@ -100,11 +108,14 @@ export function layoutSequence(ast) {
       label: p.label,
       lines,
       kind: p.kind,
+      type: p.type,
       w: Math.max(ACTOR_MIN_W, widest(lines, 700) + 2 * ACTOR_PAD),
     };
   });
-  // every actor box is as tall as the one with the most lines
-  const actorH = ACTOR_H + (Math.max(1, ...actors.map((a) => a.lines.length)) - 1) * LINE_H;
+  // every actor box is as tall as the one with the most lines, and as the
+  // glyph above a name where a participant's type draws one
+  const actorH = ACTOR_H + (Math.max(1, ...actors.map((a) => a.lines.length)) - 1) * LINE_H
+    + (actors.some((a) => GLYPH_TYPES.has(a.type)) ? GLYPH_ROOM : 0);
   /** @type {Map<string, any>} */
   const byId = new Map();
 
@@ -170,7 +181,10 @@ export function layoutSequence(ast) {
         const self = stmt.from === stmt.to;
         state.y += self ? extra / 2 : extra;
         if (stmt.activation === 'activate') activate(stmt.to);
-        messages.push({ x1, y: state.y, x2, label: stmt.text, lines, line: stmt.line, head: stmt.head, self, from: stmt.from, to: stmt.to });
+        /** @type {Record<string, any>} */
+        const message = { x1, y: state.y, x2, label: stmt.text, lines, line: stmt.line, head: stmt.head, self, from: stmt.from, to: stmt.to };
+        if (stmt.central !== undefined) message.central = stmt.central;
+        messages.push(message);
         state.y += self ? SELF_GAP + extra / 2 : MSG_GAP;
         if (stmt.activation === 'deactivate') deactivate(stmt.from);
       }
@@ -248,6 +262,7 @@ export function layoutSequence(ast) {
     lineBottom: round(lineBottom),
     actors: actors.map((a) => ({
       id: a.id, label: a.label, lines: a.lines, kind: a.kind,
+      ...(a.type === undefined ? {} : { type: a.type }),
       x: round(a.x), boxX: round(a.boxX), boxY: a.boxY, w: round(a.w), h: a.h,
       bottomY: round(lineBottom),
     })),

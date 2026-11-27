@@ -5,8 +5,11 @@
  * §7). A node is a group with the `mm-node` class and `data-id`, its visible
  * name in the `mm-label` text inside it; an edge is an element with the
  * `mm-edge` class, `data-edge` (its position), `data-from` and `data-to`,
- * its label in an `mm-edge-label` text. An editor's event delegation and the
- * opt-in tooltips key on exactly these, whatever the type.
+ * its label in an `mm-edge-label` text. A class relation's row whose end is a
+ * lollipop (`foo --() bar`) also carries `data-lollipop` (`from` or `to`): that
+ * end names an interface, which is no node, even where a class has its name.
+ * An editor's event delegation and the opt-in tooltips key on exactly these,
+ * whatever the type.
  *
  * A node a `click` statement gave tooltip text also carries it, as the
  * text of its first child `<desc>`: SVG's own description element, which

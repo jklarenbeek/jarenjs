@@ -462,10 +462,13 @@ function readVertex(s, pos, lineNo) {
 
 /**
  * Mermaid's shape names (each short name and alias) for the shapes this tree
- * draws. Any other name Mermaid draws is a rectangle here.
+ * draws, as this tree names them: a shape with a bracket form by its
+ * bracket form's name (`diamond`, `cylinder`, …), any other by Mermaid's
+ * short name (`doc`, `flip-tri`, …), which `toMermaid` prints back.
  */
 const METADATA_SHAPES = /** @type {Record<string, string>} */ ({
   __proto__: null,
+  rect: 'rect', proc: 'rect', process: 'rect', rectangle: 'rect',
   rounded: 'round', event: 'round',
   stadium: 'stadium', terminal: 'stadium', pill: 'stadium',
   'fr-rect': 'subroutine', subprocess: 'subroutine', subproc: 'subroutine',
@@ -481,23 +484,38 @@ const METADATA_SHAPES = /** @type {Record<string, string>} */ ({
   'inv-trapezoid': 'trapezoid_alt',
   'dbl-circ': 'doublecircle', 'double-circle': 'doublecircle',
   odd: 'asymmetric',
+  datastore: 'datastore', 'data-store': 'datastore',
+  bang: 'bang', cloud: 'cloud', text: 'text',
+  'notch-rect': 'notch-rect', card: 'notch-rect', 'notched-rectangle': 'notch-rect',
+  'lin-rect': 'lin-rect', 'lined-rectangle': 'lin-rect', 'lined-process': 'lin-rect', 'lin-proc': 'lin-rect',
+  'shaded-process': 'lin-rect',
+  'sm-circ': 'sm-circ', start: 'sm-circ', 'small-circle': 'sm-circ',
+  'fr-circ': 'fr-circ', stop: 'fr-circ', 'framed-circle': 'fr-circ',
+  fork: 'fork', join: 'fork',
+  hourglass: 'hourglass', collate: 'hourglass',
+  brace: 'brace', comment: 'brace', 'brace-l': 'brace', 'brace-r': 'brace-r', braces: 'braces',
+  bolt: 'bolt', 'com-link': 'bolt', 'lightning-bolt': 'bolt',
+  doc: 'doc', document: 'doc',
+  delay: 'delay', 'half-rounded-rectangle': 'delay',
+  'h-cyl': 'h-cyl', das: 'h-cyl', 'horizontal-cylinder': 'h-cyl',
+  'lin-cyl': 'lin-cyl', disk: 'lin-cyl', 'lined-cylinder': 'lin-cyl',
+  'curv-trap': 'curv-trap', 'curved-trapezoid': 'curv-trap', display: 'curv-trap',
+  'div-rect': 'div-rect', 'div-proc': 'div-rect', 'divided-rectangle': 'div-rect', 'divided-process': 'div-rect',
+  tri: 'tri', extract: 'tri', triangle: 'tri',
+  'win-pane': 'win-pane', 'internal-storage': 'win-pane', 'window-pane': 'win-pane',
+  'f-circ': 'f-circ', junction: 'f-circ', 'filled-circle': 'f-circ',
+  'notch-pent': 'notch-pent', 'loop-limit': 'notch-pent', 'notched-pentagon': 'notch-pent',
+  'flip-tri': 'flip-tri', 'manual-file': 'flip-tri', 'flipped-triangle': 'flip-tri',
+  'sl-rect': 'sl-rect', 'manual-input': 'sl-rect', 'sloped-rectangle': 'sl-rect',
+  docs: 'docs', documents: 'docs', 'st-doc': 'docs', 'stacked-document': 'docs',
+  'st-rect': 'st-rect', procs: 'st-rect', processes: 'st-rect', 'stacked-rectangle': 'st-rect',
+  'bow-rect': 'bow-rect', 'stored-data': 'bow-rect', 'bow-tie-rectangle': 'bow-rect',
+  'cross-circ': 'cross-circ', summary: 'cross-circ', 'crossed-circle': 'cross-circ',
+  'tag-doc': 'tag-doc', 'tagged-document': 'tag-doc',
+  'tag-rect': 'tag-rect', 'tagged-rectangle': 'tag-rect', 'tag-proc': 'tag-rect', 'tagged-process': 'tag-rect',
+  flag: 'flag', 'paper-tape': 'flag',
+  'lin-doc': 'lin-doc', 'lined-document': 'lin-doc',
 });
-
-/** Mermaid's other shape names: shapes this tree draws as a rectangle. */
-const RECT_SHAPES = new Set([
-  'rect', 'proc', 'process', 'rectangle', 'datastore', 'data-store', 'bang', 'cloud', 'text', 'notch-rect',
-  'card', 'notched-rectangle', 'lin-rect', 'lined-rectangle', 'lined-process', 'lin-proc', 'shaded-process',
-  'sm-circ', 'start', 'small-circle', 'fr-circ', 'stop', 'framed-circle', 'fork', 'join', 'hourglass',
-  'collate', 'brace', 'comment', 'brace-l', 'brace-r', 'braces', 'bolt', 'com-link', 'lightning-bolt', 'doc',
-  'document', 'delay', 'half-rounded-rectangle', 'h-cyl', 'das', 'horizontal-cylinder', 'lin-cyl', 'disk',
-  'lined-cylinder', 'curv-trap', 'curved-trapezoid', 'display', 'div-rect', 'div-proc', 'divided-rectangle',
-  'divided-process', 'tri', 'extract', 'triangle', 'win-pane', 'internal-storage', 'window-pane', 'f-circ',
-  'junction', 'filled-circle', 'notch-pent', 'loop-limit', 'notched-pentagon', 'flip-tri', 'manual-file',
-  'flipped-triangle', 'sl-rect', 'manual-input', 'sloped-rectangle', 'docs', 'documents', 'st-doc',
-  'stacked-document', 'st-rect', 'procs', 'processes', 'stacked-rectangle', 'bow-rect', 'stored-data',
-  'bow-tie-rectangle', 'cross-circ', 'summary', 'crossed-circle', 'tag-doc', 'tagged-document', 'tag-rect',
-  'tagged-rectangle', 'tag-proc', 'tagged-process', 'flag', 'paper-tape', 'lin-doc', 'lined-document',
-]);
 
 /** One `key: value` entry of a node's metadata; the value may be quoted. */
 const RE_METADATA_ENTRY = /\s*([\w-]+)\s*:\s*("[^"]*"|'[^']*'|[^,]*?)\s*(?:,|$)/y;
@@ -520,7 +538,7 @@ function nodeMetadata(body) {
     if (m[1] === 'label') label = stripQuotes(m[2]) || label;
     else if (m[1] === 'shape') {
       const name = stripQuotes(m[2]);
-      shape = METADATA_SHAPES[name] ?? (RECT_SHAPES.has(name) ? 'rect' : null);
+      shape = METADATA_SHAPES[name] ?? null;
     }
   }
   return { label, shape };

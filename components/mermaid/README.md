@@ -671,6 +671,26 @@ participant X`; a state transition label and a description end at `;`
 that many entities (`A o--o B` read a relationship), and an ER relationship
 without `: label` is refused, as Mermaid refuses it (it read with the label
 `""`; write `: ""` for an empty one).
+The marks Mermaid draws and this renderer read but drew plain are drawn, by
+Mermaid's shape class: a sequence participant's `type` as Mermaid's glyph for
+it (a boundary, a control and an entity as a circle with a bar, an arrow or a
+line above the name, which grows every actor box of that diagram; a database
+and a queue as a cylinder, a collection as two boxes), a half head
+(`A-|\B`, `A/|-B`, …) as a half triangle or a stroke on Mermaid's side of the
+line, a two-way message (`A<<->>B`) with a head at each end, and a
+central-connection mark (`A()->>()B`) as a dot on the lifeline where the line
+stops; a flowchart node in one of Mermaid's 34 shapes with no bracket form
+(`A@{ shape: doc }`, `manual-file`, …) is drawn in that shape (seven of them,
+the marks Mermaid draws without a label, at a mark's size and without one),
+where it was a rectangle, so its tree's `shape` is Mermaid's short name for
+the shape (`doc`, `flip-tri`; it was `rect`) and `toMermaid` prints it as
+`A[x]@{ shape: doc }` (it printed `A[x]`). A class relations row whose relation
+has a lollipop end (`foo --() bar`) carries `data-lollipop`, so a class `bar`
+is not taken as that end: its tooltip no longer lists `foo`, and the row's own
+tooltip names the interface. The new marks carry the classes
+`mm-actor-shape`, `mm-actor-mark`, `mm-node-detail`, `mm-node-mark` and
+`mm-node-bare`, which `styles/mermaid.css` themes. A diagram without these
+marks draws as it did.
 
 ## Exports
 

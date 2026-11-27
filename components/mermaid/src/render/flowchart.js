@@ -13,7 +13,7 @@
  */
 
 import {
-  svgRoot, group, rect, path, circle, polygon, textAt, textLines, num,
+  svgRoot, group, rect, path, circle, polygon, textAt, textLines, num, coord,
 } from '@jarenjs/view/helpers';
 
 import { shapeAttributes, shapeStyle, textColor } from '../styles.js';
@@ -197,6 +197,8 @@ function htmlRuns(line) {
  */
 function renderNode(node, t, fontSize, tooltip, html) {
   const shapeEl = shapeVnode(node, t);
+  // Mermaid draws a marker shape (a junction, a fork, …) without its label
+  if (MARKER_SHAPES.has(node.shape)) return group(nodeMark(node.id, 'n-' + node.id), withTooltip([shapeEl], tooltip));
   const color = textColor(node.styles, t);
   if (html) {
     // a pseudo-state draws no label at all
@@ -230,9 +232,10 @@ function shapeVnode(node, t) {
   // with no stylesheet); the author's own styles go inline, which is what
   // outranks the stylesheet's `.mm-node-shape` rule.
   const authored = shapeStyle(node.styles, t);
+  const attributes = shapeAttributes(node.styles, t);
   const common = {
     class: 'mm-node-shape', fill, stroke, 'stroke-width': 1,
-    ...shapeAttributes(node.styles, t),
+    ...attributes,
     ...(authored === null ? {} : { style: authored }),
   };
   switch (node.shape) {
@@ -306,7 +309,173 @@ function shapeVnode(node, t) {
         { x, y }, { x: x + w - 8, y }, { x: x + w, y: y + h / 2 }, { x: x + w - 8, y: y + h }, { x, y: y + h },
       ], common);
     default:
-      return rect(x, y, w, h, common);
+      return namedShape(node.shape, x, y, w, h, common, attributes.stroke ?? null) ?? rect(x, y, w, h, common);
+  }
+}
+
+/**
+ * The shapes Mermaid draws without their label, as small marks.
+ * @type {ReadonlySet<string>}
+ */
+const MARKER_SHAPES = new Set(['sm-circ', 'fr-circ', 'f-circ', 'fork', 'hourglass', 'bolt', 'cross-circ']);
+
+/**
+ * A shape only a node's `@{ shape: … }` names, drawn in its box as Mermaid
+ * draws it, by shape class: the outline carries `common` (the theme's or the
+ * author's fill and stroke, and the `mm-node-shape` class), a line inside it
+ * the `mm-node-detail` class and the same stroke, unfilled, and a filled mark
+ * the `mm-node-mark` class, filled with the stroke; an author's stroke goes
+ * inline on both, where it outranks the stylesheet, and an author's fill on
+ * neither. Null for any other shape.
+ * @param {string} shape @param {number} x @param {number} y @param {number} w @param {number} h
+ * @param {Record<string, any>} common
+ * @param {string | null} authoredStroke the stroke an author's style gives the node
+ * @returns {any}
+ */
+function namedShape(shape, x, y, w, h, common, authoredStroke) {
+  const lineOf = { stroke: common.stroke, 'stroke-width': common['stroke-width'] };
+  const detail = {
+    class: 'mm-node-detail', fill: 'none', ...lineOf,
+    ...(authoredStroke === null ? {} : { style: `stroke:${authoredStroke}` }),
+  };
+  const mark = {
+    class: 'mm-node-mark', fill: common.stroke, ...lineOf,
+    ...(authoredStroke === null ? {} : { style: `fill:${authoredStroke};stroke:${authoredStroke}` }),
+  };
+  /** A box that draws nothing: what a brace's label stands in. */
+  const bare = { class: 'mm-node-shape mm-node-bare', fill: 'none', stroke: 'none', 'stroke-width': common['stroke-width'] };
+  const d = (/** @type {string} */ s) => path(s, common);
+  const poly = (/** @type {{x:number,y:number}[]} */ points, /** @type {Record<string, any>} */ props) =>
+    polygon(points.map((pt) => ({ x: coord(pt.x), y: coord(pt.y) })), props);
+  const r = x + w;
+  const b = y + h;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  // the depth of a document's wave, a fold, a cut corner
+  const a = coord(Math.min(6, h / 6));
+  const c = coord(Math.min(12, h / 3));
+  /** A document's outline: a wave along its bottom. */
+  const docPath = (/** @type {number} */ x0, /** @type {number} */ y0, /** @type {number} */ x1, /** @type {number} */ y1) =>
+    `M${x0},${y0} H${x1} V${coord(y1 - a)} C${coord(x0 + (x1 - x0) * 0.75)},${coord(y1 - 3 * a)} ${coord(x0 + (x1 - x0) * 0.25)},${coord(y1 + a)} ${x0},${coord(y1 - a)} Z`;
+  switch (shape) {
+    case 'datastore':
+      // a data store's two lines, above and below, and no sides
+      return rect(x, y, w, h, { ...common, 'stroke-dasharray': `${coord(w)} ${coord(h)}` });
+    case 'text':
+      return rect(x, y, w, h, { ...common, class: 'mm-node-shape mm-node-bare', fill: 'none', stroke: 'none' });
+    case 'notch-rect':
+      return poly([{ x: x + c, y }, { x: r, y }, { x: r, y: b }, { x, y: b }, { x, y: y + c }], common);
+    case 'lin-rect':
+      return group({}, [rect(x, y, w, h, common), path(`M${coord(x + 8)},${y} V${b}`, detail)]);
+    case 'div-rect':
+      return group({}, [rect(x, y, w, h, common), path(`M${x},${coord(y + c)} H${r}`, detail)]);
+    case 'win-pane':
+      return group({}, [rect(x, y, w, h, common), path(`M${x},${coord(y + 8)} H${r} M${coord(x + 8)},${y} V${b}`, detail)]);
+    case 'st-rect':
+      return group({}, [
+        rect(x + 6, y - 6, w, h, common), rect(x + 3, y - 3, w, h, common), rect(x, y, w, h, common),
+      ]);
+    case 'tag-rect':
+      return group({}, [rect(x, y, w, h, common), poly([{ x: r - c, y: b }, { x: r, y: b }, { x: r, y: b - c }], mark)]);
+    case 'sl-rect':
+      return poly([{ x, y: y + c }, { x: r, y }, { x: r, y: b }, { x, y: b }], common);
+    case 'tri':
+      return poly([{ x: cx, y }, { x: r, y: b }, { x, y: b }], common);
+    case 'flip-tri':
+      return poly([{ x, y }, { x: r, y }, { x: cx, y: b }], common);
+    case 'hourglass':
+      return poly([{ x, y }, { x: r, y }, { x, y: b }, { x: r, y: b }], common);
+    case 'notch-pent':
+      return poly([{ x: x + c, y }, { x: r - c, y }, { x: r, y: y + c }, { x: r, y: b }, { x, y: b }, { x, y: y + c }], common);
+    case 'delay':
+      return d(`M${x},${y} H${coord(r - h / 2)} A${coord(h / 2)},${coord(h / 2)} 0 0 1 ${coord(r - h / 2)},${b} H${x} Z`);
+    case 'curv-trap':
+      return d(`M${x},${cy} L${coord(x + c)},${y} H${coord(r - h / 2)} A${coord(h / 2)},${coord(h / 2)} 0 0 1 ${coord(r - h / 2)},${b} H${coord(x + c)} Z`);
+    case 'bow-rect': {
+      const rx = coord(Math.min(10, w / 8));
+      // stored data: the left side bulges out, the right side in
+      return d(`M${coord(x + rx)},${y} H${r} A${rx},${coord(h / 2)} 0 0 0 ${r},${b} H${coord(x + rx)} A${rx},${coord(h / 2)} 0 0 1 ${coord(x + rx)},${y} Z`);
+    }
+    case 'h-cyl': {
+      const rx = coord(Math.min(10, w / 8));
+      return group({}, [
+        d(`M${coord(x + rx)},${y} H${coord(r - rx)} A${rx},${coord(h / 2)} 0 0 1 ${coord(r - rx)},${b} H${coord(x + rx)} A${rx},${coord(h / 2)} 0 0 1 ${coord(x + rx)},${y} Z`),
+        path(`M${coord(r - rx)},${y} A${rx},${coord(h / 2)} 0 0 0 ${coord(r - rx)},${b}`, detail),
+      ]);
+    }
+    case 'lin-cyl': {
+      const ry = coord(Math.min(8, h / 6));
+      return group({}, [
+        d(`M${x},${coord(y + ry)} A${coord(w / 2)},${ry} 0 0 1 ${r},${coord(y + ry)} V${coord(b - ry)} A${coord(w / 2)},${ry} 0 0 1 ${x},${coord(b - ry)} Z`),
+        path(`M${x},${coord(y + ry)} A${coord(w / 2)},${ry} 0 0 0 ${r},${coord(y + ry)} M${x},${coord(y + 3 * ry)} A${coord(w / 2)},${ry} 0 0 0 ${r},${coord(y + 3 * ry)}`, detail),
+      ]);
+    }
+    case 'doc':
+      return d(docPath(x, y, r, b));
+    case 'lin-doc':
+      return group({}, [d(docPath(x, y, r, b)), path(`M${coord(x + 8)},${y} V${coord(b - a)}`, detail)]);
+    case 'tag-doc':
+      return group({}, [d(docPath(x, y, r, b)), poly([{ x: r - c, y: b - a }, { x: r, y: b - a }, { x: r, y: b - a - c }], mark)]);
+    case 'docs':
+      return group({}, [d(docPath(x + 6, y - 6, r + 6, b - 6)), d(docPath(x + 3, y - 3, r + 3, b - 3)), d(docPath(x, y, r, b))]);
+    case 'flag':
+      return d(`M${x},${coord(y + a)} C${coord(x + w * 0.25)},${coord(y - a)} ${coord(x + w * 0.75)},${coord(y + 3 * a)} ${r},${coord(y + a)}`
+        + ` V${coord(b - a)} C${coord(x + w * 0.75)},${coord(b - 3 * a)} ${coord(x + w * 0.25)},${coord(b + a)} ${x},${coord(b - a)} Z`);
+    case 'cloud': {
+      // four bumps along the top and the bottom, one at each side
+      const bx = coord(w / 8);
+      const by = coord(Math.min(8, h / 4));
+      let s = `M${coord(x + bx)},${coord(y + by)}`;
+      for (let i = 1; i <= 3; i++) s += ` A${bx},${by} 0 0 1 ${coord(x + bx + 2 * i * bx)},${coord(y + by)}`;
+      s += ` A${by},${coord(h / 2 - by)} 0 0 1 ${coord(r - bx)},${coord(b - by)}`;
+      for (let i = 1; i <= 3; i++) s += ` A${bx},${by} 0 0 1 ${coord(r - bx - 2 * i * bx)},${coord(b - by)}`;
+      s += ` A${by},${coord(h / 2 - by)} 0 0 1 ${coord(x + bx)},${coord(y + by)} Z`;
+      return d(s);
+    }
+    case 'bang': {
+      // a burst: the box's corners and a spike out of the middle of each side
+      const sx = coord(Math.min(10, w / 6));
+      const sy = coord(Math.min(8, h / 4));
+      return poly([
+        { x, y }, { x: cx, y: y + sy }, { x: r, y }, { x: r - sx, y: cy }, { x: r, y: b },
+        { x: cx, y: b - sy }, { x, y: b }, { x: x + sx, y: cy },
+      ], common);
+    }
+    case 'brace':
+    case 'brace-r':
+    case 'braces': {
+      const k = coord(Math.min(8, w / 8));
+      const left = `M${coord(x + k)},${y} Q${x},${y} ${x},${coord(y + k)} V${coord(cy - k)} Q${x},${cy} ${coord(x - k)},${cy}`
+        + ` Q${x},${cy} ${x},${coord(cy + k)} V${coord(b - k)} Q${x},${b} ${coord(x + k)},${b}`;
+      const right = `M${coord(r - k)},${y} Q${r},${y} ${r},${coord(y + k)} V${coord(cy - k)} Q${r},${cy} ${coord(r + k)},${cy}`
+        + ` Q${r},${cy} ${r},${coord(cy + k)} V${coord(b - k)} Q${r},${b} ${coord(r - k)},${b}`;
+      return group({}, [
+        rect(x, y, w, h, bare),
+        path(shape === 'brace' ? left : shape === 'brace-r' ? right : left + ' ' + right, detail),
+      ]);
+    }
+    case 'sm-circ':
+    case 'f-circ':
+      return circle(cx, cy, Math.min(w, h) / 2, mark);
+    case 'fr-circ':
+      return group({}, [circle(cx, cy, Math.min(w, h) / 2, common), circle(cx, cy, Math.min(w, h) / 2 - 4, mark)]);
+    case 'fork':
+      return rect(x, y, w, h, mark);
+    case 'cross-circ': {
+      const rr = Math.min(w, h) / 2;
+      const o = coord(rr * Math.SQRT1_2);
+      return group({}, [
+        circle(cx, cy, rr, common),
+        path(`M${coord(cx - o)},${coord(cy - o)} L${coord(cx + o)},${coord(cy + o)} M${coord(cx + o)},${coord(cy - o)} L${coord(cx - o)},${coord(cy + o)}`, detail),
+      ]);
+    }
+    case 'bolt':
+      return poly([
+        { x: x + w * 0.6, y }, { x, y: y + h * 0.55 }, { x: cx, y: y + h * 0.55 },
+        { x: x + w * 0.4, y: b }, { x: r, y: y + h * 0.45 }, { x: cx, y: y + h * 0.45 },
+      ], mark);
+    default:
+      return null;
   }
 }
 

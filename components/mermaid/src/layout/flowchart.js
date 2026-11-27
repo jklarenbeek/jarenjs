@@ -360,6 +360,17 @@ function wrapLine(line, width) {
 }
 
 /**
+ * The box of each mark Mermaid draws without its label (a node's
+ * `@{ shape: … }`), as `[width, height]`.
+ * @type {Record<string, [number, number]>}
+ */
+const MARKER_SIZES = {
+  __proto__: null,
+  'sm-circ': [14, 14], 'f-circ': [14, 14], 'fr-circ': [22, 22], fork: [70, 10],
+  hourglass: [30, 30], bolt: [24, 36], 'cross-circ': [30, 30],
+};
+
+/**
  * @param {any} node
  * @param {import('../label-text.js').LabelLine[]} lines the label as it is drawn
  * @returns {any}
@@ -375,6 +386,11 @@ function sizeNode(node, lines) {
   }
   if (shape === 'doublecircle' && node.label === '') {
     return { x: 0, y: 0, w: 22, h: 22, lines: [] };
+  }
+  // the marks Mermaid draws without their label
+  if (Object.hasOwn(MARKER_SIZES, shape)) {
+    const [w, h] = MARKER_SIZES[shape];
+    return { x: 0, y: 0, w, h, lines: [] };
   }
   const m = measureLines(lines);
   let w = m.width + 2 * PAD_X;
@@ -392,6 +408,14 @@ function sizeNode(node, lines) {
   }
   else if (shape === 'stadium' || shape === 'round') {
     w += 10;
+  }
+  else if (shape === 'tri' || shape === 'flip-tri') {
+    // the label sits in the wide half of the triangle
+    w = w * 2;
+    h += 2 * PAD_Y;
+  }
+  else if (shape === 'brace' || shape === 'brace-r' || shape === 'braces' || shape === 'cloud' || shape === 'bang') {
+    w += 16;
   }
   return {
     x: 0, y: 0,

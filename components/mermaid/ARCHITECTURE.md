@@ -71,7 +71,7 @@ so each computes at most once.
 | `src/layout/{flowchart,sequence,state,gantt}.js` | pure, deterministic `PositionedDiagram` scene graphs; the Gantt one takes its tick boundaries from `@jarenjs/core/dates`, so a timeline needs no dependency on the chart component, and gives a row the `click` link that passes `sanitizeHref`; it also reads the config's `gantt.topAxis` (or a `topAxis` header line) and `gantt.displayMode: compact` (the latter packs a section's rows first-fit) |
 | `@jarenjs/view/helpers` | shared tagged-array SVG vnode builders over `h()`; `measureText`/`textWidth` from a precomputed advance-width table (no `getBBox`); the `sanitizeHref`/`sanitizeUrl` URL policies (the engine imports them, no local copy) |
 | `src/render/{flowchart,sequence,gantt,misc,error}.js` | specialized `PositionedDiagram → vnode` closures + the error box |
-| `src/render/marks.js` | the one node and edge marker contract every renderer writes (`mm-node` + `data-id`, `mm-edge` + `data-edge`/`data-from`/`data-to`, a click tooltip as the node's `<desc>`); it imports nothing, so no renderer reaches another through it |
+| `src/render/marks.js` | the one node and edge marker contract every renderer writes (`mm-node` + `data-id`, `mm-edge` + `data-edge`/`data-from`/`data-to`, a class relation's lollipop end as `data-lollipop`, a click tooltip as the node's `<desc>`); it imports nothing, so no renderer reaches another through it |
 | `src/theme.js` | `--mm-*` token tables resolved through the shared `@jarenjs/view/helpers` `resolveTheme` (concrete colors **and** CSS variables) |
 | `src/plugin.js` | the self-frozen Markdown plugin + `refreshMermaidFence` |
 | `src/component/index.js` | `createMermaidComponent` (memoized `view()`, app effects, no-op hydrate) |

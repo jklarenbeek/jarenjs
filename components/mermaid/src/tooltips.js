@@ -13,7 +13,9 @@
  *
  * The render already names its targets, with one marker contract for every
  * type (`render/marks.js`): every node group carries `mm-node` and
- * `data-id="<node id>"`, every edge `mm-edge`, `data-from` and `data-to`. The
+ * `data-id="<node id>"`, every edge `mm-edge`, `data-from` and `data-to` (a
+ * class relation's lollipop end also marked `data-lollipop`, an interface
+ * that is no node). The
  * tooltip is built from those and the label text in the DOM, so nothing is
  * re-parsed and nothing is re-rendered, and this file reads no diagram type's
  * code. What it tells a reader is what the picture cannot while the diagram
@@ -98,11 +100,16 @@ function describeTargets(svg) {
   for (const edge of svg.querySelectorAll(EDGE)) {
     const from = edge.getAttribute('data-from');
     const to = edge.getAttribute('data-to');
-    if (!names.has(from) || !names.has(to)) continue;
+    // the end a class relation's lollipop stands at names an interface, by
+    // its written name, and never the node of that name
+    const lollipop = edge.getAttribute('data-lollipop');
+    const fromName = lollipop === 'from' ? from : names.get(from);
+    const toName = lollipop === 'to' ? to : names.get(to);
+    if (fromName === undefined || toName === undefined) continue;
     const say = labelOf(edge, '.mm-edge-label');
-    push(out, from, say === '' ? names.get(to) : `${names.get(to)} (${say})`);
-    push(into, to, say === '' ? names.get(from) : `${names.get(from)} (${say})`);
-    edges.push([edge, `${names.get(from)} → ${names.get(to)}${say === '' ? '' : ` (${say})`}`]);
+    if (lollipop !== 'from') push(out, from, say === '' ? toName : `${toName} (${say})`);
+    if (lollipop !== 'to') push(into, to, say === '' ? fromName : `${fromName} (${say})`);
+    edges.push([edge, `${fromName} → ${toName}${say === '' ? '' : ` (${say})`}`]);
   }
   /** @type {Map<any, Target>} */
   const targets = new Map();

@@ -227,12 +227,7 @@ delete it or fix it.
 ## @jarenjs/mermaid
 
 - [ ] **Mermaid forms still read differently from Mermaid** — measured against
-  Mermaid 11.16.1 on its own syntax-doc examples: a class lollipop's interface
-  is the relation's written end (`foo --() bar` ends at `bar`), where Mermaid
-  makes one interface per lollipop (`interface0`, labelled `bar`), so two
-  lollipops named alike, or one named like a class, share an end (wanted: the
-  relations panel marks a lollipop end, so a class of the same name is not
-  taken as it; the tree keeps the written name); an `<<enumeration>>` line
+  Mermaid 11.16.1 on its own syntax-doc examples: an `<<enumeration>>` line
   inside a class body counts as a member; a subgraph nested in another is not
   its member, and one named by a quoted markdown title keeps the backticks in
   its id; `state X` with its `{` on the next line reads a state `{`; and a few
@@ -240,13 +235,19 @@ delete it or fix it.
   for, a lone `"` inside an unquoted label (`A[He said "hi]`), a nested
   generic in a class name (`class List~List~int~~`) and a bare `subgraph`
   line.
-- [ ] **Sequence marks read but not drawn** — a participant's `type` (boundary,
-  control, entity, database, collections, queue), the half arrows (`-|\`,
-  `-//`, `/|-`, …), the two-way `<<->>` and the central-connection marks
-  (`A()->>()B`) are read and printed back (MERMAID-FORMAT §4.2) but drawn as a
-  plain box and a plain arrow; flowchart nodes in the 36 Mermaid 11 shapes
-  with no drawn equivalent (`doc`, `manual-file`, …) read as a rectangle and
-  print as one.
+- [ ] **Marks the stylesheet does not theme** — `styles/mermaid.css` (and so a
+  host-linked theme flip) maps no rule onto a sequence message's line
+  (`mm-message-line`), its open and cross heads, a flowchart link's circle and
+  cross heads or a subroutine's inner lines, which keep the concrete theme
+  color when the host's tokens change; and a state diagram's start dot, drawn
+  in the stroke color with the class `mm-node-shape`, is repainted to the node
+  fill by that class's rule. Fixing either changes the bytes of diagrams that
+  carry none of the newer marks.
+- [ ] **Sequence and flowchart marks still drawn differently** — a sequence `actor`
+  (or `@{ "type": "actor" }`) draws the participant box, where Mermaid draws a
+  stick figure above the name; a flowchart `fork` stays a horizontal bar in an
+  `LR`/`RL` chart, where Mermaid turns it; and a `cylinder` node draws no
+  front lip of its top (the participant `database` glyph draws one).
 - [ ] **`htmlLabels:true` — browser check** — flowchart and state labels
   render as HTML in `foreignObject` when the host passes `htmlLabels: true` (a
   diagram's config can turn them off, never on; sized and wrapped by the

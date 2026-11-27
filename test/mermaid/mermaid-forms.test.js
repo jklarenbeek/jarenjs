@@ -74,9 +74,9 @@ describe('flowchart — a node\'s `@{ … }` metadata', () => {
     assert.deepEqual(nodes('flowchart LR\n  a(round)@{ label: m }'), [['a', 'm', 'round']]);
   });
 
-  it('draws a shape this tree has not as a rectangle, keeps the shape for a name Mermaid has not, and an empty label shows the id', () => {
+  it('names a shape with no bracket form by Mermaid\'s short name, keeps the shape for a name Mermaid has not, and an empty label shows the id', () => {
     assert.deepEqual(nodes('flowchart LR\n  a@{ shape: manual-file, label: "File Handling" }\n  b(x)@{ shape: nope }\n  c@{ label: "" }'),
-      [['a', 'File Handling', 'rect'], ['b', 'x', 'round'], ['c', 'c', 'rect']]);
+      [['a', 'File Handling', 'flip-tri'], ['b', 'x', 'round'], ['c', 'c', 'rect']]);
   });
 
   it('prints the shape it read in brackets', () => {

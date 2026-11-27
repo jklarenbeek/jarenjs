@@ -526,6 +526,31 @@ describe('tooltips — every type that draws something to point at', () => {
     assert.strictEqual(say(er, all(er, '.mm-edge', 'data-edge', 0)[0]), 'CUSTOMER → ORDER');
   });
 
+  it('takes a lollipop\'s end as the interface it names, never the class of that name', () => {
+    // `foo --() bar` gives `foo` an interface `bar`: Mermaid draws it as an
+    // interface of its own, so the class `bar` is neither end of the row
+    const f = figure('classDiagram\n  class bar\n  foo --() bar\n  bar ()-- baz');
+    attachDiagramTooltips(f.el, { document: f.document });
+    assert.deepEqual(all(f, '.mm-edge', 'data-edge', 0).map((e) => e.getAttribute('data-lollipop')), ['to']);
+    assert.deepEqual(all(f, '.mm-edge', 'data-edge', 1).map((e) => e.getAttribute('data-lollipop')), ['from']);
+    assert.strictEqual(say(f, f.node('bar')), 'bar');
+    assert.strictEqual(say(f, f.node('foo')), 'foo\nto: bar');
+    assert.strictEqual(say(f, f.node('baz')), 'baz\nfrom: bar');
+    assert.strictEqual(say(f, all(f, '.mm-edge', 'data-edge', 0)[0]), 'foo → bar');
+    assert.strictEqual(say(f, all(f, '.mm-edge', 'data-edge', 1)[0]), 'bar → baz');
+
+    // two lollipops named alike are two interfaces, and no node
+    const two = figure('classDiagram\n  foo --() bar\n  qux --() bar');
+    attachDiagramTooltips(two.el, { document: two.document });
+    assert.deepEqual(two.svg.querySelectorAll('.mm-node').map((n) => n.getAttribute('data-id')), ['foo', 'qux']);
+    assert.strictEqual(say(two, two.node('foo')), 'foo\nto: bar');
+    assert.strictEqual(say(two, two.node('qux')), 'qux\nto: bar');
+
+    // a relation with no lollipop, or one at each end, marks no end
+    const plain = figure('classDiagram\n  foo --> bar\n  foo ()--() bar');
+    assert.deepEqual(plain.svg.querySelectorAll('.mm-edge').map((e) => e.getAttribute('data-lollipop')), [null, null]);
+  });
+
   const GANTT = 'gantt\n  dateFormat YYYY-MM-DD\n  section S\n  A task :a1, 2024-01-01, 3d\n  B task :after a1, 2d';
 
   it('names a gantt row by the dependencies that reach and leave it, and a connector by its ends', () => {

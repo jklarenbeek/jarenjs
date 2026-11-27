@@ -11,7 +11,8 @@
  *
  * A class's or an entity's box is a node of its name, and each row of the
  * relations box an edge between the two it names, marked as every type marks
- * them (`marks.js`); a placeholder draws nothing a reader can point at.
+ * them (`marks.js`), a lollipop's interface end marked as no node; a
+ * placeholder draws nothing a reader can point at.
  * A panel's heading and rows are read as every type's text is read
  * (`label-text.js`: broken at `<br>`, entity codes decoded), and measured and
  * drawn in those lines.
@@ -28,7 +29,8 @@ import { mermaidText } from '../messages.js';
  * @property {string[]} rows
  * @property {string | null} id the class or entity a box draws, null for the relations box
  * @property {string} [tooltip] the tooltip text a `click` gave the class
- * @property {{ from: string, to: string }[]} [edges] the relations box's rows, as endpoints
+ * @property {{ from: string, to: string, lollipop?: 'from' | 'to' }[]} [edges] the relations box's
+ *   rows, as endpoints, and the end a lollipop (`foo --() bar`) names an interface at
  */
 
 /**
@@ -71,7 +73,11 @@ export function renderStructured(title, sections, theme, hash) {
       const row = textBlock(26, rowY, rows[i], fs, rowH, { fill: t.nodeText });
       rowY += rows[i].length * rowH;
       const edge = section.edges?.[i];
-      box.push(edge === undefined ? row : group(edgeMark(i, edge.from, edge.to, 'rel-' + i), [row]));
+      if (edge === undefined) { box.push(row); continue; }
+      const mark = edgeMark(i, edge.from, edge.to, 'rel-' + i);
+      // a lollipop's end names an interface, never the class of that name
+      if (edge.lollipop !== undefined) mark['data-lollipop'] = edge.lollipop;
+      box.push(group(mark, [row]));
     }
     if (section.id === null) children.push(...box);
     else children.push(group(nodeMark(section.id, 'panel-' + section.id), withTooltip(box, section.tooltip)));
@@ -122,6 +128,20 @@ function genericText(generic) {
 }
 
 /**
+ * A class relation's two ends, and the end its lollipop stands at: the
+ * interface a lollipop names (`foo --() bar` names `bar`) is no class, and
+ * the relations box marks it so (`data-lollipop`) that a class of the same
+ * name is not taken as that end.
+ * @param {{ from: string, to: string, type: string }} r
+ * @returns {{ from: string, to: string, lollipop?: 'from' | 'to' }}
+ */
+function relationEnds(r) {
+  const atFrom = r.type.startsWith('()');
+  if (atFrom === r.type.endsWith('()')) return { from: r.from, to: r.to };
+  return { from: r.from, to: r.to, lollipop: atFrom ? 'from' : 'to' };
+}
+
+/**
  * Build the sections for the structured renderers.
  * @param {string} diagram
  * @param {any} ast
@@ -145,7 +165,7 @@ export function structuredSections(diagram, ast, messages = null) {
         heading: say('mermaid/class/relations'),
         rows: ast.relations.map((r) => `${r.from} ${r.type} ${r.to}${r.label ? ' : ' + r.label : ''}`),
         id: null,
-        edges: ast.relations,
+        edges: ast.relations.map(relationEnds),
       });
     }
     return { title: say('mermaid/class/title'), sections };
