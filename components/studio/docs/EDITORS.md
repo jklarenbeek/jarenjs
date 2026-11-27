@@ -81,9 +81,14 @@ a host can inject its existing `createRow(text)` convenience function.
 
 `createStudioDocumentHost({ markdown, diagram, templates? })` validates and audits
 app documents and provides the form/chart/Markdown/diagram render widgets. The
-host supplies its Markdown and diagram rendering policy.
+host supplies its Markdown and diagram rendering policy. Its
+`validateAppDocument(doc, { operators })`, `auditDocumentRender(doc, { operators })`
+and `loadStudioDocument(doc, { operators, ... })` read and boot an app with the
+operators of a `createJsltRegistry()` value; without one, the core operators only.
 `createProjectHost({ loadDocument, runQuery, runJslt, runValidation, operators? })`
-provides the stage, splitter and project engine integration. `runQuery(inputs, { messages })`
+provides the stage, splitter and project engine integration; the stage hands
+`loadDocument` the `operators` the files validate under (the built-in packs when
+none is given). `runQuery(inputs, { messages })`
 and `runJslt(inputs, { messages })` are handed the reader's compiled catalog with each
 run, so the result they render speaks the reader's language.
 

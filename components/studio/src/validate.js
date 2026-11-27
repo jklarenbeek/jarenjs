@@ -53,6 +53,7 @@ import dagSchema from '@jarenjs/flow/schemas/jaren-dag.schema.json' with { type:
 import modelSchema from '@jarenjs/db/schemas/jaren-model.schema.json' with { type: 'json' };
 
 import { auditRenderedView } from './render-audit.js';
+import { createGrammarValidators } from './operator-grammar.js';
 
 /** Errors kept per report: enough to repair, bounded for the IDE. */
 const MAX_ERRORS = 20;
@@ -62,12 +63,20 @@ const compileTypeTest = createTypeTestCompiler();
 // the studio mounts the built-in operator packs so a query/jslt/data file
 // may compute with $npv/$sqrt/$mean/… (host opt-in; a plain compile would
 // reject them). A host embedding the studio can substitute its own via
-// `validateFile(file, { operators })`.
-const defaultRegistry = createJsltRegistry().use(mathPack).use(financePack).use(statsPack);
-const defaultRegistryOptions = defaultRegistry.toOptions();
+// `validateFile(file, { operators })`. The project stage boots an app
+// with the same registry, so what validates here also runs there.
+/** The operator registry a file validates under when the host passes none.
+ * @type {Readonly<import('@jarenjs/json/jslt').JsltRegistry>} */
+export const defaultOperators = createJsltRegistry().use(mathPack).use(financePack).use(statsPack);
+const defaultRegistryOptions = defaultOperators.toOptions();
 
 const validateApp = new JarenValidator({ skipErrors: false, collectErrors: true })
   .addSchema(querySchema).addSchema(jsltSchema).compile(appSchema);
+
+/** The app meta-schema validator for a document under a registry (see
+ * `./operator-grammar.js`): the core one unless it names a registry operator. */
+const appValidatorFor = createGrammarValidators(validateApp, (query, jslt) =>
+  new JarenValidator({ skipErrors: false, collectErrors: true }).addSchema(query).addSchema(jslt).compile(appSchema));
 const validateFsm = new JarenValidator({ skipErrors: false, collectErrors: true })
   .addSchema(querySchema).compile(fsmSchema);
 const validateDag = new JarenValidator({ skipErrors: false, collectErrors: true })
@@ -299,7 +308,7 @@ function validateFileUncached(file, options = {}) {
     case 'data':
       return ok(kind); // any JSON value is a valid state/data file
     case 'app': {
-      const outcome = validateApp(doc);
+      const outcome = appValidatorFor(doc, registryOptions)(doc);
       const structural = schemaResult(kind, outcome);
       if (!structural.valid) return schemaResult(kind, outcome, unknownOperators(kind, doc, registryOptions));
       const audit = auditAppView(doc, registryOptions);

@@ -61,7 +61,8 @@ assets from its host; it has no filesystem, fetch or DOM dependency.
 - `src/project.js` — the model: `KINDS`, `LAYOUT_DEFAULT`, `parseProject`
   (envelope-gate + normalize), `fileOf`.
 - `src/validate.js` — `validateFile`: per-kind dispatch; the composed app
-  meta-schema + a headless render audit; jslt/query compiled with the
+  meta-schema (over the registry's grammars when the document names one of
+  its operators) + a headless render audit; jslt/query compiled with the
   operator packs. When an app/fsm/dag document fails its grammar, its
   query-bearing members are compiled too, and an unknown operator the
   compiler names (`JQ0002`, with the nearest known one) replaces the
@@ -71,6 +72,12 @@ assets from its host; it has no filesystem, fetch or DOM dependency.
   model per render would recompile the whole project, where the cached
   result is a lookup. Files are immutable, so identity is
   a sound key; pass a fresh object to force a re-check.
+- `src/operator-grammar.js` — the query and JSLT grammars of an operator
+  registry: copies of the published ones whose `objectExpression` also
+  admits each operator the registry mounts, with the operand shape its
+  `params` descriptor states; the published objects themselves for a
+  registry with none. The validator and the document host compile the app
+  meta-schema over them.
 - `src/render-audit.js` — what an app view renders that its author did
   not mean, read with the view format's vnode rules over the stylesheet's
   literal elements and the first frame: an element written as an object

@@ -637,6 +637,7 @@
     ["an array", "developer-facing"],
     ["an object", "developer-facing"],
     ["an object of ", "developer-facing"],
+    ["an operator registry (an object with a toOptions function)", "developer-facing"],
     ["effect handler '", "developer-facing"],
     ["multiple failures surfaced in one drain", "developer-facing"],
     ["the renderer threw while being destroyed: ", "developer-facing"],

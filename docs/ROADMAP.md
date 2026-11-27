@@ -282,12 +282,19 @@ delete it or fix it.
 
 ## @jarenjs/studio
 
-- [ ] **App documents cannot use pack operators in the studio.** An `app` file's
-  meta-schema composes the query and JSLT grammars of the core operators only,
-  so `validateFile` refuses `{"$sqrt": 16}` in an app view with schema errors
-  whether or not the host's `operators` registry mounts the math pack (only a
-  function reached through `$call` passes the grammar), and the document host
-  boots apps with no pack and no function at all.
+- [ ] **A safe app cannot mount an operator registry.** `createApp({ operators })`
+  compiles a view, its actions and subscriptions with a registry's pack
+  operators and `$call` functions, but beside `safe` or `capabilities` it is a
+  `TypeError`: a `$call` function is host code a document names, and every
+  other host registry is empty under those options. Wanted: a
+  `capabilities.functions` grant list naming the `$call` functions an
+  untrusted document may reach, with the pure pack operators always mounted
+  (APP-FORMAT §8.2.1 treats every named host entry that way).
+- [ ] **Flow documents cannot use pack operators.** `compileFsm` and `compileDag`
+  take no operator registry, so a guard or query node using `{"$sqrt": …}` is
+  `JQ0002` in the studio even under its default math/finance/stats registry,
+  and at runtime; the studio's `fsm`/`dag` grammars are the core ones for the
+  same reason.
 - [ ] **Entity models and durable project stores** — collection models now
   run in private workers with explicit query routing, SQL plans, live results
   and seed files. The stage's operation contract addresses collections; an

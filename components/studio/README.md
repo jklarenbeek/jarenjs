@@ -103,8 +103,10 @@ query using a host-registered operator (`$npv`, `$sqrt`) can't be checked
 against them. The studio validates each file on **its own boundary** —
 `jslt`/`query` files are *compiled* with the operator packs mounted, so
 registered operators pass and a real mistake surfaces as its own coded
-error with a JSON Pointer. There is deliberately no single composed
-mega-schema; that is what lets a project mix an app, a store and a data
+error with a JSON Pointer. An `app` file's meta-schema admits the same
+registry's operators (`{"$sqrt": 16}` in a view validates with the math
+pack mounted), and the document host boots the app with them. There is
+deliberately no single composed mega-schema; that is what lets a project mix an app, a store and a data
 query at once. See [PROJECT-FORMAT.md](docs/PROJECT-FORMAT.md).
 
 Answers that changed (upgrade notes): `subscribe` on a closed data transport
@@ -112,7 +114,12 @@ refuses with `the data transport is closed`, as `request` does, where it threw
 a `TypeError` about `null`. A file whose imports expand to more reads than its
 project can reasonably hold (a chain of files that each import the next under two
 members reads the last one 2^n times) is a `JS0003` refusal, like a cycle, where
-resolving it kept the page busy for minutes.
+resolving it kept the page busy for minutes. An `app` file that uses an
+operator of the registry it validates under (`{"$sqrt": 16}`, with the
+built-in packs by default) is valid, and the project stage boots it, where
+both refused it; under a registry without the operator it is refused as
+before, and an app that names none of the registry's operators answers as
+before.
 
 ## Exports
 

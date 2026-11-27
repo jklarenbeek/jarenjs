@@ -1,6 +1,7 @@
 //@ts-check
 /** Complete project-stage behavior over injected execution and preview services. */
 import { resolveProjectFile, projectFileContext } from '../index.js';
+import { defaultOperators } from '../validate.js';
 import { contentKey, semanticKey } from '@jarenjs/core/object';
 import { createSplitterWidget } from '@jarenjs/app';
 import { createStudioComponent } from './index.js';
@@ -266,6 +267,9 @@ function createProjectStageWidget(env = {}) {
       document: handle.host.ownerDocument,
       schedule: env.schedule,
       messages: catalogOf(env.messages),
+      // the registry the files validate under (`validateFile`'s default
+      // when the host names none), so a valid app boots
+      operators: operatorRegistry ?? defaultOperators,
       onError: (err) => handle.emit({ action: 'project/stage-error', with: errorMessage(err) }),
     });
     handle.app = result.ok ? result.app : null;

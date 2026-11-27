@@ -11,8 +11,8 @@
  *     → effects → listeners → subscriptions refresh → batched re-render
  *
  * JavaScript enters only at named, registered boundaries: effect and
- * subscription handlers, the `compileTypeTest` hook, and the optional
- * `validateState` invariant hook. Everything between the boundaries is
+ * subscription handlers, an operator registry's functions, the
+ * `compileTypeTest` hook, and the optional `validateState` invariant hook. Everything between the boundaries is
  * data. See docs/APP-FORMAT.md for the document contract.
  *
  * **Transaction model (APP-FORMAT §8).** Every dispatch is one
@@ -90,6 +90,15 @@ import { rejectionText } from './tasks.js';
  * @property {(schema: any, docPath: string) => ((value: any) => boolean)} [compileTypeTest]
  *   Enables JSON Schema operators (`$valid`/`$assert`/`$as`) and schema
  *   matches inside the view and the action documents.
+ * @property {{ toOptions: () => { extensions?: Record<string, any>, functions?: Record<string, Function> } } | null} [operators]
+ *   An operator registry (`createJsltRegistry().use(pack)` from
+ *   `@jarenjs/json/jslt`): the view, the actions and the subscription
+ *   queries compile with its operators (`$sqrt` with the math pack) and
+ *   its `$call` functions. Without it they compile with the core
+ *   operators only, and a pack operator is refused at compile (`JA0002`
+ *   in the view, `JA0004` in an action, `JA0006` in a subscription).
+ *   Not combined with `safe` or `capabilities` (a `TypeError`): no grant
+ *   list covers a registry's functions.
  * @property {(state: any, context: ValidateContext) => boolean | { valid: boolean, errors?: any }} [validateState]
  *   Invariant hook, called with every candidate next state plus a
  *   context carrying the previous state, the acting action name, its
@@ -291,6 +300,8 @@ const APP_OPTIONS = {
   eventFields: registryRule('extractors'),
   widgets: registryRule('widget definitions'),
   compileTypeTest: optionRule('a function', isFunction, true),
+  operators: optionRule('an operator registry (an object with a toOptions function)',
+    (value) => value !== null && typeof value === 'object' && typeof (/** @type {any} */ (value)).toOptions === 'function', true),
   validateState: optionRule('a function', isFunction),
   viewModel: optionRule('a function', isFunction, true),
   onError: optionRule('a function', isFunction, true),
@@ -325,6 +336,12 @@ function checkAppOptions(options) {
     if (given !== null) {
       throw new TypeError(`createApp: options.${key} must be ${rule.expects}, got ${given}`);
     }
+  }
+  // an operator registry's `$call` functions are host code a document
+  // names, and no grant list covers them yet: an app that runs under a
+  // safe profile or explicit grants does not mount one
+  if (options.operators != null && (options.safe || options.capabilities !== undefined)) {
+    throw new TypeError('createApp: options.operators cannot be combined with safe or capabilities');
   }
   if (isPlainOptions(options.capabilities)) {
     refuseUnknownMembers(options.capabilities, CAPABILITY_KINDS,
@@ -448,7 +465,14 @@ export function createApp(appDoc, options = {}) {
   if (appDoc.view === undefined) {
     throw new AppCompileError('JA0002', 'the app document has no "view" stylesheet', '/view');
   }
+  /** @type {Record<string, any>} */
   const queryOptions = { compileTypeTest: options.compileTypeTest };
+  if (options.operators !== undefined && options.operators !== null) {
+    // the registry's operators and `$call` functions, in every compile
+    const { extensions, functions } = options.operators.toOptions();
+    if (extensions !== undefined) queryOptions.extensions = extensions;
+    if (functions !== undefined) queryOptions.functions = functions;
+  }
 
   let view;
   try {

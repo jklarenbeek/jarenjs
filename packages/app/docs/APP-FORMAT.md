@@ -23,8 +23,9 @@ event → binding (§4) → action document (§3) → transition (§3.2)
 Everything the loop executes is compiled once, when the app document is
 loaded. JavaScript participates only at **named, registered
 boundaries**: effect handlers, subscription handlers, event-field
-extractors (§5.4), registered widgets (§5.5), the `compileTypeTest`
-hook and the `validateState` hook. Between the boundaries, everything
+extractors (§5.4), registered widgets (§5.5), the functions of an
+operator registry (§5.6), the `compileTypeTest` hook and the
+`validateState` hook. Between the boundaries, everything
 is data.
 
 ### 1.2 Conformance and normative language
@@ -599,6 +600,22 @@ renderer it creates — the dependency arrow stays one-way. A widget's
 through the same `handleBinding` path as any DOM event — including
 §4's `event` extraction member.
 
+### 5.6 Operator registries
+
+The view, the action documents and the subscription queries compile
+with the core query and JSLT operators. A host that mounts more passes
+an operator registry as `operators` (`createJsltRegistry().use(mathPack)`
+from `@jarenjs/json/jslt`, or any object whose `toOptions()` answers
+`{ extensions, functions }`): every embedded document then compiles with
+the registry's operators (`{"$sqrt": "$.n"}`) and its `$call` functions.
+Without one, a pack operator is an unknown operator, refused when the app
+compiles (`JA0002` in the view, `JA0004` in an action, `JA0006` in a
+subscription). The registry is read once, at `createApp`. Its `$call`
+functions are host code a document names, and no grant list (§8.2.1)
+covers them, so `operators` together with `safe` or `capabilities` is a
+`TypeError`: an app under a safe profile or explicit grants computes with
+the core operators.
+
 ## 6. Invariants
 
 When `options.validateState` is present, every candidate next state
@@ -697,7 +714,8 @@ flag (`safe`, `hydrate`, `capturePayloads`) that is not a boolean (`safe`
 also takes `'interactive'`), an `idPrefix` that is not a string,
 a registry (`effects`, `subs`, `eventFields`, `widgets`) that is not an
 object of named members (a function, an array, a `Map` or `Set`, a
-promise), `capabilities` that is not a plain object or has a member other
+promise), `operators` that is not an object with a `toOptions` function,
+`capabilities` that is not a plain object or has a member other
 than those four — is refused with a `TypeError` naming it
 (`createApp: unknown option 'onerror' — did you mean 'onError'?`), and
 so are options that are not a plain object. The refusal names what it
@@ -821,7 +839,8 @@ editor is not a controlled control: it is keyed by its value's text, so a
 change to that value shows at once, focused or not, and every other render
 keeps what the operator is typing in either mode. The dialog widget's content
 renders under the same mode. Any other value is a `TypeError`. `capabilities` optionally grants names from the host's
-`effects`, `subs`, `widgets` and `eventFields` registries:
+`effects`, `subs`, `widgets` and `eventFields` registries (an operator
+registry, §5.6, is not combined with either option):
 
 ```js
 const app = createApp(doc, {

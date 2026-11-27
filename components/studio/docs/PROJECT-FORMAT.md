@@ -39,7 +39,7 @@ an invalid file.
 
 | kind | the file is | validated by |
 |---|---|---|
-| `app` | a `jaren-app` document | the composed app meta-schema (jslt + query by `$ref`) **plus a headless render audit** — a document that validates but throws on its first frame is still broken, and so is one whose view renders an element written as an object (`JS0004`, see below) |
+| `app` | a `jaren-app` document | the composed app meta-schema (jslt + query by `$ref`, admitting the operator registry's operators) **plus a headless render audit** — a document that validates but throws on its first frame is still broken, and so is one whose view renders an element written as an object (`JS0004`, see below) |
 | `jslt` | a JSLT stylesheet | **compiled** by the engine with the operator registry |
 | `query` | a query document | **compiled** by the engine with the operator registry |
 | `state` / `data` | any JSON value (an input) | structural JSON only |
@@ -61,6 +61,20 @@ design, not a compromise. A host embeds its own vocabulary with
 `validateFile(file, { operators })`; an `app`'s render audit renders its
 first frame with that registry too, so a function the host registers
 (`{"$call": ["twice", 21]}`) renders there as it does in the host.
+
+**An app computes with the registry's operators.** An `app` file's
+meta-schema reads its query and JSLT grammars with one more phrase per
+operator the registry mounts, each with the operand shape its compile
+accepts (`{"$sqrt": 16}`, `{"$pow": [2, 10]}`), so a view, an action or a
+subscription that uses a pack operator validates under a registry that
+mounts the pack — the built-in math/finance/stats packs when the host
+passes none. An operator the registry does not mount is refused as an
+unknown operator, `JQ0002` at its own place, and a document that names
+none of the registry's operators is read against the published grammars.
+The document host validates, audits and boots an app under the registry
+it is handed (`loadStudioDocument(doc, { operators })`,
+`createApp`'s `operators`), and the project stage hands it the registry
+the files validate under, so an app that validates also runs.
 
 **An unknown operator is named, not its consequences.** The `app`, `fsm`
 and `dag` grammars place a query in a branch (an action is an awaiting

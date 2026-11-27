@@ -12,6 +12,7 @@ import { compileChart } from '@jarenjs/charts';
 import { errorMessage } from './shared/nodes.js';
 import { studioTextOf } from '../messages.js';
 import { auditRenderedView } from '../render-audit.js';
+import { createGrammarValidators } from '../operator-grammar.js';
 import appSchema from '@jarenjs/app/schemas/jaren-app.schema.json' with { type: 'json' };
 import querySchema from '@jarenjs/json/schemas/jaren-query.schema.json' with { type: 'json' };
 import jsltSchema from '@jarenjs/json/schemas/jaren-jslt.schema.json' with { type: 'json' };
@@ -32,15 +33,23 @@ const validateApp = new JarenValidator(OUR_SCHEMA_OPTIONS)
   .addSchema(jsltSchema)
   .compile(appSchema);
 
+/** The meta-schema validator for a document under an operator registry
+ * (see `../operator-grammar.js`): the core one unless it names a registry operator. */
+const appValidatorFor = createGrammarValidators(validateApp, (query, jslt) =>
+  new JarenValidator(OUR_SCHEMA_OPTIONS).addFormats(jsonFormats).addSchema(query).addSchema(jslt).compile(appSchema));
+
 const message = errorMessage;
 
 /**
- * Validate a candidate document against the jaren-app meta-schema.
+ * Validate a candidate document against the jaren-app meta-schema: its
+ * query and JSLT grammars admit the operators of `options.operators` (a
+ * `createJsltRegistry()` value) beside the core ones.
  * @param {any} doc
+ * @param {{ operators?: { toOptions: () => any } }} [options]
  * @returns {{ valid: boolean, errors: Array<{ instancePath: string, keyword: string, message: string }>, total: number }}
  */
-function validateAppDocument(doc) {
-  const outcome = validateApp(doc);
+function validateAppDocument(doc, options = {}) {
+  const outcome = appValidatorFor(doc, options.operators?.toOptions())(doc);
   const valid = typeof outcome === 'object' && outcome !== null ? outcome.valid : outcome === true;
   if (valid) return { valid: true, errors: [], total: 0 };
   const raw = (typeof outcome === 'object' && outcome !== null ? outcome.errors : null) ?? [];
@@ -316,15 +325,19 @@ function getSeedHeadings() {
  * repurposed-template leftover). The rule deliberately keys on the seed
  * headings so a pristine template, or an authored heading of the user's
  * own, never trips it.
+ *
+ * The view compiles with the operators of `options.operators`, as
+ * `loadStudioDocument` boots it.
  * @param {any} doc
+ * @param {{ operators?: { toOptions: () => any } }} [options]
  * @returns {{ widgets: string[], problems: string[], notes: string[] }}
  */
-function auditDocumentRender(doc) {
+function auditDocumentRender(doc, options = {}) {
   /** @type {{ widgets: string[], problems: string[], headings: string[], formTitles: string[] }} */
   const out = { widgets: [], problems: [], headings: [], formTitles: [] };
   let vnode;
   try {
-    vnode = compileJsltStylesheet(doc.view, { compileTypeTest, memo: false })(doc.state);
+    vnode = compileJsltStylesheet(doc.view, { compileTypeTest, memo: false, ...options.operators?.toOptions() })(doc.state);
   }
   catch (err) {
     out.problems.push(`the view failed to render its first frame: ${message(err)}`);
@@ -358,14 +371,17 @@ function auditDocumentRender(doc) {
  * Validate a document against the meta-schema and boot it as an
  * isolated app: no effects, no subs, its own `onError` sink, the
  * render-capability widgets, and the runtime's atomic-boot guarantee.
+ * The document may compute with the operators of `env.operators` (a
+ * `createJsltRegistry()` value): it validates against their grammar and
+ * boots with them; without one it has the core operators only.
  * @param {any} doc
  * @param {{ node?: any, document?: any, schedule?: (flush: () => void) => void,
- *   onError?: (err: Error) => void, messages?: any }} env - `messages`: the
+ *   onError?: (err: Error) => void, messages?: any, operators?: { toOptions: () => any } }} env - `messages`: the
  *   compiled catalog the refusal and the form widget speak, English when absent
  * @returns {{ ok: true, app: any } | { ok: false, errors: any[], total: number, message: string }}
  */
 function loadStudioDocument(doc, env = {}) {
-  const report = validateAppDocument(doc);
+  const report = validateAppDocument(doc, { operators: env.operators });
   if (!report.valid) {
     return {
       ok: false,
@@ -381,6 +397,7 @@ function loadStudioDocument(doc, env = {}) {
       schedule: env.schedule,
       widgets: widgetsFor(env.messages),
       compileTypeTest,
+      operators: env.operators,
       // the form widget's typed selects and json editor decode here
       eventFields: { ...formEventFields() },
       onError: env.onError,
