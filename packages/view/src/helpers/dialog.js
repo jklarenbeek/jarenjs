@@ -39,7 +39,7 @@ export const DIALOG_CODES = Object.freeze({
  *   (`createDomRenderer`'s), which the dialog's own `id` and its title's join
  *   too, so the document's references to them resolve and none reaches the
  *   host's ids.
- * @property {(info: { kind: 'tag' | 'prop' | 'event' | 'widget' | 'id', name: string }) => void} [onUnsafe]
+ * @property {(info: { kind: 'tag' | 'prop' | 'event' | 'widget' | 'id' | 'name', name: string }) => void} [onUnsafe]
  * @property {Readonly<Record<string, unknown>> | null} [messages] - The reader's
  *   compiled catalog (`compileMessageCatalog` over a locale pack): the close
  *   button's default text renders through it (`view/dialog/close`), falling

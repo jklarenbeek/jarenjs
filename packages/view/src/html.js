@@ -16,6 +16,9 @@ import {
   isElementName,
   elementNameError,
   rawTextError,
+  breaksOutOfSvg,
+  foreignBelow,
+  svgBreakoutError,
   propsOf,
   childrenOf,
   WIDGET_TAG,
@@ -199,7 +202,7 @@ export function renderToString(vnode, options = {}) {
     ? createSafePolicy({ interactive: true, widgets: grantedWidgets(options.capabilities, options.widgets), idPrefix: options.idPrefix })
     : options.safe ? createSafePolicy({ idPrefix: options.idPrefix }) : null;
   const onUnsafe = typeof options.onUnsafe === 'function' ? options.onUnsafe : null;
-  return renderNode(vnode, options.widgets, policy, onUnsafe, null, vnode, false);
+  return renderNode(vnode, options.widgets, policy, onUnsafe, null, vnode, false, false);
 }
 
 /**
@@ -242,15 +245,18 @@ function reportEvents(policy, on, onUnsafe) {
  *   refused tag is located
  * @param {boolean} svg - inside an `svg` element (and not back in HTML
  *   under a `foreignObject`), where the DOM renderer builds SVG elements
+ * @param {boolean} foreign - where an HTML parser reads the markup written
+ *   here as foreign content: inside an `svg`, but not under its `desc` or
+ *   `title` ({@link foreignBelow}), where it reads HTML
  * @returns {string}
  */
-function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
+function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg, foreign) {
   if (isTextNode(vnode)) {
     return escapeText(String(vnode));
   }
   if (!isElementNode(vnode)) {
     if (Array.isArray(vnode)) return childrenOf(['root', {}, vnode])
-      .map((child) => renderNode(child, widgets, policy, onUnsafe, selection, root, svg)).join('');
+      .map((child) => renderNode(child, widgets, policy, onUnsafe, selection, root, svg, foreign)).join('');
     return '';
   }
   const tag = vnode[0];
@@ -266,7 +272,7 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
         if (onUnsafe !== null) onUnsafe({ kind: 'widget', name: String(props.name ?? '') });
         return '';
       }
-      if (policy.tag(props.tag ?? 'div') === null) {
+      if (policy.tag(props.tag ?? 'div', foreign) === null) {
         if (onUnsafe !== null) onUnsafe({ kind: 'tag', name: String(props.tag ?? 'div') });
         return '';
       }
@@ -274,11 +280,12 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
     }
     const hostTag = props.tag ?? 'div';
     if (!isElementName(hostTag)) throw elementNameError(root, vnode, hostTag);
+    if (foreign && breaksOutOfSvg(hostTag)) throw svgBreakoutError(root, vnode, hostTag);
     // An HTML void host holds no content and takes no end tag, so the
     // fallback a parser would read as the host's next siblings is not
     // written, and `ssr` is not read: the host as the DOM renderer builds it
-    // before the widget mounts. Inside `svg` the element is foreign, not void.
-    const voidHost = !svg && isHtmlVoid(hostTag);
+    // before the widget mounts. In foreign content the element is not void.
+    const voidHost = !foreign && isHtmlVoid(hostTag);
     const def = !voidHost && widgets !== undefined && typeof props.name === 'string'
       && Object.hasOwn(widgets, props.name) ? widgets[props.name] : undefined;
     // one read: acquisition and invocation are one boundary here too —
@@ -288,20 +295,23 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
     const ssr = def !== undefined ? def.ssr : undefined;
     const inner = ssr !== undefined
       ? renderNode(ssr.call(def, props.props ?? null), widgets, policy, onUnsafe, selection, root,
-        hostTag === 'foreignObject' ? false : svg || hostTag === 'svg')
+        hostTag === 'foreignObject' ? false : svg || hostTag === 'svg', foreignBelow(hostTag, foreign))
       : '';
     const open = '<' + hostTag + fixedAttributes(policy, hostTag) + serializeProps(props, WIDGET_SKIP_PROPS, policy, onUnsafe, hostTag) + '>';
     return voidHost ? open : open + inner + '</' + hostTag + '>';
   }
   // Safe mode: a disallowed or injection-shaped tag drops to the empty
   // string, matching the DOM renderer's empty text node.
-  if (policy !== null && policy.tag(tag) === null) {
+  if (policy !== null && policy.tag(tag, foreign) === null) {
     if (onUnsafe !== null) onUnsafe({ kind: 'tag', name: String(tag) });
     return '';
   }
   // Trusted mode holds a tag to the same grammar and refuses, as the DOM
   // renderer does, rather than writing `<Total:>` or `< >` into markup.
   if (!isElementName(tag)) throw elementNameError(root, vnode, tag);
+  // An element whose start tag ends the `svg` for a parser has no markup
+  // there: refused, as the trusted renderer refuses raw text it cannot carry.
+  if (foreign && breaksOutOfSvg(tag)) throw svgBreakoutError(root, vnode, tag);
   // Report a stripped `on` binding for observability parity with the DOM
   // renderer — SSR never emits `on`, but a host still wants to know an
   // untrusted document tried to bind an action.
@@ -345,8 +355,9 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
       selection.matched = true;
     }
   }
-  // a parser lower-cases an HTML tag name; inside `svg` the name is matched as written
-  if (svg ? VOID_ELEMENTS.has(tag) : isHtmlVoid(tag)) {
+  // a parser lower-cases a tag name; in foreign content (inside `svg`) no
+  // element is void, and an end tag closes `<input>` as `</circle>` does
+  if (!foreign && isHtmlVoid(tag)) {
     return out + '>';
   }
   out += '>';
@@ -360,6 +371,7 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
   // the namespace the DOM renderer builds the children in: SVG from an
   // `svg` element down, HTML again under a `foreignObject`
   const inSvg = tag === 'foreignObject' ? false : svg || tag === 'svg';
+  const inForeign = foreignBelow(tag, foreign);
   const breakout = svg ? undefined : RAW_TEXT_BREAKOUT.get(tag.toLowerCase());
   if (breakout !== undefined) {
     // An HTML `style` or `script` holds raw text: a parser decodes no
@@ -371,14 +383,14 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
       const child = children[i];
       inner += isTextNode(child)
         ? String(child)
-        : renderNode(child, widgets, policy, onUnsafe, selection, root, inSvg);
+        : renderNode(child, widgets, policy, onUnsafe, selection, root, inSvg, inForeign);
     }
     const found = breakout.exec(inner);
     if (found !== null) throw rawTextError(root, vnode, tag, found[0]);
     return out + inner + '</' + tag + '>';
   }
   for (let i = 0; i < children.length; i++) {
-    out += renderNode(children[i], widgets, policy, onUnsafe, selection, root, inSvg);
+    out += renderNode(children[i], widgets, policy, onUnsafe, selection, root, inSvg, inForeign);
   }
   return out + '</' + tag + '>';
 }

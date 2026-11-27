@@ -121,6 +121,53 @@ export function rawTextError(root, vnode, tag, found) {
 }
 
 /**
+ * The HTML void elements whose start tag, in any spelling, ends an `svg`
+ * where an HTML parser reads foreign content: it closes the `svg` and reads
+ * the element, and every later sibling, as HTML.
+ */
+const SVG_BREAKOUT_TAGS = new Set(['br', 'embed', 'hr', 'img', 'meta']);
+
+/**
+ * Whether an element named `tag` ends the `svg` it is written in, where an
+ * HTML parser reads foreign content: no markup builds it there, as the DOM
+ * renderer builds it, inside the `svg`.
+ * @param {string} tag
+ * @returns {boolean}
+ */
+export function breaksOutOfSvg(tag) {
+  return SVG_BREAKOUT_TAGS.has(tag.toLowerCase());
+}
+
+/**
+ * Whether an HTML parser reads the children of `tag` as foreign content,
+ * given whether it reads `tag` itself so (`foreign`): from an `svg` down,
+ * and HTML again under an SVG `foreignObject`, `desc` or `title`, where a
+ * parser reads HTML. A parser matches the names in any case.
+ * @param {string} tag
+ * @param {boolean} foreign
+ * @returns {boolean}
+ */
+export function foreignBelow(tag, foreign) {
+  const lower = tag.toLowerCase();
+  return lower === 'svg' || (foreign && lower !== 'foreignobject' && lower !== 'desc' && lower !== 'title');
+}
+
+/**
+ * The refusal of an element that ends the `svg` it is written in
+ * ({@link breaksOutOfSvg}): serialized, an HTML parser would read it, and
+ * every later sibling, outside the `svg`. Located like
+ * {@link elementNameError}.
+ * @param {any} root - the document being rendered
+ * @param {any} vnode - the element vnode (a widget's, for its host `tag`)
+ * @param {string} tag - its tag, as written
+ * @returns {TypeError}
+ */
+export function svgBreakoutError(root, vnode, tag) {
+  // one template, so the whole message reads as the coded error's
+  return new TypeError(`view: the <${tag}> ${whereIs(root, vnode)} sits inside an svg, where an HTML parser reads it as an HTML element that ends the svg: no markup keeps it inside. Move it out of the svg, or under a foreignObject`);
+}
+
+/**
  * Where `vnode` sits in `root`, as a refusal names it.
  * @param {any} root
  * @param {any} vnode

@@ -343,8 +343,11 @@ reorder efficiency is only specified for fully keyed lists.
 
 An element with tag `svg` and its descendants are created in the SVG
 namespace. Children of SVG `foreignObject` re-enter the HTML namespace;
-a nested `svg` enters SVG again. `xlink:*` and `xml:*` attributes use their
+a nested `svg` enters SVG again. A widget host (§7) whose `tag` is `svg` is
+built in the SVG namespace too. `xlink:*` and `xml:*` attributes use their
 namespace URIs for setting and removal. Safe mode excludes `foreignObject`.
+Upgrade note: a widget host on `svg` outside an `svg` used to be built in the
+HTML namespace, where it draws nothing.
 
 ### 5.5 The memo marker
 
@@ -374,11 +377,27 @@ equal.
 `renderToString(vnode)` MUST produce markup equivalent to what a
 patching renderer would build: text and attribute values escaped (`&`,
 `<`, `>` in text; `&`, `"` in double-quoted attributes), void elements
-(`br`, `img`, `input`, ..., the tag in any case outside `svg`) without end
+(`br`, `img`, `input`, ..., the tag in any case) without end
 tags, `key` and `on` producing
 no output, boolean and style props serialized per §3, and an inline handler
 value (`onclick: 'alert(1)'`) omitted as §3's property table says.
 Serialization is pure: no state, no DOM, safe in any runtime.
+
+Inside an `svg`, where an HTML parser reads foreign content, no element is
+void: an `input`, `area`, `base`, `col`, `link`, `param`, `source`, `track`
+or `wbr` is written with its end tag, which closes it as `</circle>` closes a
+`circle`, so its next sibling is not read as its child. `br`, `embed`, `hr`,
+`img` and `meta`, in any case, have no such markup: their start tag ends the
+`svg` for a parser, which reads them and every later sibling outside it,
+where the patching renderer builds them inside. The serializer refuses one
+with a `TypeError` naming where it sits (the patching renderer builds it, as
+for raw text it cannot carry), and both renderers drop one under a safe
+profile (§8 rule 1). Under an SVG `desc`, `title` or `foreignObject` a parser
+reads HTML again, so these rules do not apply there: an HTML void element is
+written without an end tag, as outside `svg`. Upgrade note: inside an `svg`
+these elements used to be written as HTML void elements, which a parser read
+with the next sibling inside the `input`, or with the rest of the drawing
+outside the `svg`.
 
 The text of an HTML `style` or `script` element (its tag in any case) is
 raw text, which an HTML parser never decodes, so it is written verbatim —
@@ -665,12 +684,14 @@ the committed baseline. Consequences a conforming renderer exhibits:
 host element with the host props (widget-local members excluded),
 containing the serialized `ssr(props)` vnode when the widget is
 registered and has `ssr`, else empty content. A host on an HTML void
-element (`tag: 'input'`, `'br'`, `'img'`, ..., in any case, outside `svg`)
-is written without an end tag and without a fallback, and `ssr` is not
-read: a parser would read the fallback as the host's next siblings, and
+element (`tag: 'input'`, `'br'`, `'img'`, ..., in any case, outside `svg`
+or under its `desc`, `title` or `foreignObject`) is written without an end
+tag and without a fallback, and `ssr` is not read: a parser would read the fallback as the host's next siblings, and
 `</br>` as a second `<br>`, where the DOM renderer builds one empty host.
 Upgrade note: such a host used to be written with an end tag and its
-fallback inside it. Serialization stays pure
+fallback inside it. Inside an `svg` a host is not void, and one on `br`,
+`embed`, `hr`, `img` or `meta` is refused or dropped as such an element is
+(§6). Serialization stays pure
 — no state, no DOM, no widget is mounted; the client-side first render
 mounts widgets as usual (§6).
 
@@ -755,7 +776,11 @@ Under the safe profile a renderer MUST:
    structural injection through the tag. `script`, `iframe`, `object`,
    `embed`, `style`, `link`, `meta`, `base`, `foreignObject` and other
    document-embedding or script/style-carrying elements MUST NOT be on the
-   allow-list.
+   allow-list. Inside an `svg`, where an HTML parser reads foreign content
+   (not under its `desc` or `title`), an element whose start tag ends the
+   `svg` for a parser (`br`, `hr`, `img`, §6) is dropped too: no markup
+   builds it where the patching renderer would. Upgrade note: the patching
+   renderer used to build one there as an inert SVG element.
 2. **Reject a property whose name is not a bare identifier** (closing
    attribute-name injection), **whose name begins with `on`** (no inline
    handlers), **which is an HTML-parsing sink** (`innerHTML`, `outerHTML`,
@@ -822,7 +847,13 @@ Under the safe profile a renderer MUST:
    the page holds first. The content a granted widget renders in its root's
    namespace (a dialog's) counts as the root's own, as a duplicate inside one
    root does. It is looked up, by `getElementById`, as the id is written: an
-   element the host adds later is not seen. Upgrade note: a safe document's ids, id
+   element the host adds later is not seen. A DOM root reports alike
+   (`{ kind: 'name', name: 'jaren-u-logo' }`, once per name) a prefixed `name`
+   it writes on a `form`, `img`, `embed`, `object` or `iframe` that an HTML
+   element of those tags outside the root already holds, so that
+   `document[name]` answers both; the names a pass writes are looked up in one
+   scan of the page as it ends, and an element the host adds later is not
+   seen either. Upgrade note: a safe document's ids, id
    references and those names used to be written as given; a second live
    root on a page used to share `jaren-u-` with the first (pass
    `idPrefix: 'jaren-u-'` to keep that).

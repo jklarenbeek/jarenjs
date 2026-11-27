@@ -48,12 +48,12 @@ import {
   childrenOf,
   isSkippedNode,
   isElementName,
-  elementNameError,
+  elementNameError, foreignBelow,
   EMPTY_PROPS,
   WIDGET_TAG,
 } from './vnode.js';
 import { ENUMERATED_ALIASES, attributePresent, attributeText, enumeratedAttribute, isAliased, isInlineHandler, removeProperty, writeProperty, writingSpelling } from './properties.js';
-import { createSafePolicy, grantedWidgets, idPrefixOf, projectEvent } from './safe.js';
+import { NAMED_TAGS, createSafePolicy, grantedWidgets, idPrefixOf, projectEvent } from './safe.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -124,7 +124,7 @@ const WIDGET_SKIP_PROPS = new Set(['name', 'props', 'tag']);
  * renderer and the content renders under the same profile and grants.
  * @typedef {Readonly<{ widgets: Record<string, WidgetDef>, document: any, controlled?: 'focus',
  *   safe?: 'interactive', capabilities?: Readonly<{ widgets: readonly string[] }>, idPrefix?: string,
- *   onUnsafe?: (info: { kind: 'tag' | 'prop' | 'event' | 'widget' | 'id', name: string }) => void }>} WidgetContext
+ *   onUnsafe?: (info: { kind: 'tag' | 'prop' | 'event' | 'widget' | 'id' | 'name', name: string }) => void }>} WidgetContext
  */
 
 /**
@@ -166,12 +166,12 @@ const WIDGET_SKIP_PROPS = new Set(['name', 'props', 'tag']);
  *   shadow the host's. Absent: the first of `jaren-u-`, `jaren-u2-`, … no
  *   other live safe root of the document holds, until `destroy()` (the
  *   serializer writes `jaren-u-`; VIEW-FORMAT §8 rule 7). Never read in trusted mode.
- * @property {(info: { kind: 'tag' | 'prop' | 'event' | 'widget' | 'id', name: string }) => void}
- *   [onUnsafe] - In safe mode, called for everything stripped: a disallowed
- *   `tag`, a rejected or sanitized-away `prop`, a stripped `on` binding
- *   (`event`; under the interactive profile named by its event type, `on`
- *   when the member is not an object, `emit` for a widget's) or a `widget`;
- *   and, nothing stripped, once per prefixed `id` the page holds outside the root.
+ * @property {(info: { kind: 'tag' | 'prop' | 'event' | 'widget' | 'id' | 'name', name: string }) => void}
+ *   [onUnsafe] - In safe mode, called for everything stripped: a disallowed `tag`, a rejected or
+ *   sanitized-away `prop`, a stripped `on` binding (`event`; under the interactive profile named by
+ *   its event type, `on` when the member is not an object, `emit` for a widget's) or a `widget`; and,
+ *   nothing stripped, once per prefixed `id`, and per prefixed `name` (`form`, `img`, ...) a page
+ *   element of that tag holds, that the page holds outside the root.
  * @property {(thrown: unknown) => void} [onCleanupError] - Receives
  *   the first VALUE a widget `unmount` threw during TERMINAL teardown
  *   (`destroy()`, direct or deferred) — by identity, whatever host
@@ -249,6 +249,12 @@ export function createDomRenderer(container, options = {}) {
     /** The prefixed ids reported as held outside the root, each once.
      * @type {Set<string>} */
     heldIds: new Set(),
+    /** The prefixed names (`form`, `img`, ...) reported as held outside the
+     * root, each once, and the names this pass wrote, looked up as it ends.
+     * @type {Set<string>} */
+    heldNames: new Set(),
+    /** @type {Set<string>} */
+    writtenNames: new Set(),
     /** Controlled form-control nodes (`value`/`checked`), reconciled against
      * the live DOM at the END of every render pass — so an authoritative
      * value is reasserted even when the `===`/`memo` fast paths skip the
@@ -360,12 +366,12 @@ export function createDomRenderer(container, options = {}) {
           }
           else {
             container.textContent = '';
-            for (const child of childrenOf(['root', {}, next])) container.appendChild(createNode(ctx, child, null));
+            for (const child of childrenOf(['root', {}, next])) container.appendChild(createNode(ctx, child, null, false));
           }
           rootNode = container;
         }
         else {
-          patchChildren(ctx, container, childrenOf(['root', {}, oldVnode]), childrenOf(['root', {}, next]), null);
+          patchChildren(ctx, container, childrenOf(['root', {}, oldVnode]), childrenOf(['root', {}, next]), null, false);
         }
         oldVnode = next;
         // mount flush: after the patch completes every queued host is
@@ -381,6 +387,7 @@ export function createDomRenderer(container, options = {}) {
       if (!ctx.destroyed && ctx.controlled.size > 0) {
         reconcileControlledSet(ctx, container);
       }
+      if (!ctx.destroyed && ctx.writtenNames.size > 0) reportHeldNames(ctx);
     }
     catch (error) {
       // A pass that threw part-way (a refused tag, an unregistered widget)
@@ -394,6 +401,7 @@ export function createDomRenderer(container, options = {}) {
       // Left parked, they would surface after the next, healthy frame.
       const parked = ctx.frameError;
       ctx.frameError = null;
+      ctx.writtenNames.clear();
       teardown();
       container.textContent = '';
       destroyPending = false;
@@ -617,10 +625,13 @@ function flushMounts(ctx) {
  * @param {any} ctx
  * @param {any} vnode
  * @param {string | null} ns
+ * @param {boolean} foreign - where an HTML parser reads the serializer's
+ *   markup for this node as foreign content ({@link foreignBelow}): the
+ *   safe policy drops there what that markup cannot keep inside the `svg`
  * @returns {any}
  */
-function createNode(ctx, vnode, ns) {
-  vnode = resolveForPolicy(ctx, vnode, true);
+function createNode(ctx, vnode, ns, foreign) {
+  vnode = resolveForPolicy(ctx, vnode, true, foreign);
   if (isTextNode(vnode)) {
     return ctx.doc.createTextNode(String(vnode));
   }
@@ -655,8 +666,10 @@ function createNode(ctx, vnode, ns) {
     setProp(ctx, node, name, undefined, props[name], ns);
   }
   const children = childrenOf(vnode);
+  // only a policy reads the parser's state, so a trusted root never computes it
+  const below = ctx.policy !== null && foreignBelow(tag, foreign);
   for (let i = 0; i < children.length; i++) {
-    node.appendChild(createNode(ctx, children[i], tag === 'foreignObject' ? null : ns));
+    node.appendChild(createNode(ctx, children[i], tag === 'foreignObject' ? null : ns, below));
   }
   registerControlled(ctx, node, props);
   return node;
@@ -678,7 +691,7 @@ function adoptChildren(ctx, parent, children, ns) {
     const namespace = tag === 'svg' ? SVG_NS : ns;
     if (node && tag && tag !== WIDGET_TAG && node.nodeType === 1
       && (node.localName ?? node.tagName?.toLowerCase()) === tag
-      && (namespace === null ? node.namespaceURI == null || node.namespaceURI === 'http://www.w3.org/1999/xhtml' : node.namespaceURI === namespace)) {
+      && (namespace === null ? isHtmlElement(node) : node.namespaceURI === namespace)) {
       const props = propsOf(vnode);
       // the attributes the vnode writes: an inline handler value writes none,
       // so the one server markup carried from before that rule is removed
@@ -695,7 +708,8 @@ function adoptChildren(ctx, parent, children, ns) {
       registerControlled(ctx, node, props);
     }
     else {
-      const fresh = createNode(ctx, vnode, ns);
+      // hydration adopts in trusted mode only, where nothing reads `foreign`
+      const fresh = createNode(ctx, vnode, ns, false);
       if (node) parent.replaceChild(fresh, node);
       else parent.appendChild(fresh);
     }
@@ -719,9 +733,11 @@ function adoptChildren(ctx, parent, children, ns) {
  * @param {boolean} report - Whether to notify `onUnsafe` (the new side of a
  *   patch reports; the old side does not, so a persistently-rejected node is
  *   not reported twice per frame)
+ * @param {boolean} foreign - the node sits where a parser reads foreign
+ *   content (the policy's `tag`)
  * @returns {any} the vnode, or `''` when the policy rejects it
  */
-function resolveForPolicy(ctx, vnode, report) {
+function resolveForPolicy(ctx, vnode, report, foreign) {
   if (ctx.policy === null || !isElementNode(vnode)) return vnode;
   const tag = vnode[0];
   if (tag === WIDGET_TAG) {
@@ -731,7 +747,7 @@ function resolveForPolicy(ctx, vnode, report) {
     // renders none
     if (ctx.policy.widget(props.name, props.props) && childrenOf(vnode).length === 0) {
       const host = props.tag ?? 'div';
-      if (ctx.policy.tag(host) !== null) return vnode;
+      if (ctx.policy.tag(host, foreign) !== null) return vnode;
       if (report && ctx.onUnsafe !== null) ctx.onUnsafe({ kind: 'tag', name: String(host) });
       return '';
     }
@@ -740,7 +756,7 @@ function resolveForPolicy(ctx, vnode, report) {
     }
     return '';
   }
-  if (ctx.policy.tag(tag) === null) {
+  if (ctx.policy.tag(tag, foreign) === null) {
     if (report && ctx.onUnsafe !== null) ctx.onUnsafe({ kind: 'tag', name: String(tag) });
     return '';
   }
@@ -756,9 +772,10 @@ function resolveForPolicy(ctx, vnode, report) {
  * @param {any} oldV
  * @param {any} newV
  * @param {string | null} ns
+ * @param {boolean} foreign - as {@link createNode} takes it
  * @returns {any}
  */
-function patchNode(ctx, parent, node, oldV, newV, ns) {
+function patchNode(ctx, parent, node, oldV, newV, ns, foreign) {
   // a destroy() requested inside a widget hook stops the active pass:
   // no later sibling may observe another update in this frame
   if (ctx.destroyed) return node;
@@ -767,8 +784,8 @@ function patchNode(ctx, parent, node, oldV, newV, ns) {
   // element patch path (the update-path escape). The old side does not report
   // — its strip was reported when it was first rendered.
   if (ctx.policy !== null) {
-    oldV = resolveForPolicy(ctx, oldV, false);
-    newV = resolveForPolicy(ctx, newV, true);
+    oldV = resolveForPolicy(ctx, oldV, false, foreign);
+    newV = resolveForPolicy(ctx, newV, true, foreign);
   }
   // the === fast path is sound only while no widget is poisoned: a
   // reference-equal subtree may hide a poisoned widget awaiting its
@@ -799,11 +816,12 @@ function patchNode(ctx, parent, node, oldV, newV, ns) {
       return node;
     }
     patchProps(ctx, node, propsOf(oldV), propsOf(newV), ns);
-    patchChildren(ctx, node, childrenOf(oldV), childrenOf(newV), newV[0] === 'foreignObject' ? null : ns);
+    patchChildren(ctx, node, childrenOf(oldV), childrenOf(newV), newV[0] === 'foreignObject' ? null : ns,
+      ctx.policy !== null && foreignBelow(newV[0], foreign));
     return node;
   }
   destroyNode(ctx, node);
-  const next = createNode(ctx, newV, ns);
+  const next = createNode(ctx, newV, ns, foreign);
   parent.replaceChild(next, node);
   return next;
 }
@@ -1080,13 +1098,58 @@ function isConnectedTo(node, root) {
 function reportHeldId(ctx, id) {
   if (ctx.heldIds.has(id) || typeof ctx.doc?.getElementById !== 'function') return;
   const held = ctx.doc.getElementById(id);
-  if (held == null || isConnectedTo(held, ctx.container)) return;
-  const { claims, prefix } = /** @type {IdClaim} */ (ctx.ids);
-  if (claims !== null) for (const [other, claim] of claims) {
-    if (other !== ctx.container && claim.prefix === prefix && isConnectedTo(ctx.container, other) && isConnectedTo(held, other)) return;
-  }
+  if (held == null || !isHeldOutside(ctx, held)) return;
   ctx.heldIds.add(id);
   ctx.onUnsafe({ kind: 'id', name: id });
+}
+
+/**
+ * Whether `held` is an element of the page outside the root: neither the
+ * root's own nor one of a root around it in the same namespace.
+ * @param {any} ctx
+ * @param {any} held
+ * @returns {boolean}
+ */
+function isHeldOutside(ctx, held) {
+  if (isConnectedTo(held, ctx.container)) return false;
+  const { claims, prefix } = /** @type {IdClaim} */ (ctx.ids);
+  if (claims !== null) for (const [other, claim] of claims) {
+    if (other !== ctx.container && claim.prefix === prefix && isConnectedTo(ctx.container, other) && isConnectedTo(held, other)) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether `node` is an HTML element: in the HTML namespace, or in none (a
+ * document that keeps no namespaces).
+ * @param {any} node
+ * @returns {boolean}
+ */
+function isHtmlElement(node) {
+  return node.namespaceURI == null || node.namespaceURI === 'http://www.w3.org/1999/xhtml';
+}
+
+/**
+ * Report a prefixed `name` the pass wrote on a `form`, `img`, `embed`,
+ * `object` or `iframe` (the elements whose name becomes a property of
+ * `document`) that an HTML element of those tags outside the root already
+ * holds, once per name, as {@link reportHeldId} reports an id: the page's
+ * `document[name]` then answers a collection holding both. Looked up once as
+ * the pass ends, in one scan of the page's named elements, so a pass writing
+ * many names walks the page once; an element the host adds later is not seen,
+ * and a document without `querySelectorAll` is not looked in.
+ * @param {any} ctx
+ */
+function reportHeldNames(ctx) {
+  const written = ctx.writtenNames;
+  ctx.writtenNames = new Set();
+  if (typeof ctx.doc?.querySelectorAll !== 'function') return;
+  for (const held of ctx.doc.querySelectorAll('form[name], img[name], embed[name], object[name], iframe[name]')) {
+    const name = held.getAttribute('name');
+    if (!written.has(name) || ctx.heldNames.has(name) || !isHtmlElement(held) || !isHeldOutside(ctx, held)) continue;
+    ctx.heldNames.add(name);
+    ctx.onUnsafe({ kind: 'name', name });
+  }
 }
 
 /**
@@ -1150,7 +1213,11 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
     // Writing/removing the attribute matches exactly what the serializer does.
     // (The interactive profile's controlled `input` keeps this attribute and
     // has its live value/checked reasserted to it at the end of the pass.)
-    if (ctx.onUnsafe !== null && typeof newValue === 'string' && name.toLowerCase() === 'id') reportHeldId(ctx, newValue);
+    if (ctx.onUnsafe !== null && typeof newValue === 'string') {
+      const lower = name.toLowerCase();
+      if (lower === 'id') reportHeldId(ctx, newValue);
+      else if (lower === 'name' && newValue !== '' && NAMED_TAGS.has(tag) && !ctx.heldNames.has(newValue)) ctx.writtenNames.add(newValue);
+    }
     if (name === 'style' && typeof newValue === 'object' && newValue !== null) {
       // an object with no declaration is no attribute, as the serializer omits it
       newValue = styleToString(newValue) || null;
@@ -1370,6 +1437,8 @@ function createWidgetNode(ctx, vnode, ns) {
   const def = widgetDef(ctx, vnode, props);
   const tag = props.tag ?? 'div';
   if (!isElementName(tag)) throw elementNameError(ctx.root, vnode, tag);
+  // a host is built in the namespace an element of its tag is (`createNode`)
+  if (tag === 'svg') ns = SVG_NS;
   const node = ns !== null
     ? ctx.doc.createElementNS(ns, tag)
     : ctx.doc.createElement(tag);
@@ -1427,7 +1496,7 @@ function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
     return next;
   }
   widgetDef(ctx, newV, newProps);
-  patchWidgetProps(ctx, node, oldProps, newProps, ns);
+  patchWidgetProps(ctx, node, oldProps, newProps, (newProps.tag ?? 'div') === 'svg' ? SVG_NS : ns);
   const props = newProps.props ?? null;
   const prevProps = oldProps.props ?? null;
   if (props !== prevProps) {
@@ -1658,8 +1727,9 @@ export function styleToString(style) {
  * @param {any[]} oldCh
  * @param {any[]} newCh
  * @param {string | null} ns
+ * @param {boolean} foreign - as {@link createNode} takes it, for the children
  */
-function patchChildren(ctx, parent, oldCh, newCh, ns) {
+function patchChildren(ctx, parent, oldCh, newCh, ns, foreign) {
   const oldDom = [];
   {
     const live = parent.childNodes;
@@ -1684,25 +1754,25 @@ function patchChildren(ctx, parent, oldCh, newCh, ns) {
     const nE = newCh[newEnd];
 
     if (isSameNode(oS, nS)) {
-      patchNode(ctx, parent, oldDom[oldStart], oS, nS, ns);
+      patchNode(ctx, parent, oldDom[oldStart], oS, nS, ns, foreign);
       oldStart++; newStart++;
     }
     else if (isSameNode(oE, nE)) {
       // A widget may replace its host while keeping its vnode key/tag.
       // Future insertions must anchor to the live replacement.
-      tailRef = patchNode(ctx, parent, oldDom[oldEnd], oE, nE, ns);
+      tailRef = patchNode(ctx, parent, oldDom[oldEnd], oE, nE, ns, foreign);
       oldEnd--; newEnd--;
     }
     else if (isSameNode(oS, nE)) {
       // old head moved to the tail
-      const node = patchNode(ctx, parent, oldDom[oldStart], oS, nE, ns);
+      const node = patchNode(ctx, parent, oldDom[oldStart], oS, nE, ns, foreign);
       parent.insertBefore(node, tailRef);
       tailRef = node;
       oldStart++; newEnd--;
     }
     else if (isSameNode(oE, nS)) {
       // old tail moved to the head
-      const node = patchNode(ctx, parent, oldDom[oldEnd], oE, nS, ns);
+      const node = patchNode(ctx, parent, oldDom[oldEnd], oE, nS, ns, foreign);
       parent.insertBefore(node, oldDom[oldStart]);
       oldEnd--; newStart++;
     }
@@ -1711,10 +1781,10 @@ function patchChildren(ctx, parent, oldCh, newCh, ns) {
       const key = keyOf(nS);
       const idx = key !== undefined ? keyMap.get(key) : undefined;
       if (idx === undefined || oldCh[idx] === undefined || !isSameNode(oldCh[idx], nS)) {
-        parent.insertBefore(createNode(ctx, nS, ns), oldDom[oldStart]);
+        parent.insertBefore(createNode(ctx, nS, ns, foreign), oldDom[oldStart]);
       }
       else {
-        const node = patchNode(ctx, parent, oldDom[idx], oldCh[idx], nS, ns);
+        const node = patchNode(ctx, parent, oldDom[idx], oldCh[idx], nS, ns, foreign);
         parent.insertBefore(node, oldDom[oldStart]);
         oldCh[idx] = undefined;
       }
@@ -1726,7 +1796,7 @@ function patchChildren(ctx, parent, oldCh, newCh, ns) {
     // old range exhausted: mount the remaining new children before the tail
     for (let i = newStart; i <= newEnd; i++) {
       if (ctx.destroyed) return;
-      parent.insertBefore(createNode(ctx, newCh[i], ns), tailRef);
+      parent.insertBefore(createNode(ctx, newCh[i], ns, foreign), tailRef);
     }
   }
   else {

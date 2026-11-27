@@ -446,3 +446,128 @@ describe('safe profiles — a prefixed id the page already holds outside the roo
     assert.deepEqual(seen, []);
   });
 });
+
+describe('safe profiles — a prefixed name the page already holds on a named element outside the root is reported, never refused', () => {
+  const walk = (/** @type {any} */ node) => [node, ...(node.childNodes ?? []).flatMap(walk)];
+  const NAMED = new Set(['form', 'img', 'embed', 'object', 'iframe']);
+
+  /**
+   * A page whose stub document answers the renderer's one scan of named
+   * elements, holding host elements before the root and after it.
+   * @param {Array<[string, string]>} before - [tag, name] host elements before the root
+   * @param {Array<[string, string]>} [after] - and after it
+   */
+  function page(before, after = []) {
+    const { document, container: a } = createStubHost();
+    const body = document.createElement('body');
+    const hostOf = ([tag, name]) => {
+      const node = document.createElement(tag);
+      node.setAttribute('name', name);
+      return node;
+    };
+    for (const entry of before) body.appendChild(hostOf(entry));
+    body.appendChild(a);
+    for (const entry of after) body.appendChild(hostOf(entry));
+    /** @type {string[]} */
+    const scans = [];
+    Object.assign(document, {
+      querySelectorAll(/** @type {string} */ selector) {
+        scans.push(selector);
+        return walk(body).filter((node) => NAMED.has(node.tagName) && node.getAttribute?.('name') != null);
+      },
+    });
+    return { document, a, body, scans };
+  }
+
+  for (const safe of PROFILES) {
+    it(`reports a host form and img holding a prefixed name once, after the pass, in one scan (safe: ${JSON.stringify(safe)})`, () => {
+      const { document, a, scans } = page([['form', 'jaren-u-f'], ['img', 'jaren-u-logo'], ['input', 'jaren-u-q']],
+        [['img', 'jaren-u-late'], ['form', 'jaren-u-f']]);
+      /** @type {any[]} */
+      const seen = [];
+      const render = createDomRenderer(a, { document, safe, onUnsafe: (info) => seen.push(info) });
+      const vnode = (/** @type {string} */ src) => ['div', {}, ['form', { name: 'f' }], ['img', { name: 'logo', src }],
+        ['input', { name: 'q' }], ['img', { name: 'late' }], ['img', { name: 'own' }], ['img', { name: 'own' }]];
+      render(vnode('a.png'));
+      assert.deepEqual(seen, [{ kind: 'name', name: 'jaren-u-f' }, { kind: 'name', name: 'jaren-u-logo' }, { kind: 'name', name: 'jaren-u-late' }]);
+      assert.deepEqual(scans, ['form[name], img[name], embed[name], object[name], iframe[name]']);
+      // a frame writing no name scans nothing; a frame renaming one scans once and reports nothing twice
+      render(vnode('b.png'));
+      assert.equal(scans.length, 1);
+      render(['div', {}, ['form', { name: 'f' }], ['img', { name: 'logo2' }]]);
+      assert.equal(scans.length, 2);
+      assert.equal(seen.length, 3);
+      assert.equal(childMarkup(a), '<div><form method="dialog" name="jaren-u-f"></form><img name="jaren-u-logo2"></div>');
+    });
+  }
+
+  it('reports nothing for an input holding the name, the root\'s own names, an SVG element, trusted roots, or a page without lookup', () => {
+    /** @type {any[]} */
+    const seen = [];
+    const onUnsafe = (/** @type {any} */ info) => seen.push(info);
+    // an empty name is no property of document either, beside a page element holding one
+    const empty = page([['img', '']]);
+    createDomRenderer(empty.a, { document: empty.document, safe: true, onUnsafe })(['img', { name: '' }]);
+    assert.deepEqual(empty.scans, []);
+    // an input's name is no property of document
+    const input = page([['input', 'jaren-u-f']]);
+    const inputs = createDomRenderer(input.a, { document: input.document, safe: true, onUnsafe });
+    // a pass writing only an input's name, which lands on no document property, scans nothing
+    inputs(['input', { name: 'f' }]);
+    assert.deepEqual(input.scans, []);
+    inputs(['form', { name: 'f' }]);
+    // the root's own named elements, replaced while the old one holds the name
+    const own = page([]);
+    const render = createDomRenderer(own.a, { document: own.document, safe: 'interactive', onUnsafe });
+    render(['img', { name: 'x' }]);
+    render(['form', { name: 'x' }]);
+    // an element of a named tag in the SVG namespace lands on no document property
+    const svg = page([]);
+    const foreign = svg.document.createElementNS('http://www.w3.org/2000/svg', 'img');
+    foreign.setAttribute('name', 'jaren-u-x');
+    svg.body.appendChild(foreign);
+    createDomRenderer(svg.a, { document: svg.document, safe: true, onUnsafe })(['img', { name: 'x' }]);
+    // a trusted root writes the name as given
+    const trusted = page([['img', 'jaren-u-x']]);
+    createDomRenderer(trusted.a, { document: trusted.document, onUnsafe })(['img', { name: 'jaren-u-x' }]);
+    // a document without querySelectorAll, and a root without onUnsafe
+    const { document, container } = createStubHost();
+    createDomRenderer(container, { document, safe: true, onUnsafe })(['img', { name: 'x' }]);
+    const quiet = page([['img', 'jaren-u-x']]);
+    createDomRenderer(quiet.a, { document: quiet.document, safe: true })(['img', { name: 'x' }]);
+    assert.equal(childMarkup(quiet.a), '<img name="jaren-u-x">');
+    assert.deepEqual(quiet.scans, []);
+    assert.deepEqual(seen, []);
+  });
+
+  it('counts a granted widget\'s content in the root\'s namespace as the root\'s own, and a pass that throws scans nothing', () => {
+    const { document, a, scans } = page([['form', 'jaren-u-host']]);
+    /** @type {string[]} */
+    const seen = [];
+    const widgets = {
+      box: {
+        mount(/** @type {any} */ host, /** @type {any} */ props, /** @type {any} */ _emit, /** @type {any} */ context) {
+          const inner = createDomRenderer(host, { document, safe: context.safe, widgets: context.widgets, capabilities: context.capabilities,
+            idPrefix: context.idPrefix, onUnsafe: context.onUnsafe });
+          inner(props.content);
+          return inner;
+        },
+        update(/** @type {any} */ inner, /** @type {any} */ props) { inner(props.content); },
+        unmount(/** @type {any} */ inner) { inner.destroy(); },
+      },
+    };
+    // a host sink that throws on a stripped tag throws the pass that reports it
+    const render = createDomRenderer(a, { document, safe: 'interactive', widgets, capabilities: { widgets: ['box'] },
+      onUnsafe: (i) => { if (i.kind === 'tag') throw new Error('sink'); seen.push(`${i.kind}:${i.name}`); } });
+    const box = (/** @type {any} */ content) => ['jaren-widget', { name: 'box', props: { content } }];
+    render(['div', {}, ['img', { name: 'x' }], box(['img', { name: 'x' }])]);
+    assert.deepEqual(seen, []);
+    render(['div', {}, box(['form', { name: 'host' }])]);
+    assert.deepEqual(seen, ['name:jaren-u-host']);
+    // a pass that throws part-way leaves no written name for the next pass to look up
+    const before = scans.length;
+    assert.throws(() => render(['div', {}, ['img', { name: 'y' }], ['script', {}]]), { message: 'sink' });
+    render(['p', {}]);
+    assert.equal(scans.length, before);
+  });
+});

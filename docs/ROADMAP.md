@@ -170,31 +170,32 @@ delete it or fix it.
 
 ## @jarenjs/view & @jarenjs/app
 
-- [ ] **A void element name inside `svg` serializes without an end tag.**
-  `renderToString(['svg', {}, ['input', {}], ['circle', {}]])` writes
-  `<svg><input><circle></circle></svg>`, which a parser reads with the
-  `circle` inside a foreign `input`, where the DOM renderer builds two
-  siblings. `area`, `base`, `col`, `input`, `link`, `param`, `source`, `track`
-  and `wbr` would read right with an end tag. `br`, `embed`, `hr`, `img` and
-  `meta` end the `svg` in any spelling, so no markup reproduces the DOM there.
-  Wanted: an end tag for the first set, and a decision for the second (refuse,
-  drop or keep).
-- [ ] **A widget hosted on `svg` is built in the HTML namespace.**
-  `createDomRenderer` builds `['jaren-widget', { name: 'w', tag: 'svg' }]`
-  with `createElement`, so `mount` receives an HTML-namespace `svg` that draws
-  nothing. The serializer writes `<svg>…</svg>`, which a parser builds as an
-  SVG element, and `createNode` switches to the SVG namespace for an `svg`
-  element. Wanted: the widget host built in the namespace the element path
-  uses.
-- [ ] **The id report sees only elements present when an id is written.** Each live
-  safe DOM root of a page takes its own default `idPrefix` (`jaren-u-`, then
-  `jaren-u2-`, …), a host serializing several untrusted documents into one
-  page gives each its own `idPrefix` on both renderers (the host-given prefix
-  is the page-scoped key: `renderToString` has no page), and a DOM root
-  reports through `onUnsafe` (`{ kind: 'id' }`) a prefixed id it writes that
-  the page already holds outside the root (VIEW-FORMAT §8 rule 7). The report
-  does not see a host element added after the id is written, and does not
-  cover a prefixed `name` (`form`, `img`, …) the page already holds.
+- [ ] **HTML elements inside `svg` read by a parser where the DOM renderer does not
+  build them.** `renderToString(['svg', {}, ['div', {}], ['circle', {}]])`
+  writes markup a parser reads with the `div` and the `circle` outside the
+  `svg`; so do `p`, `span`, `b`, `table`, `font` with `color`/`face`/`size`
+  and the rest of the parser's list, where the DOM renderer builds them
+  inside. Under an SVG `desc` or `title` a parser reads HTML where the DOM
+  renderer builds SVG elements, and a `style` there is escaped (`a&gt;b`)
+  where a parser reads raw text; inside `svg` an upper-case tag (`INPUT`) is
+  built as written where a parser lower-cases it, and an `SVG` tag is built as
+  an HTML element where a parser enters SVG. The void names of the list (`br`,
+  `embed`, `hr`, `img`, `meta`) are refused by the serializer and dropped
+  under `safe`. Wanted: the same for the rest of the list, and a decision for
+  the namespace and case divergences.
+- [ ] **The id and name reports see only elements present when they look.** Each
+  live safe DOM root of a page takes its own default `idPrefix` (`jaren-u-`,
+  then `jaren-u2-`, …), a host serializing several untrusted documents into
+  one page gives each its own `idPrefix` on both renderers (the host-given
+  prefix is the page-scoped key: `renderToString` has no page), and a DOM root
+  reports through `onUnsafe` a prefixed id it writes that the page already
+  holds outside the root (`{ kind: 'id' }`) and a prefixed `name` it writes on
+  a `form`, `img`, `embed`, `object` or `iframe` that an element of those tags
+  outside the root already holds (`{ kind: 'name' }`, VIEW-FORMAT §8 rule 7).
+  Neither report sees a host element added after its lookup (the id's as it is
+  written, the names' as the pass ends), and a page element whose `id` equals
+  a prefixed name (an `img` or `object` id is a `document` property too) is
+  not looked for. Closing the first needs an observer on every reporting root.
 - [ ] **Segmented logical scrolling past the CSS extent ceiling.** The [reusable collection](../components/collection/docs/COLLECTION.md) and [injected provider coordinator](../packages/app/docs/COLLECTION-PROVIDER.md) cover fixed/measured axes, keyed interaction and bounded page caches up to the conservative CSS extent ceiling; a source longer than that needs segmented logical scrolling. Complete sequential database snapshots and index seeks behind the provider also need an independently qualified source contract.
 
 - [ ] **Collection table semantics beyond activation and selection.** A host serving a record table still lacks per-column

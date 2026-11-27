@@ -87,7 +87,7 @@ renderToString(['p', { class: 'note' }, 'a < b'])
 // '<p class="note">a &lt; b</p>'
 ```
 
-Text and attribute values are escaped, void elements render without end tags, `key` and `on` produce no markup, and an inline handler value (`onclick: 'alert(1)'`, or a number or list under a handler's name) is omitted — the DOM renderer drops it too, so the two agree (VIEW-FORMAT §3). Upgrade note: `renderToString` used to write it as a live attribute, so the markup of a document that carried one changes and its handler is gone; bind actions with `on`. The text of an HTML `<style>` or `<script>` is the exception: it is raw text a browser never decodes, so it is written verbatim, and text holding the element's own end tag (or, in a script, an HTML comment opener) is refused with a `TypeError` where it used to be escaped into broken CSS or script (VIEW-FORMAT §6). On the client, `hydrate: true` adopts matching server DOM on the first trusted render, repairs local mismatches and gives widgets fresh hosts. Safe mode rebuilds existing DOM.
+Text and attribute values are escaped, void elements render without end tags (inside an `svg` no element is void: `<input></input>` there reads as the DOM renderer builds it, and a `br`, `embed`, `hr`, `img` or `meta`, which ends the `svg` for an HTML parser, is refused with a `TypeError` and dropped under `safe`), `key` and `on` produce no markup, and an inline handler value (`onclick: 'alert(1)'`, or a number or list under a handler's name) is omitted — the DOM renderer drops it too, so the two agree (VIEW-FORMAT §3). Upgrade note: `renderToString` used to write it as a live attribute, so the markup of a document that carried one changes and its handler is gone; bind actions with `on`. The text of an HTML `<style>` or `<script>` is the exception: it is raw text a browser never decodes, so it is written verbatim, and text holding the element's own end tag (or, in a script, an HTML comment opener) is refused with a `TypeError` where it used to be escaped into broken CSS or script (VIEW-FORMAT §6). On the client, `hydrate: true` adopts matching server DOM on the first trusted render, repairs local mismatches and gives widgets fresh hosts. Safe mode rebuilds existing DOM.
 
 ### With JavaScript in the middle
 
@@ -147,6 +147,10 @@ removed nothing and is not reported (upgrade note: it used to be). A DOM root
 also reports, once and without removing anything, `{ kind: 'id', name }` for a
 prefixed id its page already holds outside the root (`jaren-u-name` on a host
 element beside a document declaring `name`): the two elements share the id.
+Likewise `{ kind: 'name', name }`, once, for a prefixed `name` the root writes
+on a `form` or `img` that a page `form`, `img`, `embed`, `object` or `iframe`
+outside the root already holds, looked up as the pass ends: `document[name]`
+then answers both.
 
 Both build the **same** policy ([`createSafePolicy`](src/safe.js)), so the
 client and the server neutralize an attack identically. In safe mode:

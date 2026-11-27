@@ -25,7 +25,9 @@
  *    `script`, `iframe`, `object`, `style`, `link`, `foreignObject` and the
  *    rest are dropped, and so is any tag whose *name* is not a bare
  *    identifier — which is what closes structural injection through the tag
- *    (`'div><img src=x onerror=alert(1)'`).
+ *    (`'div><img src=x onerror=alert(1)'`). Inside an `svg` an element whose
+ *    start tag ends the `svg` for an HTML parser (`br`, `hr`, `img`) is
+ *    dropped too: the DOM renderer would build it inside, the parser outside.
  *  - **Property names** must be bare identifiers too (closing attribute-name
  *    injection like `'x onfocus'`), must not begin with `on` (no inline
  *    handlers), and must not be a known scripting sink (`innerHTML`,
@@ -68,7 +70,7 @@
  */
 
 import { sanitizeUrl } from './helpers/url.js';
-import { isElementName } from './vnode.js';
+import { breaksOutOfSvg, isElementName } from './vnode.js';
 import { attributePresent, attributeText } from './properties.js';
 
 /** A property name that is a bare identifier: a letter, then letters,
@@ -184,7 +186,7 @@ const ID_LIST_ATTRS = new Set([
 /** The elements whose `name` becomes a named property of `document` (and of
  * `window`): their `name` is namespaced like an id, so a document cannot
  * shadow `document.cookie`, `document.forms` or a host global. */
-const NAMED_TAGS = new Set(['form', 'img', 'embed', 'object', 'iframe']);
+export const NAMED_TAGS = new Set(['form', 'img', 'embed', 'object', 'iframe']);
 
 /** SVG presentation attributes that reference a paint server, clip path,
  * mask, marker or filter by `url(#id)`. */
@@ -207,8 +209,11 @@ const RE_ID_PREFIX = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
 /**
  * @typedef {Object} SafePolicy
- * @property {(tag: string) => string | null} tag - The tag to render, or
- *   `null` to drop the element and its subtree.
+ * @property {(tag: string, foreign?: boolean) => string | null} tag - The tag
+ *   to render, or `null` to drop the element and its subtree. `foreign`: the
+ *   element sits where an HTML parser reads foreign content (inside an `svg`,
+ *   not under its `desc` or `title`), where an element that would end the
+ *   `svg` (`br`, `hr`, `img`, ...) is dropped: no markup builds it there.
  * @property {(tag: string) => ReadonlyArray<readonly [string, string]> | null} fixed -
  *   Attributes an element of this tag carries whatever the document says,
  *   written before its props (a `form`'s `method="dialog"`), or `null`.
@@ -377,8 +382,8 @@ export function createSafePolicy(options = {}) {
       };
     },
 
-    tag(tag) {
-      if (isElementName(tag) && (SAFE_HTML_TAGS.has(tag) || SAFE_SVG_TAGS.has(tag))) {
+    tag(tag, foreign = false) {
+      if (isElementName(tag) && (SAFE_HTML_TAGS.has(tag) || SAFE_SVG_TAGS.has(tag)) && !(foreign && breaksOutOfSvg(tag))) {
         return tag;
       }
       return null;
