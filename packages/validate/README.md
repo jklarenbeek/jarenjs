@@ -2061,7 +2061,8 @@ branches enter on the same member through a reference is walked once and
 its units recorded once; `basic`, `detailed` and `list` write only the branches that
 decide the answer, while `verbose` and `hierarchical` write that
 definition's units under every branch that entered it, so their size grows
-with the branches tried. A broken document's `basic`, `detailed` and `list`
+with the branches tried: on a large schema of nested alternatives, valid
+documents included, they can exhaust the heap where `basic` answers. A broken document's `basic`, `detailed` and `list`
 still write each failing path, as their specification's shape does: an
 error the definition raised stands under every branch that reached it. The boolean default and
 `collectErrors` are unchanged.
