@@ -254,12 +254,6 @@ delete it or fix it.
   stick figure above the name; a flowchart `fork` stays a horizontal bar in an
   `LR`/`RL` chart, where Mermaid turns it; and a `cylinder` node draws no
   front lip of its top (the participant `database` glyph draws one).
-- [ ] **`htmlLabels:true` — browser check** — flowchart and state labels
-  render as HTML in `foreignObject` when the host passes `htmlLabels: true` (a
-  diagram's config can turn them off, never on; sized and wrapped by the
-  advance table; `safe: true` keeps SVG text; MERMAID-FORMAT §3, §6–7). Not
-  yet checked in a browser engine: label centering, overflow past the box, and
-  color under a host-linked theme in light and dark, with pan and zoom.
 - [ ] **Full layout for the secondary types** — class and ER render as structured panels, not domain-specific layouts; mindmap/gitGraph/journey/timeline parse-accept with a placeholder. Real layouts are the next coverage push (tracked honestly in the benchmark scorecard).
 - [ ] **Layout/perf workstream** — dagre-lite handles ranks and straight
   edges; orthogonal edge routing, subgraph clustering and crossing reduction
