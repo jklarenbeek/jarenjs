@@ -86,6 +86,12 @@ export function buildPieAST(data, config = {}) {
  * @property {string} [legendClass] class per legend `<g>`
  * @property {readonly string[]} [palette] slice colors
  * @property {string} [textColor] title/legend text fill
+ * @property {string|null} [titleClass] class on the title `<text>`
+ *  (default `'chart-title'`, the class every chart's title carries for
+ *  the stylesheet; `null` draws it with none)
+ * @property {string|null} [textClass] class on each legend `<text>`
+ *  (default none: the chart stylesheet reaches them through
+ *  `legendClass`)
  * @property {string} [sliceStroke] slice separator stroke
  * @property {'percent'|'value'} [legendText] what a legend entry names
  *  beside its label: `'percent'` (default) its share, `Dogs (53.3%)`, or
@@ -122,6 +128,8 @@ export function renderPieAST(ast, theme, hash, options = {}) {
   const legendClass = options.legendClass ?? 'chart-pie-legend';
   const palette = options.palette ?? CATEGORICAL;
   const textColor = options.textColor ?? theme.tokens.text;
+  const titleClass = options.titleClass === undefined ? 'chart-title' : options.titleClass;
+  const textClass = options.textClass ?? null;
   const sliceStroke = options.sliceStroke ?? theme.tokens.sliceStroke;
   const titles = options.titles !== false;
   const legendText = options.legendText ?? 'percent';
@@ -163,14 +171,15 @@ export function renderPieAST(ast, theme, hash, options = {}) {
     legendW = Math.max(legendW, textWidth(label, fs) + 30);
     return group({ class: legendClass }, [
       rect(legendX, y, 14, 14, { fill: palette[i % palette.length] }),
-      textAt(legendX + 20, y + 12, label, fs, { fill: textColor }),
+      textAt(legendX + 20, y + 12, label, fs, textClass === null ? { fill: textColor } : { fill: textColor, class: textClass }),
     ]);
   });
 
   /** @type {any[]} */
   const children = [];
   if (ast.title) {
-    children.push(textAt(cx, 24, ast.title, fs + 2, { 'font-weight': 'bold', 'text-anchor': 'middle', fill: textColor }));
+    const attrs = { 'font-weight': 'bold', 'text-anchor': 'middle', fill: textColor };
+    children.push(textAt(cx, 24, ast.title, fs + 2, titleClass === null ? attrs : { ...attrs, class: titleClass }));
   }
   // not `push(...slices)`: an argument list has a limit, a pie of any size does not
   for (const part of slices) children.push(part);

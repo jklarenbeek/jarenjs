@@ -4,7 +4,8 @@
  * engine and hands mermaid `mermaidPieRenderer`; mermaid imports no other
  * component (CONVENTIONS §1). With the renderer injected the SVG is the one
  * mermaid drew before the edge was cut — byte for byte, against fixtures
- * rendered at 59ff8857 — and without one a pie renders the placeholder.
+ * rendered at 59ff8857, save the `mm-text` class the host theme's title and
+ * legend text carry — and without one a pie renders the placeholder.
  */
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';

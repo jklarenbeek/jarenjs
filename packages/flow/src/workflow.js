@@ -53,6 +53,8 @@ export function lowerWorkflow(document, options) {
   const dags = {};
   const sources = {};
   const specs = {};
+  // lowered transition index -> the pointer of the guard it was lowered from
+  const guards = new Map();
   const automatic = new Map();
   const bounded = new Set();
 
@@ -127,6 +129,7 @@ export function lowerWorkflow(document, options) {
         for (const [i, branch] of spec.choose.entries()) {
           if (!isJsonObject(branch) || !Object.hasOwn(branch, 'guard') || Object.keys(branch).some((k) => !['guard', 'to'].includes(k)))
             fail('a choice is {guard,to}', `${id}/choose/${i}`);
+          guards.set(transitions.length, `${id}/choose/${i}/guard`);
           edge(branch.to, { event: NEXT, guard: branch.guard });
         }
         edge(spec.otherwise, { event: NEXT });
@@ -136,6 +139,7 @@ export function lowerWorkflow(document, options) {
         for (const [i, branch] of spec.on.entries()) {
           if (!isJsonObject(branch) || !nonblank(branch.event) || Object.keys(branch).some((k) => !['event', 'to', 'guard'].includes(k)))
             fail('a wait branch is {event,to,guard?}', `${id}/on/${i}`);
+          if (Object.hasOwn(branch, 'guard')) guards.set(transitions.length, `${id}/on/${i}/guard`);
           edge(branch.to, { event: `event:${branch.event}`, ...(Object.hasOwn(branch, 'guard') ? { guard: branch.guard } : {}) }, false);
         }
         if (spec.after !== undefined) {
@@ -172,7 +176,8 @@ export function lowerWorkflow(document, options) {
   };
   for (const id of automatic.keys()) prove(id);
   const fsm = { $fsm: '0.2', initial, states, transitions };
-  compileStatechart(fsm, embedded);
+  try { compileStatechart(fsm, embedded); }
+  catch (err) { throw relocateGuard(err, guards); }
   return deepFreeze({ version: '0.1', revision: doc.revision, document: doc, fsm, dags, sources, specs });
 }
 
@@ -192,6 +197,22 @@ function relocate(err, id, work) {
   const member = /^\/nodes\/task\/(run|version|with)$/.exec(inner)?.[1];
   const docPath = Object.hasOwn(work, 'dag') ? `${id}/work/dag${inner}`
     : `${id}/work${member === undefined ? '' : `/${member === 'run' ? 'task' : member}`}`;
+  return new FlowCompileError(err.code, err.reason, docPath, err.cause instanceof Error ? err.cause : undefined);
+}
+
+/**
+ * A guard's compile error from the lowered control machine, re-based onto
+ * the workflow document: `/transitions/<i>/guard` of the lowered statechart
+ * becomes the `choose` or `on` branch's `guard` the author wrote. Every
+ * other error keeps its path.
+ * @param {unknown} err
+ * @param {Map<number, string>} guards - lowered transition index -> guard pointer
+ */
+function relocateGuard(err, guards) {
+  if (!(err instanceof FlowCompileError) || err.code !== 'JF0007') return err;
+  const index = /^\/transitions\/(\d+)\/guard$/.exec(err.docPath ?? '')?.[1];
+  const docPath = index === undefined ? undefined : guards.get(Number(index));
+  if (docPath === undefined) return err;
   return new FlowCompileError(err.code, err.reason, docPath, err.cause instanceof Error ? err.cause : undefined);
 }
 

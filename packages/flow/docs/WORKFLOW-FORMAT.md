@@ -90,6 +90,12 @@ passed as `operators`, and with the schema operators (`$valid`) when a
 type-test compiler is passed as `compileTypeTest` (both as `compileFsm` and
 `compileDag` take them); `lowerWorkflow(document, {operators?, compileTypeTest?})`
 checks the control machine's guards under the same two options.
+A compile refusal names its place in the workflow document, not in the
+lowered machine or DAG: a guard that does not compile is `JF0007` at its branch
+(`/states/check/choose/0/guard`, `/states/review/on/0/guard`), a task
+`with` or `input` query `JF0014` at the member written
+(`/states/prepare/work/with`, `/states/prepare/input`), and an embedded DAG's
+refusal at its place inside `work.dag`.
 
 The default work input is `$.context.data`. A custom `input` query also sees
 `$.context.activation = {runId,state,visit,key}`. `key` is the canonical JSON

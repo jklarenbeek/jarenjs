@@ -114,6 +114,8 @@ describe('mermaid delegation', function () {
       legendClass: 'mm-pie-legend',
       palette: CATEGORICAL,
       textColor: mermaidTheme().tokens.nodeText,
+      titleClass: null,
+      textClass: null,
       sliceStroke: '#fff',
       titles: false,
       legendText: 'value',

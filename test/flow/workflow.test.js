@@ -58,6 +58,34 @@ describe('one workflow lowered onto statechart and DAG', () => {
         && error.message.endsWith(` at ${docPath}`), `${code} at ${docPath}`);
   });
 
+  it("reports a guard that does not compile at its branch in the workflow document, not at the lowered machine's transition", () => {
+    const tasks = { one: handler(() => 1) };
+    const nope = { $nope: 1 };
+    const valid = { $valid: ['$.context.data', { type: 'number' }] };
+    const cases = [
+      // the lowering visits states in key order, so this branch is the lowered machine's /transitions/1
+      [workflow({ start: task('one', 'pick'), pick: { choose: [{ guard: true, to: 'done' }, { guard: nope, to: 'done' }], otherwise: 'done' }, done: { final: true } }, 'start'),
+        '/states/pick/choose/1/guard', 'JQ0002'],
+      [workflow({ wait: { on: [{ event: 'go', to: 'done' }, { event: 'ok', guard: nope, to: 'done' }] }, done: { final: true } }),
+        '/states/wait/on/1/guard', 'JQ0002'],
+      [workflow({ outer: { flow: { initial: 'a/b', states: { 'a/b': { choose: [{ guard: valid, to: 'c' }], otherwise: 'c' }, c: { final: true } } }, then: 'done' }, done: { final: true } }),
+        '/states/outer/flow/states/a~1b/choose/0/guard', 'JQ0008'],
+    ];
+    for (const [doc, docPath, cause] of cases) {
+      const refusal = (/** @type {any} */ error) => error.code === 'JF0007' && error.docPath === docPath
+        && error.message === `JF0007: statechart guard failed to compile at ${docPath}` && error.cause?.code === cause;
+      assert.throws(() => lowerWorkflow(doc), refusal, `lowerWorkflow ${docPath}`);
+      assert.throws(() => compileWorkflow(doc, { tasks }), refusal, `compileWorkflow ${docPath}`);
+    }
+    // the lowered machine is what it was: its guards carry no source member
+    const lowered = lowerWorkflow(workflow({ start: task('one', 'pick'), pick: { choose: [{ guard: true, to: 'done' }], otherwise: 'done' }, done: { final: true } }, 'start'));
+    assert.deepEqual(lowered.fsm.transitions, [
+      { from: '/states/pick', to: '/states/done', event: '@workflow/next', guard: true },
+      { from: '/states/pick', to: '/states/done', event: '@workflow/next' },
+      { from: '/states/start', to: '/states/pick', event: '@workflow/done' },
+    ]);
+  });
+
   it('refuses corrupt saved control before claiming the run or invoking a task', async () => {
     const doc = workflow({ wait: { on: [{ event: 'go', to: 'work' }] }, work: task('one', 'done'), done: { final: true } });
     let calls = 0; let saves = 0;

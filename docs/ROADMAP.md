@@ -243,11 +243,16 @@ delete it or fix it.
 
 ## @jarenjs/charts
 
-- [ ] **The Mermaid pie adapter keeps concrete colors under a host theme.**
-  `mermaidPieRenderer` (`@jarenjs/charts/transforms/mermaid-adapter`) draws
-  its slices (`mm-pie-slice`) in a fixed palette and its legend swatches and
-  text with no class, so under `theme: 'host'` a theme flip leaves them as
-  they were: the legend text stays `#1f2020` on a dark host.
+- [ ] **The Mermaid pie's slice separators stay white under a host theme.**
+  `mermaidPieRenderer` draws each slice's stroke `#fff` (the bytes mermaid
+  drew), so on a dark host the slices are ringed in white where a charts pie's
+  follow `--bg`; mermaid's theme has no separator token (`edgeLabelBg` is
+  `#1f2020` under `dark`, so mapping onto it would repaint the concrete dark
+  pie).
+- [ ] **A titled pie has no accessible name.** Every other chart type stamps its
+  title as the root's `aria-label` and a leading `<title>` (`annotateChart`);
+  `compileChart({ type: 'pie', title: 'Pets', … })` stamps neither (`bar` with
+  the same title: `aria-label="Pets"`).
 
 ## @jarenjs/mermaid
 
@@ -259,7 +264,8 @@ delete it or fix it.
   lines Mermaid refuses still read: a node `@{ shape: … }` Mermaid has no name
   for, a lone `"` inside an unquoted label (`A[He said "hi]`), a nested
   generic in a class name (`class List~List~int~~`) and a bare `subgraph`
-  line.
+  line; and `pie title Pets` reads no title: the title is read only from its
+  own line, while Mermaid reads it on the header line too (its docs' example).
 - [ ] **Full layout for the secondary types** — class and ER render as structured panels, not domain-specific layouts; mindmap/gitGraph/journey/timeline parse-accept with a placeholder. Real layouts are the next coverage push (tracked honestly in the benchmark scorecard).
 - [ ] **Layout/perf workstream** — dagre-lite handles ranks and straight
   edges; orthogonal edge routing, subgraph clustering and crossing reduction
@@ -299,12 +305,13 @@ delete it or fix it.
 
 ## @jarenjs/flow
 
-- [ ] **A workflow guard's refusal names its place in the lowered machine.**
-  `compileWorkflow` and `lowerWorkflow` refuse a guard that fails to compile
-  as `JF0007` at `/transitions/<i>/guard` of the lowered statechart, while a
-  task `with`, `input` or embedded DAG refusal is re-based onto the workflow
-  document (`/states/work/work/with`, `/states/work/input`); `lowerWorkflow`'s
-  `sources` already maps each lowered state to its source pointer.
+- [ ] **A workflow guard's evaluation error names its place in the lowered
+  machine.** A guard that compiles but throws while a run evaluates it rejects
+  the run as `JF2016` at `/transitions/<i>/guard` of the lowered, key-sorted
+  statechart (a `choose` guard dividing by a string: `/transitions/1/guard`).
+  A guard that does not compile is re-based onto its branch
+  (`/states/pick/choose/1/guard`). `lowerWorkflow` already knows each guarded
+  transition's branch.
 
 ## @jarenjs/contract
 

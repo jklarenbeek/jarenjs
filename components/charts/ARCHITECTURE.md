@@ -103,7 +103,11 @@ either way. `tooltipView` in the component layer is the floating host.
 `mermaidPieRenderer`, the pie a host injects into `@jarenjs/mermaid`,
 draws with `titles: false`. A mermaid diagram's SVG is a byte-stable
 contract; the delegation exists to share the geometry, not to change
-what mermaid draws.
+what mermaid draws. Under a theme that links mermaid's text token to a
+host property it passes `titleClass`/`textClass: 'mm-text'`, the class
+mermaid's stylesheet paints with that token, so its text follows the
+host; under a concrete theme it passes none. Charts' own pie titles
+with `chart-title`, as every chart type's title does.
 
 ## Scales and axes (`src/core/`)
 
