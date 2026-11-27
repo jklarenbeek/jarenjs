@@ -334,10 +334,10 @@ matching combined measurements.
 | catalog | relational.statements | 9 | 9 (pass) | relational: 9 (pass) | pending | pending |
 | catalog | relational.queryMs | 100 | 0.09 (pass) | relational: 0.49 (pass) | pending | pending |
 | catalog | relational.recoveryMs | 5000 | 34.73 (pass) | relational: 43.50 (pass) | pending | pending |
-| catalog | search.startupMs | 15000 | 372.60 (pass) | lexical: 557.90 (pass) | 386.79 (pass) | 313.74 (pass) |
-| catalog | search.coldIndexMs | 15000 | 169.51 (pass) | lexical: 246.64 (pass) | pending | pending |
-| catalog | search.warmIndexMs | 15000 | 65.05 (pass) | lexical: 267.48 (pass) | pending | pending |
-| catalog | search.queryMs | 100 | 14.11 (pass) | lexical: 12.66 (pass) | pending | pending |
+| catalog | search.startupMs | 15000 | 372.60 (pass) | lexical: 461.82 (pass) | 386.79 (pass) | 313.74 (pass) |
+| catalog | search.coldIndexMs | 15000 | 169.51 (pass) | lexical: 212.47 (pass) | pending | pending |
+| catalog | search.warmIndexMs | 15000 | 65.05 (pass) | lexical: 212.89 (pass) | pending | pending |
+| catalog | search.queryMs | 100 | 14.11 (pass) | lexical: 11.01 (pass) | pending | pending |
 | catalog | search.sourceBytes | 8388608 | 2606620 (pass) | lexical: 2606620 (pass) | pending | pending |
 | catalog | search.indexBytes | 33554432 | 1915119 (pass) | lexical: 25776764 (pass) | pending | pending |
 | catalog | search.browserGzipBytes | 65536 | 5873 (pass) | lexical: 6165 (pass) | pending | pending |
@@ -362,10 +362,10 @@ matching combined measurements.
 | archive-stock | relational.statements | 9 | 9 (pass) | relational: 9 (pass) | pending | pending |
 | archive-stock | relational.queryMs | 250 | 0.16 (pass) | relational: 0.60 (pass) | pending | pending |
 | archive-stock | relational.recoveryMs | 5000 | 49.20 (pass) | relational: 76.04 (pass) | pending | pending |
-| archive-stock | search.startupMs | 45000 | 2096.09 (pass) | lexical: 3329.78 (pass) | 2944.77 (pass) | 2051.18 (pass) |
-| archive-stock | search.coldIndexMs | 45000 | 970.36 (pass) | lexical: 1291.24 (pass) | pending | pending |
-| archive-stock | search.warmIndexMs | 45000 | 479.46 (pass) | lexical: 1767.59 (pass) | pending | pending |
-| archive-stock | search.queryMs | 250 | 88.96 (pass) | lexical: 85.81 (pass) | pending | pending |
+| archive-stock | search.startupMs | 45000 | 2096.09 (pass) | lexical: 3100.28 (pass) | 2944.77 (pass) | 2051.18 (pass) |
+| archive-stock | search.coldIndexMs | 45000 | 970.36 (pass) | lexical: 1272.86 (pass) | pending | pending |
+| archive-stock | search.warmIndexMs | 45000 | 479.46 (pass) | lexical: 1533.15 (pass) | pending | pending |
+| archive-stock | search.queryMs | 250 | 88.96 (pass) | lexical: 86.49 (pass) | pending | pending |
 | archive-stock | search.sourceBytes | 50331648 | 20021733 (pass) | lexical: 20021733 (pass) | pending | pending |
 | archive-stock | search.indexBytes | 201326592 | 15820123 (pass) | lexical: 195268100 (pass) | pending | pending |
 | archive-stock | search.browserGzipBytes | 65536 | 5873 (pass) | lexical: 6165 (pass) | pending | pending |

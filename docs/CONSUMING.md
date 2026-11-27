@@ -160,16 +160,16 @@ the table and stale in the paragraph that cites it:
 | `./model` | <!--fact:bundle.model.kb-->60<!--/fact--> kB | the schema pen it subclasses |
 | `./jslt` | <!--fact:bundle.jslt.kb-->29<!--/fact--> kB | the body capture; of the schema pen, only the builder brand |
 | `./migration` | <!--fact:bundle.migration.kb-->37<!--/fact--> kB | the canonicalizer and hash a shape identity needs |
-| `./contract` | <!--fact:bundle.contract.kb-->61<!--/fact--> kB | the schema pen (a contract's inputs and outputs are schemas) |
-| `./flow` | <!--fact:bundle.flow.kb-->30<!--/fact--> kB | the capture; of the schema pen, only the brand |
+| `./contract` | <!--fact:bundle.contract.kb-->62<!--/fact--> kB | the schema pen (a contract's inputs and outputs are schemas) |
+| `./flow` | <!--fact:bundle.flow.kb-->31<!--/fact--> kB | the capture; of the schema pen, only the brand |
 | `./app` | <!--fact:bundle.app.kb-->63<!--/fact--> kB | the schema pen and the JSLT pen (state, and views) |
 | `./forms` | <!--fact:bundle.forms.kb-->52<!--/fact--> kB | the schema pen it subclasses |
-| `./formula` | <!--fact:bundle.formula.kb-->14<!--/fact--> kB | saved Query profiles; no evaluator |
+| `./formula` | <!--fact:bundle.formula.kb-->15<!--/fact--> kB | saved Query profiles; no evaluator |
 | `./messages` | <!--fact:bundle.messages.kb-->16<!--/fact--> kB | message templates; no locale packs |
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->26<!--/fact--> kB | text template capture; no renderer |
 | `./project` | <!--fact:bundle.project.kb-->5<!--/fact--> kB | project files; no Studio engine |
 | `./charts` | <!--fact:bundle.charts.kb-->7<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->1212<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->1213<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both
@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->30 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->10 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -282,7 +282,7 @@ included.
 | `./flow` | 19 | linq 11, core 8 | 1.1 |
 | `./forms` | 21 | linq 13, core 8 | 1.3 |
 | `./formula` | 93 | core 62, json 26, linq 5 | 4.3 |
-| `./jslt` | 17 | linq 9, core 8 | 1.0 |
+| `./jslt` | 17 | linq 9, core 8 | 1.1 |
 | `./jtlt` | 15 | core 8, linq 7 | 1.0 |
 | `./messages` | 16 | core 9, linq 7 | 1.1 |
 | `./migration` | 27 | core 11, linq 9, json 7 | 1.4 |
@@ -299,7 +299,7 @@ included.
 | `.` | 90 | core 62, json 28 | 4.1 |
 | `./basic` | 3 | json 2, core 1 | 0.2 |
 | `./canonical` | 17 | core 10, json 7 | 0.9 |
-| `./formula` | 88 | core 62, json 26 | 3.9 |
+| `./formula` | 88 | core 62, json 26 | 4.0 |
 | `./formula/batch` | 89 | core 62, json 27 | 4.0 |
 | `./formula/migrate` | 91 | core 62, json 29 | 4.3 |
 | `./jslt` | 105 | core 73, json 32 | 4.3 |
@@ -324,7 +324,7 @@ included.
 | `./load` | 41 | core 24, validate 11, json 6 | 1.8 |
 | `./normalize` | 126 | core 73, validate 29, json 24 | 5.9 |
 | `./output` | 42 | core 25, validate 11, json 6 | 2.0 |
-| `./query` | 124 | core 73, validate 27, json 24 | 5.5 |
+| `./query` | 124 | core 73, validate 27, json 24 | 5.6 |
 | `./references` | 24 | core 12, json 6, validate 6 | 1.1 |
 | `./strict-profile` | 127 | core 73, validate 30, json 24 | 6.1 |
 <!--/fact-->

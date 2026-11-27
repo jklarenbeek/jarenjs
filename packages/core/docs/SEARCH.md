@@ -139,14 +139,14 @@ Measured on v24.22.1, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
 
 | Consumer / engine | Rows | Cold / warm ms | Query p95 ms | One update ms | Snapshot gzip bytes | Sampled heap / RSS high-water MiB | V8 heap ceiling MiB |
 |---|---:|---|---:|---:|---:|---|---:|
-| catalog / reference | 10000 | 119.12 / 61.19 | 5.20 | 0.40 | 370591 | 86.37 / 192.55 | 240.00 |
-| catalog / native | 10000 | 246.64 / 267.48 | 12.66 | 65.99 | 121054 | 105.85 / 223.04 | 240.00 |
-| archive-stock / reference | 75000 | 993.26 / 487.06 | 163.23 | 0.46 | 2820312 | 549.75 / 708.84 | 752.00 |
-| archive-stock / native | 75000 | 1291.24 / 1767.59 | 85.81 | 743.77 | 920811 | 576.71 / 738.76 | 752.00 |
+| catalog / reference | 10000 | 144.72 / 53.62 | 10.47 | 0.44 | 370591 | 95.65 / 198.34 | 240.00 |
+| catalog / native | 10000 | 212.47 / 212.89 | 11.01 | 67.24 | 121054 | 106.06 / 220.01 | 240.00 |
+| archive-stock / reference | 75000 | 1001.42 / 504.36 | 114.30 | 0.48 | 2820312 | 558.07 / 702.69 | 752.00 |
+| archive-stock / native | 75000 | 1272.86 / 1533.15 | 86.49 | 708.41 | 920811 | 574.75 / 732.61 | 752.00 |
 
 | Consumer | Native logical index MiB | Peak update accounted MiB | Native teardown ms / remaining handles | Membership / order / score / native reload differences | Reference reload tie changes |
 |---|---:|---:|---|---|---:|
-| catalog | 24.58 | 35.37 | 0.04 / 0 | 0 / 0 / 0 / 0 | 1002 |
+| catalog | 24.58 | 35.37 | 0.05 / 0 | 0 / 0 / 0 / 0 | 1002 |
 | archive-stock | 186.22 | 267.03 | 0.04 / 0 | 0 / 0 / 0 / 0 | 6002 |
 
 Browser gzip: native 6165 bytes; reference 5874 bytes.
