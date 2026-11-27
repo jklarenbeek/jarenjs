@@ -182,25 +182,34 @@ compileXQuery(text)(null, { doc: inputDocument });
 > XQuery types as an error raises XQuery's code where it is evaluated — the
 > engine's `$error` (`JQ2017`) carrying `err:FORG0006` and a message that
 > names the position (`an xs:date has no effective boolean value (position
-> 0)`); arithmetic raises the engine's own `JQ2001`, which carries no XQuery
-> code (§4.9). Within one type the answers
+> 0)`); arithmetic carries `err:XPTY0004` (§4.9). Within one type the answers
 > are XQuery's: comparisons order by time, `string()`, `concat` and
 > `string-join` give the canonical text, `min`, `max`, `distinct-values`,
 > `index-of`, `order by` and `group by` compare by time. §4.9
-> lists the uses. A use whose operand may or may not be a date (an item of
-> `(xs:date(...), "a")`, a member looked up in an array or a map that holds
-> one) is refused by name (`unsupported construct 'the effective boolean
-> value of a value that may be a date'`, `'fn:min of a value that may be a
-> date'`, `'an order by key of a value that may be a date'`). The difference of two dates is a
-> duration, a type outside the subset (`unsupported construct 'date
-> arithmetic'`).
+> lists the uses. A sequence written as parts of known types (`($x,
+> xs:date(...))`) is read part by part where `min`, `max`, an `order by`
+> variable over it or a key holding a date literal reads it: XQuery's error
+> where a date and a value of another type are both present, XQuery's answer
+> where one is empty. Any other use whose operand may or may not be a date
+> (an item of such a sequence bound to a variable, a member looked up in an
+> array or a map that holds one) is refused by name (`unsupported construct
+> 'the effective boolean value of a value that may be a date'`, `'fn:min of a
+> value that may be a date'`, `'an order by key of a value that may be a
+> date'`). The difference of two dates is a duration, a type outside the
+> subset (`unsupported construct 'date arithmetic'`).
 >
 > *Upgrade: `min`, `max`, `distinct-values`, `order by` and `group by` used
 > to compare a date's text with a string or with another date type's text
 > and answer (`min((xs:date("2007-01-01"), "2006-01-01"))` gave
-> `"2006-01-01"`); an operand that may hold both is now refused (§4.9), and
+> `"2006-01-01"`); an operand that may hold both now raises XQuery's error
+> or is refused (§4.9), and
 > `index-of` finds no date among values of another type (`index-of((xs:date("2007-01-01")),
-> "2007-01-01")` is `()`, where it gave `1`).*
+> "2007-01-01")` is `()`, where it gave `1`). Arithmetic on a date raised
+> the engine's `JQ2001` with no XQuery code; it is now `JQ2017` carrying
+> `err:XPTY0004`, and the empty sequence where an operand is empty. `min`
+> and `max` of a sequence of parts of known types, a key holding a date
+> literal, and an `order by` variable over such a sequence were refused or
+> raised `unsupported`; they now answer, or raise XQuery's code.*
 
 ## 4. The supported subset
 
@@ -566,22 +575,42 @@ the date operand non-empty:
 | the effective boolean value: `boolean`, `not`, an `if` condition, a `where` clause, `satisfies`, an `and`/`or` operand | `FORG0006` |
 | a string argument: `string-length`, `substring`, `contains`, `starts-with`, `ends-with`, `upper-case`, `lower-case`, `normalize-space`, `matches`, `replace`, `tokenize`, `substring-before`, `substring-after`, `translate`, `compare`, the separator of `string-join`, the picture and format of `format-number` | `XPTY0004` |
 | a comparison with anything but a value of its own date type (a string, a number, another date type, an external value) | `XPTY0004` |
-| unary plus | `XPTY0004` |
-| unary minus, `+`, `*`, `div`, `idiv`, `mod`, `to`, a numeric function | XQuery's `XPTY0004`, raised as the engine's own `JQ2001` (its operator takes no string), which carries no XQuery code |
+| unary plus, unary minus, `+`, `-` with a value that is not a date, `*`, `div`, `idiv`, `mod`, `to` | `XPTY0004` (with an empty operand: the empty sequence) |
+| a numeric function (`abs`, `floor`, `ceiling`, `round`, `round-half-to-even`, `sum`, `avg`) | XQuery's `XPTY0004` or `FORG0006`, raised as the engine's own `JQ2001` (its operator takes no string), which carries no XQuery code |
 
 The functions and clauses that compare items — `min`, `max`,
 `distinct-values`, `index-of`, an `order by` key and a `group by` key —
 compare a date only with a value of its own type. An operand that holds
 values of one date type, the empty sequence or no date at all answers as
-XQuery does; one that may hold a date and a value of another type (two
+XQuery does. A sequence written as parts whose types the query fixes
+(`($x, xs:date("2007-01-01"))`: no date, an `xs:date`) is read part by part
+when the query runs, each part evaluated once. A part of no date holds a
+value of another type where one of its items is a string, a number or a
+boolean; any other item (an empty array, null, a map) is read by the engine
+as it is beside a number:
+
+- `min` and `max` of it raise `err:FORG0006` where values of two types (no
+  date, a date type, another date type) are both among its items, and
+  answer over the one type present otherwise (`min(($x?*,
+  xs:date("2007-01-01")))` with `$x` an empty array is `"2007-01-01"`);
+- an `order by` variable over it, in a phrase whose tuples are its items
+  (one `for`, no `where`, no `group by`), raises `err:XPTY0004` where the
+  `for` binds values of two types, as the keys would not order, and orders
+  the one type present otherwise (an empty array binds no tuple, D4);
+- a `group by` or `order by` key one of whose parts is a date literal is
+  that literal wherever it answers (its other parts are empty; two items
+  are the engine's refusal of a key, `JQ2001` and `JQ2005`).
+
+Any other operand that may hold a date and a value of another type (two
 date types among them) is refused by name, where XQuery raises (`min`,
 `max`: `FORG0006`; `order by`: `XPTY0004`) or tells the items apart
-(`distinct-values`, `group by`). An `order by` key that is a variable or a
-path is read when the query runs instead: the engine orders the keys first
-(a key of two items, or a number and a string, is its `JQ2005`), and a
-tuple whose key is a string in a date's shape then raises the engine's
-`$error` with the code `unsupported` (`order by: a key that may be a date
-is a value the front-end does not order`). `index-of` of dates of one type among
+(`distinct-values`, `index-of`, `group by`), since the engine holds no date
+apart from a string. An `order by` key that is any other variable or path
+is read when the query runs instead: the engine orders the keys first (a
+key of two items, or a number and a string, is its `JQ2005`), and a tuple
+whose key is a string in a date's shape then raises the engine's `$error`
+with the code `unsupported` (`order by: a key that may be a date is a value
+the front-end does not order`). `index-of` of dates of one type among
 values of another — or of another type's value among dates — is `()`, as
 F&O's `eq` reads two values that do not compare, both operands still
 evaluated.

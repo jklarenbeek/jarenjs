@@ -82,15 +82,18 @@ delete it or fix it.
   `$year`/`$hours`/…; `tokenize` flags `i`, `s`, `m`, `x`, which need I-Regexp
   flags; and the `declare decimal-format` prolog.
 
-- [ ] **A value that may be a date is refused, even where it answers.** A use
-  whose operand may hold a date and a value of another type (`min(($x,
-  xs:date(...)))`, a `group by` or computed `order by` key over
-  `(xs:date(...), $x)`) is refused by name, and an `order by` variable whose
-  key is a string in a date's shape raises `unsupported` when the query runs —
-  also where the other part is empty at run time and XQuery answers. Wanted: a
-  date value the engine tells apart from a string at run time, so these
-  compare as XQuery compares them. Arithmetic on a date raises the engine's
-  `JQ2001` without XQuery's `XPTY0004`.
+- [ ] **A value that may be a date is told apart only by where it is written.** A
+  sequence written as parts of known types (`($x, xs:date(...))`) is read part
+  by part by `min`, `max`, a `group by` or `order by` key holding a date
+  literal, and an `order by` variable over it in a phrase of one `for`
+  (XQUERY-FRONTEND.md §4.9). Any other operand that may hold a date and a
+  value of another type — such a sequence bound by `let` or filtered by
+  `where`, a second `for` or `group by`, an `if` of a date and a string, a
+  lookup into a container of one, `distinct-values`, `index-of`, a key without
+  a date literal — is still refused by name or raises `unsupported` when the
+  query runs, also where XQuery answers. Wanted: a date value the engine tells
+  apart from a string at run time. A numeric function of a date (`abs`,
+  `round`, `sum`, …) raises the engine's `JQ2001` without XQuery's code.
 
 ## @jarenjs/validate
 
@@ -670,15 +673,6 @@ delete it or fix it.
   too, but status compares no column, index, or undeclared trigger of a table,
   where SQLite compares every stored CREATE text. Wanted: status reads every
   table the model owns as the open verifies it.
-
-## @jarenjs/locales
-
-- [ ] **The uncataloged-text guard reads a window of tokens.** The guard refuses a
-  literal equal to a catalog's English unless one of its ids sits beside it,
-  but it reads a window of tokens, so a copy beside a word equal to an id's
-  last segment still passes.
-
-## @jarenjs/core
 
 ## Lexical search (cross-package)
 

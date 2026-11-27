@@ -7,8 +7,9 @@ import { JsonQueryRuntimeError } from '@jarenjs/json/query';
 import { values, failsWith, failsAtRun } from './emitted.js';
 
 // A date value is typed as the query is read: every use XQuery types as an
-// error raises XQuery's code where it is evaluated, and a use whose operand
-// may or may not be a date is refused by name.
+// error raises XQuery's code where it is evaluated, a sequence of parts of
+// known types is read part by part, and any other use whose operand may or
+// may not be a date is refused by name.
 
 const D = 'xs:date("2007-01-01")';
 const DT = 'xs:dateTime("2007-01-01T00:00:00Z")';
@@ -70,9 +71,38 @@ describe('XQuery front-end: a date value is typed', () => {
   describe('arithmetic takes no date (XPTY0004), and a date difference is a duration', () => {
     it('should raise for a unary plus, a unary minus and an operator with a number', () => {
       raises(`+${D}`, 'XPTY0004', 0);
-      assert.throws(() => compileXQuery(`-${D}`)(null), { code: 'JQ2001' });
-      assert.throws(() => compileXQuery(`${D} + 1`)(null), { code: 'JQ2001' });
+      raises(`-${D}`, 'XPTY0004', 0);
+      raises(`--${T}`, 'XPTY0004', 0);
+      raises(`${D} + 1`, 'XPTY0004', 22);
+      raises(`1 - ${D}`, 'XPTY0004', 2);
+      raises(`2 * ${T}`, 'XPTY0004', 2);
+      raises(`${DT} div 2`, 'XPTY0004', 36);
+      raises(`${D} idiv 2`, 'XPTY0004', 22);
+      raises(`${D} mod 2`, 'XPTY0004', 22);
+      raises(`${D} to 3`, 'XPTY0004', 22);
+      raises(`1 to ${D}`, 'XPTY0004', 2);
+      assert.strictEqual(compileXQuery(`${D} + 1`).doc.$if[1].$error[1], "'+' takes a number, not an xs:date (position 22)");
+    });
+
+    it('should give the empty sequence where an operand is empty, evaluating each once', () => {
       assert.deepStrictEqual(values('+xs:date(())'), []);
+      assert.deepStrictEqual(values('-xs:date(())'), []);
+      assert.deepStrictEqual(values(`${D} + $e?*`, { e: [] }), []);
+      assert.deepStrictEqual(values(`$e?* * ${T}`, { e: [] }), []);
+      assert.deepStrictEqual(values(`xs:date($e?*) to 3`, { e: [] }), []);
+      assert.deepStrictEqual(parseXQuery(`${D} + $n`), {
+        '$if': [{ '$and': [{ '$exists': { '$const': '2007-01-01' } }, { '$exists': '$n' }] },
+          { '$error': ['err:XPTY0004', "'+' takes a number, not an xs:date (position 22)"] }, { '$seq': [] }],
+      });
+    });
+
+    it('should read an operand that may or may not be a date as the engine does', () => {
+      const text = `(if ($c) then ${D} else 1) + 1`;
+      assert.deepStrictEqual(values(text, { c: false }), [2]);
+      assert.throws(() => compileXQuery(text)(null, { c: true }), { code: 'JQ2001' });
+      // beside a date it has no value either way
+      assert.deepStrictEqual(values(`${D} + (if ($c) then ${T} else $e?*)`, { c: false, e: [] }), []);
+      raises(`${D} + (if ($c) then ${T} else $e?*)`, 'XPTY0004', 22, { c: true, e: [] });
     });
 
     it('should refuse the difference of two dates: a duration is outside the subset', () => {
@@ -103,10 +133,38 @@ describe('XQuery front-end: a date value is typed', () => {
   });
 
   describe('a function or a clause that compares items reads a date only with its own type', () => {
+    it('should raise FORG0006 for min and max of a sequence holding a date and a value of another type', () => {
+      raises(`min((${D}, ${T}))`, 'FORG0006', 0);
+      raises(`max((${D}, ${DT}))`, 'FORG0006', 0);
+      raises(`min((${D}, "2006-01-01"))`, 'FORG0006', 0);
+      raises(`max(($x, ${D}))`, 'FORG0006', 0, { x: 3 });
+      raises(`max(($x, ${D}, $y))`, 'FORG0006', 0, { x: [], y: '2006-01-01' });
+      assert.strictEqual(compileXQuery(`min((${D}, ${T}))`).doc.$min.$return.$if[1].$error[1], 'an xs:date compares only with an xs:date (position 0)');
+    });
+
+    it('should answer min and max of such a sequence where one type is present, as XQuery does', () => {
+      assert.deepStrictEqual(values(`min(($e?*, ${D}, xs:date("2006-01-01")))`, { e: [] }), ['2006-01-01']);
+      assert.deepStrictEqual(values(`max(($x, xs:date($e?*)))`, { x: 'b', e: [] }), ['b']);
+      assert.deepStrictEqual(values(`fn:max((${T}, $e?*, xs:time("09:00:00Z")))`, { e: [] }), ['09:00:00Z']);
+      // an item that is no string, number or boolean is read by the engine, as beside a number
+      for (const x of [[], null, {}]) {
+        assert.throws(() => compileXQuery(`min(($x, 2))`)(null, { x }), { code: 'JQ2001' });
+        assert.throws(() => compileXQuery(`min(($x, ${D}))`)(null, { x }), { code: 'JQ2001' });
+      }
+    });
+
+    it('should type a key one of whose parts is a date literal as that literal', () => {
+      assert.deepStrictEqual(values(`for $i in (1, 2) group by $k := (${D}, $e?*) return [$k eq ${D}, count($i)]`, { e: [] }), [[true, 2]]);
+      assert.deepStrictEqual(values(`for $i in (2, 1) order by (${D}, $e?*), $i return $i`, { e: [] }), [1, 2]);
+      // two items are the engine's refusal of a key
+      assert.throws(() => compileXQuery(`for $i in (1, 2) group by $k := (${D}, $x) return $k`)(null, { x: 1 }), { code: 'JQ2001' });
+      assert.throws(() => compileXQuery(`for $i in (1, 2) order by ($x, ${D}) return $i`)(null, { x: 1 }), { code: 'JQ2005' });
+    });
+
     it('should refuse an argument or a key that may or may not hold a date', () => {
-      failsWith(`min((${D}, ${T}))`, "unsupported construct 'fn:min of a value that may be a date'", 0);
-      failsWith(`max((${D}, ${DT}))`, "unsupported construct 'fn:max of a value that may be a date'", 0);
-      failsWith(`min((${D}, "2006-01-01"))`, "unsupported construct 'fn:min of a value that may be a date'", 0);
+      failsWith(`min(if ($c) then ${D} else 1)`, "unsupported construct 'fn:min of a value that may be a date'", 0);
+      failsWith(`let $s := (${D}, "a") return max($s)`, "unsupported construct 'fn:max of a value that may be a date'", 46);
+      failsWith(`for $i in (1, 2) group by $k := (xs:date($y), $x) return $k`, "unsupported construct 'a group by key of a value that may be a date'", 32);
       failsWith(`distinct-values((${D}, $x))`, "unsupported construct 'fn:distinct-values of a value that may be a date'", 0);
       failsWith(`index-of((${D}, ${DT}), ${D})`, "unsupported construct 'fn:index-of of a value that may be a date'", 0);
       failsWith(`for $v in (${D}, "a") order by head($v) return $v`, "unsupported construct 'an order by key of a value that may be a date'", 48);
@@ -114,13 +172,34 @@ describe('XQuery front-end: a date value is typed', () => {
         "unsupported construct 'a group by key of a value that may be a date'", 63);
     });
 
+    it('should raise XPTY0004 for an order by variable over a sequence holding a date and a value of another type', () => {
+      raises(`for $v in (${D}, "a") order by $v return $v`, 'XPTY0004', 48);
+      raises(`for $v in (${D}, ${DT}) order by 1, $v descending return $v`, 'XPTY0004', 83);
+      raises(`for $v in (${D}, $x) order by $v return $v`, 'XPTY0004', 47, { x: '2006-01-01' });
+      raises(`for $v at $i in ($x, ${D}) order by $v return $i`, 'XPTY0004', 53, { x: ['b', 'a'] });
+      raises(`for $x in (1, "hello", ${D}) order by $x return $x`, 'XPTY0004', 55);
+    });
+
+    it('should order such a variable where one type is present, as XQuery does', () => {
+      assert.deepStrictEqual(values(`for $v in ($e?*, ${D}, xs:date("2006-01-01")) order by $v return $v`, { e: [] }), ['2006-01-01', '2007-01-01']);
+      assert.deepStrictEqual(values(`for $v in ($x?*, xs:date($e?*)) let $w := $v order by $v descending count $n return [$n, $w]`, { x: ['a', 'b'], e: [] }),
+        [[0, 'b'], [1, 'a']]);
+      // an empty array binds no tuple; an array of an array, null or a map is the engine's JQ2005, as beside a number
+      assert.deepStrictEqual(values(`for $v in ($x, ${D}) order by $v return $v`, { x: [] }), ['2007-01-01']);
+      assert.deepStrictEqual(values('for $v in ($x, 2) order by $v return $v', { x: [] }), [2]);
+      for (const x of [[[]], null, {}]) {
+        assert.throws(() => compileXQuery('for $v in ($x, 2) order by $v return $v')(null, { x }), { code: 'JQ2005' });
+        assert.throws(() => compileXQuery(`for $v in ($x, ${D}) order by $v return $v`)(null, { x }), { code: 'JQ2005' });
+      }
+    });
+
     it('should refuse an order by variable that may be a date where the engine ordered a key in a date\'s shape', () => {
-      failsAtRun(`for $v in (${D}, "a") order by $v return $v`, {}, 'unsupported');
-      failsAtRun(`for $v in (${D}, ${DT}) order by 1, $v descending return $v`, {}, 'unsupported');
-      failsAtRun(`for $v in (${D}, $x) order by $v return $v`, { x: '2006-01-01' }, 'unsupported');
+      // a where clause or a second for: the tuples are not the items of the sequence
+      failsAtRun(`for $v in (${D}, "a") where true() order by $v return $v`, {}, 'unsupported');
+      failsAtRun(`for $i in (1, 2), $v in ($e?*, ${D}) order by $v return $v`, { e: [] }, 'unsupported');
+      failsAtRun(`for $v in (if ($c) then ${D} else "a") order by $v return $v`, { c: true }, 'unsupported');
       // the engine's own refusals come first: a key of two items, a number and a string
       assert.throws(() => compileXQuery(`let $i := (${D}, ${T}) order by $i return $i`)(null), { code: 'JQ2005' });
-      assert.throws(() => compileXQuery(`for $x in (1, "hello", ${D}) order by $x return $x`)(null), { code: 'JQ2005' });
       // no key in a date's shape is no date
       assert.deepStrictEqual(values('for $v in (xs:date($y?a), $x, "a") order by $v return $v', { x: 'b', y: {} }), ['a', 'b']);
       // a count after the order by would bind the name the key reads

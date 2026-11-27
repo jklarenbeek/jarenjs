@@ -130,6 +130,9 @@ const NODE_CTOR_KEYWORDS = new Set([
 
 // FLWOR clause positions in the fixed semantic order of the JSON format
 // (QUERY-FORMAT.md section 6.1, D7)
+// the multiplicative operators spelled by a name, and the engine's operator
+const MULTIPLICATIVE = Object.freeze({ __proto__: null, div: '$div', idiv: '$idiv', mod: '$mod' });
+
 const CLAUSE_SLOT = Object.freeze({
   for: 0, let: 1, where: 2, groupby: 3, orderby: 4, count: 5,
 });
@@ -304,6 +307,10 @@ const DATE_TYPES = new WeakMap();
 
 const isDateTypeName = (t) => t === 'date' || t === 'dateTime' || t === 'time';
 const isDateOrMaybe = (t) => isDateTypeName(t) || t === 'maybe';
+
+// the messages of a date used where XQuery types it as an error
+const comparesOnly = (type) => `an xs:${type} compares only with an xs:${type}`;
+const takesNumber = (use) => (type) => `${use} takes a number, not an xs:${type}`;
 
 // a date literal the parser emitted: its text, or null
 function dateLiteralText(e) {
@@ -982,8 +989,10 @@ function replaced(e, replacements) {
   return out ?? e;
 }
 
-// the variable a guard of a date use binds its operands to (see `typed`)
+// the variable a guard of a date use binds its operands to (see `typed`),
+// and the one it reads their items by (see `ofOneType`)
 const TYPED_VAR = 'ty_args';
+const SCALAR_VAR = 'ty_item';
 
 // The operands of a composed function, each evaluated once and outside
 // every name the composition introduces: one array per operand, in an
@@ -1209,7 +1218,8 @@ const ITEM_ARGUMENTS = Object.freeze({
 
 // The functions that compare the items of some of their arguments: a date
 // compares only with a value of its own type, so an argument that may or
-// may not hold a date is refused (see `operandTypes`)
+// may not hold a date is refused (see `operandTypes`), but for `min` and
+// `max` of a sequence of parts of known types (see `partsOf`)
 const COMPARED_ARGUMENTS = Object.freeze({
   'min': [0], 'max': [0], 'distinct-values': [0], 'index-of': [0, 1],
 });
@@ -1339,8 +1349,9 @@ export function parseXQuery(source) {
   // values are of that type, if any), 'none' (no date value), 'empty',
   // 'nested' (an array or a map holding a date value) or 'maybe' (a date
   // value may be among its items). A use XQuery types as an error raises
-  // XQuery's code when it is evaluated; a use whose operand may or may not
-  // be a date is refused by name.
+  // XQuery's code when it is evaluated; a sequence of parts of known types
+  // is read part by part where a use can (see partsOf); any other use whose
+  // operand may or may not be a date is refused by name.
   const scope = new Map();
   const shadowed = [];
 
@@ -1456,6 +1467,69 @@ export function parseXQuery(source) {
         replaced(original, new Map(objects.map((e) => [e, { '$seq': [] }]))),
       ],
     };
+  }
+
+  // `original`, an arithmetic operator (`use`). With a date operand it has
+  // no value: XPTY0004 where every operand is non-empty, else the empty
+  // sequence, each operand evaluated once. Without one, an operand that may
+  // or may not be a date is read as the engine reads it: a number answers,
+  // a date is the engine's JQ2001.
+  function arithmetic(original, operands, use, at) {
+    const types = operands.map(typeOf);
+    if (!types.some(isDateTypeName))
+      return original;
+    const tests = operands.map((e) => ({ '$exists': e }));
+    const raise = raisedWith(xqueryCode('XPTY0004'), `${takesNumber(use)(types.find(isDateTypeName))} (position ${at})`);
+    return { '$if': [tests.length === 1 ? tests[0] : { '$and': tests }, raise, { '$seq': [] }] };
+  }
+
+  // The parts of `e`, a sequence each of whose items is of one known type
+  // (a date type, no date or empty), with their types; null for any other
+  // expression. The type a part holds is told apart where the query is
+  // read, so whether a date and a value of another type are both present
+  // is read when it runs.
+  function partsOf(e) {
+    if (e === null || typeof e !== 'object' || DATE_TYPES.has(e) || !hasOwn(e, '$seq') || Object.keys(e).length !== 1)
+      return null;
+    const parts = e.$seq.map((item) => ({ item, type: typeOf(item) }));
+    return parts.every(({ type }) => type !== 'maybe' && type !== 'nested') ? parts : null;
+  }
+
+  // The items of `parts`, raising XQuery's `code` where values of two types
+  // (a date type, another date type, no date) are both among them; each
+  // part is evaluated once. A part of no date holds a value of another type
+  // where one of its items is a string, a number or a boolean: of the items
+  // `for` binds (`members`: an array's members are its items, D4), or of
+  // the items themselves. Any other item (an empty array, null, a map) is
+  // left to the engine, which reads it as it reads it beside a number.
+  function ofOneType(parts, code, at, members) {
+    const kinds = [...new Set(parts.map(({ type }) => type).filter((type) => type !== 'empty'))];
+    const anyOf = (tests) => (tests.length === 1 ? tests[0] : { '$or': tests });
+    const scalar = (e) => ({ '$or': ['$is-string', '$is-number', '$is-boolean'].map((op) => ({ [op]: e })) });
+    const holds = (ref, i) => (parts[i].type !== 'none' ? { '$exists': ref }
+      : { '$some': { [SCALAR_VAR]: members ? ref : `$${TYPED_VAR}[${i}]` }, '$satisfies': scalar('$' + SCALAR_VAR) });
+    const out = withOperands(TYPED_VAR, parts.map(({ item }) => item), (refs) => {
+      const present = (kind) => anyOf(refs.map((ref, i) => (parts[i].type === kind ? holds(ref, i) : null)).filter((test) => test !== null));
+      const both = [];
+      for (let i = 0; i < kinds.length; i++)
+        for (let j = i + 1; j < kinds.length; j++)
+          both.push({ '$and': [present(kinds[i]), present(kinds[j])] });
+      return {
+        '$if': [anyOf(both), raisedWith(xqueryCode(code), `${comparesOnly(kinds.find(isDateTypeName))} (position ${at})`), { '$seq': refs }],
+      };
+    });
+    DATE_TYPES.set(out, 'maybe');
+    return out;
+  }
+
+  // The type of a key (`use`), which is one item at most: a sequence one of
+  // whose parts is a date literal is that literal wherever it answers (its
+  // other parts empty: two items are the engine's refusal), so it has the
+  // literal's type; any other key that may or may not be a date is refused
+  // by name.
+  function keyType(key, use, at) {
+    const literal = typeOf(key) === 'maybe' ? partsOf(key)?.find(({ item }) => dateLiteralText(item) !== null) : undefined;
+    return literal !== undefined ? literal.type : operandTypes([key], use, at)[0];
   }
 
   // `original`, which reads the effective boolean value of `operand`
@@ -1824,7 +1898,7 @@ export function parseXQuery(source) {
     if (isDateTypeName(leftType) && leftType === typeOf(right))
       return comparison;
     return typed(comparison, [left, right], {
-      code: 'XPTY0004', use: 'a comparison', at, all: true, says: (type) => `an xs:${type} compares only with an xs:${type}`,
+      code: 'XPTY0004', use: 'a comparison', at, all: true, says: comparesOnly,
     });
   }
 
@@ -1856,8 +1930,11 @@ export function parseXQuery(source) {
     const first = parseAdditive();
     const save = pos;
     skipWS();
-    if (isNameStartCode(cc(pos)) && parseNCName() === 'to')
-      return { '$range': [first, parseAdditive()] };
+    const at = pos;
+    if (isNameStartCode(cc(pos)) && parseNCName() === 'to') {
+      const last = parseAdditive();
+      return arithmetic({ '$range': [first, last] }, [first, last], "'to'", at);
+    }
     pos = save;
     return first;
   }
@@ -1869,8 +1946,10 @@ export function parseXQuery(source) {
       skipWS();
       const c = cc(pos);
       if (c === CC_PLUS) {
+        const at = pos;
         pos++;
-        expr = { '$add': [expr, parseMultiplicative()] };
+        const right = parseMultiplicative();
+        expr = arithmetic({ '$add': [expr, right] }, [expr, right], "'+'", at);
         continue;
       }
       if (c === CC_MINUS) {
@@ -1878,10 +1957,10 @@ export function parseXQuery(source) {
         pos++;
         const right = parseMultiplicative();
         // XQuery subtracts two dates into a duration, a type outside the
-        // subset; every other date operand is XPTY0004, which `$sub` raises
+        // subset; every other date operand is XPTY0004
         if (isDateOrMaybe(typeOf(expr)) && isDateOrMaybe(typeOf(right)))
           fail("unsupported construct 'date arithmetic'", at);
-        expr = { '$sub': [expr, right] };
+        expr = arithmetic({ '$sub': [expr, right] }, [expr, right], "'-'", at);
         continue;
       }
       pos = save;
@@ -1902,21 +1981,16 @@ export function parseXQuery(source) {
       const c = cc(pos);
       if (c === CC_STAR) {
         pos++;
-        expr = { '$mul': [expr, parseCastable()] };
+        const right = parseCastable();
+        expr = arithmetic({ '$mul': [expr, right] }, [expr, right], "'*'", at);
         continue;
       }
       if (isNameStartCode(c)) {
         const ident = parseNCName();
-        if (ident === 'div') {
-          expr = { '$div': [expr, parseCastable()] };
-          continue;
-        }
-        if (ident === 'idiv') {
-          expr = { '$idiv': [expr, parseCastable()] };
-          continue;
-        }
-        if (ident === 'mod') {
-          expr = { '$mod': [expr, parseCastable()] };
+        const op = MULTIPLICATIVE[ident];
+        if (op !== undefined) {
+          const right = parseCastable();
+          expr = arithmetic({ [op]: [expr, right] }, [expr, right], `'${ident}'`, at);
           continue;
         }
         if (ident === 'instance')
@@ -1998,13 +2072,14 @@ export function parseXQuery(source) {
         c = cc(pos);
       }
       let expr = parsePostfix();
-      // unary minus is `$neg`, which raises on a date; unary plus emits
-      // nothing, so a date operand is raised here (XPTY0004)
+      // a date operand is XPTY0004: unary plus emits nothing, unary minus
+      // is `$neg`, which would raise the engine's own code
       if (negs === 0)
-        return typed(expr, [expr], { code: 'XPTY0004', use: 'unary plus', at, says: (type) => `unary plus takes a number, not an xs:${type}` });
+        return typed(expr, [expr], { code: 'XPTY0004', use: 'unary plus', at, says: takesNumber('unary plus') });
+      const operand = expr;
       for (let i = 0; i < negs; i++)
         expr = typeof expr === 'number' ? -expr : { '$neg': expr };
-      return expr;
+      return arithmetic(expr, [operand], 'unary minus', at);
     }
     return parsePostfix();
   }
@@ -2413,7 +2488,12 @@ export function parseXQuery(source) {
     if (args.length < def.min || args.length > def.max)
       return fail(`unsupported function '${written}#${args.length}'`, at);
     const types = args.map(typeOf);
-    if (table === FN_TABLE && hasOwn(COMPARED_ARGUMENTS, local))
+    // min and max of a sequence whose parts hold a date and a value of
+    // another type are FORG0006 where both are present
+    const parts = (local === 'min' || local === 'max') && table === FN_TABLE && types[0] === 'maybe' ? partsOf(args[0]) : null;
+    if (parts !== null)
+      args = [ofOneType(parts, 'FORG0006', at, false)];
+    else if (table === FN_TABLE && hasOwn(COMPARED_ARGUMENTS, local))
       operandTypes(COMPARED_ARGUMENTS[local].map((i) => args[i]), `fn:${local}`, at);
     let out = def.emit(args, (message) => fail(message, at), types);
     if (table !== FN_TABLE)
@@ -2671,7 +2751,7 @@ export function parseXQuery(source) {
         fail("unsupported construct 'collation'", collationAt);
       // a date and a value of another type are two keys, where the engine
       // would compare their texts
-      bind(name, operandTypes([expr], 'a group by key', exprAt)[0]);
+      bind(name, keyType(expr, 'a group by key', exprAt));
       keys.push({ name, expr, at: bindAt });
       skipWS();
       if (cc(pos) === CC_COMMA) {
@@ -2693,11 +2773,11 @@ export function parseXQuery(source) {
       const key = parseExprSingle();
       // a date and a value of another type do not order (XPTY0004), where
       // the engine would order their texts: a variable or a path that may
-      // hold a date is checked where the phrase returns (see
-      // guardOrderKeys), any other key is refused
+      // hold a date is checked as the phrase runs (see buildPhrase and
+      // guardOrderKeys), any other key is typed (see keyType)
       const mayBeDate = isPathExpr(key) && typeOf(key) === 'maybe';
       if (!isPathExpr(key))
-        operandTypes([key], 'an order by key', keyAt);
+        keyType(key, 'an order by key', keyAt);
       let desc = false;
       let greatest = false;
       if (tryKeyword('ascending') < 0 && tryKeyword('descending') >= 0)
@@ -2772,6 +2852,26 @@ export function parseXQuery(source) {
     };
   }
 
+  // The order by keys `guardOrderKeys` checks. A phrase whose tuples are
+  // the items of its one `for` (`complete`: no where, no group by) has a
+  // key of one item of each tuple's kind where the key is that `for`'s
+  // variable over a sequence of parts of known types: that source raises
+  // XPTY0004 where values of two types are both among its items, as their
+  // keys would not order, and the key is checked no further.
+  function orderedBySource(specs, fors, complete, forObj) {
+    if (!complete || fors.length !== 1)
+      return specs;
+    const [source] = fors;
+    const parts = partsOf(source.expr);
+    const reads = (spec) => spec.mayBeDate && spec.key === '$' + source.name;
+    const read = specs.find(reads);
+    if (parts === null || read === undefined)
+      return specs;
+    const items = ofOneType(parts, 'XPTY0004', read.at, true);
+    setObjectMember(forObj, source.name, source.atName === null ? items : { '$in': items, '$at': source.atName });
+    return specs.filter((spec) => !reads(spec));
+  }
+
   //#region clause packing
   // The JSON FLWOR phrase holds at most one clause per kind, applied in
   // the fixed semantic order $for -> $let -> $where -> $groupby ->
@@ -2823,6 +2923,7 @@ export function parseXQuery(source) {
     let countName = null;
     let lastSlot = -1;
     let multi = false; // this phrase iterates: $for or $groupby present
+    const fors = [];
 
     for (; i < clauses.length; i++) {
       const c = clauses[i];
@@ -2838,6 +2939,7 @@ export function parseXQuery(source) {
           if (forObj === null)
             forObj = {};
           setObjectMember(forObj, c.name, c.atName === null ? c.expr : { '$in': c.expr, '$at': c.atName });
+          fors.push(c);
           names.add(c.name);
           if (c.atName !== null)
             names.add(c.atName);
@@ -2895,7 +2997,7 @@ export function parseXQuery(source) {
       ? buildChain(clauses, i, ret, enclosingMulti || multi)
       : ret;
     if (orderSpecs !== null)
-      retExpr = guardOrderKeys(orderSpecs, countName, retExpr);
+      retExpr = guardOrderKeys(orderedBySource(orderSpecs, fors, whereExpr === null && groupObj === null, forObj), countName, retExpr);
 
     const phrase = {};
     if (forObj !== null)

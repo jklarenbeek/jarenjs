@@ -5,12 +5,16 @@
  * words (two letter-words, or one word under a UI key: label, title,
  * aria-label, placeholder, alt, textContent) must be one of:
  * - a catalog's own English beside one of its message ids, as a fallback
- *   where the catalog is read: within twelve tokens a name that is the id
- *   (`pageBreak: 'Page break'`), or a string that is the id, the prefix the
- *   id is built from (`'calc/financial/nper'` for
+ *   where the catalog is read: in the expression the text belongs to (its
+ *   item of an array, a call's arguments or an object, and the literal
+ *   arguments or members beside it in a call or an object, within its
+ *   statement: neither `if (…)`, `case …:` nor a block before it) a name that is
+ *   the id (`pageBreak: 'Page break'`), or a string that is the id, the
+ *   prefix the id is built from (`'calc/financial/nper'` for
  *   `calc/financial/nper#label`) or its last segment (`key: 'overview'` for
  *   `site/bench/suite/overview`). A copy of a catalog's English typed
- *   anywhere else is a reader meeting English: it is refused like new text;
+ *   anywhere else is a reader meeting English: it is refused like new text,
+ *   also beside a word equal to an id that is not part of its expression;
  * - out of scope by its place in the code: an object key, a module
  *   specifier, a class list, the message of a coded error a developer
  *   reads (`throw`, `new …Error(`), a log line (`console.*`);
@@ -63,8 +67,8 @@ const DIRS = ['packages/forms/src', 'packages/view/src', 'packages/app/src', 'pa
   'components/calc/src', 'components/collection/src', 'components/rules/src', 'packages/website/src',
   'packages/validate/src', 'packages/contract/src', 'packages/json/src'];
 
-/** The catalogs themselves (their English is the point) and the site packs. */
-const CATALOG_FILE = /(^|\/)messages\.js$|^packages\/website\/src\/lang\//;
+/** The catalogs themselves (their English is the point), a module a catalog reads its entries from, and the site packs. */
+const CATALOG_FILE = /(^|\/)messages\.js$|^packages\/json\/src\/query\/descent-message\.js$|^packages\/website\/src\/lang\//;
 
 /** The reason classes an allowlist entry may give. */
 const REASONS = new Set(['not-prose', 'developer-facing', 'English-by-design-paragraph', 'data', 'proper-noun', 'catalog-copy']);
@@ -102,6 +106,9 @@ const besideItsId = (s) => {
   return ids !== undefined
     && ids.some((id) => s.nearNames.includes(id) || s.near.some((token) => namesId(id, token)));
 };
+
+/** The statements whose head, a parenthesized expression, governs the statement after it. */
+const CONTROL = new Set(['if', 'for', 'while', 'switch', 'with', 'catch']);
 
 const REGEX_BEFORE = new Set(['(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '<', '>', '~', '^', 'return', 'typeof', 'case', 'do', 'else', 'in', 'of', 'new', 'delete', 'void', 'throw', 'yield', 'await', '=>', '&&', '||', '??', '']);
 /**
@@ -152,13 +159,91 @@ function strings(src) {
     if (['=>', '==', '!=', '<=', '>=', '&&', '||', '??', '?.', '++', '--', '+=', '-=', '*=', '/=', '**', '<<', '>>'].includes(two)) { push({ k: 'p', v: two }); i += 2; continue; }
     push({ k: 'p', v: c }); i++;
   }
-  // context: index into tokens
-  // `near`, `nearNames`: the strings and the names within twelve tokens either side
-  const around = (/** @type {number} */ n, /** @type {string} */ kind) => tokens.slice(Math.max(0, n - 12), n + 13)
-    .filter((x) => x !== tokens[n] && x.k === kind).map((x) => (kind === 'str' ? x.text : x.v));
+  // The expression a string belongs to. `pair` matches each bracket with its partner, `parent` names
+  // the innermost bracket holding a token (-1: the top level). A bracket's content splits at its own
+  // depth into statements (`;`) and items (`,`): a string belongs to its item, nested brackets
+  // included, and, among a call's arguments or an object's members (`(`, `{`), it sits beside the
+  // other items of its statement that are a literal or a member holding one (`t('id', 'English')`,
+  // `{ key: 'overview', label: 'Overview' }`); a function among the arguments and an array's other
+  // items are not its expression (`f('English', (v) => v === 'id')`, `['span', {}, 'English']`).
+  const pair = tokens.map(() => -1), parent = tokens.map(() => -1), open = [];
   tokens.forEach((t, n) => {
-    if (t.k === 'str') out.push({ ...t, before: tokens.slice(Math.max(0, n - 12), n).map((x) => x.v), after: tokens.slice(n + 1, n + 3).map((x) => x.v),
-      near: around(n, 'str'), nearNames: around(n, 'id') });
+    parent[n] = open.length ? open[open.length - 1] : -1;
+    if (t.k !== 'p') return;
+    if (t.v === '(' || t.v === '[' || t.v === '{') open.push(n);
+    else if ((t.v === ')' || t.v === ']' || t.v === '}') && open.length) { const o = open.pop(); pair[o] = n; pair[n] = o; parent[n] = parent[o]; }
+  });
+  /** @param {number} k - a `case` @param {number} end @returns {number} the `:` that ends its label */
+  const colonAfter = (k, end) => {
+    for (let j = k + 1; j < end; j++) {
+      if (tokens[j].v === ':' && tokens[j].k === 'p') return j;
+      if (tokens[j].k === 'p' && '([{'.includes(tokens[j].v) && pair[j] > j) j = pair[j];
+    }
+    return -1;
+  };
+  /** @type {Map<number, { stmt: number, from: number, to: number, top: number[] }[]>} */
+  const groups = new Map();
+  const itemOf = tokens.map(() => -1);
+  /** @param {number} p */
+  const itemsOf = (p) => {
+    let items = groups.get(p);
+    if (items) return items;
+    items = [];
+    const end = p < 0 ? tokens.length : (pair[p] < 0 ? tokens.length : pair[p]);
+    let stmt = 0, item = { stmt, from: p + 1, to: p, top: /** @type {number[]} */ ([]) };
+    /** @param {number} k - the item's last token @param {number} next - 1 when a statement ends there */
+    const cut = (k, next) => { items.push(item); stmt += next; item = { stmt, from: k + 1, to: k, top: [] }; };
+    /** @param {number} k */
+    const take = (k) => { itemOf[k] = items.length; item.top.push(k); item.to = k; };
+    for (let k = p + 1; k < end; k++) {
+      const t = tokens[k], v = t.k === 'p' ? t.v : '';
+      if (v === ';' || v === ',') { cut(k, v === ';' ? 1 : 0); continue; }
+      // a statement's head is a statement of its own: `if (…)`, `while (…)`, `case …:`
+      const head = t.k === 'id' && CONTROL.has(t.v) && tokens[k + 1]?.v === '(' && pair[k + 1] > k + 1 ? pair[k + 1]
+        : t.k === 'id' && t.v === 'case' && tokens[k + 1]?.v !== ':' ? colonAfter(k, end) : -1;
+      if (head > k) {
+        if (item.top.length) cut(k - 1, 1);
+        for (let j = k; j <= head; j++) { take(j); if (tokens[j].k === 'p' && '([{'.includes(tokens[j].v) && pair[j] > j) item.to = j = pair[j]; }
+        k = item.to;
+        cut(k, 1);
+        continue;
+      }
+      take(k);
+      if ((v === '(' || v === '[' || v === '{') && pair[k] > k) item.to = k = pair[k];
+      // a block ends its statement where another begins: `{ … } el.title = …`
+      if (v === '{' && k + 1 < end && tokens[k + 1].k !== 'p') cut(k, 1);
+    }
+    items.push(item);
+    groups.set(p, items);
+    return items;
+  };
+  /**
+   * The strings of an item that is a literal (a string, or a template and what it interpolates) or a
+   * member holding one (`key: 'overview'`); none for any other item.
+   * @param {number[]} top - the item's tokens at its bracket's depth
+   */
+  const literalOf = (top) => {
+    const rest = top.length > 2 && tokens[top[1]].v === ':' && (tokens[top[0]].k === 'id' || tokens[top[0]].k === 'str') ? top.slice(2) : top;
+    if (rest.length === 0 || tokens[rest[0]].k !== 'str') return [];
+    const last = tokens[rest[rest.length - 1]];
+    if (rest.length === 1) return last.tpl && last.open ? [] : rest;
+    return tokens[rest[0]].tpl && tokens[rest[0]].open && last.tpl && !last.open ? rest.filter((k) => tokens[k].k === 'str') : [];
+  };
+  /** @param {number} n @returns {number[]} the tokens of the expression string n belongs to */
+  const expression = (n) => {
+    const p = parent[n], items = itemsOf(p), own = items[itemOf[n]];
+    const at = [];
+    for (let k = own.from; k <= own.to; k++) if (k !== n) at.push(k);
+    if (p >= 0 && (tokens[p].v === '(' || tokens[p].v === '{')) {
+      for (const item of items) if (item !== own && item.stmt === own.stmt) at.push(...literalOf(item.top));
+    }
+    return at;
+  };
+  tokens.forEach((t, n) => {
+    if (t.k !== 'str') return;
+    const at = expression(n).map((k) => tokens[k]);
+    out.push({ ...t, before: tokens.slice(Math.max(0, n - 12), n).map((x) => x.v), after: tokens.slice(n + 1, n + 3).map((x) => x.v),
+      near: at.filter((x) => x.k === 'str').map((x) => x.text), nearNames: at.filter((x) => x.k === 'id').map((x) => x.v) });
   });
   return out;
 }
@@ -277,6 +362,31 @@ describe('@jarenjs/locales — no uncataloged human text in a rendering module',
     assert.deepStrictEqual(scan("['span', {}, t('studio/project/untitled') ?? 'Untitled project'],"), []);
     assert.deepStrictEqual(scan("['span', { title: t(`play/card/${'compile'}`, 'Compile') }],"), []);
     assert.deepStrictEqual(scan("['span', { key: 'compile', title: 'Compile' }],"), []);
+    assert.deepStrictEqual(scan("['span', { title: t('studio/project/untitled', 'Untitled project') }],"), []);
+    assert.deepStrictEqual(scan("['span', { title: t(`studio/project/${name}`) ?? 'Untitled project', key: 'untitled' }],"), []);
+  });
+
+  it('a copy beside a word equal to an id that is not part of its expression fails', () => {
+    const file = 'packages/website/src/views/shell.js';
+    const source = readFileSync(join(ROOT, file), 'utf8');
+    const anchor = "['span', { class: 'brand-name' }, 'Jaren'],";
+    /** @param {string} added */
+    const scan = (added) => {
+      const changed = source.replace(anchor, `${anchor} ${added}`);
+      assert.notStrictEqual(changed, source, 'the probe found its anchor');
+      return unlisted(uncatalogedTexts((f) => (f === file ? changed : readFileSync(join(ROOT, f), 'utf8')))).map((h) => [h.file, h.text]);
+    };
+    // 'untitled' and 'compile' are the last segments of studio/project/untitled and play/card/compile
+    assert.deepStrictEqual(scan("['span', { key: 'untitled' }], ['span', {}, 'Untitled project'],"), [[file, 'Untitled project']]);
+    assert.deepStrictEqual(scan("say('untitled'); ['span', {}, 'Untitled project'],"), [[file, 'Untitled project']]);
+    assert.deepStrictEqual(scan("['span', { 'data-step': 'untitled' }, 'Untitled project'],"), [[file, 'Untitled project']]);
+    assert.deepStrictEqual(scan("['span', { title: pick('Untitled project', (v) => v === 'untitled') }],"), [[file, 'Untitled project']]);
+    assert.deepStrictEqual(scan("['span', { key: 'compile' }, ['b', { title: 'Compile' }]],"), [[file, 'Compile']]);
+    assert.deepStrictEqual(scan("['span', { title: 'Compile' }, 'compile'],"), [[file, 'Compile']]);
+    // a statement's head and a block before it are not the expression of the statement that follows
+    assert.deepStrictEqual(scan("if (k === 'untitled') { go(); } el.title = 'Untitled project';"), [[file, 'Untitled project']]);
+    assert.deepStrictEqual(scan("if (k === 'untitled') el.title = 'Untitled project';"), [[file, 'Untitled project']]);
+    assert.deepStrictEqual(scan("switch (k) { case 'untitled': el.title = 'Untitled project'; }"), [[file, 'Untitled project']]);
   });
 
   it('the lexer reads strings, templates, comments and regular expressions the way a parser does', () => {
