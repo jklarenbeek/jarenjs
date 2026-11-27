@@ -66,13 +66,21 @@ export const mermaidMessagesEn = /*#__PURE__*/ Object.freeze({
   'mermaid/flowchart/expected-node': 'expected a node after a link',
   'mermaid/flowchart/too-many-edges': 'a flowchart holds at most {max} edges',
   'mermaid/flowchart/unterminated-shape': 'unterminated \'{opener}\' shape for node \'{id}\'',
+  'mermaid/flowchart/unknown-shape': 'node \'{id}\' asks for the shape \'{shape}\', and no shape has that name (a shape name is lowercase, with no \'_\')',
+  'mermaid/flowchart/quote-in-label': 'node \'{id}\' has a \'"\' inside a label that is not quoted: quote the whole label, or write the quote as #quot;',
+  'mermaid/flowchart/subgraph-unnamed': 'a subgraph needs an id or a title after \'subgraph\'',
   'mermaid/sequence/outside-block': '\'{word}\' outside a block',
   'mermaid/sequence/stray-end': 'unexpected \'end\'',
   'mermaid/state/transition': '\'{line}\' is no transition: From --> To, with an optional \': label\'',
   'mermaid/state/note': '\'{line}\' is no note: note left of|right of <state> with \': text\' or a block up to \'end note\', or note "text" as <id>',
   'mermaid/state/unclosed-note': 'a note opened here is never closed with \'end note\'',
   'mermaid/class/relation': '\'{line}\' is no relation: From ["cardinality"] <operator> ["cardinality"] To, one per line, with an optional \': label\'',
+  'mermaid/class/nested-generic': 'class \'{name}\' nests one generic in another: a class name takes one level (Name~T~), and only a member\'s type may nest',
   'mermaid/er/relationship': '\'{line}\' is no relationship: LEFT <cardinality>--<cardinality> RIGHT : label',
+
+  // ——— parse diagnostics: pie ———
+  'mermaid/pie/header': '\'{word}\' does not belong on the pie line: it is pie, then showData, then title and the title text, each optional',
+  'mermaid/pie/line': '\'{line}\' is no pie line: a slice is "label" : value, the label quoted and the value a number of zero or more; title, accTitle and accDescr lines may come between',
 
   // ——— parse diagnostics: a Gantt's click statements ———
   'mermaid/click/no-id': 'click names no task id',

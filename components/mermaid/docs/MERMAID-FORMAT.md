@@ -122,7 +122,7 @@ member order (monomorphic; the structural hash is deterministic).
 |-------|---------|
 | node | `{ id, label, shape }` — shape ∈ rect, round, stadium, subroutine, cylinder, circle, doublecircle, diamond, hexagon, parallelogram, parallelogram_alt, trapezoid, trapezoid_alt, asymmetric (the bracket forms), or one of Mermaid's 34 shapes only `@{ shape: … }` names, by Mermaid's short name: datastore, bang, cloud, text, notch-rect, lin-rect, sm-circ, fr-circ, fork, hourglass, brace, brace-r, braces, bolt, doc, delay, h-cyl, lin-cyl, curv-trap, div-rect, tri, win-pane, f-circ, notch-pent, flip-tri, sl-rect, docs, st-rect, bow-rect, cross-circ, tag-doc, tag-rect, flag, lin-doc |
 | edge | `{ from, to, stroke, head, tail, length, label }` — stroke ∈ solid/thick/dotted/invisible (`~~~`, which places its ends and draws no line); head/tail ∈ none/arrow/circle/cross (`A o--o B`, `A x--x B`); `length` preserved so the printer is a fixed point |
-| subgraph | `{ id, label, direction, nodes[] }` |
+| subgraph | `{ id, label, direction, nodes[] }` — `nodes[]` holds its member nodes' ids and the id of each subgraph nested in it, as Mermaid lists them; a subgraph titled with no id of its own (`subgraph "…"`, `subgraph Title`) is named by the title (a quoted markdown title without its backticks), or, when the title holds a blank, `subGraph0`, `subGraph1`, … in the order subgraphs close, as Mermaid names it |
 | classDef / class / style | `{ name, styles }` / `{ node, name }` / `{ node, styles }` |
 | click | `{ ids[], href, target, call, tooltip }` — one action: `href` (a link, never drawn) or `call` (`{ name, args[] }`, recorded and never run); `target` ∈ `_self`/`_blank`/`_parent`/`_top` after a link, else null; `tooltip` the author's text, else null |
 
@@ -167,8 +167,11 @@ is a diamond `x`); a shape with no bracket form is named by Mermaid's short
 name, whichever alias wrote it (`manual-file` is `flip-tri`, `document` is
 `doc`), and `toMermaid` prints it as the metadata after the label in brackets
 (`A[x]@{ shape: doc }`, or `A@{ shape: doc }` where the label is the id); a
-name Mermaid has not (which it refuses) leaves the shape as it was, and the
-metadata's other entries are not kept. The renderer draws each of these in
+name Mermaid has not is refused, as Mermaid refuses it
+(`mermaid/flowchart/unknown-shape`; a shape name is lowercase, with no `_`),
+one Mermaid has and this tree draws no shape for (`state`, `choice`, `note`,
+`icon`, `anchor`) is a `rect`, and the metadata's other entries are not
+kept. The renderer draws each of these in
 Mermaid's shape class (a document's wave, a card's cut corner, a cylinder on
 its side, …), and the seven Mermaid draws as a mark without its label
 (`sm-circ`, `f-circ`, `fr-circ`, `fork`, `hourglass`, `bolt`, `cross-circ`)
@@ -181,9 +184,17 @@ of `"` that does not read on its own reads on to the line that closes the
 quote, each line trimmed and joined at a line break (`` n["`Line1
 Line 2`"] ``), in a node, an edge label or a subgraph title whose quote opens
 it (`subgraph s ["…`); a quote no line closes is refused at its line, as
-before. `subgraph` opens a subgraph
+before. A `"` inside a node label that opens with no quote is refused, as
+Mermaid refuses it (`A[He said "hi]`, `mermaid/flowchart/quote-in-label`;
+write the quote as `#quot;` or quote the whole label): an empty `""` reads, a
+label in `'…'` (how `toMermaid` quotes one that holds a `"`) reads, and so
+does a `"` that may close a stray quote earlier in its statement
+(`A["x] --> B[y"]`, which Mermaid reads as one label). `subgraph` opens a subgraph
 only as a word of its own: `subgraph1 --> B` links a node `subgraph1`, as in
-Mermaid. Text after a node where a link belongs
+Mermaid; a bare `subgraph` line (at most one blank after the keyword) is
+refused, as Mermaid refuses it (`mermaid/flowchart/subgraph-unnamed`), and two
+blanks or more open an untitled subgraph, as in Mermaid. A subgraph opened
+inside another is a member of it, and `toMermaid` prints it inside that one. Text after a node where a link belongs
 (`A --> B garbage`) is refused, as Mermaid refuses it. A `;` separates statements outside every label, where the
 statement reader finds labels (a quote counts only where it opens one, so the
 apostrophe in `A[it's] --> B; C --> D` is text and the `;` separates), and a `;`
@@ -291,9 +302,15 @@ class of the same name is not taken as it. A class is named without its generic
 wherever the generic is written (`class Square~Shape~`, `class Square~Shape~ {`,
 `Square~Shape~ <|-- Rect`, `Square~Shape~ : x` all name `Square`), as Mermaid
 names it, and keeps it as `generic` (`Shape`), which `toMermaid` prints after
-the name and the panel draws as Mermaid does (`Square<Shape>`, `Map<K,V>`; a nested
-generic, which Mermaid refuses in a class name, draws nested:
-`List~List~int~~` as `List<List<int>>`). `class Name["label"]` sets the label, and
+the name and the panel draws as Mermaid does (`Square<Shape>`, `Map<K,V>`). A
+nested generic in a class name — a name, two or more `~`-led words, then the
+`~`s that close them — is refused wherever the name is written, as Mermaid
+refuses it (`class List~List~int~~`, `class A~B~C~`, `mermaid/class/nested-generic`;
+other runs of `~` Mermaid reads, such as `A~~B~~`, read as before);
+a member's type may nest, and a backtick-quoted name reads one, drawn nested
+(`` `Grid~List~int~~` `` as `Grid<List<int>>`), which `toMermaid` prints back in
+backticks. An `<<annotation>>` line in a class body (`<<enumeration>>`) is no
+member, as Mermaid reads it, and is not kept, as in a header. `class Name["label"]` sets the label, and
 a `:::style` after a class name is not kept; a
 click shaped as a flowchart's (§4.1) in the forms Mermaid's class grammar reads
 — `click Name href "url"` with an optional tooltip and target, `click Name call
@@ -316,7 +333,9 @@ prints them comma-separated, as Mermaid writes them). State:
 guard, effect, parent }] }` — a composite state's members carry its id as
 `parent`, and a state is never its own ancestor (opening `state C {`
 inside `C`, or declaring an ancestor inside its own descendant, leaves it
-under the parent it already has); a transition's `label` is the verbatim
+under the parent it already has); `state X` (or `state "Long" as X`, which
+labels X) whose `{` opens a later line opens X as `state X {` does, past
+comment lines (and blank ones, where Mermaid refuses a blank line between); a transition's `label` is the verbatim
 text after `:` (what renderers draw and `toMermaid` prints), and
 `event`/`guard`/`effect` are its UML reading, parsed as
 `event [guard] / effect` with every part optional: the first `[` opens
@@ -330,7 +349,14 @@ a line of its own, a later one replacing an earlier one and a blank one
 leaving none, and `showData` is read only before the header's title
 (`pie title Pets showData` is titled `Pets showData`); a `%%` comment ends
 a title (quoted or not) and may follow a slice's value, as Mermaid reads
-them all; `toMermaid` prints the title on its own line. With
+them all; `toMermaid` prints the title on its own line. `accTitle` and
+`accDescr` lines (and an `accDescr { … }` block) are no slices. Any other line
+is refused, as Mermaid refuses it (`mermaid/pie/line`): a slice's label is
+quoted (`"Dogs" : 1` or `'Dogs' : 1`; `Dogs : 1` is refused; a label in
+`"…"` may hold a `"`, as it read before, where Mermaid refuses it) and its value a
+number of zero or more as Mermaid writes one (no sign, no leading zero, no
+bare `.`), and the header holds only `showData` and the title
+(`pie titled`, `pie foo showData` are refused, `mermaid/pie/header`). With
 `showData` the injected renderer's legend lists each slice's value as
 written (`Dogs [40]`), as Mermaid's does, and without it each share
 (`Dogs (53.3%)`).
@@ -391,7 +417,8 @@ answer rather than only what the source said.
 
 `meta` holds the header lines **verbatim** (`title`, `dateFormat`,
 `axisFormat`, `excludes`, `includes`, `inclusiveEndDates`, `topAxis`,
-`tickInterval`, `weekday`, `weekend`, `todayMarker`), which is what keeps `printGantt` a
+`tickInterval`, `weekday`, `weekend`, `todayMarker`; a directive's word ends
+at a blank or a tab, `title<TAB>Plan`, as Mermaid reads it), which is what keeps `printGantt` a
 fixed point. `rules` holds the same directives *interpreted*:
 `{ dateFormat, axisFormat, tick, weekStart, weekendStart, excludes,
 includes, inclusiveEndDates, todayMarker }`, where `tick` is
@@ -717,7 +744,7 @@ type) and the reverse of `parseMermaid`. The normative contract:
 The flowchart printer emits in a fixed order — node declarations (AST
 order) → subgraph membership → edges → classDef/class/style → click — and it is
 that ordering which makes node order and edge order a fixed point on the
-round trip. Subgraphs, however, round-trip **structurally, not as a
+round trip. A subgraph nested in another prints inside it. Subgraphs, however, round-trip **structurally, not as a
 deep-equal fixed point**: they emit their members by bare id and a
 re-parse reconstructs membership, so the shape survives but the strict
 `nodes[]` ordering of a subgraph is not guaranteed to be `===`-identical
@@ -727,8 +754,9 @@ The state printer keeps the order of `states` (layout reads it): when the
 plain spelling would introduce the states in another order, it declares every
 state first. The class printer writes a member that holds a `}` or starts with
 `%%` as a `Name : member` line, because a body ends at its first `}` and drops
-comment-looking lines; the pie printer writes a label's line break as `<br/>`
-and a value as a plain decimal. The flowchart printer writes a markdown string
+comment-looking lines; the pie printer writes a label's line break as `<br/>`,
+a label holding a `"` (and no `'`) in `'…'`, which Mermaid reads, and a value
+as a plain decimal. The flowchart printer writes a markdown string
 in quotes (`` ["`**a**`"] ``, `` |"`b`"| ``), which Mermaid needs to read it as
 one, its line breaks as newlines inside the quotes (one holding a quote of its
 own writes `<br/>`), and an edge label in the pipe form, quoted where it holds a `|` or a `;` or

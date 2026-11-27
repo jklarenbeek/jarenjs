@@ -130,6 +130,56 @@ function labelSource(label, closer, needsQuote) {
 }
 
 /**
+ * Which subgraph each subgraph holds, by the member id that names it: the
+ * nearest subgraph before it in the list with that id (the reader lists an
+ * inner subgraph before the one around it) that no other subgraph holds
+ * yet, then the nearest after it. A node of the same id stays declared on
+ * its own line, so it reads back too.
+ * @param {any} ast a flowchart tree
+ * @returns {Map<object, Map<string, object>>}
+ */
+function nestedSubgraphs(ast) {
+  /** @type {Map<object, Map<string, object>>} */
+  const inner = new Map();
+  const held = new Set();
+  const list = ast.subgraphs;
+  for (let at = 0; at < list.length; at++) {
+    for (const id of list[at].nodes) {
+      const pick = (/** @type {number} */ i) => i !== at && list[i].id === id && !held.has(list[i]) && !holds(inner, list[i], list[at]);
+      let found = -1;
+      for (let i = at - 1; i >= 0 && found === -1; i--) if (pick(i)) found = i;
+      for (let i = at + 1; i < list.length && found === -1; i++) if (pick(i)) found = i;
+      if (found === -1) continue;
+      held.add(list[found]);
+      let children = inner.get(list[at]);
+      if (children === undefined) inner.set(list[at], children = new Map());
+      children.set(id, list[found]);
+    }
+  }
+  return inner;
+}
+
+/**
+ * Whether `outer` holds `sg`, directly or through the subgraphs it holds.
+ * @param {Map<object, Map<string, object>>} inner
+ * @param {object} outer
+ * @param {object} sg
+ * @returns {boolean}
+ */
+function holds(inner, outer, sg) {
+  const seen = new Set();
+  const stack = [outer];
+  while (stack.length > 0) {
+    const at = /** @type {object} */ (stack.pop());
+    if (at === sg) return true;
+    if (seen.has(at)) continue;
+    seen.add(at);
+    for (const child of inner.get(at)?.values() ?? []) stack.push(child);
+  }
+  return false;
+}
+
+/**
  * @param {any} ast
  * @returns {string}
  */
@@ -142,15 +192,23 @@ function printFlowchart(ast) {
     out.push(nodeDecl(node));
   }
 
-  // 2. Subgraphs: reference members by bare id (membership only).
-  for (const sg of ast.subgraphs) {
-    out.push(sg.label && sg.label !== ''
+  // 2. Subgraphs: reference members by bare id (membership only); a member
+  //    that names another subgraph is that subgraph, written inside this one
+  const inner = nestedSubgraphs(ast);
+  const printSubgraph = (/** @type {any} */ sg, /** @type {string} */ indent) => {
+    out.push(indent + (sg.label && sg.label !== ''
       ? `subgraph ${sg.id} [${labelSource(sg.label, null, RE_TITLE_NEEDS_QUOTE)}]`
-      : `subgraph ${sg.id}`);
-    if (sg.direction) out.push('  direction ' + sg.direction);
-    for (const id of sg.nodes) out.push('  ' + id);
-    out.push('end');
-  }
+      : `subgraph ${sg.id}`));
+    if (sg.direction) out.push(indent + '  direction ' + sg.direction);
+    for (const id of sg.nodes) {
+      const child = inner.get(sg)?.get(id);
+      if (child === undefined) out.push(indent + '  ' + id);
+      else printSubgraph(child, indent + '  ');
+    }
+    out.push(indent + 'end');
+  };
+  const nested = new Set([...inner.values()].flatMap((children) => [...children.values()]));
+  for (const sg of ast.subgraphs) if (!nested.has(sg)) printSubgraph(sg, '');
 
   // 3. Edges in AST order.
   for (const e of ast.edges) {
@@ -347,8 +405,11 @@ function printClass(ast) {
   // a name only words may spell is written bare; any other in backticks
   const name = (/** @type {string} */ n) => (/^[^\s"`:;<>*|()\-[\]{}~]+$/.test(n) ? n : `\`${n}\``);
   for (const cls of ast.classes) {
-    const generic = cls.generic == null ? '' : `~${cls.generic}~`;
-    const head = `class ${name(cls.name)}${generic}${cls.label !== cls.name ? `["${cls.label}"]` : ''}`;
+    // a nested generic reads only inside a backtick-quoted name (Mermaid
+    // refuses it in a bare one)
+    const written = cls.generic == null ? name(cls.name)
+      : cls.generic.includes('~') ? `\`${cls.name}~${cls.generic}~\`` : `${name(cls.name)}~${cls.generic}~`;
+    const head = `class ${written}${cls.label !== cls.name ? `["${cls.label}"]` : ''}`;
     if (cls.members.length === 0) {
       out.push(head);
     }
@@ -540,7 +601,12 @@ function printGantt(ast) {
 function printPie(ast) {
   const out = ['pie' + (ast.showData ? ' showData' : '')];
   if (ast.title) out.push('title ' + ast.title);
-  for (const s of ast.slices) out.push(`"${s.label.replace(/\n/g, '<br/>')}" : ${plainDecimal(s.value)}`);
+  for (const s of ast.slices) {
+    const label = s.label.replace(/\n/g, '<br/>');
+    // a label holding a `"` (and no `'`) is written in `'…'`, which Mermaid reads
+    const quote = label.includes('"') && !label.includes("'") ? "'" : '"';
+    out.push(`${quote}${label}${quote} : ${plainDecimal(s.value)}`);
+  }
   return out.join('\n') + '\n';
 }
 

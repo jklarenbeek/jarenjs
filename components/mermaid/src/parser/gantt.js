@@ -143,7 +143,8 @@ function scan(lines, offset) {
     const line = lines[li].trim();
     if (line === '' || line.startsWith('%%')) continue;
     const at = offset + li + 1;
-    const sp = line.indexOf(' ');
+    // a directive's word ends at a blank or a tab (`title\tPlan`), as Mermaid reads it
+    const sp = line.search(/[ \t]/);
     const key = sp === -1 ? line : line.slice(0, sp);
 
     if (HEADER_KEYS.has(key) && !isNamedLikeDirective(key, line)) {

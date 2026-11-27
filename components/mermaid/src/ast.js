@@ -106,7 +106,7 @@ export function flowEdge(from, to, stroke, head, tail, length, label) {
  * @param {string} id
  * @param {string} label
  * @param {string|null} direction
- * @param {string[]} nodes ids of member nodes
+ * @param {string[]} nodes ids of its member nodes and of the subgraphs nested in it
  * @returns {object}
  */
 export function flowSubgraph(id, label, direction, nodes) {

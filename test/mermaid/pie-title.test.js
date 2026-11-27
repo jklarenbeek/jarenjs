@@ -40,10 +40,18 @@ describe('a pie title on the header line', () => {
   });
 
   it('reads no title from a header without the keyword', () => {
-    for (const header of ['pie', 'pie showData', 'pie titled']) {
+    for (const header of ['pie', 'pie showData']) {
       assert.equal(read(`${header}\n "Dogs" : 1`).title, null, header);
     }
     assert.equal(read('pie showData\n "Dogs" : 1').showData, true);
+  });
+
+  it('refuses a header word that is neither showData nor title, as Mermaid refuses it, where it was read past', () => {
+    for (const [header, word] of [['pie titled', 'titled'], ['pie foo showData', 'foo'], ['pie showdata', 'showdata'],
+      ['pie showData showData', 'showData showData'], ['pie foo title Pets', 'foo']]) {
+      assert.throws(() => parseMermaid(`${header}\n "Dogs" : 1`),
+        (/** @type {any} */ error) => error.msgid === 'mermaid/pie/header' && error.line === 1 && error.params.word === word, header);
+    }
   });
 });
 
@@ -52,7 +60,9 @@ describe('a pie title on its own line', () => {
     assert.equal(read('pie\n title Pets\n "Dogs" : 1').title, 'Pets');
     assert.equal(read('pie\n title\tTabbed own line\n "Dogs" : 1').title, 'Tabbed own line');
     assert.equal(read('pie\n title : 5\n "Dogs" : 1').title, ': 5');
-    assert.deepEqual(read('pie\n titled X\n "Dogs" : 1'), { title: null, showData: false, slices: [['Dogs', 1]] });
+    // Mermaid refuses a line that is no title, no slice and no accessibility line
+    assert.throws(() => parseMermaid('pie\n titled X\n "Dogs" : 1'),
+      (/** @type {any} */ error) => error.msgid === 'mermaid/pie/line' && error.line === 2 && error.params.line === 'titled X');
   });
 
   it('replaces a title read before it, and a blank one leaves none', () => {

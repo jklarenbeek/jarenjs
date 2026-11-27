@@ -87,7 +87,7 @@ export function parseFlowchart(lines, lineOffset, direction) {
   const styles = [];
   /** @type {import('./click.js').NodeClick[]} */
   const clicks = [];
-  /** @type {{ id: string, label: string, direction: string|null, nodes: string[] }[]} */
+  /** @type {{ id: string|null, label: string, direction: string|null, nodes: string[] }[]} */
   const subgraphStack = [];
   /** @type {Set<string>} */
   const edgeIds = new Set();
@@ -111,6 +111,18 @@ export function parseFlowchart(lines, lineOffset, direction) {
     return node;
   };
 
+  // A finished subgraph joins the list (an inner one before the one around
+  // it) and, nested, is a member of the subgraph around it; one with no id
+  // of its own is numbered in the order subgraphs finish, `subGraph0` on,
+  // as Mermaid numbers it
+  const closeSubgraph = () => {
+    const group = /** @type {{ id: string|null, label: string, direction: string|null, nodes: string[] }} */ (subgraphStack.pop());
+    const id = group.id ?? `subGraph${subgraphs.length}`;
+    subgraphs.push(flowSubgraph(id, group.label, group.direction, group.nodes));
+    const outer = subgraphStack.at(-1);
+    if (outer !== undefined && !outer.nodes.includes(id)) outer.nodes.push(id);
+  };
+
   /**
    * Read a statement that opens with a keyword (`subgraph`, `end`,
    * `direction`, `classDef`, `class`, `style`, `click`, `linkStyle`).
@@ -121,11 +133,8 @@ export function parseFlowchart(lines, lineOffset, direction) {
   const readKeyword = (line, lineNo) => {
     // subgraph … end
     if (line === 'end') {
-      const group = subgraphStack.pop();
-      if (group === undefined) failWith('mermaid/flowchart/stray-end', {}, lineNo);
-      // A finished subgraph goes to the list only when it is top-level;
-      // nested subgraphs still record membership via their id.
-      subgraphs.push(flowSubgraph(group.id, group.label, group.direction, group.nodes));
+      if (subgraphStack.length === 0) failWith('mermaid/flowchart/stray-end', {}, lineNo);
+      closeSubgraph();
       return true;
     }
     // `subgraph` is a keyword only as a word of its own: `subgraph1` is a node
@@ -185,6 +194,11 @@ export function parseFlowchart(lines, lineOffset, direction) {
       line = joined.line;
       li = joined.last;
     }
+    // a bare `subgraph` (with at most one blank after it) names nothing, and
+    // Mermaid refuses it; two blanks or more read as an untitled subgraph
+    if (line === 'subgraph' && RE_BARE_SUBGRAPH.test(lines[li].trimStart())) {
+      failWith('mermaid/flowchart/subgraph-unnamed', {}, lineNo);
+    }
     // a line that opens with a keyword is that one statement, read whole
     if (readKeyword(line, lineNo)) continue;
     // A node/edge chain: split on ';' first (multiple statements per line);
@@ -199,15 +213,14 @@ export function parseFlowchart(lines, lineOffset, direction) {
   }
 
   // Close any dangling subgraphs (lenient).
-  while (subgraphStack.length > 0) {
-    const group = subgraphStack.pop();
-    subgraphs.push(flowSubgraph(group.id, group.label, group.direction, group.nodes));
-  }
+  while (subgraphStack.length > 0) closeSubgraph();
 
   const nodes = nodeOrder.map((id) => nodeMap.get(id));
   return flowchartAst(direction, nodes, edges, subgraphs, classDefs, classes, styles, clicks);
 }
 
+/** A `subgraph` line with no name, at most one blank after the keyword. */
+const RE_BARE_SUBGRAPH = /^subgraph\s?$/;
 /** `subgraph` and a blank: the keyword, not a node id that begins with it. */
 const RE_SUBGRAPH = /^subgraph\s/;
 /** A subgraph header whose title opens with a quote: `subgraph s ["…`, `subgraph "…`. */
@@ -323,13 +336,19 @@ function labelEnd(s, at, unclosed) {
   return at;
 }
 
+/** A markdown string's text between its backticks. */
+const RE_MARKDOWN_TITLE = /^`([\s\S]+)`$/;
+
 /**
  * Parse `subgraph` header: `id`, `id[title]`, `"title"`, or `id [title]`.
+ * A title that is also the id names the subgraph by its text (a quoted
+ * markdown title without its backticks); one with a blank in it names
+ * none, and the subgraph is numbered when it closes, as Mermaid numbers it.
  * @param {string} rest
- * @returns {{ id: string, label: string }}
+ * @returns {{ id: string|null, label: string }}
  */
 function parseSubgraphHeader(rest) {
-  if (rest === '') return { id: 'sub', label: '' };
+  if (rest === '') return { id: null, label: '' };
   // id[title] form
   const br = rest.indexOf('[');
   if (br !== -1 && rest.endsWith(']')) {
@@ -339,10 +358,14 @@ function parseSubgraphHeader(rest) {
   }
   if (rest.startsWith('"') && rest.endsWith('"')) {
     const label = stripQuotes(rest.slice(1, -1));
-    return { id: label, label };
+    const id = RE_MARKDOWN_TITLE.exec(label)?.[1] ?? label;
+    return { id: RE_BLANK.test(id) ? null : id, label };
   }
-  return { id: rest, label: rest };
+  return { id: RE_BLANK.test(rest) ? null : rest, label: rest };
 }
+
+/** A blank anywhere in a title: such a title names no subgraph. */
+const RE_BLANK = /\s/;
 
 /** The most edges one flowchart may declare. */
 const MAX_EDGES = 10000;
@@ -432,7 +455,18 @@ function readVertex(s, pos, lineNo) {
   if (opened !== null) {
     const closed = scanToCloser(s, opened.contentStart, opened.closers);
     if (closed === null) failWith('mermaid/flowchart/unterminated-shape', { opener: opened.opener, id }, lineNo);
-    label = stripQuotes(s.slice(opened.contentStart, closed.at).trim());
+    const written = s.slice(opened.contentStart, closed.at).trim();
+    // a `"` in a label that opens with no quote is refused, as Mermaid
+    // refuses it, where it was read as text; an empty `""` Mermaid reads, a
+    // label in `'…'` (how `toMermaid` quotes one that holds a `"`) reads as
+    // before, and so does a `"` that may close a stray one earlier in the
+    // statement (`A["x] --> B[y"]`, which Mermaid reads as one label)
+    const first = written.charCodeAt(0);
+    if (first !== 0x22 && first !== 0x27 && written.replaceAll('""', '').includes('"')
+      && countCharCode(s.slice(0, opened.contentStart), 0x22) % 2 === 0) {
+      failWith('mermaid/flowchart/quote-in-label', { id }, lineNo);
+    }
+    label = stripQuotes(written);
     shape = closed.shape;
     p = closed.end;
   }
@@ -452,6 +486,7 @@ function readVertex(s, pos, lineNo) {
     const end = metadataEnd(s, p + 2);
     if (end !== -1) {
       const meta = nodeMetadata(s.slice(p + 2, end - 1));
+      if (meta.unknown !== null) failWith('mermaid/flowchart/unknown-shape', { id, shape: meta.unknown }, lineNo);
       if (meta.label !== null) label = meta.label;
       if (meta.shape !== null) shape = meta.shape;
       p = end;
@@ -482,7 +517,7 @@ const METADATA_SHAPES = /** @type {Record<string, string>} */ ({
   'trap-b': 'trapezoid', priority: 'trapezoid', 'trapezoid-bottom': 'trapezoid', trapezoid: 'trapezoid',
   'trap-t': 'trapezoid_alt', manual: 'trapezoid_alt', 'trapezoid-top': 'trapezoid_alt',
   'inv-trapezoid': 'trapezoid_alt',
-  'dbl-circ': 'doublecircle', 'double-circle': 'doublecircle',
+  'dbl-circ': 'doublecircle', 'double-circle': 'doublecircle', doublecircle: 'doublecircle',
   odd: 'asymmetric',
   datastore: 'datastore', 'data-store': 'datastore',
   bang: 'bang', cloud: 'cloud', text: 'text',
@@ -517,20 +552,27 @@ const METADATA_SHAPES = /** @type {Record<string, string>} */ ({
   'lin-doc': 'lin-doc', 'lined-document': 'lin-doc',
 });
 
+/**
+ * Mermaid's shape names this tree draws no shape of its own for: a node
+ * that asks for one is drawn a rectangle.
+ */
+const UNDRAWN_SHAPES = new Set(['state', 'choice', 'note', 'icon', 'anchor']);
+
 /** One `key: value` entry of a node's metadata; the value may be quoted. */
 const RE_METADATA_ENTRY = /\s*([\w-]+)\s*:\s*("[^"]*"|'[^']*'|[^,]*?)\s*(?:,|$)/y;
 
 /**
  * Read a node's `@{ … }` metadata as Mermaid does: its `label`, and its
  * `shape` by Mermaid's name for it. A shape name Mermaid does not know (it
- * refuses the diagram) leaves the shape as written; the rest of the entries
- * (`icon`, `img`, `pos`, …) are not kept.
+ * refuses the diagram) is `unknown`, for the reader to refuse; the rest of
+ * the entries (`icon`, `img`, `pos`, …) are not kept.
  * @param {string} body the text between `@{` and `}`
- * @returns {{ label: string|null, shape: string|null }}
+ * @returns {{ label: string|null, shape: string|null, unknown: string|null }}
  */
 function nodeMetadata(body) {
   let label = null;
   let shape = null;
+  let unknown = null;
   RE_METADATA_ENTRY.lastIndex = 0;
   for (let m; RE_METADATA_ENTRY.lastIndex < body.length && (m = RE_METADATA_ENTRY.exec(body)) !== null;) {
     if (m[0] === '') break;
@@ -538,10 +580,11 @@ function nodeMetadata(body) {
     if (m[1] === 'label') label = stripQuotes(m[2]) || label;
     else if (m[1] === 'shape') {
       const name = stripQuotes(m[2]);
-      shape = METADATA_SHAPES[name] ?? null;
+      shape = METADATA_SHAPES[name] ?? (UNDRAWN_SHAPES.has(name) ? 'rect' : null);
+      unknown = shape === null && name !== '' ? name : null;
     }
   }
-  return { label, shape };
+  return { label, shape, unknown };
 }
 
 /**

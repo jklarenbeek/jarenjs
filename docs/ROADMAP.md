@@ -243,16 +243,20 @@ delete it or fix it.
 ## @jarenjs/mermaid
 
 - [ ] **Mermaid forms still read differently from Mermaid** — measured against
-  Mermaid 11.16.1 on its own syntax-doc examples: an `<<enumeration>>` line
-  inside a class body counts as a member; a subgraph nested in another is not
-  its member, and one named by a quoted markdown title keeps the backticks in
-  its id; `state X` with its `{` on the next line reads a state `{`; a gantt
-  `title` followed by a tab (`title<TAB>Plan`) reads no title; and a few lines
-  Mermaid refuses still read: a node `@{ shape: … }` Mermaid has no name for,
-  a lone `"` inside an unquoted label (`A[He said "hi]`), a nested generic in
-  a class name (`class List~List~int~~`), a bare `subgraph` line, a pie slice
-  with an unquoted label (`Dogs : 1`) and a pie header with a word Mermaid has
-  no keyword for (`pie foo showData`, `pie titled`).
+  Mermaid 11.16.1: a few lines Mermaid refuses still read: an empty subgraph
+  title (`subgraph ""`, `subgraph s []`), a bare `subgraph` after a `;`, a
+  subgraph never closed by `end`, `state X <<choice>> {`, a `{` line that
+  follows no `state X` (or follows one past a blank line), a `"` inside an
+  unquoted edge label (`A -- a"b --> B`, `A -->|a"b| B`), a node label that
+  opens a quote it never closes (`A["x]`), a label in single quotes that holds
+  a `"` (`A['He said "Hi"']`, the form `toMermaid` prints for such a label, so
+  that printed text does not read in Mermaid), and a pie label in `"…"` that
+  holds a `"` (`"a"b" : 1`); and a few read otherwise: an empty `""` inside a
+  label (`A[a""b]`, Mermaid `ab`), `A["x] --> B[y"]` (Mermaid: one node
+  labelled `x] --> B[y`), a backtick class name holding a nested generic
+  (Mermaid reads `` `Grid~List~int~~` `` as `Grid` of `List`), a class name
+  with runs of `~` (`A~~B~~`, Mermaid's class `AB`), and a class's
+  `<<annotation>>`, which is not kept where Mermaid draws it above the name.
 - [ ] **Full layout for the secondary types** — class and ER render as structured panels, not domain-specific layouts; mindmap/gitGraph/journey/timeline parse-accept with a placeholder. Real layouts are the next coverage push (tracked honestly in the benchmark scorecard).
 - [ ] **Layout/perf workstream** — dagre-lite handles ranks and straight
   edges; orthogonal edge routing, subgraph clustering and crossing reduction

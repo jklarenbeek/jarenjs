@@ -47,12 +47,15 @@ describe('flowchart — a quoted label over lines', () => {
     assert.deepEqual(nodes('flowchart LR\n  a["one\n  two"] --> b'), [['a', 'one\ntwo', 'rect'], ['b', 'b', 'rect']]);
   });
 
-  it('still reads a line that reads alone, a quote in it as text, and refuses a quote no line closes at its line', () => {
-    assert.deepEqual(nodes('flowchart LR\n  A[He said "hi]\n  B["x"]'), [['A', 'He said "hi', 'rect'], ['B', 'x', 'rect']]);
-    // a subgraph title the quote does not open reads alone, as before
-    const { ast } = parseMermaid('flowchart LR\n  subgraph 6" pipes\n  a\n  end\n  c[say "hi]');
-    assert.deepEqual([ast.subgraphs.map((/** @type {any} */ g) => [g.id, g.nodes]), ast.nodes.map((/** @type {any} */ n) => [n.id, n.label])],
-      [[['6" pipes', ['a']]], [['a', 'a'], ['c', 'say "hi']]]);
+  it('refuses a quote inside a label that is not quoted at its line, reads a subgraph title the quote does not open alone, and refuses a quote no line closes at its line', () => {
+    // Mermaid refuses `A[He said "hi]`; it was read as the text `He said "hi`
+    assert.throws(() => parseMermaid('flowchart LR\n  A[He said "hi]\n  B["x"]'),
+      (/** @type {any} */ error) => error.msgid === 'mermaid/flowchart/quote-in-label' && error.line === 2 && error.params.id === 'A');
+    // a subgraph title the quote does not open reads alone, as before (its
+    // blank leaves it no id, so it is numbered)
+    const { ast } = parseMermaid('flowchart LR\n  subgraph 6" pipes\n  a\n  end\n  c[say hi]');
+    assert.deepEqual([ast.subgraphs.map((/** @type {any} */ g) => [g.id, g.label, g.nodes]), ast.nodes.map((/** @type {any} */ n) => [n.id, n.label])],
+      [[['subGraph0', '6" pipes', ['a']]], [['a', 'a'], ['c', 'say hi']]]);
     assert.throws(() => parseMermaid('flowchart LR\n  a["`never closed\n  b --> c'),
       (/** @type {any} */ error) => error.name === 'MermaidParseError' && error.line === 2);
   });
@@ -74,9 +77,17 @@ describe('flowchart — a node\'s `@{ … }` metadata', () => {
     assert.deepEqual(nodes('flowchart LR\n  a(round)@{ label: m }'), [['a', 'm', 'round']]);
   });
 
-  it('names a shape with no bracket form by Mermaid\'s short name, keeps the shape for a name Mermaid has not, and an empty label shows the id', () => {
-    assert.deepEqual(nodes('flowchart LR\n  a@{ shape: manual-file, label: "File Handling" }\n  b(x)@{ shape: nope }\n  c@{ label: "" }'),
-      [['a', 'File Handling', 'flip-tri'], ['b', 'x', 'round'], ['c', 'c', 'rect']]);
+  it('names a shape with no bracket form by Mermaid\'s short name, draws a Mermaid name this tree has no shape for a rectangle, keeps the shape for an empty name, and an empty label shows the id', () => {
+    assert.deepEqual(nodes('flowchart LR\n  a@{ shape: manual-file, label: "File Handling" }\n  b(x)@{ shape: anchor }\n  c@{ label: "" }\n  d(y)@{ shape: }\n  e@{ shape: doublecircle }'),
+      [['a', 'File Handling', 'flip-tri'], ['b', 'x', 'rect'], ['c', 'c', 'rect'], ['d', 'y', 'round'], ['e', 'e', 'doublecircle']]);
+  });
+
+  it('refuses a shape name Mermaid has not, as Mermaid refuses it, where the node kept its shape', () => {
+    for (const shape of ['nope', 'Diamond', 'lean_right', 'square', 'roundedRect', '"nope"']) {
+      assert.throws(() => parseMermaid(`flowchart LR\n  a\n  b(x)@{ shape: ${shape} }`),
+        (/** @type {any} */ error) => error.msgid === 'mermaid/flowchart/unknown-shape' && error.line === 3
+          && error.params.id === 'b' && error.params.shape === shape.replaceAll('"', ''), shape);
+    }
   });
 
   it('prints the shape it read in brackets', () => {
@@ -121,10 +132,10 @@ describe('classDiagram — a generic', () => {
     printsBack('classDiagram\n  class A["x<y"] {\n    +m\n  }');
   });
 
-  it('prints it back after the name and draws it as Mermaid does, a nested one (which Mermaid refuses in a name) nested', () => {
-    assert.equal(printsBack('classDiagram\n  class Square~Shape~\n  Map~K,V~ --> List~List~int~~'),
-      'classDiagram\nclass Square~Shape~\nclass Map~K,V~\nclass List~List~int~~\nMap --> List\n');
-    const svg = renderToString(renderMermaid('classDiagram\n  class Square~Shape~\n  class Map~K,V~\n  class Grid~List~int~~'));
+  it('prints it back after the name and draws it as Mermaid does, a nested one (read only in a backtick-quoted name) nested', () => {
+    assert.equal(printsBack('classDiagram\n  class Square~Shape~\n  Map~K,V~ --> List~int~\n  class `Grid~List~int~~`'),
+      'classDiagram\nclass Square~Shape~\nclass Map~K,V~\nclass List~int~\nclass `Grid~List~int~~`\nMap --> List\n');
+    const svg = renderToString(renderMermaid('classDiagram\n  class Square~Shape~\n  class Map~K,V~\n  class `Grid~List~int~~`'));
     assert.ok(svg.includes('Square&lt;Shape&gt;') && svg.includes('Map&lt;K,V&gt;') && svg.includes('Grid&lt;List&lt;int&gt;&gt;'), svg);
   });
 });

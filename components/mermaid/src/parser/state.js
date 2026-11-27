@@ -12,8 +12,9 @@
  * fits no UML pattern reads whole as the event, so plain labels keep
  * their historical meaning byte for byte.
  *
- * Composite states (`state Foo { … }`) stay in a flat table with parent
- * ids on both states and transitions, at arbitrary nesting depth.
+ * Composite states (`state Foo { … }`, the `{` on the head's line or a
+ * later one) stay in a flat table with parent ids on both states and
+ * transitions, at arbitrary nesting depth.
  */
 
 import { failWith } from '../errors.js';
@@ -179,6 +180,24 @@ export function stateDeclaration(id) {
   return id.includes('"') ? `state ${id}` : `state "${id}" as ${id}`;
 }
 
+/**
+ * The line after `lines[at]` that opens with the `{` of a composite state,
+ * past comment lines (which reach the reader blank, so a blank line between
+ * reads on too, where Mermaid refuses it); -1 when the next line with a
+ * statement does not open with one.
+ * @param {string[]} lines
+ * @param {number} at
+ * @returns {number}
+ */
+function braceLineAfter(lines, at) {
+  for (let i = at + 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line === '' || line.startsWith('%%')) continue;
+    return line.startsWith('{') ? i : -1;
+  }
+  return -1;
+}
+
 /** The longest parent chain walked to decide whether a re-declared state is an ancestor. */
 const MAX_ANCESTOR_WALK = 1000;
 
@@ -225,6 +244,18 @@ export function parseState(lines, lineOffset = 0) {
   };
 
   /**
+   * Open a composite state: the state its `state …` head names (a
+   * `state "description" as X` head names X), whose `{` follows the head.
+   * @param {string} head the opener without its `{`
+   */
+  const openComposite = (head) => {
+    const sa = RE_STATE_AS.exec(head);
+    const id = sa !== null ? sa[2] : head.slice('state '.length).trim().split(/\s+/)[0];
+    ensure(id, sa !== null ? sa[1] : null, true);
+    parentStack.push(id);
+  };
+
+  /**
    * Read one statement.
    * @param {string} line
    * @param {number} lineNo
@@ -232,12 +263,9 @@ export function parseState(lines, lineOffset = 0) {
   const read = (line, lineNo) => {
     if (line === 'end' || line === '}') { parentStack.pop(); return; }
 
-    // Composite state opener: `state Foo {`
+    // Composite state opener: `state Foo {`, `state "Long name" as Foo {`
     if (line.startsWith('state ') && line.endsWith('{')) {
-      const inner = line.slice('state '.length, -1).trim();
-      const id = inner.split(/\s+/)[0];
-      ensure(id, null, true);
-      parentStack.push(id);
+      openComposite(line.slice(0, -1).trim());
       return;
     }
 
@@ -322,7 +350,16 @@ export function parseState(lines, lineOffset = 0) {
     }
     // a multi-line accessible description: `accDescr {` up to `}`
     if (/^accDescr\s*\{/.test(line)) { inDescription = !line.includes('}'); continue; }
-    for (const statement of stateStatements(line)) read(statement, lineNo);
+    // `state X` (or `state "…" as X`) whose `{` opens a later line, with
+    // only comment lines between, opens X as `state X {` does
+    const brace = RE_STATE_PLAIN.test(line) || RE_STATE_AS.test(line) ? braceLineAfter(lines, li) : -1;
+    if (brace !== -1) {
+      openComposite(line);
+      li = brace;
+      line = lines[li].trim().slice(1).trim();
+      if (line === '') continue;
+    }
+    for (const statement of stateStatements(line)) read(statement, lineOffset + li + 1);
   }
   if (noteOpenedAt !== null) failWith('mermaid/state/unclosed-note', {}, noteOpenedAt);
 

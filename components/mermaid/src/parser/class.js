@@ -5,9 +5,11 @@
  * relations (`<|--`, `*--`, `o--`, `-->`, `..>`, `..|>`, the lollipop
  * `()--`, …; blanks around the operator optional) with optional quoted
  * cardinalities on either side and an optional `: label`, a class's generic
- * (`Foo~T~`, named `Foo` wherever it is written, kept as `generic`), and `click`
- * statements (a link or a call, with the tooltip text). Geometry-free:
- * members and relations preserve declaration order.
+ * (`Foo~T~`, named `Foo` wherever it is written, kept as `generic`; one
+ * nested in a bare name is refused, as Mermaid refuses it), and `click`
+ * statements (a link or a call, with the tooltip text); a body's
+ * `<<annotation>>` line is no member. Geometry-free: members and relations
+ * preserve declaration order.
  */
 
 import { collectBraceBody, commentStart } from '../utils.js';
@@ -29,6 +31,8 @@ const RE_FROM = new RegExp(`^${NAME}(?:\\s*"([^"]*)")?$`);
 const RE_TO = new RegExp(`^(?:"([^"]*)"\\s*)?${NAME}(?:\\s*:\\s*(.*))?$`);
 /** `ClassName : member` line form. */
 const RE_MEMBER_LINE = /^(\S+)\s*:\s*(.+)$/;
+/** A class annotation on a body line of its own: `<<interface>>`, `<<enumeration>>`. */
+const RE_ANNOTATION = /^<<[^<>]*>>$/;
 /** Lines Mermaid reads as notes, styling, links or grouping, which this tree does not keep. */
 const RE_DIRECTIVE = /^(?:note|classDef|cssClass|style|link|callback|direction|namespace|accTitle|accDescr|<<)(?=[\s:{<]|$)|^\}$/;
 
@@ -36,13 +40,37 @@ const RE_DIRECTIVE = /^(?:note|classDef|cssClass|style|link|callback|direction|n
  * A name as the tree keeps it: a backtick-quoted name without its
  * backticks, and words without the blanks between them, as Mermaid reads it.
  * @param {string} name
+ * @param {number} lineNo the line it is written on
  * @returns {string}
  */
-function className(name) {
-  return name.startsWith('`') ? name.slice(1, -1) : name.replace(/\s+/g, '');
+function className(name, lineNo) {
+  if (name.startsWith('`')) return name.slice(1, -1);
+  refuseNestedGeneric(name, lineNo);
+  return name.replace(/\s+/g, '');
 }
 
-/** A name's generic: `Square~Shape~` is `Square` of `Shape` (`List~List~int~~` nests). */
+/**
+ * A class name whose generic nests another: a name, then two or more
+ * `~`-led words, then the `~`s that close them (`List~List~int~~`,
+ * `A~B~C~`). Mermaid refuses each such name; it reads some other runs of
+ * `~` (`A~~B~~` is a class `AB`), which this tree reads as before.
+ */
+const RE_NESTED_GENERIC = /^[^~]+(?:~[^~]+){2,}~+$/;
+
+/**
+ * Refuse a class name whose generic nests another, as Mermaid refuses it,
+ * where it was read; a backtick-quoted name is text, and a member's type may
+ * nest.
+ * @param {string} written the name as written
+ * @param {number} lineNo
+ */
+function refuseNestedGeneric(written, lineNo) {
+  if (written.charCodeAt(0) !== 0x60 /* ` */ && RE_NESTED_GENERIC.test(written)) {
+    failWith('mermaid/class/nested-generic', { name: written }, lineNo);
+  }
+}
+
+/** A name's generic: `Square~Shape~` is `Square` of `Shape` (in a backtick-quoted name, `List~List~int~~` nests). */
 const RE_GENERIC = /^([^~]+)~(.*)~$/;
 
 /**
@@ -81,18 +109,19 @@ function operatorIn(line) {
  * Read a relation line: `From ["card"] <operator> ["card"] To [: label]`,
  * blanks around the operator optional.
  * @param {string} line
+ * @param {number} lineNo the line's number, for a refusal
  * @returns {{ from: string, to: string, type: string, label: string|null,
  *   fromCardinality?: string, toCardinality?: string } | null}
  */
-function relationOf(line) {
+function relationOf(line, lineNo) {
   const op = operatorIn(line);
   if (op === null) return null;
   const from = RE_FROM.exec(line.slice(0, op.at).trim());
   const to = RE_TO.exec(line.slice(op.end).trim());
   if (from === null || to === null) return null;
   return {
-    from: className(from[1]),
-    to: className(to[2]),
+    from: className(from[1], lineNo),
+    to: className(to[2], lineNo),
     type: line.slice(op.at, op.end),
     label: to[3] ? to[3].trim() : null,
     ...(from[2] === undefined ? {} : { fromCardinality: from[2] }),
@@ -104,12 +133,13 @@ function relationOf(line) {
  * A `class` statement's name and label: `Name`, `` `Name` ``,
  * `Name["label"]`, with an optional `:::style` this tree does not keep.
  * @param {string} head the statement after `class`, up to any `{`
+ * @param {number} lineNo the line's number, for a refusal
  * @returns {{ name: string, label: string|null }}
  */
-function classHead(head) {
+function classHead(head, lineNo) {
   const m = /^(`[^`]+`|[^[`]+?)(?:\["([^"]*)"\])?(?::::[\w-]+)?$/.exec(head.trim());
   if (m === null) return { name: head.trim(), label: null };
-  return { name: className(m[1].trim()), label: m[2] ?? null };
+  return { name: className(m[1].trim(), lineNo), label: m[2] ?? null };
 }
 
 /**
@@ -171,7 +201,7 @@ export function parseClass(lines, lineOffset = 0) {
     if (line.startsWith('class ')) {
       const rest = line.slice('class '.length).trim();
       const brace = rest.indexOf('{');
-      const head = classHead(classStatementHead(rest));
+      const head = classHead(classStatementHead(rest), lineOffset + li + 1);
       const cls = ensure(head.name);
       if (head.label !== null) cls.label = head.label;
       if (brace === -1) continue;
@@ -180,7 +210,9 @@ export function parseClass(lines, lineOffset = 0) {
       ({ body, li } = collectBraceBody(lines, li, rest.slice(brace + 1)));
       for (const raw of body.split('\n')) {
         const mem = raw.trim();
-        if (mem !== '') cls.members.push(member(mem));
+        // an `<<enumeration>>` line annotates the class, as in its header,
+        // and is no member
+        if (mem !== '' && !RE_ANNOTATION.test(mem)) cls.members.push(member(mem));
       }
       continue;
     }
@@ -195,7 +227,7 @@ export function parseClass(lines, lineOffset = 0) {
 
     if (RE_DIRECTIVE.test(line)) continue;
 
-    const rel = relationOf(line);
+    const rel = relationOf(line, lineOffset + li + 1);
     if (rel !== null) {
       // the end at a lollipop (`bar ()-- foo`) names an interface, not a class
       const lollipop = rel.type.startsWith('()') !== rel.type.endsWith('()');
@@ -207,6 +239,7 @@ export function parseClass(lines, lineOffset = 0) {
 
     const ml = RE_MEMBER_LINE.exec(line);
     if (ml !== null && !line.startsWith('class')) {
+      refuseNestedGeneric(ml[1], lineOffset + li + 1);
       ensure(ml[1]).members.push(member(ml[2].trim()));
       continue;
     }

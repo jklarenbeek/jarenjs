@@ -672,6 +672,37 @@ participant X`; a state transition label and a description end at `;`
 that many entities (`A o--o B` read a relationship), and an ER relationship
 without `: label` is refused, as Mermaid refuses it (it read with the label
 `""`; write `: ""` for an empty one).
+Still more of Mermaid's documented forms read as Mermaid reads them, and the
+lines it refuses are refused: an `<<enumeration>>` line in a class body is no
+member (it was a member row); a subgraph inside another is a member of it (its
+id in the outer one's `nodes`), printed inside it; a subgraph titled with no
+id of its own is named by the title without a quoted markdown title's
+backticks (`` subgraph "`**Two**`" `` was named `` `**Two**` ``), and one whose
+title holds a blank is `subGraph0`, `subGraph1`, … in the order subgraphs
+close, as Mermaid names it (`subgraph "two words"` was named `two words`, an
+untitled one `sub`); `state X` with its `{` on a later line opens X (it read
+a state `{`), and `state "Long" as X {` opens X labelled `Long` (it opened a
+state `"Long"`); a gantt directive followed by a tab (`title<TAB>Plan`,
+`dateFormat`, `section`, `excludes`, …) is read (it was dropped); a pie's
+`accTitle`/`accDescr` lines are no slices (`accTitle: 2024` read a slice).
+Refused, as Mermaid refuses them, where they read: a node's
+`@{ shape: … }` naming a shape Mermaid has not (`mermaid/flowchart/unknown-shape`;
+it kept its bracket shape, and a name Mermaid has with no shape here, such as
+`anchor` or `note`, is now a `rect`, `doublecircle` a double circle); a `"`
+inside a node label that is not quoted (`A[He said "hi]`,
+`mermaid/flowchart/quote-in-label`; write `#quot;` or quote the label); a bare
+`subgraph` line (`mermaid/flowchart/subgraph-unnamed`); a nested generic in a
+class name (`class List~List~int~~`, `mermaid/class/nested-generic`; a
+backtick-quoted name still reads, and `toMermaid` prints a nested generic in
+one); a pie line that is no quoted slice, title or accessibility line
+(`Dogs : 1`, a value with a sign, a leading zero or a bare `.`,
+`mermaid/pie/line`), and a pie header word that is neither `showData` nor
+`title` (`pie titled`, `mermaid/pie/header`). The tab-spelled gantt directives
+now meet the header checks the blank-spelled ones always met (`tickInterval<TAB>1decade`
+is refused as `tickInterval 1decade` is). `toMermaid` writes a pie label holding a
+`"` in `'…'` (Mermaid refused the `"…"` it wrote). A subgraph whose members are
+all nested subgraphs that edges also name as nodes now draws its frame around
+those nodes (it drew none).
 The marks Mermaid draws and this renderer read but drew plain are drawn, by
 Mermaid's shape class: a sequence participant's `type` as Mermaid's glyph for
 it (a boundary, a control and an entity as a circle with a bar, an arrow or a
