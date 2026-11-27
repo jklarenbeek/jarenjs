@@ -5224,6 +5224,24 @@ export function migrate(target, migrations, options) {
   return runMigration(target, migrations, options);
 }
 
+/** Whether two history reads (their rows, or an identity table's
+ * `{ present, rows }`) have one canonical text: flat records of text whose
+ * fields are strictly equal do, without serializing either; any other pair
+ * is compared by its canonical text.
+ * @param {any} a @param {any} b @returns {boolean} */
+function sameCanonical(a, b) {
+  const text = (/** @type {any} */ value) => value === null || typeof value === 'string';
+  const sameRecord = (/** @type {any} */ x, /** @type {any} */ y) => isJsonObject(x) && isJsonObject(y)
+    && Object.keys(x).length === Object.keys(y).length
+    && Object.keys(x).every((name) => Object.hasOwn(y, name) && text(x[name]) && x[name] === y[name]);
+  const rowsOf = (/** @type {any} */ value) => Array.isArray(value) ? value
+    : isJsonObject(value) && Object.keys(value).length === 2 && typeof value.present === 'boolean' && Array.isArray(value.rows) ? value.rows : null;
+  const left = rowsOf(a), right = rowsOf(b);
+  if (left !== null && right !== null && (Array.isArray(a) ? Array.isArray(b) : a.present === b.present)
+    && left.length === right.length && left.every((row, at) => sameRecord(row, right[at]))) return true;
+  return canonicalizeJson(a) === canonicalizeJson(b);
+}
+
 /** The replay authority is created only after primary exact receipt verification.
  * `shadowReplay` marks the shadow's own run, so its refusals say the database ran nothing. */
 function runMigration(target, migrations, options, replay = undefined, shadowReplay = false) {
@@ -5277,14 +5295,17 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
         const header = checkHistoryIdentity(observed, migrations, replay);
         const endpoint = checkHistoryChain(migrations, appliedRows.length, header, options, replay);
         const expectedFrom = endpoint.shape;
+        // the history and identity rows this run last attested, and their
+        // canonical text: a read identical to them is checked from where the
+        // attestation ended, so a link checks only what it adds
         let expectedRows = appliedRows, expectedSide = observed.identity;
         historyExists = observed.history.present;
         const verifyHistory = (scope, count) => chain(readMigrationHistory(scope, true), (current) => {
           if (current.history.rows.length !== count
-            || canonicalizeJson(current.history.rows) !== canonicalizeJson(expectedRows)
-            || canonicalizeJson(current.identity) !== canonicalizeJson(expectedSide))
+            || !sameCanonical(current.history.rows, expectedRows)
+            || !sameCanonical(current.identity, expectedSide))
             throw refuse('JD0022', 'migration history changed while acquiring its writer; no step ran');
-          checkHistoryIdentity(current, migrations, replay);
+          checkHistoryIdentity(current, migrations, replay, count);
         });
         const pending = migrations.slice(appliedRows.length);
         for (const migration of pending) checkPreservationPlan(migration, dialect);
@@ -5402,18 +5423,25 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
           const record = (scope, migration) => chain(readMigrationHistory(scope, true), (current) => {
             const rows = current.history.rows, at = expectedRows.length;
             if (rows.length !== at + 1 || rows[at].id !== migration.id
-              || canonicalizeJson(rows.slice(0, at)) !== canonicalizeJson(expectedRows)
-              || canonicalizeJson(current.identity) !== canonicalizeJson(expectedSide))
+              || !sameCanonical(rows.slice(0, at), expectedRows)
+              || !sameCanonical(current.identity, expectedSide))
               throw refuse('JD0022', 'a migration changed its existing history or identity metadata');
-            checkAppliedRows(current, migrations);
+            // the rows before this link's are the attested ones: its own is checked
+            checkAppliedRows(current, migrations, at);
             const entries = [{ key: `receipt:${at}`, value: canonicalizeJson({
               document: canonicalizeJson(migration), row: canonicalizeJson(rows[at]),
             }) }];
             const publish = replay === undefined ? !current.identity.present : at + 1 === header.legacyCount;
             if (publish) entries.push({ key: 'header', value: canonicalizeJson(header) });
+            // what the identity table reads once the entries are in, in its key order
+            const written = { present: true, rows: [...current.identity.rows, ...entries.map(({ key, value }) => ({ key, value }))]
+              .sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0) };
             return chain(current.identity.present ? null : scope.exec(statements.createIdentity), () =>
               chain(writeIdentityRows(scope, entries, check), () => chain(readMigrationHistory(scope, true), (recorded) => {
-                checkHistoryIdentity(recorded, migrations, replay);
+                // read back as written: the receipts before this link's stand
+                // attested; anything else is checked whole
+                const asWritten = sameCanonical(recorded.history.rows, rows) && sameCanonical(recorded.identity, written);
+                checkHistoryIdentity(recorded, migrations, replay, asWritten ? at : 0);
                 expectedRows = recorded.history.rows;
                 expectedSide = recorded.identity;
               })));

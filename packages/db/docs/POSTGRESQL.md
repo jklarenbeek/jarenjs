@@ -698,7 +698,9 @@ transaction creates until it commits, in a lock table shared by the server and
 sized by `max_locks_per_transaction` times the connections it allows
 (`max_connections` plus `max_prepared_transactions`). A model whose relations
 outgrow it is refused at that first open with `JD0002` (SQLSTATE `53200`,
-out of shared memory), the create rolled back whole; how many tables fit
+out of shared memory), class `full`, under a reason that names the setting the
+server's hint names (`the server's lock table is full, which
+max_locks_per_transaction sizes`), the create rolled back whole; how many tables fit
 depends on that setting and on the indexes and programs each table holds. Raise
 `max_locks_per_transaction` (it takes a server restart) before the first open
 of such a model; the create stays one transaction.

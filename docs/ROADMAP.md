@@ -365,16 +365,21 @@ delete it or fix it.
   CHECK verification, and the store's zoned writes, `rekey()` and open checks.
   Wanted: those call sites gathered behind one seam entry per module where
   that costs no per-query work.
-- [ ] **Out of shared memory reads as a full disk on PostgreSQL.** A first open
-  whose created relations outgrow the server's lock table
-  (`max_locks_per_transaction`, POSTGRESQL.md "A first open of a large model")
-  is refused `JD0002` as "the database or its disk is full": SQLSTATE `53200`
-  is classified with `53100`. Wanted: `53200` a reason of its own that names
-  `max_locks_per_transaction`.
-- [ ] **Applying a chain of links costs the square of its length.** `migrate()` over
-  a chain of unchanged-model links takes about four times as long for twice
-  the links, atomic or link by link; a dry run stays flat. Wanted: each link's
-  history check reading what the chain already verified.
+- [ ] **Applying a chain of links reads its whole history at every link.**
+  `migrate()` checks a link's history and identity rows against the ones the
+  run attested last and verifies only what the link adds, but to refuse a
+  step, a trigger or a second connection that edits an earlier row (`JD0022`)
+  it reads every history and identity row twice per link (three times link by
+  link), so the rows read grow with the square of the chain while a dry run
+  stays flat. Wanted: a guard that notices an earlier row's edit without
+  reading it, before the next link's steps run.
+- [ ] **A PostgreSQL resource state outside the disk reads as a full disk.**
+  SQLSTATE class `53` falls back to `full` (`JD2082`, 'the database or its
+  disk is full'): `53000` insufficient_resources and `53400`
+  configuration_limit_exceeded read as a full disk, and `JD2082`'s catalogue
+  sentence names the disk while the code also carries a server out of memory
+  (`53200`). Wanted: the family's own reason, and a catalogue sentence that
+  covers what the code carries.
 - [ ] **A CHECK the model does not declare is read back as a declaration where
   the format has one.** On PostgreSQL a CHECK of someone else's opens, still
   refuses the writes it governs (`JD2005`) and is an `unmapped-constraint`

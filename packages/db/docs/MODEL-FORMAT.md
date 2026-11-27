@@ -2190,7 +2190,9 @@ migration run —
 consults one table (`classifyDriverError`), so the same failure arrives
 under the same code with the same `class` and `retryable` verdict
 whichever path met it: `busy` (SQLITE_BUSY/LOCKED → `JD2005`,
-retryable), `full` (`JD2082`), `readonly` (`JD2083`), `io` (`JD2084`),
+retryable), `full` (`JD2082`: a full disk, or a server out of memory — on
+PostgreSQL SQLSTATE `53200`, whose reason names `max_locks_per_transaction`
+when the server's hint does), `readonly` (`JD2083`), `io` (`JD2084`),
 `corrupt` (`JD2085`), `cantopen` and `constraint` (`JD2005`), `duplicate`
 (a collision on the key's own constraint → `JD2001`), `overflow` (`JD2005`: a
 numeric result past the range of its type, such as an integer a PostgreSQL

@@ -181,12 +181,16 @@ export function checkHistoryObservation(observed) {
   return observed;
 }
 
-/** Full original receipt agreement; numeric text is compared without Number. */
-export function checkAppliedRows(observed, migrations) {
+/** Full original receipt agreement; numeric text is compared without Number.
+ * `from` is the count of leading rows this run already checked, identical to
+ * what it read now: their orders still count as taken, and the rows after
+ * them are checked as a whole check would. */
+export function checkAppliedRows(observed, migrations, from = 0) {
   checkHistoryObservation(observed);
-  const seen = new Set();
-  for (const [at, row] of observed.history.rows.entries()) {
-    const migration = migrations[at], order = row[observed.order];
+  const rows = observed.history.rows;
+  const seen = new Set(rows.slice(0, from).map((row) => row[observed.order]));
+  for (let at = from; at < rows.length; at++) {
+    const row = rows[at], migration = migrations[at], order = row[observed.order];
     if (typeof order !== 'string' || !SIGNED_INTEGER.test(order) || seen.has(order)
       || typeof row.applied_at !== 'string' || !DECIMAL.test(row.applied_at)
       || typeof row.steps !== 'string' || !COUNT.test(row.steps)) invalid(`history position ${at} contains invalid ordering, timestamp or step fields`);
@@ -210,9 +214,12 @@ export function identityRows(migrations, rows, header) {
   }))].sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
 }
 
-/** A complete attestation, or a private replay's strictly bounded headerless prefix. */
-export function checkHistoryIdentity(observed, migrations, replay = undefined) {
-  checkAppliedRows(observed, migrations);
+/** A complete attestation, or a private replay's strictly bounded headerless prefix.
+ * `from` is the count of leading rows, and their receipts, this run already
+ * attested, identical to what it read now: the header and the coverage are
+ * checked whole, the rows and receipts after them one by one. */
+export function checkHistoryIdentity(observed, migrations, replay = undefined, from = 0) {
+  checkAppliedRows(observed, migrations, from);
   const rows = observed.history.rows, side = observed.identity;
   if (!side.present) {
     if (!rows.length) return replay?.header ?? historyHeader();
@@ -254,7 +261,7 @@ export function checkHistoryIdentity(observed, migrations, replay = undefined) {
   if (replay !== undefined && canonicalizeJson(header) !== canonicalizeJson(replay.header))
     invalid('shadow legacy boundary changed during replay');
   if (map.size !== rows.length + (partial ? 0 : 1)) invalid('migration identity coverage is incomplete or contains extra rows');
-  for (let at = 0; at < rows.length; at++) {
+  for (let at = from; at < rows.length; at++) {
     const receipt = parseCanonical(map.get(`receipt:${at}`), `migration identity receipt ${at}`);
     const migration = migrations[at];
     if (!keys(receipt, ['document', 'row']) || receipt.document !== canonicalizeJson(migration)

@@ -362,7 +362,8 @@ export class DbCompileError extends CodedError {
  *    another type is a defect below the store, refused before the
  *    statement it would have bound runs
  *  - `JD2082`/`JD2083`/`JD2084`/`JD2085` — the driver reported a full
- *    disk, a read-only database, an I/O error, a corrupt file: one
+ *    disk (or a server out of memory), a read-only database, an I/O
+ *    error, a corrupt file: one
  *    classifier (`classifyDriverError`) assigns them, whichever path met
  *    the failure, and every classified error carries `class`,
  *    `retryable` and the driver's error as `cause`; a busy or locked
@@ -473,8 +474,11 @@ const SQLSTATE = Object.freeze({
   '57P01': CONNECTION,
   '57P02': CONNECTION,
   '57P03': CONNECTION,
-  // 53 — insufficient resources
+  // 53 — insufficient resources: a full disk, and the server's memory,
+  // which is the lock table's when the server's hint names its setting
+  // (`lockTableSetting`)
   '53100': FULL,
+  '53200': classification('full', 'JD2082', false, 'the server ran out of memory'),
   '53300': BUSY,
   // 58 — system error
   '58030': IO,
@@ -847,6 +851,20 @@ export function classifyDriverError(error, unique = undefined) {
 }
 
 /**
+ * The setting a PostgreSQL out-of-memory names when the memory that ran out
+ * is the lock table: the server's hint names `max_locks_per_transaction` (or
+ * `max_pred_locks_per_transaction` for the predicate locks of a serializable
+ * transaction) whatever language its messages are in. `null` for any other
+ * out-of-memory, which names no setting.
+ * @param {any} error
+ * @returns {string | null}
+ */
+function lockTableSetting(error) {
+  const found = typeof error?.hint === 'string' ? /\bmax_(?:pred_)?locks_per_transaction\b/.exec(error.hint) : null;
+  return found === null ? null : found[0];
+}
+
+/**
  * The PostgreSQL half: a SQLSTATE into the same closed classes. The server
  * names the constraint it rejected against, and the key's own collision is
  * the one named like the primary-key constraint the catalog gave the key
@@ -869,6 +887,10 @@ function classifySqlState(state, error, unique) {
   // generic error naming the overflow, PostgreSQL as numeric_value_out_of_range
   if (state === '22003') {
     return { ...OVERFLOW };
+  }
+  if (state === '53200') {
+    const setting = lockTableSetting(error);
+    if (setting !== null) return classification('full', 'JD2082', false, `the server's lock table is full, which ${setting} sizes`);
   }
   const exact = SQLSTATE[state];
   if (exact !== undefined) return { ...exact };

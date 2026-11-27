@@ -889,7 +889,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,212,400 (measured 1212310): the entity writes that read first beginning with the writer lock on SQLite (entity, tracker, store 195).
 // Raised to 1,212,700 (measured 1212616): core's escapePointerToken, isStringWhiteSpace, compareCodePoints, kebabCase and the case predicates refusing a non-string with a named TypeError (string 306).
 // Lowered to 1,209,900 (measured 1209853): an entity's calendar members planned, read back, shaped, written and mapped behind the temporal seam, and one JD0017 refusal for the three doors (ddl -843, model -641, introspect -640, plan -236, store -163, query -121, entity -116, temporal-seam +157, minifier renames elsewhere net -160).
-if (clientBytes > 1209900)
+// Raised to 1,210,000 (measured 1209930): a PostgreSQL server out of shared memory refused under a reason of its own, naming the lock-table setting the server's hint names (errors +314).
+if (clientBytes > 1210000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

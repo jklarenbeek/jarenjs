@@ -613,6 +613,42 @@ describe('one classifier, two engines: a SQLSTATE lands in the same classes', ()
     }
   });
 
+  it('an out-of-memory server is not a full disk, and names the lock table setting its hint names', async () => {
+    // the lock table a first open of a large model outgrows, as the server
+    // reports it (its message and hint are localized; the setting is not)
+    const locks = pgError('53200', { message: 'out of shared memory',
+      hint: 'You might need to increase "max_locks_per_transaction".' });
+    assert.deepStrictEqual(classifyDriverError(locks),
+      { class: 'full', code: 'JD2082', retryable: false,
+        reason: 'the server\'s lock table is full, which max_locks_per_transaction sizes' });
+    assert.deepStrictEqual(classifyDriverError(pgError('53200', { message: 'out of shared memory',
+      hint: 'Sie müssen möglicherweise „max_pred_locks_per_transaction“ erhöhen.' })),
+    { class: 'full', code: 'JD2082', retryable: false,
+      reason: 'the server\'s lock table is full, which max_pred_locks_per_transaction sizes' });
+    // a backend's own allocation names no setting
+    for (const other of [pgError('53200', { message: 'out of memory', detail: 'Failed on request of size 1024.' }),
+      pgError('53200', { hint: 'You might need to increase "max_locks_per_transactions".' })]) {
+      assert.deepStrictEqual(classifyDriverError(other),
+        { class: 'full', code: 'JD2082', retryable: false, reason: 'the server ran out of memory' });
+    }
+    // a full disk keeps its own sentence
+    assert.strictEqual(classifyDriverError(pgError('53100')).reason, 'the database or its disk is full');
+    assert.strictEqual(wrapDriverError(locks, { collection: 'rows' }).message,
+      'JD2082: the server\'s lock table is full, which max_locks_per_transaction sizes: out of shared memory');
+    // the first open that meets it is refused JD0002 under that reason
+    const driver = { name: 'stub', dialect: sqliteDialect, open: () => { throw locks; } };
+    // a synchronous driver refuses synchronously: the thunk catches both
+    await assert.rejects(async () => openStore(MODEL, { driver, path: 'unused.db' }), (error) => {
+      assert.strictEqual(error.code, 'JD0002');
+      assert.strictEqual(error.message, 'JD0002: the store could not be opened (the server\'s lock table is full, '
+        + 'which max_locks_per_transaction sizes): out of shared memory');
+      assert.strictEqual(error.class, 'full');
+      assert.strictEqual(error.retryable, false);
+      assert.strictEqual(error.cause, locks);
+      return true;
+    });
+  });
+
   it('an out-of-range number is the overflow row the query path re-runs', () => {
     const classified = classifyDriverError(pgError('22003'));
     assert.strictEqual(classified.class, 'overflow');
