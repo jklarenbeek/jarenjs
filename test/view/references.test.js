@@ -305,3 +305,144 @@ describe('safe profiles — each live root of a page has its own default namespa
     assert.equal(childMarkup(a), renderToString(vnode, { safe: 'interactive', widgets, capabilities: { widgets: ['box'] } }));
   });
 });
+
+describe('safe profiles — a prefixed id the page already holds outside the root is reported, never refused', () => {
+  const walk = (node) => [node, ...(node.childNodes ?? []).flatMap(walk)];
+
+  /** A page whose stub document answers `getElementById` (first in tree order), a host element first. */
+  function page(hostId = 'jaren-u-name') {
+    const { document, container: a } = createStubHost();
+    const body = document.createElement('body');
+    const host = document.createElement('p');
+    host.setAttribute('id', hostId);
+    body.appendChild(host);
+    body.appendChild(a);
+    const b = document.createElement('div');
+    body.appendChild(b);
+    Object.assign(document, { getElementById: (id) => walk(body).find((node) => node.getAttribute?.('id') === id) ?? null });
+    return { document, a, b };
+  }
+
+  for (const safe of PROFILES) {
+    it(`reports a host element inside the namespace once, and writes the ids as before (safe: ${JSON.stringify(safe)})`, () => {
+      const { document, a } = page();
+      /** @type {any[]} */
+      const seen = [];
+      const render = createDomRenderer(a, { document, safe, onUnsafe: (info) => seen.push(info) });
+      const vnode = ['div', {}, ['label', { for: 'name' }, 'Name'], ['input', { id: 'name' }]];
+      render(vnode);
+      // a new element under the same id, and the same frame again
+      render(['div', {}, ['label', { for: 'name' }, 'Name'], ['input', { key: 'k', id: 'name' }]]);
+      render(['section', { id: 'name' }]);
+      assert.deepEqual(seen, [{ kind: 'id', name: 'jaren-u-name' }]);
+      assert.equal(childMarkup(a), '<section id="jaren-u-name"></section>');
+    });
+  }
+
+  it('reports nothing for the root\'s own ids, a second default root, host ids outside the namespace, trusted roots, or a page without lookup', () => {
+    /** @type {any[]} */
+    const seen = [];
+    const onUnsafe = (/** @type {any} */ info) => seen.push(info);
+    const own = page();
+    const render = createDomRenderer(own.a, { document: own.document, safe: true, onUnsafe });
+    // replaced while the old element still holds the id, then patched, then repeated
+    render(['p', { id: 'x' }, '1']);
+    render(['div', { id: 'x' }, '2']);
+    render(['div', { id: 'y' }, '3']);
+    render(['div', {}, ['p', { id: 'y' }], ['p', { id: 'y' }]]);
+    // a second default root declaring the first one's ids takes its own namespace
+    createDomRenderer(own.b, { document: own.document, safe: true, onUnsafe })(['div', { id: 'y' }]);
+    assert.equal(childMarkup(own.b), '<div id="jaren-u2-y"></div>');
+    // the host's ids outside every namespace
+    const outside = page('name');
+    createDomRenderer(outside.a, { document: outside.document, safe: 'interactive', onUnsafe })(['input', { id: 'name' }]);
+    // a trusted root writes the id as given and is not a safe root
+    const trusted = page();
+    createDomRenderer(trusted.a, { document: trusted.document, onUnsafe })(['input', { id: 'jaren-u-name' }]);
+    // a document without getElementById, and a root without onUnsafe
+    const { document, container } = createStubHost();
+    createDomRenderer(container, { document, safe: true, onUnsafe })(['input', { id: 'name' }]);
+    const quiet = page();
+    createDomRenderer(quiet.a, { document: quiet.document, safe: true })(['input', { id: 'name' }]);
+    assert.equal(childMarkup(quiet.a), '<input id="jaren-u-name">');
+    assert.deepEqual(seen, []);
+  });
+
+  it('counts the content a granted widget renders in the root\'s namespace as the root\'s own, and still reports the host\'s holder from it', () => {
+    const { document, a } = page();
+    /** @type {string[]} */
+    const seen = [];
+    const widgets = {
+      box: {
+        mount(/** @type {any} */ host, /** @type {any} */ props, /** @type {any} */ _emit, /** @type {any} */ context) {
+          const inner = createDomRenderer(host, { document, safe: context.safe, widgets: context.widgets, capabilities: context.capabilities,
+            idPrefix: context.idPrefix, onUnsafe: context.onUnsafe });
+          inner(props.content);
+          return inner;
+        },
+        update(/** @type {any} */ inner, /** @type {any} */ props) { inner(props.content); },
+        unmount(/** @type {any} */ inner) { inner.destroy(); },
+      },
+    };
+    const render = createDomRenderer(a, { document, safe: 'interactive', widgets, capabilities: { widgets: ['box'] },
+      onUnsafe: (i) => seen.push(`${i.kind}:${i.name}`) });
+    const box = (/** @type {any} */ content) => ['jaren-widget', { name: 'box', props: { content } }];
+    // the content declares the root's id, then the id moves into the content in one frame
+    render(['div', {}, ['p', { id: 'x' }], box(['p', { id: 'x' }])]);
+    render(['div', {}, box(['p', {}]), ['p', { id: 'y' }]]);
+    render(['div', {}, box(['p', { id: 'y' }]), ['p', {}]]);
+    assert.deepEqual(seen, []);
+    // the host's own element is still a holder for the content
+    render(['div', {}, box(['p', { id: 'name' }])]);
+    assert.deepEqual(seen, ['id:jaren-u-name']);
+  });
+
+  it('reports an id patched in on a connected element when the page holds it after the root', () => {
+    const { document, container: a } = createStubHost();
+    const body = document.createElement('body');
+    body.appendChild(a);
+    const host = document.createElement('p');
+    host.setAttribute('id', 'jaren-u-z');
+    body.appendChild(host);
+    Object.assign(document, { getElementById: (id) => walk(body).find((node) => node.getAttribute?.('id') === id) ?? null });
+    /** @type {string[]} */
+    const seen = [];
+    const render = createDomRenderer(a, { document, safe: true, onUnsafe: (i) => seen.push(`${i.kind}:${i.name}`) });
+    render(['p', { id: 'y' }]);
+    const node = a.childNodes[0];
+    render(['p', { id: 'z' }]);
+    assert.equal(a.childNodes[0], node);
+    assert.deepEqual(seen, ['id:jaren-u-z']);
+  });
+
+  it('reports the second of two roots the host gave one prefix when both declare an id', () => {
+    const { document, a, b } = page('host');
+    /** @type {string[]} */
+    const seen = [];
+    createDomRenderer(a, { document, safe: true, idPrefix: 't-', onUnsafe: (i) => seen.push(`a ${i.kind}:${i.name}`) })(['p', { id: 'x' }]);
+    createDomRenderer(b, { document, safe: true, idPrefix: 't-', onUnsafe: (i) => seen.push(`b ${i.kind}:${i.name}`) })(['p', { id: 'x' }]);
+    assert.deepEqual(seen, ['b id:t-x']);
+    assert.equal(childMarkup(a) + childMarkup(b), '<p id="t-x"></p><p id="t-x"></p>');
+  });
+
+  it('serializes two documents into one page apart under the prefixes the host gives, and their roots render them alike', () => {
+    const { document, a, b } = page('host');
+    const A = ['div', {}, ['label', { for: 'name' }, 'A'], ['input', { id: 'name' }]];
+    const B = ['div', {}, ['label', { for: 'name' }, 'B'], ['input', { id: 'name' }]];
+    const htmlA = renderToString(A, { safe: true, idPrefix: 'doc-a-' });
+    const htmlB = renderToString(B, { safe: 'interactive', idPrefix: 'doc-b-' });
+    assert.equal(htmlA, '<div><label for="doc-a-name">A</label><input id="doc-a-name"></div>');
+    assert.equal(htmlB, '<div><label for="doc-b-name">B</label><input id="doc-b-name"></div>');
+    /** @type {string[]} */
+    const seen = [];
+    createDomRenderer(a, { document, safe: true, idPrefix: 'doc-a-', hydrate: true, onUnsafe: (i) => seen.push(i.name) })(A);
+    createDomRenderer(b, { document, safe: 'interactive', idPrefix: 'doc-b-', hydrate: true, onUnsafe: (i) => seen.push(i.name) })(B);
+    assert.equal(childMarkup(a), htmlA);
+    assert.equal(childMarkup(b), htmlB);
+    // a default root beside them keeps the first default namespace
+    const c = document.createElement('div');
+    createDomRenderer(c, { document, safe: true })(['p', { id: 'name' }]);
+    assert.equal(childMarkup(c), '<p id="jaren-u-name"></p>');
+    assert.deepEqual(seen, []);
+  });
+});

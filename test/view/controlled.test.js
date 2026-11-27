@@ -368,12 +368,12 @@ describe('controlled inputs — read as the attribute the serializer writes', ()
     const widgets = { w: { mount() {} } };
     /** @type {Array<[any, Array<[string, string]>, string]>} */
     const cases = [
-      [{ tag: 'input', value: 'x' }, [['value', 'x']], '<input value="x"></input>'],
-      [{ tag: 'input', type: 'checkbox', checked: true }, [['type', 'checkbox'], ['checked', '']], '<input type="checkbox" checked></input>'],
-      [{ tag: 'input', type: 'checkbox', checked: 0 }, [['type', 'checkbox'], ['checked', '0']], '<input type="checkbox" checked="0"></input>'],
+      [{ tag: 'input', value: 'x' }, [['value', 'x']], '<input value="x">'],
+      [{ tag: 'input', type: 'checkbox', checked: true }, [['type', 'checkbox'], ['checked', '']], '<input type="checkbox" checked>'],
+      [{ tag: 'input', type: 'checkbox', checked: 0 }, [['type', 'checkbox'], ['checked', '0']], '<input type="checkbox" checked="0">'],
       [{ tag: 'textarea', value: 'x' }, [['value', 'x']], '<textarea value="x"></textarea>'],
       [{ tag: 'select', value: 'x' }, [['value', 'x']], '<select value="x"></select>'],
-      [{ tag: 'input', value: false, checked: null }, [], '<input></input>'],
+      [{ tag: 'input', value: false, checked: null }, [], '<input>'],
     ];
     for (const [props, attributes, markup] of cases) {
       const vnode = ['jaren-widget', { name: 'w', ...props }];
