@@ -159,7 +159,7 @@ flowchart LR
 
 Fully laid out: **flowchart**, **sequence**, **state** (through the
 flowchart engine via an adapter — states as rounded nodes, `[*]` as a
-filled start dot and an end ring, verbatim transition labels on the
+filled start dot and an end ring around a dot, verbatim transition labels on the
 edges; composite states stay flattened in v1) and **gantt** (a real time
 axis — see below). Structured panels / chart: **class**, **ER**,
 **pie**. Parse-accepted with an
@@ -691,6 +691,30 @@ tooltip names the interface. The new marks carry the classes
 `mm-actor-shape`, `mm-actor-mark`, `mm-node-detail`, `mm-node-mark` and
 `mm-node-bare`, which `styles/mermaid.css` themes. A diagram without these
 marks draws as it did.
+
+A sequence `actor` (or `@{ "type": "actor" }`) is drawn as Mermaid's stick
+figure above its name, where it drew the participant box, and every actor box
+of its diagram grows to hold the figure; a flowchart `fork` stands across the
+flow in an `LR` chart, as Mermaid turns it there (in `RL`, `TB` and `BT` it
+stays a bar); a `cylinder` (`A[(x)]`) is drawn in Mermaid's outline, its top's
+front lip included; a state diagram's end marker is a ring around a filled
+dot, as Mermaid draws it (it drew two rings). Every mark this package's own
+renderers paint now carries a class `styles/mermaid.css` maps to the theme's
+tokens, so a host-linked theme flip repaints all of it (an injected renderer,
+such as a pie's, paints its own): a sequence message's line, its open
+and cross heads (`mm-arrowhead-line`, which a stick half head now carries
+too), a block frame, its tab and its dividers (`mm-block-tab`,
+`mm-block-divider`), a flowchart link's circle (`mm-arrowhead`) and cross
+heads, a subroutine's inner lines (`mm-node-detail`, in an author's stroke
+where a style gives one, as Mermaid draws them), a subgraph title, a class or
+ER panel, its rules and its text (`mm-panel-rule`, `mm-text`) and the
+placeholder of a type this renderer does not draw (`mm-placeholder`). A
+state's start and end dots carry `mm-node-mark`, and a double circle's inner
+ring `mm-node-ring`, beside `mm-node-shape`, so the stylesheet no longer
+repaints them in the node fill; an invisible link
+(`~~~`) carries `mm-edge-hidden`, so the stylesheet no longer draws it. These
+diagrams' SVG changes by those classes; their drawing changes only where this
+paragraph says so.
 
 ## Exports
 

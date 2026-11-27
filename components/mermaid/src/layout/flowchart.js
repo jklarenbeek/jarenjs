@@ -60,7 +60,7 @@ export function layoutFlowchart(ast, options = {}) {
   /** @type {Map<string, any>} */
   const boxes = new Map();
   for (const node of ast.nodes) {
-    boxes.set(node.id, sizeNode(node, linesOf(node.label)));
+    boxes.set(node.id, sizeNode(node, linesOf(node.label), dir));
   }
 
   // 2. Rank assignment (longest path over predecessors).
@@ -373,9 +373,10 @@ const MARKER_SIZES = {
 /**
  * @param {any} node
  * @param {import('../label-text.js').LabelLine[]} lines the label as it is drawn
+ * @param {string} dir the chart's direction
  * @returns {any}
  */
-function sizeNode(node, lines) {
+function sizeNode(node, lines, dir) {
   const shape = node.shape;
   // The state-diagram pseudo-states are fixed-size markers, never
   // label-sized boxes. An empty-labeled doublecircle cannot come from
@@ -390,7 +391,9 @@ function sizeNode(node, lines) {
   // the marks Mermaid draws without their label
   if (Object.hasOwn(MARKER_SIZES, shape)) {
     const [w, h] = MARKER_SIZES[shape];
-    return { x: 0, y: 0, w, h, lines: [] };
+    // a fork stands across the flow in a left-to-right chart, as Mermaid
+    // turns it there (and only there: right to left it stays a bar)
+    return shape === 'fork' && dir === 'LR' ? { x: 0, y: 0, w: h, h: w, lines: [] } : { x: 0, y: 0, w, h, lines: [] };
   }
   const m = measureLines(lines);
   let w = m.width + 2 * PAD_X;

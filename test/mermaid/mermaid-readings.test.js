@@ -201,7 +201,7 @@ describe('flowchart — statements and links', () => {
 
   it('draws no line for an invisible link', () => {
     const svg = renderToString(renderMermaid('flowchart LR\n A ~~~ B'));
-    assert.match(svg, /class="mm-edge-line" fill="none" stroke="none"/);
+    assert.match(svg, /class="mm-edge-line mm-edge-hidden" fill="none" stroke="none"/);
   });
 
   it('refuses text after a node where a link belongs, as Mermaid does', () => {

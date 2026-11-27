@@ -55,7 +55,7 @@ export function renderStructured(title, sections, theme, hash) {
   const gap = 16;
   const children = [];
   let y = 40;
-  children.push(textAt(16, 24, title, fs + 3, { 'font-weight': 'bold', fill: t.nodeText }));
+  children.push(textAt(16, 24, title, fs + 3, { 'font-weight': 'bold', class: 'mm-text', fill: t.nodeText }));
   for (let si = 0; si < sections.length; si++) {
     const section = sections[si];
     const { heading, rows } = read[si];
@@ -65,12 +65,12 @@ export function renderStructured(title, sections, theme, hash) {
     const box = [
       rect(16, y, boxW, boxH, { rx: 4, fill: t.nodeFill, stroke: t.nodeStroke, 'stroke-width': 1, class: 'mm-panel' }),
       textBlock(26, y + 17, heading, fs, rowH,
-        section.id === null ? { 'font-weight': 'bold', fill: t.nodeText } : { 'font-weight': 'bold', class: 'mm-label', fill: t.nodeText }),
-      path(`M16,${num(y + sectionHeadH)} h${boxW}`, { stroke: t.nodeStroke, 'stroke-width': 1 }),
+        section.id === null ? { 'font-weight': 'bold', class: 'mm-text', fill: t.nodeText } : { 'font-weight': 'bold', class: 'mm-label', fill: t.nodeText }),
+      path(`M16,${num(y + sectionHeadH)} h${boxW}`, { class: 'mm-panel-rule', stroke: t.nodeStroke, 'stroke-width': 1 }),
     ];
     let rowY = y + sectionHeadH + 16;
     for (let i = 0; i < rows.length; i++) {
-      const row = textBlock(26, rowY, rows[i], fs, rowH, { fill: t.nodeText });
+      const row = textBlock(26, rowY, rows[i], fs, rowH, { class: 'mm-text', fill: t.nodeText });
       rowY += rows[i].length * rowH;
       const edge = section.edges?.[i];
       if (edge === undefined) { box.push(row); continue; }
@@ -103,9 +103,9 @@ export function renderPlaceholder(type, theme, hash, noteId = 'mermaid/placehold
   const width = 380;
   const height = 84;
   return svgRoot('mermaid mm-svg', width, height, theme, [
-    rect(1, 1, width - 2, height - 2, { rx: 6, fill: t.clusterFill, stroke: t.clusterStroke, 'stroke-width': 1, 'stroke-dasharray': '5 4' }),
-    textAt(width / 2, 36, say('mermaid/placeholder/type', { type }), 15, { 'font-weight': 'bold', 'text-anchor': 'middle', fill: t.nodeText }),
-    textAt(width / 2, 58, say(noteId), 12, { 'text-anchor': 'middle', fill: t.nodeText }),
+    rect(1, 1, width - 2, height - 2, { rx: 6, class: 'mm-placeholder', fill: t.clusterFill, stroke: t.clusterStroke, 'stroke-width': 1, 'stroke-dasharray': '5 4' }),
+    textAt(width / 2, 36, say('mermaid/placeholder/type', { type }), 15, { 'font-weight': 'bold', 'text-anchor': 'middle', class: 'mm-text', fill: t.nodeText }),
+    textAt(width / 2, 58, say(noteId), 12, { 'text-anchor': 'middle', class: 'mm-text', fill: t.nodeText }),
   ], 'mmph-' + hash);
 }
 

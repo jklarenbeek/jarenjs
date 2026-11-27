@@ -172,7 +172,10 @@ metadata's other entries are not kept. The renderer draws each of these in
 Mermaid's shape class (a document's wave, a card's cut corner, a cylinder on
 its side, …), and the seven Mermaid draws as a mark without its label
 (`sm-circ`, `f-circ`, `fr-circ`, `fork`, `hourglass`, `bolt`, `cross-circ`)
-at a mark's size and without it. A quoted
+at a mark's size and without it; a `fork` stands across the flow in an `LR`
+chart, the one direction Mermaid turns it in (in `RL`, `TB` and `BT` it is a
+bar). A `cylinder` (`A[(x)]`) is drawn in Mermaid's outline: the whole top
+ellipse, its front lip included, as the participant `database` is. A quoted
 label may run over lines, as Mermaid reads it: a line holding an odd number
 of `"` that does not read on its own reads on to the line that closes the
 quote, each line trimmed and joined at a line break (`` n["`Line1
@@ -241,8 +244,9 @@ metadata gives the label by its alias unless `as` names one, and its type:
 (`boundary`, `control`, `entity`, `database`, `collections`, `queue`) are a
 `participant` that keeps the name as `type`, which the renderer draws as
 Mermaid's glyph for it: a boundary, a control and an entity as a circle with a
-bar on its left, an arrow on its top or a line under it, above the name (every
-actor box of such a diagram grows to hold the glyph); a database as a
+bar on its left, an arrow on its top or a line under it, above the name, and an
+`actor` as Mermaid's stick figure above the name (every actor box of such a
+diagram grows to hold the glyph); a database as a
 cylinder, a collection as two boxes one behind the other, and a queue as a
 cylinder on its side, around the name.
 `statements` is ordered; each is a `message`
@@ -813,17 +817,19 @@ apart, or as far as a message's, a self-message's or a side note's text
 between them needs, as Mermaid widens an actor gap — message
 y-advance, activation bars, notes and block frames; every actor box is
 as tall as the one with the most lines, and taller by a glyph's room where
-a boundary, control or entity participant draws its glyph above its name.
-A flowchart node is sized for its label, save the seven shapes Mermaid
-draws as a mark without one (§4.1), which take a mark's fixed size.
+a boundary, control, entity or actor participant draws its glyph above its
+name. A flowchart node is sized for its label, save the seven shapes Mermaid
+draws as a mark without one (§4.1), which take a mark's fixed size (a
+`fork`'s turned in an `LR` chart).
 Geometry is deterministic, so golden-JSON tests catch drift.
 
 **State diagrams lay out through the flowchart engine** via an adapter
 (`layoutState`), not a second algorithm: states become rounded nodes,
 transition `label`s become edge labels verbatim, and the `[*]`
 pseudo-states become synthetic `__start`/`__end` nodes (a fixed-size
-filled `statedot` and an empty-labeled `doublecircle` ring — shapes
-only the adapter produces; flowchart source cannot spell them).
+filled `statedot` and an empty-labeled `doublecircle`, a ring around a
+filled dot — shapes only the adapter produces; flowchart source cannot
+spell them).
 
 **HTML labels are measured, not asked for.** With HTML labels (§3), every
 node and edge label line wider than `flowchart.wrappingWidth` wraps at its

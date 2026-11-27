@@ -205,7 +205,7 @@ describe('flowchart — Mermaid\'s shapes with no bracket form', () => {
   it('draws a data store as its two lines, and a mark Mermaid draws unlabelled at its own size', () => {
     assert.match(svgOf('flowchart LR\n  A["x"]@{ shape: datastore }'),
       /<rect x="12" y="12" width="48" height="34.8" class="mm-node-shape" fill="#dbeafe" stroke="#2563eb" stroke-width="1" stroke-dasharray="48 34.8">/);
-    const layout = compileMermaid('flowchart LR\n  A["a long label"]@{ shape: fork }\n  B["x"]@{ shape: sm-circ }').toLayout();
+    const layout = compileMermaid('flowchart TD\n  A["a long label"]@{ shape: fork }\n  B["x"]@{ shape: sm-circ }').toLayout();
     assert.deepEqual(layout.nodes.map((/** @type {any} */ n) => [n.w, n.h]), [[70, 10], [14, 14]]);
   });
 
@@ -221,6 +221,41 @@ describe('flowchart — Mermaid\'s shapes with no bracket form', () => {
     assert.match(styled('tag-rect'), /<polygon [^>]*class="mm-node-mark" fill="#aa5500" stroke="#aa5500" stroke-width="1" style="fill:#aa5500;stroke:#aa5500">/);
     assert.match(styled('fr-circ'), /<circle cx="23" cy="23" r="7" class="mm-node-mark" fill="#aa5500" stroke="#aa5500" stroke-width="1" style="fill:#aa5500;stroke:#aa5500">/);
     assert.match(styled('braces'), /<rect x="12" y="12" width="51" height="34.8" class="mm-node-shape mm-node-bare" fill="none" stroke="none" stroke-width="1"><\/rect>/);
+  });
+});
+
+describe('the marks Mermaid draws in its own outline: an actor, a turned fork, a cylinder', () => {
+  it('draws an actor as Mermaid\'s stick figure above the name, head box and foot box', () => {
+    for (const source of ['sequenceDiagram\n  actor A\n  participant B\n  A->>B: hi', 'sequenceDiagram\n  participant A@{ "type": "actor" }\n  participant B\n  A->>B: hi']) {
+      const svg = svgOf(source);
+      const boxes = [...svg.matchAll(/<g class="mm-node mm-actor" data-id="A">(.*?)<text/g)].map((m) => m[1]);
+      assert.equal(boxes[0],
+        '<circle cx="52" cy="22" r="6" class="mm-actor-shape" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"></circle>'
+        + '<path d="M52,28 V36 M45,31 H59 M52,36 L45,42 M52,36 L59,42" class="mm-actor-mark" fill="#2563eb" stroke="#2563eb" stroke-width="1.5"></path>', source);
+      assert.deepEqual(boxes.map(shapes), [['circle.mm-actor-shape', 'path.mm-actor-mark'], ['circle.mm-actor-shape', 'path.mm-actor-mark']]);
+      // the name under the figure; every box grows to hold it, a participant's too
+      assert.match(svg, /<g class="mm-node mm-actor" data-id="A"><circle[^>]*><\/circle><path[^>]*><\/path><text[^>]*class="mm-label"[^>]*><tspan x="52" y="61"/);
+      assert.deepEqual(compileMermaid(source).toLayout().actors.map((/** @type {any} */ a) => a.h), [66, 66]);
+      assert.match(headBox(svg, 'B'), /^<rect x="[\d.]+" y="12" width="80" height="66" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1"><\/rect>$/);
+    }
+    // a diagram of participants only keeps its boxes
+    assert.deepEqual(compileMermaid('sequenceDiagram\n  participant A\n  participant B').toLayout().actors.map((/** @type {any} */ a) => a.h), [34, 34]);
+  });
+
+  it('turns a fork across the flow in a left-to-right chart only, as Mermaid does', () => {
+    const box = (/** @type {string} */ dir) => compileMermaid(`flowchart ${dir}\n  A --> F@{ shape: fork }\n  F --> B`).toLayout()
+      .nodes.filter((/** @type {any} */ n) => n.id === 'F').map((/** @type {any} */ n) => [n.w, n.h])[0];
+    assert.deepEqual(Object.fromEntries(['LR', 'RL', 'TD', 'TB', 'BT'].map((dir) => [dir, box(dir)])),
+      { LR: [10, 70], RL: [70, 10], TD: [70, 10], TB: [70, 10], BT: [70, 10] });
+    assert.match(svgOf('flowchart LR\n  A --> F@{ shape: fork }\n  F --> B'), /<rect x="[\d.]+" y="[\d.]+" width="10" height="70" class="mm-node-mark"/);
+  });
+
+  it('draws a cylinder\'s whole top ellipse, its front lip included, as the participant database does', () => {
+    const svg = svgOf('flowchart TD\n  A[(Database)]');
+    assert.match(svg, /<path d="M12,17.8 a43.96,5.8 0 0 0 87.92,0 a43.96,5.8 0 0 0 -87.92,0 l0,23.2 a43.96,5.8 0 0 0 87.92,0 l0,-23.2" class="mm-node-shape" fill="#dbeafe" stroke="#2563eb" stroke-width="1">/);
+    // one outline: an author's fill and stroke paint all of it
+    assert.match(svgOf('flowchart TD\n  A[(Database)]\n  style A fill:#ffeeaa,stroke:#aa5500'),
+      /<path d="M12,17.8 a[^"]*" class="mm-node-shape" fill="#ffeeaa" stroke="#aa5500" stroke-width="1" style="fill:#ffeeaa;stroke:#aa5500">/);
   });
 });
 

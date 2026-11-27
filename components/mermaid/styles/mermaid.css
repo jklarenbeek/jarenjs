@@ -100,18 +100,31 @@
   height: auto;
 }
 
-/* Cascade over the render pass's presentation attributes. */
+/* Cascade over the render pass's presentation attributes: every mark the
+   render pass paints carries one of these classes, so a host-linked theme
+   repaints all of it. A class written after `mm-node-shape` on the same
+   element (`mm-node-mark` on a state's dot, `mm-node-ring`, `mm-node-bare`)
+   wins by coming later here. */
 .mermaid .mm-node-shape { fill: var(--mm-node-fill); stroke: var(--mm-node-stroke); }
 .mermaid .mm-node-detail { stroke: var(--mm-node-stroke); }
 .mermaid .mm-node-mark { fill: var(--mm-node-stroke); stroke: var(--mm-node-stroke); }
 .mermaid .mm-node-bare { fill: none; stroke: none; }
+.mermaid .mm-node-ring { fill: none; }
 .mermaid .mm-label,
+.mermaid .mm-text,
 .mermaid .mm-node text { fill: var(--mm-node-text); }
-.mermaid .mm-edge-line { stroke: var(--mm-line-color); }
+.mermaid .mm-edge-line,
+.mermaid .mm-message-line { stroke: var(--mm-line-color); }
+.mermaid .mm-edge-line.mm-edge-hidden { stroke: none; }
 .mermaid .mm-arrowhead { fill: var(--mm-line-color); stroke: var(--mm-line-color); }
+.mermaid .mm-arrowhead-line { fill: none; stroke: var(--mm-line-color); }
 .mermaid .mm-edge-label { fill: var(--mm-edge-label-text); }
 .mermaid .mm-edge-label-bg { fill: var(--mm-edge-label-bg); }
 .mermaid .mm-cluster-rect { fill: var(--mm-cluster-fill); stroke: var(--mm-cluster-stroke); }
+.mermaid .mm-cluster-label { fill: var(--mm-node-text); }
+.mermaid .mm-panel { fill: var(--mm-node-fill); stroke: var(--mm-node-stroke); }
+.mermaid .mm-panel-rule { stroke: var(--mm-node-stroke); }
+.mermaid .mm-placeholder { fill: var(--mm-cluster-fill); stroke: var(--mm-cluster-stroke); }
 .mermaid .mm-actor rect { fill: var(--mm-actor-fill); stroke: var(--mm-actor-stroke); }
 .mermaid .mm-actor text { fill: var(--mm-actor-text); }
 .mermaid .mm-actor-shape { fill: var(--mm-actor-fill); stroke: var(--mm-actor-stroke); }
@@ -120,6 +133,11 @@
 .mermaid .mm-activation { fill: var(--mm-activation-fill); stroke: var(--mm-activation-stroke); }
 .mermaid .mm-note rect { fill: var(--mm-note-fill); stroke: var(--mm-note-stroke); }
 .mermaid .mm-note text { fill: var(--mm-note-text); }
+.mermaid .mm-block,
+.mermaid .mm-block-divider { stroke: var(--mm-actor-stroke); }
+.mermaid .mm-block-tab { fill: var(--mm-cluster-fill); stroke: var(--mm-actor-stroke); }
+.mermaid .mm-block-label,
+.mermaid .mm-block-divider-label { fill: var(--mm-node-text); }
 
 /* Gantt reuses the vocabulary rather than adding a second one: a bar is a
    node, a done bar an activation, a critical bar a note, the grid a cluster

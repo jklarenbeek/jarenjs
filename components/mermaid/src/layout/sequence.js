@@ -44,9 +44,20 @@ const NOTE_GAP = 10;
  * with a bar, an arrow or a line) rather than as a box around it.
  * @type {ReadonlySet<string>}
  */
-export const GLYPH_TYPES = new Set(['boundary', 'control', 'entity']);
+const GLYPH_TYPES = new Set(['boundary', 'control', 'entity']);
 /** The room a glyph takes above its participant's name. */
 export const GLYPH_ROOM = 32;
+
+/**
+ * Whether Mermaid draws a participant as a glyph above its name: a
+ * boundary's, a control's or an entity's, or an `actor`'s stick figure
+ * (an actor carries no type).
+ * @param {{ kind?: string, type?: string }} a
+ * @returns {boolean}
+ */
+export function drawsGlyph(a) {
+  return a.type === undefined ? a.kind === 'actor' : GLYPH_TYPES.has(a.type);
+}
 
 /**
  * The distance each pair of actors' lifelines needs, so that no message's
@@ -115,7 +126,7 @@ export function layoutSequence(ast) {
   // every actor box is as tall as the one with the most lines, and as the
   // glyph above a name where a participant's type draws one
   const actorH = ACTOR_H + (Math.max(1, ...actors.map((a) => a.lines.length)) - 1) * LINE_H
-    + (actors.some((a) => GLYPH_TYPES.has(a.type)) ? GLYPH_ROOM : 0);
+    + (actors.some(drawsGlyph) ? GLYPH_ROOM : 0);
   /** @type {Map<string, any>} */
   const byId = new Map();
 

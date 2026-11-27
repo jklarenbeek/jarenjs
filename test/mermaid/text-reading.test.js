@@ -73,7 +73,7 @@ describe('class and ER panels read their rows', () => {
   it('decodes a row\'s codes and draws a broken row in its lines, the box grown to hold them', () => {
     const svg = svgOf('classDiagram\nclass A {\n  +items #lt;T#gt;\n}\nA --> B : one<br>two');
     assert.ok(svg.includes('>+items &lt;T&gt;</text>'));
-    assert.ok(svg.includes('<text font-size="13" fill="#1f2020"><tspan x="26" y="204">A --&gt; B : one</tspan><tspan x="26" y="226">two</tspan></text>'));
+    assert.ok(svg.includes('<text font-size="13" class="mm-text" fill="#1f2020"><tspan x="26" y="204">A --&gt; B : one</tspan><tspan x="26" y="226">two</tspan></text>'));
     const flat = svgOf('classDiagram\nclass A {\n  +items #lt;T#gt;\n}\nA --> B : one');
     // one row's height (22px) more
     assert.deepEqual([flat, svg].map((s) => s.match(/height="(\d+)"/)?.[1]), ['234', '256']);

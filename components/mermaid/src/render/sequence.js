@@ -2,7 +2,7 @@
 /**
  * @file Sequence renderer: `PositionedDiagram` → pure-vnode SVG.
  * Actor boxes (top and bottom), each participant type in Mermaid's glyph
- * for it, dashed lifelines, activation bars, messages with solid/dotted
+ * for it and an `actor` as its stick figure, dashed lifelines, activation bars, messages with solid/dotted
  * lines and arrow/open/cross/async heads, Mermaid's half heads and two-way
  * heads and its central-connection dots, note boxes and block frames. Both boxes of an actor are nodes of that
  * participant's id and every message an edge between two of them, marked
@@ -12,7 +12,7 @@
 
 import { svgRoot, group, rect, path, line, polygon, circle, textAt, textLines, num, coord } from '@jarenjs/view/helpers';
 import { textBlock } from '../label-text.js';
-import { SELF_LOOP_W, GLYPH_TYPES, GLYPH_ROOM } from '../layout/sequence.js';
+import { SELF_LOOP_W, GLYPH_ROOM, drawsGlyph } from '../layout/sequence.js';
 import { nodeMark, edgeMark } from './marks.js';
 
 /** The advance from one line of a text to the next (`textLines`' own). */
@@ -80,10 +80,10 @@ export function renderSequence(scene, theme, hash) {
  */
 function actorBox(a, y, t, fs, key) {
   const label = { class: 'mm-label', fill: t.actorText, 'font-weight': 'bold' };
-  if (GLYPH_TYPES.has(a.type)) {
+  if (drawsGlyph(a)) {
     // the glyph above the name, the name below it
     return group(nodeMark(a.id, key, 'mm-actor'), [
-      ...actorGlyph(a.type, a.x, y + 4 + GLYPH_R, t),
+      ...actorGlyph(a.type ?? a.kind, a.x, y + 4 + GLYPH_R, t),
       textLines(a.x, y + GLYPH_ROOM + (a.h - GLYPH_ROOM) / 2, a.lines, fs, label),
     ]);
   }
@@ -127,13 +127,22 @@ function actorShape(a, y, t) {
 /**
  * A boundary's, a control's or an entity's glyph, as Mermaid draws it: a
  * circle (`mm-actor-shape`) with a bar on its left, an arrow on its top or a
- * line under it (`mm-actor-mark`, the stroke's color).
+ * line under it (`mm-actor-mark`, the stroke's color); an actor's stick
+ * figure, a head (`mm-actor-shape`) over a body, arms and legs
+ * (`mm-actor-mark`), in Mermaid's proportions, in the same room.
  * @param {string} type @param {number} cx @param {number} cy @param {Record<string,string>} t
  * @returns {any[]}
  */
 function actorGlyph(type, cx, cy, t) {
   const R = GLYPH_R;
   const mark = { class: 'mm-actor-mark', fill: t.actorStroke, stroke: t.actorStroke, 'stroke-width': 1.5 };
+  if (type === 'actor') {
+    // each limb its own two-point line, so the mark's fill covers nothing
+    return [
+      circle(cx, cy - 7, 6, { class: 'mm-actor-shape', fill: t.actorFill, stroke: t.actorStroke, 'stroke-width': 1.5 }),
+      path(`M${cx},${cy - 1} V${cy + 7} M${cx - 7},${cy + 2} H${cx + 7} M${cx},${cy + 7} L${cx - 7},${cy + 13} M${cx},${cy + 7} L${cx + 7},${cy + 13}`, mark),
+    ];
+  }
   const ring = circle(cx, cy, R, { class: 'mm-actor-shape', fill: t.actorFill, stroke: t.actorStroke, 'stroke-width': 1.5 });
   if (type === 'boundary') {
     const bx = cx - R - 10;
@@ -240,7 +249,7 @@ function halfHead(head, tip, dir, travel, color) {
   const side = (head.includes('top') ? -1 : 1) * travel;
   if (head.startsWith('stick-')) {
     return path(`M${num(tip.x)},${num(tip.y)} L${num(tip.x - dir * 7)},${num(tip.y + side * 7)}`,
-      { class: 'mm-arrowhead', stroke: color, 'stroke-width': 1.2, fill: 'none' });
+      { class: 'mm-arrowhead-line', stroke: color, 'stroke-width': 1.2, fill: 'none' });
   }
   return polygon([
     { x: tip.x, y: tip.y }, { x: tip.x - dir * 8, y: tip.y }, { x: tip.x - dir * 8, y: tip.y + side * 6 },
@@ -260,12 +269,12 @@ function arrowHead(tip, from, head, color) {
     return path(
       `M${num(tip.x)},${num(tip.y - s)} L${num(tip.x - dir * s)},${num(tip.y + s)}`
       + ` M${num(tip.x)},${num(tip.y + s)} L${num(tip.x - dir * s)},${num(tip.y - s)}`,
-      { stroke: color, 'stroke-width': 1.5, fill: 'none' });
+      { class: 'mm-arrowhead-line', stroke: color, 'stroke-width': 1.5, fill: 'none' });
   }
   if (head === 'open') {
     return path(
       `M${num(tip.x - dir * size)},${num(tip.y - 5)} L${num(tip.x)},${num(tip.y)} L${num(tip.x - dir * size)},${num(tip.y + 5)}`,
-      { stroke: color, 'stroke-width': 1.2, fill: 'none' });
+      { class: 'mm-arrowhead-line', stroke: color, 'stroke-width': 1.2, fill: 'none' });
   }
   // filled arrow / async point → filled triangle
   return polygon([
@@ -284,11 +293,11 @@ function renderBlock(b, t, fs, i) {
   const tabW = Math.max(48, label.length * fs * 0.5 + 16);
   const parts = [
     rect(b.x, b.y, b.w, b.h, { class: 'mm-block', fill: 'none', stroke: t.actorStroke, 'stroke-width': 1 }),
-    path(`M${num(b.x)},${num(b.y + 18)} h${num(tabW)} l-8,6 h${num(-tabW + 8)} Z`, { fill: t.clusterFill, stroke: t.actorStroke, 'stroke-width': 1 }),
+    path(`M${num(b.x)},${num(b.y + 18)} h${num(tabW)} l-8,6 h${num(-tabW + 8)} Z`, { class: 'mm-block-tab', fill: t.clusterFill, stroke: t.actorStroke, 'stroke-width': 1 }),
     textAt(b.x + 6, b.y + 14, label, fs - 1, { 'font-weight': 'bold', class: 'mm-block-label', fill: t.nodeText }),
   ];
   for (const d of b.dividers) {
-    parts.push(line(b.x, d.y, b.x + b.w, d.y, { stroke: t.actorStroke, 'stroke-width': 1, 'stroke-dasharray': '2 2' }));
+    parts.push(line(b.x, d.y, b.x + b.w, d.y, { class: 'mm-block-divider', stroke: t.actorStroke, 'stroke-width': 1, 'stroke-dasharray': '2 2' }));
     if (d.label) parts.push(textAt(b.x + b.w / 2, d.y - 4, '[' + d.label + ']', fs - 1, { 'text-anchor': 'middle', class: 'mm-block-divider-label', fill: t.nodeText }));
   }
   return group({ class: 'mm-block-group', key: 'blk-' + i }, parts);

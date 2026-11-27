@@ -246,12 +246,14 @@ function shapeVnode(node, t) {
     case 'subroutine':
       return group({}, [
         rect(x, y, w, h, common),
-        path(`M${x + 6},${y} L${x + 6},${y + h} M${x + w - 6},${y} L${x + w - 6},${y + h}`, { fill: 'none', stroke, 'stroke-width': 1 }),
+        path(`M${x + 6},${y} L${x + 6},${y + h} M${x + w - 6},${y} L${x + w - 6},${y + h}`, detailProps(common, attributes.stroke ?? null)),
       ]);
     case 'cylinder': {
-      const ry = Math.min(8, h / 6);
-      const d = `M${x},${y + ry} C${x},${y - ry / 2} ${x + w},${y - ry / 2} ${x + w},${y + ry}`
-        + ` L${x + w},${y + h - ry} C${x + w},${y + h + ry / 2} ${x},${y + h + ry / 2} ${x},${y + h - ry} Z`;
+      // Mermaid's own outline (and the participant database's): the whole top
+      // ellipse, its front lip included, then the sides and the bottom's front
+      const ry = coord(Math.min(8, h / 6));
+      const d = `M${x},${coord(y + ry)} a${coord(w / 2)},${ry} 0 0 0 ${w},0 a${coord(w / 2)},${ry} 0 0 0 ${-w},0`
+        + ` l0,${coord(h - 2 * ry)} a${coord(w / 2)},${ry} 0 0 0 ${w},0 l0,${coord(-(h - 2 * ry))}`;
       return path(d, common);
     }
     case 'circle':
@@ -259,13 +261,19 @@ function shapeVnode(node, t) {
     case 'statedot':
       // the state diagram's start marker: a small filled dot (the state
       // layout is the only producer; flowchart source cannot spell it)
+      // (filled with the stroke: `mm-node-mark` comes after `mm-node-shape`
+      // in the stylesheet, so a host theme paints it so too)
       return circle(x + w / 2, y + h / 2, Math.min(w, h) / 2,
-        { ...common, fill: stroke });
+        { ...common, class: 'mm-node-shape mm-node-mark', fill: stroke });
     case 'doublecircle': {
       const r = Math.min(w, h) / 2;
       return group({}, [
         circle(x + w / 2, y + h / 2, r, common),
-        circle(x + w / 2, y + h / 2, r - 4, { ...common, fill: 'none' }),
+        // the state diagram's end marker (no label) rings a filled dot, as
+        // Mermaid draws it; a flowchart's `(((x)))` two rings
+        circle(x + w / 2, y + h / 2, r - 4, node.label === ''
+          ? { ...common, class: 'mm-node-shape mm-node-mark', fill: stroke }
+          : { ...common, class: 'mm-node-shape mm-node-ring', fill: 'none' }),
       ]);
     }
     case 'diamond':
@@ -314,6 +322,21 @@ function shapeVnode(node, t) {
 }
 
 /**
+ * A line drawn inside a node's outline (a subroutine's sides, a lined
+ * shape's rule): the `mm-node-detail` class, unfilled, in the outline's
+ * stroke, and an author's stroke inline, where it outranks the stylesheet.
+ * @param {Record<string, any>} common the outline's attributes
+ * @param {string | null} authoredStroke the stroke an author's style gives the node
+ * @returns {Record<string, any>}
+ */
+function detailProps(common, authoredStroke) {
+  return {
+    class: 'mm-node-detail', fill: 'none', stroke: common.stroke, 'stroke-width': common['stroke-width'],
+    ...(authoredStroke === null ? {} : { style: `stroke:${authoredStroke}` }),
+  };
+}
+
+/**
  * The shapes Mermaid draws without their label, as small marks.
  * @type {ReadonlySet<string>}
  */
@@ -334,10 +357,7 @@ const MARKER_SHAPES = new Set(['sm-circ', 'fr-circ', 'f-circ', 'fork', 'hourglas
  */
 function namedShape(shape, x, y, w, h, common, authoredStroke) {
   const lineOf = { stroke: common.stroke, 'stroke-width': common['stroke-width'] };
-  const detail = {
-    class: 'mm-node-detail', fill: 'none', ...lineOf,
-    ...(authoredStroke === null ? {} : { style: `stroke:${authoredStroke}` }),
-  };
+  const detail = detailProps(common, authoredStroke);
   const mark = {
     class: 'mm-node-mark', fill: common.stroke, ...lineOf,
     ...(authoredStroke === null ? {} : { style: `fill:${authoredStroke};stroke:${authoredStroke}` }),
@@ -493,6 +513,8 @@ function renderEdge(e, t, fontSize, i, html) {
   const dash = e.stroke === 'dotted' ? '3 3' : null;
   const lineProps = {
     class: 'mm-edge-line', fill: 'none', stroke, 'stroke-width': strokeWidth,
+    // `mm-edge-hidden` keeps the stylesheet's line rule off an invisible link
+    ...(e.stroke === 'invisible' ? { class: 'mm-edge-line mm-edge-hidden' } : {}),
   };
   if (dash) lineProps['stroke-dasharray'] = dash;
 
@@ -548,7 +570,7 @@ function marker(tip, from, kind, color) {
   const ux = dx / len;
   const uy = dy / len;
   if (kind === 'circle') {
-    return circle(tip.x - ux * 4, tip.y - uy * 4, 4, { fill: color, stroke: color });
+    return circle(tip.x - ux * 4, tip.y - uy * 4, 4, { class: 'mm-arrowhead', fill: color, stroke: color });
   }
   if (kind === 'cross') {
     const s = 5;
@@ -556,7 +578,7 @@ function marker(tip, from, kind, color) {
     return path(
       `M${num(tip.x - ux * 8 + px * s)},${num(tip.y - uy * 8 + py * s)} L${num(tip.x - px * s)},${num(tip.y - py * s)}`
       + ` M${num(tip.x - ux * 8 - px * s)},${num(tip.y - uy * 8 - py * s)} L${num(tip.x + px * s)},${num(tip.y + py * s)}`,
-      { stroke: color, 'stroke-width': 1.5, fill: 'none' });
+      { class: 'mm-arrowhead-line', stroke: color, 'stroke-width': 1.5, fill: 'none' });
   }
   // arrow (default)
   const size = 9;

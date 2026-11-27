@@ -230,6 +230,14 @@ delete it or fix it.
   reader makes reads back and the search can go; such content costs both
   derivations and then the search.
 
+## @jarenjs/charts
+
+- [ ] **The Mermaid pie adapter keeps concrete colors under a host theme.**
+  `mermaidPieRenderer` (`@jarenjs/charts/transforms/mermaid-adapter`) draws
+  its slices (`mm-pie-slice`) in a fixed palette and its legend swatches and
+  text with no class, so under `theme: 'host'` a theme flip leaves them as
+  they were: the legend text stays `#1f2020` on a dark host.
+
 ## @jarenjs/mermaid
 
 - [ ] **Mermaid forms still read differently from Mermaid** — measured against
@@ -241,19 +249,6 @@ delete it or fix it.
   for, a lone `"` inside an unquoted label (`A[He said "hi]`), a nested
   generic in a class name (`class List~List~int~~`) and a bare `subgraph`
   line.
-- [ ] **Marks the stylesheet does not theme** — `styles/mermaid.css` (and so a
-  host-linked theme flip) maps no rule onto a sequence message's line
-  (`mm-message-line`), its open and cross heads, a flowchart link's circle and
-  cross heads or a subroutine's inner lines, which keep the concrete theme
-  color when the host's tokens change; and a state diagram's start dot, drawn
-  in the stroke color with the class `mm-node-shape`, is repainted to the node
-  fill by that class's rule. Fixing either changes the bytes of diagrams that
-  carry none of the newer marks.
-- [ ] **Sequence and flowchart marks still drawn differently** — a sequence `actor`
-  (or `@{ "type": "actor" }`) draws the participant box, where Mermaid draws a
-  stick figure above the name; a flowchart `fork` stays a horizontal bar in an
-  `LR`/`RL` chart, where Mermaid turns it; and a `cylinder` node draws no
-  front lip of its top (the participant `database` glyph draws one).
 - [ ] **Full layout for the secondary types** — class and ER render as structured panels, not domain-specific layouts; mindmap/gitGraph/journey/timeline parse-accept with a placeholder. Real layouts are the next coverage push (tracked honestly in the benchmark scorecard).
 - [ ] **Layout/perf workstream** — dagre-lite handles ranks and straight
   edges; orthogonal edge routing, subgraph clustering and crossing reduction
