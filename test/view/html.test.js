@@ -40,6 +40,11 @@ describe('renderToString', function () {
       '<div><br><img src="x.png"></div>');
   });
 
+  it('renders a void element named in any case without an end tag: `</BR>` would read as a second `<br>`', function () {
+    assert.strictEqual(renderToString(['div', {}, ['BR'], 'x', ['Input', { value: 'v' }]]),
+      '<div><BR>x<Input value="v"></div>');
+  });
+
   it('serializes a controlled textarea value as escaped text instead of its children', function () {
     assert.strictEqual(renderToString(['textarea', { value: 'a < b & </textarea>', rows: 3 }, 'stale']),
       '<textarea rows="3">a &lt; b &amp; &lt;/textarea&gt;</textarea>');

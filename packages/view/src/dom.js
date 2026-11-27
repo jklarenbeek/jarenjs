@@ -124,7 +124,7 @@ const WIDGET_SKIP_PROPS = new Set(['name', 'props', 'tag']);
  * renderer and the content renders under the same profile and grants.
  * @typedef {Readonly<{ widgets: Record<string, WidgetDef>, document: any, controlled?: 'focus',
  *   safe?: 'interactive', capabilities?: Readonly<{ widgets: readonly string[] }>, idPrefix?: string,
- *   onUnsafe?: (info: { kind: 'tag' | 'prop' | 'event' | 'widget', name: string }) => void }>} WidgetContext
+ *   onUnsafe?: (info: { kind: 'tag' | 'prop' | 'event' | 'widget' | 'id', name: string }) => void }>} WidgetContext
  */
 
 /**
@@ -166,12 +166,12 @@ const WIDGET_SKIP_PROPS = new Set(['name', 'props', 'tag']);
  *   shadow the host's. Absent: the first of `jaren-u-`, `jaren-u2-`, … no
  *   other live safe root of the document holds, until `destroy()` (the
  *   serializer writes `jaren-u-`; VIEW-FORMAT §8 rule 7). Never read in trusted mode.
- * @property {(info: { kind: 'tag' | 'prop' | 'event' | 'widget', name: string }) => void}
+ * @property {(info: { kind: 'tag' | 'prop' | 'event' | 'widget' | 'id', name: string }) => void}
  *   [onUnsafe] - In safe mode, called for everything stripped: a disallowed
  *   `tag`, a rejected or sanitized-away `prop`, a stripped `on` binding
  *   (`event`; under the interactive profile named by its event type, `on`
- *   when the member is not an object, `emit` for a widget's) or a
- *   `widget`.
+ *   when the member is not an object, `emit` for a widget's) or a `widget`;
+ *   and, nothing stripped, once per prefixed `id` the page holds outside the root.
  * @property {(thrown: unknown) => void} [onCleanupError] - Receives
  *   the first VALUE a widget `unmount` threw during TERMINAL teardown
  *   (`destroy()`, direct or deferred) — by identity, whatever host
@@ -242,6 +242,13 @@ export function createDomRenderer(container, options = {}) {
      * than have it silently vanish. The policy stays a pure decision; the
      * renderer reports at the point it acts. */
     onUnsafe: typeof options.onUnsafe === 'function' ? options.onUnsafe : null,
+    /** The render's container and its id claim, which a prefixed id the
+     * page already holds is looked for outside of. */
+    container,
+    ids,
+    /** The prefixed ids reported as held outside the root, each once.
+     * @type {Set<string>} */
+    heldIds: new Set(),
     /** Controlled form-control nodes (`value`/`checked`), reconciled against
      * the live DOM at the END of every render pass — so an authoritative
      * value is reasserted even when the `===`/`memo` fast paths skip the
@@ -1057,6 +1064,32 @@ function isConnectedTo(node, root) {
 }
 
 /**
+ * Report a prefixed id the page already holds outside the root, once per id:
+ * a host element whose id starts with the namespace (`jaren-u-name` beside a
+ * document declaring `name`) or another root given the same prefix. The
+ * document's references to it resolve to whichever element the page holds
+ * first. Nothing is refused or changed: the id is written as VIEW-FORMAT §8
+ * rule 7 says. Looked up before the write, so the element being written never
+ * hides a holder later in the page; an element of the root itself is no
+ * holder, nor one of a root around it in the same namespace (the content a
+ * granted widget renders there, a dialog's, is the document's own), and a
+ * document without `getElementById` is not looked in.
+ * @param {any} ctx
+ * @param {string} id
+ */
+function reportHeldId(ctx, id) {
+  if (ctx.heldIds.has(id) || typeof ctx.doc?.getElementById !== 'function') return;
+  const held = ctx.doc.getElementById(id);
+  if (held == null || isConnectedTo(held, ctx.container)) return;
+  const { claims, prefix } = /** @type {IdClaim} */ (ctx.ids);
+  if (claims !== null) for (const [other, claim] of claims) {
+    if (other !== ctx.container && claim.prefix === prefix && isConnectedTo(ctx.container, other) && isConnectedTo(held, other)) return;
+  }
+  ctx.heldIds.add(id);
+  ctx.onUnsafe({ kind: 'id', name: id });
+}
+
+/**
  * Write one prop change to the DOM.
  * @param {any} ctx
  * @param {any} node
@@ -1117,6 +1150,7 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
     // Writing/removing the attribute matches exactly what the serializer does.
     // (The interactive profile's controlled `input` keeps this attribute and
     // has its live value/checked reasserted to it at the end of the pass.)
+    if (ctx.onUnsafe !== null && typeof newValue === 'string' && name.toLowerCase() === 'id') reportHeldId(ctx, newValue);
     if (name === 'style' && typeof newValue === 'object' && newValue !== null) {
       // an object with no declaration is no attribute, as the serializer omits it
       newValue = styleToString(newValue) || null;

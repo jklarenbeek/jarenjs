@@ -118,7 +118,7 @@ const render = createDomRenderer(container, {
 });
 ```
 
-`name`/`props`/`tag` configure the widget (the host tag defaults to `div`); every other prop — `key`, `class`, `on`, ... — applies to the host element as usual, and the widget node has no vnode children (the widget owns the host's subtree). `props` is compared **by reference**: with the JSLT memo option, unchanged state yields reference-equal props, so an untouched widget is never called. `mount` runs after the host is connected (grids can measure) and returns a handle threaded to `update`/`unmount`; `unmount` runs exactly once when the widget leaves the tree, even when an ancestor subtree is replaced. A throwing `mount` or `update` **poisons** the widget instead of corrupting it: siblings and the frame still complete, the first error surfaces after the frame settles, and the next render that revisits the widget replaces it with a fresh lifecycle (`unmount` runs on the old instance only when its `mount` had succeeded). `emit(binding, event)` delivers ordinary event bindings to `onEvent` — a widget composes runtime data (the clicked row id) into the binding its props carry instead of inventing an action vocabulary. `mount` also receives a fourth argument, the renderer's frozen `{ widgets, document }`, so a widget that renders vnodes of its own (a dialog's content) renders them with the registry it was mounted from. `renderToString(vnode, { widgets })` serializes the host around the widget's `ssr(props)` vnode — still pure, nothing mounts.
+`name`/`props`/`tag` configure the widget (the host tag defaults to `div`); every other prop — `key`, `class`, `on`, ... — applies to the host element as usual, and the widget node has no vnode children (the widget owns the host's subtree). `props` is compared **by reference**: with the JSLT memo option, unchanged state yields reference-equal props, so an untouched widget is never called. `mount` runs after the host is connected (grids can measure) and returns a handle threaded to `update`/`unmount`; `unmount` runs exactly once when the widget leaves the tree, even when an ancestor subtree is replaced. A throwing `mount` or `update` **poisons** the widget instead of corrupting it: siblings and the frame still complete, the first error surfaces after the frame settles, and the next render that revisits the widget replaces it with a fresh lifecycle (`unmount` runs on the old instance only when its `mount` had succeeded). `emit(binding, event)` delivers ordinary event bindings to `onEvent` — a widget composes runtime data (the clicked row id) into the binding its props carry instead of inventing an action vocabulary. `mount` also receives a fourth argument, the renderer's frozen `{ widgets, document }`, so a widget that renders vnodes of its own (a dialog's content) renders them with the registry it was mounted from. `renderToString(vnode, { widgets })` serializes the host around the widget's `ssr(props)` vnode — still pure, nothing mounts; a host on a void element (`tag: 'input'`) is written alone, with no end tag and no fallback (VIEW-FORMAT §7.4).
 
 ## Untrusted views: the safe profile
 
@@ -143,7 +143,10 @@ createDomRenderer(container, { safe: true, onUnsafe: (i) => log(i) });
 
 `onUnsafe` receives one `{ kind, name }` per tag, prop, event binding or
 widget the policy removed; a prop with no value (`null`, or one a frame drops)
-removed nothing and is not reported (upgrade note: it used to be).
+removed nothing and is not reported (upgrade note: it used to be). A DOM root
+also reports, once and without removing anything, `{ kind: 'id', name }` for a
+prefixed id its page already holds outside the root (`jaren-u-name` on a host
+element beside a document declaring `name`): the two elements share the id.
 
 Both build the **same** policy ([`createSafePolicy`](src/safe.js)), so the
 client and the server neutralize an attack identically. In safe mode:
@@ -180,7 +183,8 @@ client and the server neutralize an attack identically. In safe mode:
   shadows the host's. Absent, the serializer writes `jaren-u-` and each live
   safe DOM root of a page takes the first default namespace no other holds
   (`jaren-u-`, then `jaren-u2-`, …) until `destroy()` (VIEW-FORMAT §8
-  rule 7), so two untrusted documents on one page do not share one. Upgrade note: these used to be written as given; a second
+  rule 7), so two untrusted documents on one page do not share one. A page
+  serializing several gives each its own `idPrefix`, on both renderers. Upgrade note: these used to be written as given; a second
   root on a page used to share `jaren-u-` too.
 
 A companion schema,

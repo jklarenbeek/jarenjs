@@ -336,4 +336,38 @@ describe('widget vnodes (VIEW-FORMAT §7)', function () {
       '<section class="viewport"></section>');
     assert.strictEqual(renderToString(vnode), '<section class="viewport"></section>');
   });
+
+  it('renderToString writes a host on a void element alone: no end tag, no fallback, ssr unread', function () {
+    let reads = 0;
+    const widgets = {
+      w: {
+        mount() { return {}; },
+        get ssr() { reads++; return () => ['b', {}, 'fallback']; },
+      },
+    };
+    assert.strictEqual(renderToString(['jaren-widget', { name: 'w', tag: 'input', value: 'x' }], { widgets }),
+      '<input value="x">');
+    assert.strictEqual(renderToString(['div', {}, ['jaren-widget', { name: 'w', tag: 'br' }], 'after'], { widgets }),
+      '<div><br>after</div>');
+    // a parser reads a tag name in any case: `</BR>` is a second `<br>` too
+    assert.strictEqual(renderToString(['jaren-widget', { name: 'w', tag: 'BR' }], { widgets }), '<BR>');
+    assert.strictEqual(renderToString(['jaren-widget', { name: 'w', tag: 'img', src: 'a.png' }],
+      { widgets, safe: 'interactive', capabilities: { widgets: ['w'] } }), '<img src="a.png">');
+    assert.strictEqual(reads, 0);
+    // the DOM renderer builds the one empty host the markup reads as
+    const h = host({ w: { mount() { return {}; } } });
+    h.render(['div', {}, ['jaren-widget', { name: 'w', tag: 'br' }], 'after']);
+    const div = /** @type {any} */ (h.container.childNodes[0]);
+    assert.deepStrictEqual(div.childNodes.map((/** @type {any} */ n) => n.tagName ?? n.nodeValue), ['br', 'after']);
+    assert.strictEqual(div.childNodes[0].childNodes.length, 0);
+  });
+
+  it('renderToString keeps the end tag and the fallback of a host that is not an HTML void element', function () {
+    const widgets = { w: { mount() { return {}; }, ssr: () => ['title', {}, 't'] } };
+    // inside svg an `input` is a foreign element: its end tag closes it
+    assert.strictEqual(renderToString(['svg', {}, ['jaren-widget', { name: 'w', tag: 'input' }], ['circle', {}]], { widgets }),
+      '<svg><input><title>t</title></input><circle></circle></svg>');
+    assert.strictEqual(renderToString(['jaren-widget', { name: 'w', tag: 'span' }], { widgets }),
+      '<span><title>t</title></span>');
+  });
 });

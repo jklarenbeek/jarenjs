@@ -374,7 +374,8 @@ equal.
 `renderToString(vnode)` MUST produce markup equivalent to what a
 patching renderer would build: text and attribute values escaped (`&`,
 `<`, `>` in text; `&`, `"` in double-quoted attributes), void elements
-(`br`, `img`, `input`, ...) without end tags, `key` and `on` producing
+(`br`, `img`, `input`, ..., the tag in any case outside `svg`) without end
+tags, `key` and `on` producing
 no output, boolean and style props serialized per §3, and an inline handler
 value (`onclick: 'alert(1)'`) omitted as §3's property table says.
 Serialization is pure: no state, no DOM, safe in any runtime.
@@ -663,7 +664,13 @@ the committed baseline. Consequences a conforming renderer exhibits:
 `renderToString(vnode, { widgets })`: a widget node serializes its
 host element with the host props (widget-local members excluded),
 containing the serialized `ssr(props)` vnode when the widget is
-registered and has `ssr`, else empty content. Serialization stays pure
+registered and has `ssr`, else empty content. A host on an HTML void
+element (`tag: 'input'`, `'br'`, `'img'`, ..., in any case, outside `svg`)
+is written without an end tag and without a fallback, and `ssr` is not
+read: a parser would read the fallback as the host's next siblings, and
+`</br>` as a second `<br>`, where the DOM renderer builds one empty host.
+Upgrade note: such a host used to be written with an end tag and its
+fallback inside it. Serialization stays pure
 — no state, no DOM, no widget is mounted; the client-side first render
 mounts widgets as usual (§6).
 
@@ -807,7 +814,15 @@ Under the safe profile a renderer MUST:
    gives. A page's first untrusted document therefore
    serializes and renders alike; a host serializing several gives each its
    own prefix, the same one its DOM root is given, and uses no id of its own
-   that starts with a prefix. Upgrade note: a safe document's ids, id
+   that starts with a prefix. A DOM root reports, through `onUnsafe` and once
+   per id, a prefixed id it writes that the page already holds outside the
+   root (`{ kind: 'id', name: 'jaren-u-name' }` for a host element beside a
+   document declaring `name`, or a second root given the same prefix): both
+   elements keep the id, nothing is refused, and references resolve to the one
+   the page holds first. The content a granted widget renders in its root's
+   namespace (a dialog's) counts as the root's own, as a duplicate inside one
+   root does. It is looked up, by `getElementById`, as the id is written: an
+   element the host adds later is not seen. Upgrade note: a safe document's ids, id
    references and those names used to be written as given; a second live
    root on a page used to share `jaren-u-` with the first (pass
    `idPrefix: 'jaren-u-'` to keep that).

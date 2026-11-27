@@ -170,25 +170,31 @@ delete it or fix it.
 
 ## @jarenjs/view & @jarenjs/app
 
-- [ ] **A widget hosted on a void element serializes an end tag.**
-  `renderToString(['jaren-widget', { name: 'w', tag: 'input', value: 'x' }], {
-  widgets: { w: {} } })` writes `<input value="x"></input>`, where an element
-  `input` writes no end tag; a parser drops `</input>` as an error, but reads
-  `</br>` as a second `<br>`, so a `br` host serializes two elements where the
-  DOM renderer builds one. Wanted: a void host tag written without an end tag
-  (and its `ssr` fallback, which a void element cannot hold, refused or
-  dropped).
-- [ ] **Host ids and serialized pages beside an untrusted document's namespace.**
-  Each live safe DOM root of a page takes its own default `idPrefix`
-  (`jaren-u-`, then `jaren-u2-`, …; VIEW-FORMAT §8 rule 7), but
-  `renderToString` has no page. Two untrusted documents serialized into one
-  page both write `jaren-u-` unless the host gives each its own prefix. The
-  same applies to roots built off the page and attached later, and to roots
-  rendered by two separately bundled copies of the renderer. A host id that
-  starts with a namespace in use (`jaren-u-name` beside a document declaring
-  `name`) still collides with the document's element. Wanted: a page-scoped
-  key the serializer and the DOM renderer agree on, or a check on a host id
-  inside a namespace in use that refuses nothing that answered right.
+- [ ] **A void element name inside `svg` serializes without an end tag.**
+  `renderToString(['svg', {}, ['input', {}], ['circle', {}]])` writes
+  `<svg><input><circle></circle></svg>`, which a parser reads with the
+  `circle` inside a foreign `input`, where the DOM renderer builds two
+  siblings. `area`, `base`, `col`, `input`, `link`, `param`, `source`, `track`
+  and `wbr` would read right with an end tag. `br`, `embed`, `hr`, `img` and
+  `meta` end the `svg` in any spelling, so no markup reproduces the DOM there.
+  Wanted: an end tag for the first set, and a decision for the second (refuse,
+  drop or keep).
+- [ ] **A widget hosted on `svg` is built in the HTML namespace.**
+  `createDomRenderer` builds `['jaren-widget', { name: 'w', tag: 'svg' }]`
+  with `createElement`, so `mount` receives an HTML-namespace `svg` that draws
+  nothing. The serializer writes `<svg>…</svg>`, which a parser builds as an
+  SVG element, and `createNode` switches to the SVG namespace for an `svg`
+  element. Wanted: the widget host built in the namespace the element path
+  uses.
+- [ ] **The id report sees only elements present when an id is written.** Each live
+  safe DOM root of a page takes its own default `idPrefix` (`jaren-u-`, then
+  `jaren-u2-`, …), a host serializing several untrusted documents into one
+  page gives each its own `idPrefix` on both renderers (the host-given prefix
+  is the page-scoped key: `renderToString` has no page), and a DOM root
+  reports through `onUnsafe` (`{ kind: 'id' }`) a prefixed id it writes that
+  the page already holds outside the root (VIEW-FORMAT §8 rule 7). The report
+  does not see a host element added after the id is written, and does not
+  cover a prefixed `name` (`form`, `img`, …) the page already holds.
 - [ ] **Segmented logical scrolling past the CSS extent ceiling.** The [reusable collection](../components/collection/docs/COLLECTION.md) and [injected provider coordinator](../packages/app/docs/COLLECTION-PROVIDER.md) cover fixed/measured axes, keyed interaction and bounded page caches up to the conservative CSS extent ceiling; a source longer than that needs segmented logical scrolling. Complete sequential database snapshots and index seeks behind the provider also need an independently qualified source contract.
 
 - [ ] **Collection table semantics beyond activation and selection.** A host serving a record table still lacks per-column

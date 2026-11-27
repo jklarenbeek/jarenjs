@@ -30,6 +30,17 @@ const VOID_ELEMENTS = new Set([
   'link', 'meta', 'param', 'source', 'track', 'wbr',
 ]);
 
+/**
+ * Whether an HTML element of `tag` is void. A parser reads a tag name in
+ * any case, so `BR` is `br`: written with an end tag, `</br>` would read as
+ * a second `<br>`.
+ * @param {string} tag
+ * @returns {boolean}
+ */
+function isHtmlVoid(tag) {
+  return VOID_ELEMENTS.has(tag.toLowerCase());
+}
+
 /** Props that never serialize to markup. */
 const SKIP_PROPS = new Set(['key', 'on', 'memo']);
 
@@ -145,8 +156,8 @@ function serializeProps(props, skip, policy, onUnsafe, tag) {
  * @property {Record<string, { ssr?: (props: any) => any }>} [widgets] -
  *   Registered widget definitions by name: a `jaren-widget` vnode
  *   serializes its host element around the widget's `ssr(props)` vnode
- *   when the widget is registered and has one, else empty
- *   (VIEW-FORMAT §7).
+ *   when the widget is registered and has one, else empty; a host on a
+ *   void element is written alone, with no end tag (VIEW-FORMAT §7.4).
  * @property {boolean | 'interactive'} [safe=false] - Serialize under the
  *   SAFE policy ({@link createSafePolicy}): treat the vnode as untrusted.
  *   Disallowed tags, scripting-sink and inline `on*` properties,
@@ -263,7 +274,12 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
     }
     const hostTag = props.tag ?? 'div';
     if (!isElementName(hostTag)) throw elementNameError(root, vnode, hostTag);
-    const def = widgets !== undefined && typeof props.name === 'string'
+    // An HTML void host holds no content and takes no end tag, so the
+    // fallback a parser would read as the host's next siblings is not
+    // written, and `ssr` is not read: the host as the DOM renderer builds it
+    // before the widget mounts. Inside `svg` the element is foreign, not void.
+    const voidHost = !svg && isHtmlVoid(hostTag);
+    const def = !voidHost && widgets !== undefined && typeof props.name === 'string'
       && Object.hasOwn(widgets, props.name) ? widgets[props.name] : undefined;
     // one read: acquisition and invocation are one boundary here too —
     // renderToString is pure and offers no isolation, so a hostile
@@ -274,8 +290,8 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
       ? renderNode(ssr.call(def, props.props ?? null), widgets, policy, onUnsafe, selection, root,
         hostTag === 'foreignObject' ? false : svg || hostTag === 'svg')
       : '';
-    return '<' + hostTag + fixedAttributes(policy, hostTag) + serializeProps(props, WIDGET_SKIP_PROPS, policy, onUnsafe, hostTag) + '>'
-      + inner + '</' + hostTag + '>';
+    const open = '<' + hostTag + fixedAttributes(policy, hostTag) + serializeProps(props, WIDGET_SKIP_PROPS, policy, onUnsafe, hostTag) + '>';
+    return voidHost ? open : open + inner + '</' + hostTag + '>';
   }
   // Safe mode: a disallowed or injection-shaped tag drops to the empty
   // string, matching the DOM renderer's empty text node.
@@ -329,7 +345,8 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
       selection.matched = true;
     }
   }
-  if (VOID_ELEMENTS.has(tag)) {
+  // a parser lower-cases an HTML tag name; inside `svg` the name is matched as written
+  if (svg ? VOID_ELEMENTS.has(tag) : isHtmlVoid(tag)) {
     return out + '>';
   }
   out += '>';
