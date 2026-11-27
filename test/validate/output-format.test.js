@@ -8,7 +8,7 @@ import { JarenValidator, ValidatorOptions, ValidationOptions, SchemaCompileError
 import { nl } from '@jarenjs/locales';
 import { stringFormats } from '@jarenjs/formats';
 import { getSchemaDraftByName } from '@jarenjs/refs';
-import { flagOutput, basicOutput, detailedOutput, verboseOutput, listOutput, hierarchicalOutput } from '@jarenjs/validate/output';
+import { flagOutput, basicOutput, detailedOutput, verboseOutput, listOutput, hierarchicalOutput, distinctBasicOutput } from '@jarenjs/validate/output';
 
 /** The formats by their specification names. @type {Record<string, any>} */
 const FORMATS = { flag: flagOutput, basic: basicOutput, detailed: detailedOutput, verbose: verboseOutput, list: listOutput, hierarchical: hierarchicalOutput };
@@ -280,11 +280,19 @@ describe('the README example', () => {
     const readme = fs.readFileSync(new URL('../../packages/validate/README.md', import.meta.url), 'utf8');
     const section = readme.slice(readme.indexOf('## Standard output formats'), readme.indexOf('## Normalization'));
     const fences = [...section.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => JSON.parse(m[1]));
-    assert.equal(fences.length, 5);
-    const [schema, order, list, basic, dutch] = fences;
+    assert.equal(fences.length, 6);
+    const [schema, order, list, basic, distinct, dutch] = fences;
     assert.deepEqual(output('list', schema, order), list);
     assert.deepEqual(output('basic', schema, order), basic);
     assert.deepEqual(localizeErrors(output('list', schema, order), compileMessageCatalog(nl)), dutch);
+    // the distinct example's schema, as the README's javascript writes it
+    const node = {
+      $schema: S, $id: 'https://example.com/node', type: 'array', items: { $ref: '#/$defs/node' },
+      $defs: { node: { anyOf: [{ type: 'integer' }, { type: 'array', items: { $ref: '#/$defs/node' } }, { type: 'array', items: { $ref: '#/$defs/node' }, minItems: 1 }] } },
+    };
+    assert.match(section, /items: \{ \$ref: '#\/\$defs\/node' \}, minItems: 1 \}/);
+    assert.deepEqual(new JarenValidator({ outputFormat: distinctBasicOutput }).compile(node)([['x']]).errors
+      .map((/** @type {any} */ unit) => [unit.keywordLocation, unit.instanceLocation, unit.error]), distinct);
   });
 });
 

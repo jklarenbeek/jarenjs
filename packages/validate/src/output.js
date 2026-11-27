@@ -22,6 +22,11 @@
  * annotations it would have produced as `droppedAnnotations` (`list` and
  * `hierarchical` only).
  *
+ * {@link distinctBasicOutput}, {@link distinctDetailedOutput} and
+ * {@link distinctListOutput} are those three formats writing each distinct
+ * error once, where the specification's shape writes it under every path
+ * that reached it.
+ *
  * A validator that is not given a format never imports this module.
  */
 
@@ -191,6 +196,8 @@ class OutputUnit {
     this.valid = true;
     /** @type {any[]} Internal error records raised by this unit's own keywords */
     this.errors = [];
+    /** @type {UnitRecord|null} The record this unit was made from, the hops of a `$ref` chain included (null for a unit inside such a chain) */
+    this.record = null;
   }
 
   /** @type {OutputUnit[]} */
@@ -349,7 +356,9 @@ function unitOf(record, parent, schemas) {
   unit.errors = record.errors;
   unit.applied(record.children, schemas);
   if (enclosing !== parent) enclosing.children.push(unit);
-  return top ?? unit;
+  const made = top ?? unit;
+  made.record = record;
+  return made;
 }
 
 /**
@@ -494,6 +503,138 @@ function decides(parent, child, results) {
   return child.keyword !== 'not' && child.keyword !== 'if' && results.get(child.keyword)?.valid === false;
 }
 
+/**
+ * What a projection that writes each distinct error once has written. An
+ * error is the same as one written before it when it has the same schema
+ * location (the absolute one, whichever path reached it), instance
+ * location and text, raised from errors of the same keywords and params
+ * (as `collectErrors` keeps each error once), so two errors of one
+ * keyword under `messages: false`, both `''`, stay two. A failed unit that
+ * a kept reference answer gave to a path already expanded holds only
+ * errors written there, and is not expanded again: that bounds the
+ * projection by the recorded units, not by the paths through them.
+ * Passing units and annotations are written as the format writes them.
+ */
+class Distinct {
+  /** @type {Set<UnitRecord>} The failed records expanded so far */
+  #entered = new Set();
+
+  /** @type {Set<string>} The written errors' keys */
+  #written = new Set();
+
+  /**
+   * Whether a child unit is to be expanded: a passing one always, a failed
+   * one the first time its record is reached.
+   * @param {OutputUnit} child
+   * @returns {boolean}
+   */
+  enters(child) {
+    const record = child.record;
+    if (child.valid || record === null) return true;
+    if (this.#entered.has(record)) return false;
+    this.#entered.add(record);
+    return true;
+  }
+
+  /**
+   * Whether an error is written for the first time, counting it written.
+   * @param {string} location - Its absolute schema location
+   * @param {string} instanceLocation
+   * @param {unknown} text - Its text, or a `list` unit's texts by keyword
+   * @param {unknown} sources - What the text was rendered from: an error, a list of them, or a list of such lists
+   * @param {unknown} [extra] - What else the unit writes (a `list` unit's `droppedAnnotations`)
+   * @returns {boolean}
+   */
+  #first(location, instanceLocation, text, sources, extra) {
+    let key;
+    try {
+      key = JSON.stringify([location, instanceLocation, text, raisedOf(sources), extra ?? null]);
+    }
+    catch {
+      // a value JSON cannot spell (a BigInt param) is written, never merged
+      return true;
+    }
+    if (this.#written.has(key)) return false;
+    this.#written.add(key);
+    return true;
+  }
+
+  /**
+   * Whether a failed node of the 2020-12 shape carries an error not
+   * written yet, counting it written.
+   * @param {KeywordNode} node
+   * @returns {boolean}
+   */
+  first(node) {
+    return this.#first(/** @type {string} */ (node.at), node.instanceLocation, node.error ?? null, node.sources ?? []);
+  }
+
+  /**
+   * Take the error of every failed node whose error was written before it,
+   * in document order, before the hierarchy is condensed.
+   * @param {KeywordNode} node
+   */
+  strip(node) {
+    if (!node.valid && node.error !== undefined && !this.first(node)) {
+      node.error = undefined;
+      node.sources = undefined;
+    }
+    for (const kid of node.kids) this.strip(kid);
+  }
+
+  /**
+   * Write a `list` unit and the `false` subschema units it refused, each
+   * failed one only the first time, and keep the texts of those written.
+   * @param {Record<string, unknown>} out
+   * @param {Record<string, unknown>[]} refused
+   * @param {Record<string, unknown>[]} details - Receives the units written
+   * @param {unknown[]} texts - What each text was rendered from, in triples from `mark` on for these units
+   * @param {number} mark
+   */
+  list(out, refused, details, texts, mark) {
+    /** @type {Map<unknown, unknown[]>} Each unit's `errors` object, to the errors its texts were rendered from */
+    const raised = new Map();
+    for (let i = mark; i < texts.length; i += 3) {
+      const sources = raised.get(texts[i]);
+      if (sources === undefined) raised.set(texts[i], [texts[i + 2]]);
+      else sources.push(texts[i + 2]);
+    }
+    /** @type {Set<unknown>} */
+    const dropped = new Set();
+    const write = (/** @type {Record<string, unknown>} */ unit) => {
+      if (unit.errors !== undefined && !this.#first(/** @type {string} */ (unit.schemaLocation), /** @type {string} */ (unit.instanceLocation),
+        unit.errors, raised.get(unit.errors) ?? [], unit.droppedAnnotations)) {
+        dropped.add(unit.errors);
+        return;
+      }
+      details.push(unit);
+    };
+    if (out.errors !== undefined || out.annotations !== undefined) write(out);
+    for (const unit of refused) write(unit);
+    if (dropped.size === 0) return;
+    let to = mark;
+    for (let i = mark; i < texts.length; i += 3) {
+      if (dropped.has(texts[i])) continue;
+      texts[to++] = texts[i];
+      texts[to++] = texts[i + 1];
+      texts[to++] = texts[i + 2];
+    }
+    texts.length = to;
+  }
+}
+
+/**
+ * The keywords and params of the errors a text was rendered from, nested
+ * as given: what tells two errors with the same text apart.
+ * @param {unknown} sources
+ * @returns {unknown}
+ */
+function raisedOf(sources) {
+  if (Array.isArray(sources)) return sources.map(raisedOf);
+  const error = /** @type {{ keyword?: unknown, params?: unknown }|null} */ (sources);
+  return error === null || typeof error !== 'object' ? null : [error.keyword, error.params];
+}
+
 //#region list and hierarchical
 
 /**
@@ -614,25 +755,32 @@ function projectHierarchical(unit, surviving, texts) {
 
 /**
  * The `list` output: the units that carry errors or annotations, flat, from
- * the subschemas that decide the answer.
+ * the subschemas that decide the answer. Distinct, a unit with errors is
+ * written once ({@link Distinct}), at the first path that reached it.
  * @param {OutputUnit} root
  * @param {unknown} validation
  * @param {unknown[]} texts - Receives what each text was rendered from
+ * @param {boolean} [distinct] - Write each distinct error once
  * @returns {{ valid: boolean, details: Record<string, unknown>[] }}
  */
-function projectList(root, validation, texts) {
+function projectList(root, validation, texts, distinct) {
   /** @type {Record<string, unknown>[]} */
   const details = [];
+  const once = distinct ? new Distinct() : null;
   const visit = (/** @type {OutputUnit} */ unit, /** @type {boolean} */ surviving) => {
     const results = keywordResults(unit, false);
     /** @type {Record<string, unknown>[]} */
     const refused = [];
+    const mark = texts.length;
     const out = subschemaUnit(unit, results, surviving, refused, texts);
-    if (out.errors !== undefined || out.annotations !== undefined) details.push(out);
-    details.push(...refused);
+    if (once === null) {
+      if (out.errors !== undefined || out.annotations !== undefined) details.push(out);
+      details.push(...refused);
+    }
+    else once.list(out, refused, details, texts, mark);
     const byKeyword = new Map(results.map((result) => [result.keyword, result]));
     for (const child of unit.children)
-      if (decides(unit, child, byKeyword)) visit(child, surviving && child.valid);
+      if (decides(unit, child, byKeyword) && (once === null || once.enters(child))) visit(child, surviving && child.valid);
   };
   visit(root, root.valid);
   return { valid: root.valid, details };
@@ -651,8 +799,22 @@ function projectList(root, validation, texts) {
  * @property {string} [error]
  * @property {import('./messages.js').ValidationError|import('./messages.js').ValidationError[]} [sources] - The error or errors `error` joins
  * @property {unknown} [annotation]
+ * @property {string} [at] - The keyword's absolute location, set for a projection that writes each distinct error once
  * @property {KeywordNode[]} kids
  */
+
+/**
+ * A keyword node with its absolute location, for a projection that writes
+ * each distinct error once (`at` given); the default projections' nodes
+ * hold none.
+ * @param {KeywordNode} node
+ * @param {string|undefined} at
+ * @returns {KeywordNode}
+ */
+function located(node, at) {
+  if (at !== undefined) node.at = at;
+  return node;
+}
 
 /**
  * The keyword tree of a unit (2020-12 shape): the unit's node, holding one
@@ -660,9 +822,10 @@ function projectList(root, validation, texts) {
  * @param {OutputUnit} unit
  * @param {boolean} surviving
  * @param {boolean} verbose
+ * @param {Distinct|null} [once] - For a projection that writes each distinct error once: the failed records expanded so far
  * @returns {KeywordNode}
  */
-function keywordTree(unit, surviving, verbose) {
+function keywordTree(unit, surviving, verbose, once = null) {
   /** @type {KeywordNode} */
   const node = {
     valid: unit.valid,
@@ -671,6 +834,7 @@ function keywordTree(unit, surviving, verbose) {
     instanceLocation: unit.instanceLocation,
     kids: [],
   };
+  if (once !== null) node.at = unit.schemaLocation;
   for (const result of keywordResults(unit, verbose)) {
     if (result.keyword === '') {
       node.error = joinErrorMessages(result.reported);
@@ -679,22 +843,37 @@ function keywordTree(unit, surviving, verbose) {
     }
     const keywordLocation = unit.evaluationPath + '/' + encodeJSONPointerSegment(result.keyword);
     const absoluteKeywordLocation = unit.hop ? unit.schemaLocation + '/' + encodeJSONPointerSegment(result.keyword) : undefined;
+    const at = once === null ? undefined : unit.schemaLocation + '/' + encodeJSONPointerSegment(result.keyword);
     const annotation = surviving ? result.annotation : undefined;
     if (result.children.length === 0 && result.reported.length !== 0) {
       // Each error is its own unit at the instance it names; errors at the
       // members of the instance (an `additionalProperties: false`) sit
       // under the keyword's own unit at the instance.
-      const leaves = result.reported.map((error) => ({ valid: false, keywordLocation, absoluteKeywordLocation, instanceLocation: error.instancePath, error: error.message, sources: error, kids: [] }));
+      const leaves = result.reported.map((error) => located({ valid: false, keywordLocation, absoluteKeywordLocation, instanceLocation: error.instancePath, error: error.message, sources: error, kids: [] }, at));
       if (leaves.every((leaf) => leaf.instanceLocation === unit.instanceLocation)) node.kids.push(...leaves);
-      else node.kids.push({ valid: false, keywordLocation, absoluteKeywordLocation, instanceLocation: unit.instanceLocation, kids: leaves });
+      else node.kids.push(located({ valid: false, keywordLocation, absoluteKeywordLocation, instanceLocation: unit.instanceLocation, kids: leaves }, at));
       continue;
+    }
+    // A `true` subschema has no keywords: its node would hold nothing.
+    // Condensed (not verbose), a unit whose answer is not its keyword's,
+    // under a keyword whose answer is not its unit's, decides nothing
+    // (see `condense`) and is not expanded; nor, distinct, a failed one
+    // already expanded under an earlier path.
+    /** @type {KeywordNode[]} */
+    const kids = [];
+    for (const child of result.children) {
+      if (child.schema !== true && (verbose || (child.valid === result.valid && result.valid === unit.valid))
+        && (once === null || once.enters(child)))
+        kids.push(keywordTree(child, surviving && child.valid, verbose, once));
     }
     // An error the keyword located at another instance than the unit's is
     // a unit of its own there, beside the subschemas it applied.
     const here = result.reported.filter((error) => error.instancePath === unit.instanceLocation);
-    const elsewhere = result.reported.filter((error) => error.instancePath !== unit.instanceLocation)
-      .map((error) => ({ valid: false, keywordLocation, absoluteKeywordLocation, instanceLocation: error.instancePath, error: error.message, sources: error, kids: [] }));
-    node.kids.push({
+    for (const error of result.reported) {
+      if (error.instancePath !== unit.instanceLocation)
+        kids.push(located({ valid: false, keywordLocation, absoluteKeywordLocation, instanceLocation: error.instancePath, error: error.message, sources: error, kids: [] }, at));
+    }
+    node.kids.push(located({
       valid: result.valid,
       keywordLocation,
       absoluteKeywordLocation,
@@ -702,14 +881,8 @@ function keywordTree(unit, surviving, verbose) {
       error: here.length !== 0 ? joinErrorMessages(here) : undefined,
       sources: here,
       annotation,
-      // A `true` subschema has no keywords: its node would hold nothing.
-      // Condensed (not verbose), a unit whose answer is not its keyword's,
-      // under a keyword whose answer is not its unit's, decides nothing
-      // (see `condense`) and is not expanded.
-      kids: [...result.children.filter((child) => child.schema !== true
-        && (verbose || (child.valid === result.valid && result.valid === unit.valid)))
-        .map((child) => keywordTree(child, surviving && child.valid, verbose)), ...elsewhere],
-    });
+      kids,
+    }, at));
   }
   return node;
 }
@@ -778,14 +951,19 @@ function projectVerbose(root, validation, texts) {
 }
 
 /**
- * The `detailed` output: the condensed hierarchy.
+ * The `detailed` output: the condensed hierarchy. Distinct, a node whose
+ * error an earlier node carried ({@link Distinct}) carries none, and is
+ * condensed as any node that carries nothing.
  * @param {OutputUnit} root
  * @param {unknown} validation
  * @param {unknown[]} texts - Receives what each text was rendered from
+ * @param {boolean} [distinct] - Write each distinct error once
  * @returns {Record<string, unknown>}
  */
-function projectDetailed(root, validation, texts) {
-  const tree = keywordTree(root, root.valid, false);
+function projectDetailed(root, validation, texts, distinct) {
+  const once = distinct ? new Distinct() : null;
+  const tree = keywordTree(root, root.valid, false, once);
+  once?.strip(tree);
   const kept = condense(tree);
   return kept === null ? keywordUnit(tree, [], texts) : keywordUnit(kept, kept.kids, texts);
 }
@@ -795,26 +973,34 @@ function projectDetailed(root, validation, texts) {
  * that carries an error or an annotation is listed with it; a failed unit
  * that carries neither holds two or more failed units (the condensed
  * hierarchy keeps no other), and is listed as a branch unit with the
- * `subschema` message, "A subschema had errors.".
+ * `subschema` message, "A subschema had errors.". Distinct, a node whose
+ * error an earlier node carried ({@link Distinct}) carries none before the
+ * hierarchy is condensed, so a branch unit is listed only where two or
+ * more failed units are left under it, and once.
  * @param {OutputUnit} root
  * @param {{ options?: { messages?: boolean } }} validation - The compilation's `ValidationRoot`
  * @param {unknown[]} texts - Receives what each text was rendered from
+ * @param {boolean} [distinct] - Write each distinct error once
  * @returns {Record<string, unknown>}
  */
-function projectBasic(root, validation, texts) {
+function projectBasic(root, validation, texts, distinct) {
   /** @type {ValidationError|null} The branch units' message, made on first need */
   let branch = null;
   const units = [];
+  const once = distinct ? new Distinct() : null;
   const visit = (/** @type {KeywordNode} */ node) => {
     if (carries(node)) units.push(keywordUnit(node, [], texts));
     else if (!node.valid) {
       branch ??= new ValidationError({ keyword: 'subschema', instancePath: '', schemaPath: '', params: {},
         message: validation.options?.messages === false ? '' : renderErrorMessage({ keyword: 'subschema' }) });
-      units.push(keywordUnit({ ...node, error: branch.message, sources: branch }, [], texts));
+      const unit = { ...node, error: branch.message, sources: branch };
+      if (once === null || once.first(unit)) units.push(keywordUnit(unit, [], texts));
     }
     for (const kid of node.kids) visit(kid);
   };
-  const kept = condense(keywordTree(root, root.valid, false));
+  const tree = keywordTree(root, root.valid, false, once);
+  once?.strip(tree);
+  const kept = condense(tree);
   if (kept !== null) visit(kept);
   /** @type {Record<string, unknown>} */
   const out = { valid: root.valid };
@@ -987,6 +1173,36 @@ export const verboseOutput = recordingFormat('verbose', projectVerbose);
  * @type {Readonly<OutputFormat<ListOutput>>}
  */
 export const listOutput = recordingFormat('list', projectList);
+
+/**
+ * `basic`, writing each distinct error once: a failed unit with the same
+ * absolute schema location, instance location and text as one written
+ * before it, raised from errors of the same keywords and params, is left
+ * out, so each stands at the first path that reached it; a branch unit is
+ * listed once too, and only where its failed units are still two after
+ * that. A passing document's output is `basic`'s.
+ * @type {Readonly<OutputFormat<BasicOutput>>}
+ */
+export const distinctBasicOutput = recordingFormat('basic', (root, validation, texts) => projectBasic(root, validation, texts, true));
+
+/**
+ * `detailed`, writing each distinct error once (see
+ * {@link distinctBasicOutput}): a node whose error was written before it
+ * carries none, and is condensed away unless it still holds two or more
+ * failed nodes.
+ * @type {Readonly<OutputFormat<KeywordOutputUnit>>}
+ */
+export const distinctDetailedOutput = recordingFormat('detailed', (root, validation, texts) => projectDetailed(root, validation, texts, true));
+
+/**
+ * `list`, writing each distinct error once: a unit with errors whose
+ * schema location, instance location, texts and dropped annotations a unit
+ * written before it had, raised from errors of the same keywords and
+ * params, is left out, so each stands at the first path that reached it.
+ * A passing document's output is `list`'s.
+ * @type {Readonly<OutputFormat<ListOutput>>}
+ */
+export const distinctListOutput = recordingFormat('list', (root, validation, texts) => projectList(root, validation, texts, true));
 
 /**
  * `hierarchical`: every applied subschema, nested under `details`.

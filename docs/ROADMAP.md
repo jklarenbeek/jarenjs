@@ -114,24 +114,6 @@ delete it or fix it.
   still extends them even when nothing it can reach reads one. Following those
   needs every `$dynamicAnchor` the compilation can enter by that name, and the
   embedded resource's base.
-- [ ] **`verbose` and `hierarchical` write a definition's units under every branch
-  that entered it, and exhaust the heap on the studio's `form` seed; a broken
-  document's `basic` writes each failing path.** A recording walk keeps a
-  reference's answer and its units for the branches that enter it again, and
-  `basic`, `detailed` and `list` expand only what they write
-  (packages/validate/ARCHITECTURE.md, Standard Output Formats: "A unit's
-  applied units are made from the records on first read, and `basic`,
-  `detailed` and `list` read only the ones their pruning keeps"). `verbose`
-  and `hierarchical` write the failed branches' units under `valid: true` by
-  their own definition, so their size follows the branches. On the valid
-  seeds, hierarchical writes 67 MB of JSON on minisite and 224 MB on
-  dashboard, verbose 219 MB and 729 MB, and on `form` both run out of a 2 GB
-  heap. On a broken document `basic` writes each failing path (minisite one
-  phrase down: 2,819 units, 529 distinct by location, instance and text; form
-  three phrases down: 183,807 units, 123 MB, 702 distinct). Wanted: an opt-in
-  that writes each distinct error once (by schema location, instance location
-  and text) on the recording formats, the default staying the specification's
-  shape; `collectErrors` already keeps each distinct error once.
 - [ ] **A two-position tuple validates at about half of Ajv's speed.** The
   validator benchmark's 'uniqueItems=false with an array of items' rows (a
   two-position `prefixItems`/`items` tuple of `type: boolean`; `uniqueItems:
@@ -352,9 +334,28 @@ delete it or fix it.
 
 ## @jarenjs/linq & @jarenjs/db — the data pair
 
-- [ ] **A backlog read from the tick backwards is not counted.** A tick whose backlog is longer than one search reads
-  under the limits fires exactly what `missed` says, but counts as skipped only the occurrences of the span it read;
-  `counts.uncounted` says a tick did so. Wanted: the passed occurrences counted without enumerating them.
+- [ ] **A backlog read from the tick backwards is not counted where the rule's
+  occurrences are not one step apart.** A tick whose backlog is longer than
+  one search reads under the limits counts the occurrences before the span it
+  reads backwards where the rule places them one step apart
+  (packages/db/docs/JOBS-FORMAT.md §11, A backlog of any length: "counted
+  without being read where the rule places them one step apart"). A rule with
+  a BYxxx part, a series with RDATEs, EXDATEs or overrides, a sub-daily rule
+  in a zone (a slot in a gap binds after the slots that follow it) and
+  `reject` still pass them uncounted (`counts.uncounted`). Wanted: those
+  counted too, without enumerating them: the period a rule's BY parts repeat
+  over counted once and multiplied, the EXDATEs and RDATEs in the span
+  subtracted and added, and a sub-daily zoned span counted around the zone's
+  offset changes.
+- [ ] **A floating `reject` schedule whose first search a limit cuts before a gap
+  stalls at the gap without firing the occurrences between.** A floating DAILY
+  02:30 in Europe/Amsterdam under `reject` with `maxOccurrences: 20`, ticked
+  on 1 March and then on 1 May, stalls with `JY0002` (29 March never happens)
+  having fired through 21 March. The same schedule under the default limits
+  fires through 28 March before stalling there. The search answers the refusal
+  over the limit's cut, so the 22-28 March occurrences, which bind, are
+  neither fired nor counted. Wanted: the limit's stop answered first (the
+  search reads on from its cut), every answer otherwise unchanged.
 - [ ] **The client bundle carries calendar-member plumbing without the seam.**
   The calendar kernel runs only when a host installs `@jarenjs/db/temporals`,
   and the tree-shaking gate keeps it out of the store client, but the

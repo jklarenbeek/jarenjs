@@ -819,10 +819,25 @@ occurrences the policy fires: 0, 1 or `catchUp`), widening eightfold
 until it holds them and the latest due ones. The policy then fires
 exactly what it fires over the whole backlog, the schedule moves past
 everything due, and it stays `active`: downtime never stalls a schedule.
-The occurrences before that span are passed without being counted: the
-tick's `skipped` and `counts.skipped` hold only those the span read, and
-`counts.uncounted` (absent until it happens) counts the ticks that
-passed a backlog so. A rule with COUNT walks from its DTSTART, so its
+The occurrences before that span are passed, and counted without being
+read where the rule places them one step apart: a bare rule (no RDATE,
+EXDATE or override) of a SECONDLY, MINUTELY, HOURLY, DAILY or WEEKLY
+frequency with no BYxxx part, its count the wall-clock distance from the
+first occurrence the tick's first search read to the first one the span
+read, divided by the step. That holds for a utc series at every one of
+those frequencies, and for a date, zoned or floating series at DAILY and
+WEEKLY under a policy that binds every slot (`rfc5545`, `later`): no gap
+or fold is longer than a day, so its slots bind in their order (the day
+Pacific/Apia skipped, 30 December 2011, binds where 31 December does,
+and is counted as its own occurrence, as a whole read counts it). Such a tick's
+`skipped` and `counts.skipped` are those of the whole backlog read at
+once. Any other rule (a BYxxx part, a series with RDATEs, EXDATEs or
+overrides, a sub-daily rule in a zone, whose slot in a gap binds after
+the slots that follow it, or `reject`, which binds no instant to a slot
+in a gap) passes them without counting them: the tick's `skipped` and
+`counts.skipped` hold only those the span read, and `counts.uncounted`
+(absent until it happens) counts the ticks that passed a backlog so. A
+rule with COUNT walks from its DTSTART, so its
 backward span costs the walk; a span the limits cannot read at any width
 leaves the schedule `stalled`, as a limit always did. The tick's
 statements are the same whatever the backlog: one read of the due rows,

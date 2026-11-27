@@ -77,6 +77,54 @@ const HOUR = 3600000;
 const OFFSET_SPAN = Object.freeze({ min: -12 * HOUR, max: 14 * HOUR });
 /** A rule's cycle, in milliseconds per unit of its INTERVAL: where a backward read of a backlog starts. */
 const CYCLES = Object.freeze({ ...PERIODS, DAILY: DAY, WEEKLY: 7 * DAY, MONTHLY: 31 * DAY, YEARLY: 366 * DAY });
+/** The wall-clock step, in milliseconds per unit of its INTERVAL, between the occurrences of a rule that has one. */
+const STEPS = Object.freeze({ ...PERIODS, DAILY: DAY, WEEKLY: 7 * DAY });
+/**
+ * The members a rule may hold and keep its occurrences one step apart:
+ * COUNT and UNTIL only end it, and WKST moves no WEEKLY occurrence without
+ * BYDAY. Any BYxxx part (or BYSETPOS) breaks the step.
+ */
+const STEP_MEMBERS = Object.freeze(['FREQ', 'INTERVAL', 'COUNT', 'UNTIL', 'WKST']);
+
+/**
+ * A recurrence id's wall clock as epoch milliseconds of that wall clock
+ * read as UTC: the slot the rule placed the occurrence in, whatever instant
+ * it bound to.
+ * @param {string} id @param {string} kind
+ */
+const wallOfId = (id, kind) => Date.parse(kind === 'date' ? `${id}T00:00:00Z` : kind === 'utc' ? id : `${id}Z`);
+
+/**
+ * How many occurrences of a schedule lie from `first` up to, not
+ * including, `last` (two of its occurrences), counted by arithmetic on
+ * their recurrence ids: the rule's slots are one step apart on the wall
+ * clock. That count is exact only where every slot is an occurrence and
+ * the slots bind to instants in their order: a series of a bare rule with
+ * no BYxxx part, a SECONDLY to WEEKLY frequency, no RDATE, EXDATE or
+ * override; a utc series at any of those steps, and a date, zoned or
+ * floating one at a day or more (a zone's gap moves a sub-daily slot
+ * past the next ones; no gap or fold is longer than a day, so a daily slot
+ * binds at most where the next one does) under a policy
+ * that binds every slot (not `reject`). Elsewhere the answer is null.
+ * @param {ScheduleDefinition} definition
+ * @param {{ recurrenceId: string } | undefined} first
+ * @param {{ recurrenceId: string } | undefined} last
+ * @returns {number | null}
+ */
+function occurrencesBetween(definition, first, last) {
+  const series = definition.series;
+  const rule = series.base?.rrule;
+  if (first === undefined || last === undefined || rule === undefined
+    || series.rdates.length + series.exdates.length + series.overrides.length !== 0) return null;
+  for (const member of Object.keys(rule)) if (!STEP_MEMBERS.includes(member)) return null;
+  const unit = STEPS[/** @type {keyof typeof STEPS} */ (rule.FREQ)];
+  if (unit === undefined) return null;
+  const kind = definition.seriesKind;
+  if (kind !== 'utc' && (unit < DAY || definition.policy === 'reject' || series.base.policy === 'reject')) return null;
+  const step = unit * (rule.INTERVAL ?? 1);
+  const span = wallOfId(last.recurrenceId, kind) - wallOfId(first.recurrenceId, kind);
+  return Number.isSafeInteger(span) && span >= 0 && span % step === 0 ? span / step : null;
+}
 
 /** @param {unknown} value @returns {value is Record<string, any>} */
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -400,9 +448,11 @@ function searchSpan(definition, provider, span) {
  * ending at the tick, a few of the rule's cycles wide and widening
  * eightfold, until it holds the `keep` latest missed occurrences and the
  * latest due ones beside them — all that `missed` can fire. The
- * occurrences before that span are passed without being counted
- * (`uncounted`). A tick's backlog never stalls a schedule; a span its
- * limits cannot read whatever its width does.
+ * occurrences before that span are passed: counted (`passedBefore`) where
+ * the rule's step counts them ({@link occurrencesBetween}), from the first
+ * one the whole search read to the first one the span read, and otherwise
+ * passed without being counted (`uncounted`). A tick's backlog never stalls
+ * a schedule; a span its limits cannot read whatever its width does.
  * @param {ScheduleDefinition} definition @param {any} provider
  * @param {{ from: number, inclusive: boolean, until: number }} span
  * @param {number | null} [keep] - the missed occurrences `missed` fires (0, 1 or n), or no backward read
@@ -418,8 +468,10 @@ function occurrencesAfter(definition, provider, span, keep = null) {
     const tail = searchSpan(definition, provider, { from: span.until - width, inclusive: true, until: span.until });
     const limited = /** @type {any} */ (tail.stall)?.limit !== undefined;
     if (limited) return whole;
-    if (new Set(tail.due.map((occurrence) => occurrence.at)).size > keep || tail.stall !== null)
-      return { ...tail, uncounted: true };
+    if (new Set(tail.due.map((occurrence) => occurrence.at)).size > keep || tail.stall !== null) {
+      const passedBefore = occurrencesBetween(definition, whole.due[0], tail.due[0]);
+      return passedBefore === null ? { ...tail, uncounted: true } : { ...tail, passedBefore };
+    }
   }
   return whole;
 }
@@ -632,11 +684,13 @@ function attach(context) {
               if (typeof failure?.code !== 'string' || !failure.code.startsWith('JY')) throw error;
               outcome = { state: 'stalled', due: [], next: null, stall: { code: failure.code, message: failure.message } };
             }
-            const { fire, skipped: passed } = firedOf(outcome.due, JSON.parse(row.missed), readLimits(row.limits).latenessMs, at);
+            const { fire, skipped: late } = firedOf(outcome.due, JSON.parse(row.missed), readLimits(row.limits).latenessMs, at);
+            // a backlog read from the tick backwards passed the occurrences before the span it read
+            const passed = late + (outcome.passedBefore ?? 0);
             const counts = JSON.parse(row.counts);
             counts.fired += fire.length;
             counts.skipped += passed;
-            // a backlog read from the tick backwards passed occurrences it did not count
+            // ... or passed them without counting them, where the rule's step does not count them
             if (outcome.uncounted === true) counts.uncounted = (counts.uncounted ?? 0) + 1;
             skipped += passed;
             const latest = outcome.due.length === 0 ? null : outcome.due[outcome.due.length - 1];

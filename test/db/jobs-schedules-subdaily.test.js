@@ -206,14 +206,13 @@ for (const engine of /** @type {const} */ (['sqlite', 'postgres'])) {
               ...latest(3).map((at) => `catchup@${at}`), ...latest(1).map((at) => `once@${at}`), `skip@${id(end)}`,
             ], `${freq} after ${downtime} ms`);
             const records = await store.jobs.schedules();
-            // a backlog one search reads is counted whole; a longer one is read from the tick backwards
-            const counted = due + 64 <= 10000;
+            // a backlog one search reads is counted whole; a longer one is read from the tick backwards,
+            // the occurrences before the span it reads counted by the rule's step
             for (const record of records) {
               assert.deepEqual([record.state, record.stall, record.lastRecurrenceId, record.nextRecurrenceId],
                 ['active', null, id(end), id(end + period)], record.id);
               const fired = latest({ catchup: 3, once: 1, skip: 0 }[/** @type {'catchup' | 'once' | 'skip'} */ (record.id)]).length;
-              if (counted) assert.deepEqual(record.counts, { fired: 1 + fired, skipped: due - fired }, record.id);
-              else assert.equal(record.counts.uncounted, 1, record.id);
+              assert.deepEqual(record.counts, { fired: 1 + fired, skipped: due - fired }, record.id);
             }
             rows.push({ downtime, statements, providerCalls: counter.calls, skipped: back.skipped,
               uncounted: records.map((/** @type {any} */ r) => r.counts.uncounted ?? 0) });

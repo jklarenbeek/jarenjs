@@ -4347,6 +4347,27 @@ PostgreSQL migration steps require one transactional statement`) before any
 statement runs — exactly the links it refused at the drop; apply such a link
 under this release. A SQLite document runs under either.
 
+## 85. A tick counts the backlog it reads from its own instant backwards
+
+- A tick whose backlog is longer than one search reads under the limits
+  counts the occurrences before the span it reads from the tick backwards
+  where the rule places its occurrences one step apart: a bare SECONDLY to
+  WEEKLY rule with no BYxxx part, no RDATE, EXDATE or override, in a utc
+  series, or at DAILY and WEEKLY in a date, zoned or floating series under
+  `rfc5545` or `later`. The tick's `skipped` and the schedule's
+  `counts.skipped` are then what a tick reading the whole backlog answers,
+  where they held only the occurrences of that span, and `counts.uncounted`
+  is not raised for it. A sub-daily rule in a zone, a rule with a BYxxx part,
+  a series with RDATEs, EXDATEs or overrides, and `reject` pass that backlog
+  uncounted as before ([JOBS-FORMAT §11](JOBS-FORMAT.md#11-recurring-schedules),
+  A backlog of any length). Which occurrences fire, and where the schedule
+  stands after, are unchanged. A count stored before this release keeps its
+  `uncounted` member and its value.
+
+**Downgrade.** No table, column, index or CHECK text changes, and `counts`
+keeps its members: the previous release opens and ticks every schedule this
+release ticked, counting a later backlog as it counted one.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

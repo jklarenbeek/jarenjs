@@ -2773,7 +2773,8 @@ export interface JobScheduleRecord {
   readonly providerRevision: string | null;
   /** The occurrences fired and skipped; `uncounted`, absent until it happens, is how
    * many ticks passed a backlog longer than one search reads without counting
-   * the occurrences before the span they read from the tick backwards. */
+   * the occurrences before the span they read from the tick backwards (a rule
+   * whose occurrences are not one step apart: JOBS-FORMAT §11). */
   readonly counts: { readonly fired: number; readonly skipped: number; readonly uncounted?: number };
   readonly stall: null
     | { readonly limit: string; readonly counts: { readonly emitted: number; readonly work: number; readonly providerCalls: number } }

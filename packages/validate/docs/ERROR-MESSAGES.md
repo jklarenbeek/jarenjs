@@ -522,7 +522,8 @@ schema can exhaust the host's stack again.
 **`JK0003` — the output format.** The `outputFormat` option takes one of
 the formats `@jarenjs/validate/output` exports (`flagOutput`,
 `basicOutput`, `detailedOutput`, `verboseOutput`, `listOutput`,
-`hierarchicalOutput`; the README's *Standard output formats*). Anything
+`hierarchicalOutput`, `distinctBasicOutput`, `distinctDetailedOutput`,
+`distinctListOutput`; the README's *Standard output formats*). Anything
 else, a format's name as a string (`'list'`) included, is refused `JK0003`
 when a schema compiles, naming the subpath and the value given, rather
 than quietly returning the default shape:

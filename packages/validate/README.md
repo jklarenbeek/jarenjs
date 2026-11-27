@@ -38,7 +38,7 @@ Highlights:
 - `$vocabulary`-aware keyword selection and per-draft `format`/content assertion defaults
 - Instance-data references via the `data` keyword (json-everything data-ref) and Ajv-style `$data`
 - Cross-field assertions via the `$query` extension keyword (a [Jaren JSON Query](../json/docs/QUERY-FORMAT.md) inside the schema), and a [2020-12 dialect](#checking-query-itself--the-jaren-2020-12-dialect) whose meta-schema checks it
-- The JSON Schema standard output formats (`flag`, `basic`, `detailed`, `verbose`, `list`, `hierarchical`) from `@jarenjs/validate/output`, via the `outputFormat` option — see [Standard output formats](#standard-output-formats)
+- The JSON Schema standard output formats (`flag`, `basic`, `detailed`, `verbose`, `list`, `hierarchical`) from `@jarenjs/validate/output`, via the `outputFormat` option, and `basic`, `detailed` and `list` writing each distinct error once — see [Standard output formats](#standard-output-formats)
 
 Schema registrations accept boolean schemas when supplied an explicit key.
 Document URIs with or without an empty `#` fragment are aliases; replacing a
@@ -2061,8 +2061,65 @@ branches enter on the same member through a reference is walked once and
 its units recorded once; `basic`, `detailed` and `list` write only the branches that
 decide the answer, while `verbose` and `hierarchical` write that
 definition's units under every branch that entered it, so their size grows
-with the branches tried. The boolean default and
-`collectErrors` are unchanged. Against the specifications' examples, two
+with the branches tried. A broken document's `basic`, `detailed` and `list`
+still write each failing path, as their specification's shape does: an
+error the definition raised stands under every branch that reached it. The boolean default and
+`collectErrors` are unchanged.
+
+`distinctBasicOutput`, `distinctDetailedOutput` and `distinctListOutput`
+(from the same subpath) write each distinct error once instead: a failed
+unit with the same absolute schema location, instance location and text
+as one written before it, raised from errors of the same keywords and
+params, is left out, so each error stands at the first path that reached
+it. Two errors whose texts are the same but whose params differ (two
+property names a `propertyNames` refuses, two `required` members under
+`messages: false`) stay two, as `collectErrors` keeps them. `basic` and
+`detailed` leave the error out before the hierarchy is condensed, so a
+branch unit is listed only where two or more failed units are left under
+it. A failed unit a kept reference answer gave to a path already written
+is not expanded again, so the document is bounded by the recorded units,
+not by the paths through them. A passing document's output is the
+default format's, byte for byte: annotations are written under every path,
+as the default writes them. The names stay the specifications' (`name` is
+`'basic'`, `'detailed'`, `'list'`); `verbose` and `hierarchical` have no
+such twin, as they write every applied subschema by definition.
+
+```javascript
+import { JarenValidator } from '@jarenjs/validate';
+import { distinctBasicOutput } from '@jarenjs/validate/output';
+
+const node = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://example.com/node',
+  type: 'array',
+  items: { $ref: '#/$defs/node' },
+  $defs: { node: { anyOf: [
+    { type: 'integer' },
+    { type: 'array', items: { $ref: '#/$defs/node' } },
+    { type: 'array', items: { $ref: '#/$defs/node' }, minItems: 1 },
+  ] } },
+};
+const output = new JarenValidator({ outputFormat: distinctBasicOutput }).compile(node)([['x']]);
+output.errors.map((unit) => [unit.keywordLocation, unit.instanceLocation, unit.error]);
+```
+
+returns the six errors, the inner definition's four under the first branch
+that reached them (`basicOutput` writes them under the third branch too,
+ten units in all; for `'x'` eight arrays deep it writes 766 where this
+writes 18):
+
+```json
+[
+  ["/items/$ref/anyOf", "/0", "must match a subschema in anyOf"],
+  ["/items/$ref/anyOf/0/type", "/0", "must be an integer"],
+  ["/items/$ref/anyOf/1/items/$ref/anyOf", "/0/0", "must match a subschema in anyOf"],
+  ["/items/$ref/anyOf/1/items/$ref/anyOf/0/type", "/0/0", "must be an integer"],
+  ["/items/$ref/anyOf/1/items/$ref/anyOf/1/type", "/0/0", "must be an array"],
+  ["/items/$ref/anyOf/1/items/$ref/anyOf/2/type", "/0/0", "must be an array"]
+]
+```
+
+Against the specifications' examples, two
 answers differ: `basic` adds the `valid` its output schema requires to
 every unit; and `droppedAnnotations` follows one rule (every failed unit
 reports what its own keywords produced), where the example shows it on

@@ -969,6 +969,19 @@ always built):
   entered it, is never expanded. `verbose` and `hierarchical` write every
   applied unit, so their size follows the branches. The recorder lets go of
   the tree once the run returns.
+- **Each distinct error once, by projection.** `distinctBasicOutput`,
+  `distinctDetailedOutput` and `distinctListOutput` record what their
+  default twins record and project it through one `Distinct`: a failed
+  child unit whose record was already expanded under an earlier path (a
+  kept answer gives one record to every path that entered it) is not
+  expanded again, which bounds the projection by the records rather than
+  the paths; and a failed unit's error is dropped when one written before
+  it in document order has the same absolute schema location, instance
+  location, text and source errors' keywords and params (which also
+  catches what a walk without kept answers raised twice). `basic` and
+  `detailed` drop it before condensing, so branch units follow. Passing
+  units are never touched, so a passing document answers byte for byte as
+  the default does.
 - **Texts are rendered once and kept renderable.** A unit's text joins the
   messages `convertInternalErrors` rendered (`joinErrorMessages`); each
   projection lists, as it builds the units, which object holds each text,
@@ -1621,7 +1634,7 @@ For broader context on how this package fits into the JarenJS ecosystem:
 |------|---------|-------------|
 | `index.js` | Public API | `JarenValidator`, `ValidationOptions`, `ValidatorOptions` |
 | `messages.js` | Error conversion & i18n | `ValidationError`, `convertInternalErrors`, `messagesEn`, `compileMessageTemplate`, `compileMessageCatalog`, `renderErrorMessage`, `localizeErrors`, `compileErrorMessageSpec` |
-| `output.js` | Standard output formats (`@jarenjs/validate/output`) | `flagOutput`, `basicOutput`, `detailedOutput`, `verboseOutput`, `listOutput`, `hierarchicalOutput` |
+| `output.js` | Standard output formats (`@jarenjs/validate/output`) | `flagOutput`, `basicOutput`, `detailedOutput`, `verboseOutput`, `listOutput`, `hierarchicalOutput`, `distinctBasicOutput`, `distinctDetailedOutput`, `distinctListOutput` |
 | `strict-profile.js` | Strict structured-output profiles (`@jarenjs/validate/strict-profile`) | `relaxSchema`, `deriveStrictProfile`, `strictProfileSize` |
 | `schema.js` | Schema compilation | `compileSchemaObject` |
 | `keyword-values.js` | Keyword value admission | `admitKeywordValues`, `KEYWORD_SHAPES` |
