@@ -105,7 +105,9 @@ against them. The studio validates each file on **its own boundary** —
 registered operators pass and a real mistake surfaces as its own coded
 error with a JSON Pointer. An `app` file's meta-schema admits the same
 registry's operators (`{"$sqrt": 16}` in a view validates with the math
-pack mounted), and the document host boots the app with them. There is
+pack mounted), and the document host boots the app with them; so do an
+`fsm` file's guards and a `dag` file's embedded documents, which run under
+that registry. There is
 deliberately no single composed mega-schema; that is what lets a project mix an app, a store and a data
 query at once. See [PROJECT-FORMAT.md](docs/PROJECT-FORMAT.md).
 
@@ -119,7 +121,10 @@ operator of the registry it validates under (`{"$sqrt": 16}`, with the
 built-in packs by default) is valid, and the project stage boots it, where
 both refused it; under a registry without the operator it is refused as
 before, and an app that names none of the registry's operators answers as
-before.
+before. The same holds for an `fsm` or `dag` file: a guard, effect `with`,
+query or jslt node, task `with` or edge `select` using the registry's
+operators validates and runs (in the project's flow host and in Run), where
+both refused it with `JQ0002`.
 
 ## Exports
 

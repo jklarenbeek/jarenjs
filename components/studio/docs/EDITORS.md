@@ -55,6 +55,9 @@ Flow documents are the `jaren-fsm` or `jaren-dag` value. Replacement retains an
 undo entry, invalidates the previous run and clears structural selection. The
 kind stays fixed while a document is open; templates open a new document.
 `run({ input, event? })` uses the injected task registry or the mounted machine.
+Guards, effect props and a DAG's embedded documents compile with the editor's
+`operators` registry (the built-in math/finance/stats packs when none is
+given), and a replacement validates under the same registry.
 A DAG returns its settled output or failure. `event` sends a machine event
 through the same sandbox used by the run controls.
 
@@ -88,7 +91,8 @@ operators of a `createJsltRegistry()` value; without one, the core operators onl
 `createProjectHost({ loadDocument, runQuery, runJslt, runValidation, operators? })`
 provides the stage, splitter and project engine integration; the stage hands
 `loadDocument` the `operators` the files validate under (the built-in packs when
-none is given). `runQuery(inputs, { messages })`
+none is given), the host answers that registry as `operators`, and a flow file
+runs under it. `runQuery(inputs, { messages })`
 and `runJslt(inputs, { messages })` are handed the reader's compiled catalog with each
 run, so the result they render speaks the reader's language.
 

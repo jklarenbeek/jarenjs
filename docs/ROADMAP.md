@@ -283,19 +283,6 @@ delete it or fix it.
 
 ## @jarenjs/studio
 
-- [ ] **A safe app cannot mount an operator registry.** `createApp({ operators })`
-  compiles a view, its actions and subscriptions with a registry's pack
-  operators and `$call` functions, but beside `safe` or `capabilities` it is a
-  `TypeError`: a `$call` function is host code a document names, and every
-  other host registry is empty under those options. Wanted: a
-  `capabilities.functions` grant list naming the `$call` functions an
-  untrusted document may reach, with the pure pack operators always mounted
-  (APP-FORMAT §8.2.1 treats every named host entry that way).
-- [ ] **Flow documents cannot use pack operators.** `compileFsm` and `compileDag`
-  take no operator registry, so a guard or query node using `{"$sqrt": …}` is
-  `JQ0002` in the studio even under its default math/finance/stats registry,
-  and at runtime; the studio's `fsm`/`dag` grammars are the core ones for the
-  same reason.
 - [ ] **Entity models and durable project stores** — collection models now
   run in private workers with explicit query routing, SQL plans, live results
   and seed files. The stage's operation contract addresses collections; an
@@ -303,6 +290,21 @@ delete it or fix it.
   UI also need project identity, storage ownership and a migration policy:
   the current documented lifetime is in-memory, reset on committed model or
   seed changes. Reusing the data page's shared database would break isolation.
+
+## @jarenjs/flow
+
+- [ ] **Statecharts, workflows and dag jobs take no operator registry.**
+  `compileFsm`, `compileDag` and `fsmToApp` take `operators`, but
+  `compileStatechart`, `compileWorkflow`, `fsmStateSchema` and `@jarenjs/db`'s
+  dag job compile with the core operators only, so a guard or node using
+  `{"$sqrt": …}` that `compileFsm`/`compileDag` accept under a registry is
+  `JF0007`/`JF0014` there (`fsmStateSchema` refuses a machine `fsmToApp`
+  accepts).
+- [ ] **Flow guards cannot use schema operators.** `compileFsm` and `compileDag`
+  take no `compileTypeTest`, so a guard or query node using `{"$valid": …}` is
+  `JF0007`/`JF0014` with `JQ0008` ("schema operators require a type-test
+  compiler") — in the studio too, where a `query` file with the same `$valid`
+  validates.
 
 ## @jarenjs/contract
 

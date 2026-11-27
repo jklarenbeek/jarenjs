@@ -12,7 +12,7 @@ import { createFlowRuntime, flowPageViewModel } from './runtime.js';
 export function createFlowEditor(node, options) {
   let app;
   const runtime = createFlowRuntime({ ...options, getFlow: () => app.getState().flow });
-  const controller = createFlowController({ getApp: () => app, runtime });
+  const controller = createFlowController({ getApp: () => app, runtime, operators: options.operators });
   app = createApp({
     state: { flow: createFlowState(options) },
     actions: { ...FLOW_ACTIONS, ...(options.resetDocument ? {

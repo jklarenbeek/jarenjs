@@ -611,10 +611,13 @@ the registry's operators (`{"$sqrt": "$.n"}`) and its `$call` functions.
 Without one, a pack operator is an unknown operator, refused when the app
 compiles (`JA0002` in the view, `JA0004` in an action, `JA0006` in a
 subscription). The registry is read once, at `createApp`. Its `$call`
-functions are host code a document names, and no grant list (§8.2.1)
-covers them, so `operators` together with `safe` or `capabilities` is a
-`TypeError`: an app under a safe profile or explicit grants computes with
-the core operators.
+functions are host code a document names, so under `safe` or
+`capabilities` they are granted like every other named host entry
+(§8.2.1): the app reaches the functions `capabilities.functions` lists,
+none when it is omitted, while the registry's operators stay mounted. A
+`$call` to a function not granted is refused when the app compiles, as
+one the registry does not hold is (`JQ0010`, inside `JA0002`, `JA0004` or
+`JA0006`).
 
 ## 6. Invariants
 
@@ -716,7 +719,7 @@ a registry (`effects`, `subs`, `eventFields`, `widgets`) that is not an
 object of named members (a function, an array, a `Map` or `Set`, a
 promise), `operators` that is not an object with a `toOptions` function,
 `capabilities` that is not a plain object or has a member other
-than those four — is refused with a `TypeError` naming it
+than those four and `functions` — is refused with a `TypeError` naming it
 (`createApp: unknown option 'onerror' — did you mean 'onError'?`), and
 so are options that are not a plain object. The refusal names what it
 was given: `createApp: options.effects must be an object of handlers by
@@ -839,8 +842,9 @@ editor is not a controlled control: it is keyed by its value's text, so a
 change to that value shows at once, focused or not, and every other render
 keeps what the operator is typing in either mode. The dialog widget's content
 renders under the same mode. Any other value is a `TypeError`. `capabilities` optionally grants names from the host's
-`effects`, `subs`, `widgets` and `eventFields` registries (an operator
-registry, §5.6, is not combined with either option):
+`effects`, `subs`, `widgets` and `eventFields` registries, and `functions`
+from the `$call` functions of its operator registry (§5.6, whose operators
+stay mounted under either option):
 
 ```js
 const app = createApp(doc, {
@@ -855,7 +859,8 @@ Unknown or inherited registry names are refused at construction, naming the
 nearest registered name when one is close (`createApp: unknown effects
 capability 'lgo' — did you mean 'log'?`); a document that names an inherited
 member at run time (`{ "run": "toString" }`) meets the refusal an unknown
-name meets (§5.1). Only granted
+name meets (§5.1), and a `$call` naming a function not granted meets the
+compile refusal an unregistered function meets (§5.6). Only granted
 effects belong to this app's disposal lifecycle. Without either option, the
 existing registered capabilities remain available. Safe mode still removes
 DOM event bindings and widgets; a widget grant does not override that display

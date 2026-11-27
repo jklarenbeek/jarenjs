@@ -12,7 +12,9 @@
  *               so host-registered operators ($npv, $sqrt) validate and a
  *               real error comes back as its own coded `JQ`/`JT` code with
  *               a docPath — the closed grammar would reject the operators;
- *  - `fsm` / `dag` / `model` → their grammar plus compiler/planner checks;
+ *  - `fsm` / `dag` / `model` → their grammar plus compiler/planner checks
+ *               (an fsm's and a dag's grammar and compile, like an app's,
+ *               read the registry's operators);
  *  - `contract` → COMPILED by `compileContract`, so a refusal comes back
  *               as its stable `JC00xx` code with the docPath of the
  *               member at fault — richer than the grammar alone;
@@ -79,8 +81,14 @@ const appValidatorFor = createGrammarValidators(validateApp, (query, jslt) =>
   new JarenValidator({ skipErrors: false, collectErrors: true }).addSchema(query).addSchema(jslt).compile(appSchema));
 const validateFsm = new JarenValidator({ skipErrors: false, collectErrors: true })
   .addSchema(querySchema).compile(fsmSchema);
+/** The fsm meta-schema's validator under a registry, as the app's. */
+const fsmValidatorFor = createGrammarValidators(validateFsm, (query) =>
+  new JarenValidator({ skipErrors: false, collectErrors: true }).addSchema(query).compile(fsmSchema));
 const validateDag = new JarenValidator({ skipErrors: false, collectErrors: true })
   .addSchema(querySchema).addSchema(jsltSchema).compile(dagSchema);
+/** The dag meta-schema's validator under a registry, as the app's. */
+const dagValidatorFor = createGrammarValidators(validateDag, (query, jslt) =>
+  new JarenValidator({ skipErrors: false, collectErrors: true }).addSchema(query).addSchema(jslt).compile(dagSchema));
 const validateModel = new JarenValidator({ skipErrors: false, collectErrors: true })
   .compile(modelSchema);
 
@@ -181,11 +189,12 @@ function unknownOperators(kind, doc, registryOptions) {
       });
     }
   }
-  else if (kind === 'fsm') probe('', () => compileFsm(doc));
+  // the flow compilers read a registry, never its options
+  else if (kind === 'fsm') probe('', () => compileFsm(doc, { operators: { toOptions: () => registryOptions } }));
   else if (kind === 'dag') {
     const tasks = Object.fromEntries(Object.values(isPlainNodes(doc.nodes) ? doc.nodes : {})
       .filter((node) => node?.kind === 'task' && typeof node.run === 'string').map((node) => [node.run, () => null]));
-    probe('', () => compileDag(doc, { tasks }));
+    probe('', () => compileDag(doc, { tasks, operators: { toOptions: () => registryOptions } }));
   }
   return found;
 }
@@ -292,6 +301,7 @@ function withWarnings(verdict) {
  */
 function validateFileUncached(file, options = {}) {
   const kind = file.kind;
+  const operators = options.operators ?? defaultOperators;
   const registryOptions = options.operators ? options.operators.toOptions() : defaultRegistryOptions;
 
   let doc;
@@ -321,19 +331,19 @@ function validateFileUncached(file, options = {}) {
     case 'query':
       return compileResult(kind, () => compileJsonQuery(doc, { compileTypeTest, ...registryOptions }));
     case 'fsm': {
-      const outcome = validateFsm(doc);
+      const outcome = fsmValidatorFor(doc, registryOptions)(doc);
       const structural = schemaResult(kind, outcome);
-      return structural.valid ? compileResult(kind, () => compileFsm(doc))
+      return structural.valid ? compileResult(kind, () => compileFsm(doc, { operators }))
         : schemaResult(kind, outcome, unknownOperators(kind, doc, registryOptions));
     }
     case 'dag': {
-      const outcome = validateDag(doc);
+      const outcome = dagValidatorFor(doc, registryOptions)(doc);
       const structural = schemaResult(kind, outcome);
       if (!structural.valid) return schemaResult(kind, outcome, unknownOperators(kind, doc, registryOptions));
       // Validate named task nodes without acquiring or running host tasks.
       const tasks = Object.fromEntries(Object.values(doc.nodes ?? {})
         .filter((node) => node.kind === 'task').map((node) => [node.run, () => null]));
-      return compileResult(kind, () => compileDag(doc, { tasks }));
+      return compileResult(kind, () => compileDag(doc, { tasks, operators }));
     }
     case 'model': {
       const structural = schemaResult(kind, validateModel(doc));

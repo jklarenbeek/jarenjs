@@ -30,7 +30,7 @@ export function mountStudioEditor(node, options) {
   }, {
     node, document: node?.ownerDocument, schedule: options.schedule, onError: options.onError,
     eventFields: formEventFields(), effects: controller.effects,
-    widgets: { 'studio-flow': createProjectFlowWidget({ schedule: options.schedule, messages: options.messages }),
+    widgets: { 'studio-flow': createProjectFlowWidget({ schedule: options.schedule, messages: options.messages, operators: host.operators }),
       ...(options.projectData ? { 'studio-data': options.projectData.widget } : {}),
       'studio-stage': host.createProjectStageWidget({ schedule: options.schedule, messages: options.messages }),
       'studio-splitter': host.createProjectSplitterWidget(), ...options.widgets },

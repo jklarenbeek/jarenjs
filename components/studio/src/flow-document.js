@@ -14,11 +14,13 @@ export const validateDagDoc = new JarenValidator(OUR_SCHEMA_OPTIONS)
   .compile(dagSchema);
 
 
-/** @param {'fsm'|'dag'} kind @param {any} document */
-export function validateFlowDocument(kind, document) {
+/** @param {'fsm'|'dag'} kind @param {any} document
+ * @param {{ operators?: { toOptions: () => any } }} [options] - the registry
+ *   the document validates under (`validateFile`'s) */
+export function validateFlowDocument(kind, document, options) {
   try {
     if (kind !== 'fsm' && kind !== 'dag') throw new TypeError('The Flow kind must be fsm or dag.');
-    return validateFile({ kind, text: JSON.stringify(document) });
+    return validateFile({ kind, text: JSON.stringify(document) }, options);
   }
   catch (error) { return { valid: false, errors: [{ code: error.code ?? 'JF0001', message: error.message, docPath: error.docPath ?? '' }] }; }
 }

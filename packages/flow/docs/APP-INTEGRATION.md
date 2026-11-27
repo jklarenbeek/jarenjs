@@ -37,7 +37,9 @@ const { slice, actions, events } = fsmToApp(fsmDoc, {
 ```
 
 `fsmToApp` validates the document exactly like `compileFsm` (same
-JF0xxx errors) and then emits **pure JSON**: one action document per
+JF0xxx errors; its `operators` option is `compileFsm`'s, and the app that
+hosts the generated actions takes the same registry as `createApp`'s
+`operators`) and then emits **pure JSON**: one action document per
 distinct named event, each a conditional chain over the machine's
 transitions in document order. `pointer` must be a chain of
 identifier-safe segments (`/ui/wizard` is fine); anything else throws a

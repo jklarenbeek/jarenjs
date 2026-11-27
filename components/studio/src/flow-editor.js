@@ -18,7 +18,8 @@ export function createFlowState(options = {}) {
   };
 }
 
-/** @param {{ getApp: () => any, runtime: any }} env */
+/** @param {{ getApp: () => any, runtime: any, operators?: any }} env - `operators`:
+ * the registry a published document validates under (`validateFile`'s) */
 export function createFlowController(env) {
   let stopped = false, detach = null, sequence = 0;
   const requests = new Map(), listeners = new Set();
@@ -32,7 +33,9 @@ export function createFlowController(env) {
     return { kind, document: copy(doc), revision: semanticKey([kind, documentKey(kind, doc)]), result: copy(run) };
   }
   /** @param {any} candidate @param {'fsm'|'dag'} [kind] */
-  function validate(candidate, kind = env.getApp().getState().flow.kind) { return validateFlowDocument(kind, candidate); }
+  function validate(candidate, kind = env.getApp().getState().flow.kind) {
+    return validateFlowDocument(kind, candidate, { operators: env.operators });
+  }
   function settle(id, result) { const resolve = requests.get(id); requests.delete(id); resolve?.({ ...read(), ...result }); }
   /** @param {any} candidate @param {{ expectedRevision?: string, kind?: 'fsm'|'dag' }} [options]
    * @returns {Promise<EditorReceipt>}

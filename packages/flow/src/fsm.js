@@ -26,14 +26,42 @@ import { asError, FlowCompileError, FlowRuntimeError } from './errors.js';
  */
 
 /**
+ * The compile options an `operators` option gives the embedded query
+ * and JSLT documents: the registry's `{ extensions, functions }`, so
+ * they compile with its operators (`$sqrt` with the math pack) and its
+ * `$call` functions. Absent (`undefined` or `null`), they compile with
+ * the core operators only.
+ * @param {unknown} operators - an operator registry
+ *   (`createJsltRegistry().use(pack)` from `@jarenjs/json/jslt`, or any
+ *   object whose `toOptions()` answers `{ extensions, functions }`)
+ * @param {string} caller - the compiler a refusal names
+ * @returns {{ extensions?: Record<string, any>, functions?: Record<string, any> } | undefined}
+ * @throws {TypeError} when `operators` is no registry
+ */
+export function operatorOptions(operators, caller) {
+  if (operators === undefined || operators === null) return undefined;
+  if (typeof operators !== 'object' || typeof (/** @type {any} */ (operators)).toOptions !== 'function') {
+    throw new TypeError(`${caller}: "operators" must be an operator registry (an object with a toOptions function)`);
+  }
+  const { extensions, functions } = /** @type {any} */ (operators).toOptions();
+  /** @type {{ extensions?: Record<string, any>, functions?: Record<string, any> }} */
+  const compileOptions = {};
+  if (extensions !== undefined) compileOptions.extensions = extensions;
+  if (functions !== undefined) compileOptions.functions = functions;
+  return compileOptions;
+}
+
+/**
  * Compile one effects list (`entry`, `exit` or a transition's
  * `effects`). Absent means none; anything else must be an array of
  * `{ run, with? }` descriptors.
  * @param {any} list
  * @param {string} docPath - JSON Pointer of the list member.
+ * @param {{ extensions?: Record<string, any>, functions?: Record<string, any> }} [compileOptions] -
+ *   what each `with` compiles with ({@link operatorOptions})
  * @returns {CompiledEffect[]}
  */
-export function compileEffectList(list, docPath) {
+export function compileEffectList(list, docPath, compileOptions) {
   if (list === undefined) return [];
   if (!Array.isArray(list)) {
     throw new FlowCompileError('JF0008',
@@ -48,7 +76,7 @@ export function compileEffectList(list, docPath) {
     let withQuery = null;
     if (effect.with !== undefined) {
       try {
-        withQuery = compileJsonQuery(effect.with);
+        withQuery = compileJsonQuery(effect.with, compileOptions);
       }
       catch (err) {
         const cause = asError(err);
@@ -153,8 +181,15 @@ export function resolveEffect(effect, scope, out, errors) {
  * `event: null` mean no guard / any event.
  *
  * @param {any} doc - the jaren-fsm document
+ * @param {{ operators?: { toOptions: () => { extensions?: Record<string, any>, functions?: Record<string, any> } } | null }} [options] -
+ *   `operators`: an operator registry (`createJsltRegistry().use(mathPack)`
+ *   from `@jarenjs/json/jslt`); every guard and effect `with` compiles with
+ *   its operators and `$call` functions. Without it they compile with the
+ *   core operators, and a pack operator is refused (`JF0007` for a guard,
+ *   `JF0009` for a `with`, each with the `JQ0002` in its cause chain).
  * @returns {CompiledFsm}
  * @throws {FlowCompileError} when the document violates the format (JF0xxx)
+ * @throws {TypeError} when `operators` is no registry
  * @example
  * const fsm = compileFsm({
  *   initial: 'idle',
@@ -163,7 +198,8 @@ export function resolveEffect(effect, scope, out, errors) {
  * });
  * fsm.step('idle', 'start').state; // 'busy'
  */
-export function compileFsm(doc) {
+export function compileFsm(doc, options) {
+  const compileOptions = operatorOptions(options?.operators, 'compileFsm');
   if (!isJsonObject(doc)) {
     throw new FlowCompileError('JF0001', 'the fsm document must be an object', '');
   }
@@ -197,8 +233,8 @@ export function compileFsm(doc) {
           `state '${id}' has a non-boolean "final"`, `${base}/final`);
       }
       meta = {
-        entry: compileEffectList(entry.entry, `${base}/entry`),
-        exit: compileEffectList(entry.exit, `${base}/exit`),
+        entry: compileEffectList(entry.entry, `${base}/entry`, compileOptions),
+        exit: compileEffectList(entry.exit, `${base}/exit`, compileOptions),
         final: entry.final === true,
       };
     }
@@ -262,7 +298,7 @@ export function compileFsm(doc) {
     let guard = null;
     if (t.guard !== undefined && t.guard !== null) {
       try {
-        guard = compileJsonQuery(t.guard);
+        guard = compileJsonQuery(t.guard, compileOptions);
       }
       catch (err) {
         const cause = asError(err);
@@ -276,7 +312,7 @@ export function compileFsm(doc) {
       to: t.to,
       guard,
       guardPath: `${base}/guard`,
-      effects: compileEffectList(t.effects, `${base}/effects`),
+      effects: compileEffectList(t.effects, `${base}/effects`, compileOptions),
     };
     const list = byFrom.get(t.from);
     if (list === undefined) byFrom.set(t.from, [compiled]);

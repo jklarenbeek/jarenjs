@@ -3,9 +3,9 @@
  * @file The query and JSLT grammars of an operator registry: the
  * published grammars plus one phrase per operator the registry mounts.
  * The published grammars close the operator vocabulary to the core
- * operators, so an `app` document that computes with a pack operator
- * (`{"$sqrt": 16}`) fails its meta-schema even under a host that mounts
- * the pack. `grammarsFor(registryOptions)` reads the registry's
+ * operators, so an `app`, `fsm` or `dag` document that computes with a
+ * pack operator (`{"$sqrt": 16}`) fails its meta-schema even under a host
+ * that mounts the pack. `grammarsFor(registryOptions)` reads the registry's
  * `toOptions().extensions` (the descriptors the query compiler itself
  * reads) and returns copies of both grammars whose `objectExpression`
  * also admits those operators, each with the operand shape its compile
@@ -19,7 +19,8 @@
  * so the registry changes no verdict of such a document;
  * `createGrammarValidators` packages that choice with a validator kept
  * per operator set (the studio's validator and the document host each
- * compile the app meta-schema with their own options). A
+ * compile the app meta-schema with their own options, and the studio's
+ * validator the fsm and dag ones). A
  * `$call` function (`kind: 'fn'`) needs no phrase: `callPhrase` already
  * admits any function name, and the compile checks it.
  */

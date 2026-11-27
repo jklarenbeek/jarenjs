@@ -66,9 +66,10 @@ import { rejectionText } from './tasks.js';
  *   safe profile, the id namespace every id and id reference of the
  *   document joins (absent: the first default namespace no other live safe
  *   root of the page holds, `'jaren-u-'` for the first; VIEW-FORMAT §8).
- * @property {{ effects?: string[], subs?: string[], widgets?: string[], eventFields?: string[] }} [capabilities]
- *   Restrict the host registry names the document may access. Omitted
- *   lists grant nothing when this option or `safe` is enabled.
+ * @property {{ effects?: string[], subs?: string[], widgets?: string[], eventFields?: string[], functions?: string[] }} [capabilities]
+ *   Restrict the host registry names the document may access
+ *   (`functions`: the `$call` functions of `operators`). Omitted lists
+ *   grant nothing when this option or `safe` is enabled.
  * @property {Record<string, (props: any, dispatch: Dispatch, context?: { signal: AbortSignal }) => any>} [effects]
  *   Effect handlers by name. A handler function may carry an optional
  *   `dispose()` member, called exactly once by `app.destroy()` (a
@@ -98,8 +99,10 @@ import { rejectionText } from './tasks.js';
  *   its `$call` functions. Without it they compile with the core
  *   operators only, and a pack operator is refused at compile (`JA0002`
  *   in the view, `JA0004` in an action, `JA0006` in a subscription).
- *   Not combined with `safe` or `capabilities` (a `TypeError`): no grant
- *   list covers a registry's functions.
+ *   Under `safe` or `capabilities` the operators stay mounted and the
+ *   `$call` functions are the ones `capabilities.functions` grants (none
+ *   when it is omitted); an ungranted one is refused at compile as an
+ *   unregistered function is (`JQ0010`).
  * @property {(state: any, context: ValidateContext) => boolean | { valid: boolean, errors?: any }} [validateState]
  *   Invariant hook, called with every candidate next state plus a
  *   context carrying the previous state, the acting action name, its
@@ -278,8 +281,9 @@ const optionRule = (expects, test, orNull = false) => ({ expects, given: (value)
  */
 const registryRule = (entries) => ({ expects: `an object of ${entries} by name`, given: notARegistry, orNull: true });
 
-/** The registries `capabilities` grants names from: its closed member set. */
-const CAPABILITY_KINDS = ['effects', 'subs', 'widgets', 'eventFields'];
+/** The registries `capabilities` grants names from: its closed member set
+ * (`functions` names an operator registry's `$call` functions). */
+const CAPABILITY_KINDS = ['effects', 'subs', 'widgets', 'eventFields', 'functions'];
 
 /**
  * {@link AppOptions}, closed: each member with the kind a present value
@@ -337,12 +341,6 @@ function checkAppOptions(options) {
     if (given !== null) {
       throw new TypeError(`createApp: options.${key} must be ${rule.expects}, got ${given}`);
     }
-  }
-  // an operator registry's `$call` functions are host code a document
-  // names, and no grant list covers them yet: an app that runs under a
-  // safe profile or explicit grants does not mount one
-  if (options.operators != null && (options.safe || options.capabilities !== undefined)) {
-    throw new TypeError('createApp: options.operators cannot be combined with safe or capabilities');
   }
   if (isPlainOptions(options.capabilities)) {
     refuseUnknownMembers(options.capabilities, CAPABILITY_KINDS,
@@ -468,11 +466,33 @@ export function createApp(appDoc, options = {}) {
   }
   /** @type {Record<string, any>} */
   const queryOptions = { compileTypeTest: options.compileTypeTest };
+  /** @type {Record<string, any> | undefined} */
+  let functionRegistry;
   if (options.operators !== undefined && options.operators !== null) {
-    // the registry's operators and `$call` functions, in every compile
+    // the registry's operators in every compile; its `$call` functions
+    // as granted below
     const { extensions, functions } = options.operators.toOptions();
     if (extensions !== undefined) queryOptions.extensions = extensions;
-    if (functions !== undefined) queryOptions.functions = functions;
+    functionRegistry = functions;
+  }
+  // a kind's grant reads names from its own option, `functions` from the
+  // operator registry
+  const grant = (kind) => {
+    const registry = (kind === 'functions' ? functionRegistry : options[kind]) ?? {};
+    if (!options.safe && options.capabilities === undefined) return registry;
+    const names = options.capabilities?.[kind] ?? [];
+    if (!Array.isArray(names) || names.some((name) => typeof name !== 'string'))
+      throw new TypeError(`createApp: capabilities.${kind} must be a list of names`);
+    return Object.fromEntries(names.map((name) => {
+      if (!Object.hasOwn(registry, name)) throw new TypeError(`createApp: unknown ${kind} capability '${name}'${grantHint(name, registry)}`);
+      return [name, registry[name]];
+    }));
+  };
+  // every function for a trusted app; under `safe` or explicit grants the
+  // names `capabilities.functions` lists, none when it is omitted — an
+  // ungranted `$call` is the unregistered function it names (`JQ0010`)
+  if (functionRegistry !== undefined || options.capabilities?.functions !== undefined) {
+    queryOptions.functions = grant('functions');
   }
 
   let view;
@@ -492,17 +512,6 @@ export function createApp(appDoc, options = {}) {
   const actions = compileActions(appDoc.actions, queryOptions);
   const subs = compileSubs(appDoc.subs, queryOptions);
 
-  const grant = (kind) => {
-    const registry = options[kind] ?? {};
-    if (!options.safe && options.capabilities === undefined) return registry;
-    const names = options.capabilities?.[kind] ?? [];
-    if (!Array.isArray(names) || names.some((name) => typeof name !== 'string'))
-      throw new TypeError(`createApp: capabilities.${kind} must be a list of names`);
-    return Object.fromEntries(names.map((name) => {
-      if (!Object.hasOwn(registry, name)) throw new TypeError(`createApp: unknown ${kind} capability '${name}'${grantHint(name, registry)}`);
-      return [name, registry[name]];
-    }));
-  };
   const effectHandlers = grant('effects');
   const subHandlers = grant('subs');
   const eventExtractors = grant('eventFields');

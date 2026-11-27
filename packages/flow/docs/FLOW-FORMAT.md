@@ -124,7 +124,11 @@ judge of what a document means.
 ## §3 The evaluation scope
 
 Guards and effect `with` members are Jaren JSON Query documents
-(QUERY-FORMAT.md), compiled once at `compileFsm` time. At step time each
+(QUERY-FORMAT.md), compiled once at `compileFsm` time — with the core
+operators, or with the operators and `$call` functions of the registry
+passed as `compileFsm(doc, { operators })` (`createJsltRegistry().use(mathPack)`
+from `@jarenjs/json/jslt`); a pack operator the registry does not mount is
+`JF0007`/`JF0009` with its `JQ0002` in the cause chain. At step time each
 evaluates with `$` bound to one scope object:
 
 | member | value |
@@ -347,7 +351,10 @@ they receive.
 compiles every embedded query, stylesheet, `with` and `select` exactly
 once, resolves every `task` node against the registry (a missing
 handler is compile-time JF0018 — fail early, not mid-run), and proves
-acyclicity. `run(input, { signal?, onNode? })` may then be called any
+acyclicity. Those embedded documents compile with the core operators, or
+with an operator registry's passed as `operators` (as `compileFsm`'s,
+§3); an operator it does not mount is `JF0014` with its `JQ0002` in the
+cause chain. `run(input, { signal?, onNode? })` may then be called any
 number of times, concurrently; runs share nothing but the compiled
 closures.
 

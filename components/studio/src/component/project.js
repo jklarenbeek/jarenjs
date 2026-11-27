@@ -151,10 +151,12 @@ function runProjectFile(slice, name, options = {}) {
     try {
       const doc = resolveProjectFile(project, name).doc;
       const data = JSON.parse(dataText);
-      if (file.kind === 'dag') return compileDag(doc).run(data).then(
+      // the registry the files validate under, so a valid flow also runs
+      const operators = operatorRegistry ?? defaultOperators;
+      if (file.kind === 'dag') return compileDag(doc, { operators }).run(data).then(
         (output) => ({ nodes: [code(t('studio/run/dag-output'), JSON.stringify(output, null, 2) ?? t('studio/run/empty-sequence'))] }),
         (err) => ({ nodes: [error(err, t('studio/run/dag-failed'))] }));
-      const machine = compileFsm(doc);
+      const machine = compileFsm(doc, { operators });
       let state = machine.initial;
       const trace = [];
       for (const event of data?.events ?? []) {
@@ -328,5 +330,7 @@ function createProjectSplitterWidget() {
   });
 }
 
-return { projectComponent, projectSnapshot, projectAppFile, commitProject, runProjectFile, createProjectStageWidget, createProjectSplitterWidget };
+return { projectComponent, projectSnapshot, projectAppFile, commitProject, runProjectFile, createProjectStageWidget, createProjectSplitterWidget,
+  // the registry the files validate, boot and run under
+  operators: operatorRegistry ?? defaultOperators };
 }

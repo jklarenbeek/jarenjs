@@ -340,7 +340,7 @@ renderToString(createApp(doc).getVnode());
 
 Also exported: `compileActions`, `compileSubs`, `createFormView`, `createFormActions`, `formEventFields`, `FORM_NUMBER_VALUE` (the standard number action's reading of a number control's text, for an app's own number actions), `createTaskEffect`, `createJsonStateValidator`, `createFocusEffect`, `createTransactionLog`, `createSplitterWidget`, `createDocStore`, `encodeShare`, `decodeShare`, and the error classes (`AppCompileError`, `AppRuntimeError`, `HostValueError`, `toError`, `APP_CODES`).
 
-Options: `node`, `document`, `effects`, `subs`, `eventFields` (named `$event` field extractors), `widgets` (registered widget definitions, forwarded to the renderer), `compileTypeTest`, `operators` (an operator registry, `createJsltRegistry().use(mathPack)`: the view, actions and subscriptions compile with its operators and `$call` functions; APP-FORMAT §5.6), `validateState`, `viewModel`, `onError` (default rethrows), `schedule` (render batching; default microtask — pass `(f) => f()` for synchronous tests), `controlled` (`'focus'`: a field the operator is typing into keeps their text until it loses focus; the standard form view's `json` editor is keyed by its value instead, and shows a new value at once). Compile failures throw `AppCompileError` (`JA0xxx`, with a `docPath` into the app document); runtime failures route `AppRuntimeError` (`JA2xxx`) through `onError`. The full code table is in [APP-FORMAT.md](docs/APP-FORMAT.md) §10.
+Options: `node`, `document`, `effects`, `subs`, `eventFields` (named `$event` field extractors), `widgets` (registered widget definitions, forwarded to the renderer), `compileTypeTest`, `operators` (an operator registry, `createJsltRegistry().use(mathPack)`: the view, actions and subscriptions compile with its operators and `$call` functions, the functions `capabilities.functions` grants under `safe` or `capabilities`; APP-FORMAT §5.6), `validateState`, `viewModel`, `onError` (default rethrows), `schedule` (render batching; default microtask — pass `(f) => f()` for synchronous tests), `controlled` (`'focus'`: a field the operator is typing into keeps their text until it loses focus; the standard form view's `json` editor is keyed by its value instead, and shows a new value at once). Compile failures throw `AppCompileError` (`JA0xxx`, with a `docPath` into the app document); runtime failures route `AppRuntimeError` (`JA2xxx`) through `onError`. The full code table is in [APP-FORMAT.md](docs/APP-FORMAT.md) §10.
 
 ## Exports
 
@@ -367,9 +367,10 @@ Every subpath a consumer can import, derived from the manifest by
 Unit tests live in `test/app/` at the repository root (`npm run test:app`). See [ROADMAP](../../docs/ROADMAP.md) for what's next: dirty-path-pruned re-rendering and time-travel tooling over the action log.
 
 `createApp` forwards the renderer's `safe`, `onUnsafe` and `hydrate` options.
-Optional `capabilities: { effects, subs, widgets, eventFields }` arrays grant
-specific host registry names; with safe mode or explicit grants, omitted lists
-are empty. See [APP-FORMAT §8.2.1](docs/APP-FORMAT.md#821-dom-profiles-and-host-capability-grants)
+Optional `capabilities: { effects, subs, widgets, eventFields, functions }` arrays grant
+specific host registry names (`functions`: the `$call` functions of
+`operators`, whose operators stay mounted); with safe mode or explicit grants,
+omitted lists are empty. See [APP-FORMAT §8.2.1](docs/APP-FORMAT.md#821-dom-profiles-and-host-capability-grants)
 for the disposal and trust contract. Safe mode is a display policy and removes
 DOM event bindings and widgets. `safe: 'interactive'` is the same sanitizer
 keeping data-only bindings on gesture events and the widgets

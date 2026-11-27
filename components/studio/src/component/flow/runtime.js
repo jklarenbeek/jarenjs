@@ -1,4 +1,5 @@
 import { validateDagDoc } from '../../flow-document.js';
+import { defaultOperators } from '../../validate.js';
 //@ts-check
 /**
  * The Flow studio's JS boundary: the projection chain (flow document →
@@ -383,16 +384,20 @@ const message = errorMessage;
  * machine sends, dag runs with abort). One closure ref ties the
  * running instances to their effects.
  * @param {{ schedule?: any, template?: (name: string) => any, tasks?: Record<string, Function>, getFlow?: () => any, mintFromCount?: boolean,
- *   messages?: any }} [env] - `messages`: the compiled catalog, or a function
- *   answering the current one, the run's lines and refusals speak
+ *   messages?: any, operators?: any }} [env] - `messages`: the compiled catalog, or a function
+ *   answering the current one, the run's lines and refusals speak;
+ *   `operators`: the operator registry a machine's guards and effect
+ *   props and a dag's embedded documents compile with (absent: the one
+ *   `validateFile` reads when given none, so a valid flow runs)
  */
 export function createFlowRuntime(env = {}) {
   const words = () => studioTextOf(env.messages);
+  const operators = env.operators ?? defaultOperators;
   const ref = { app: null, controller: null, generation: 0, disposed: false };
 
   const boot = (handle, props) => {
     try {
-      const { slice, actions } = fsmToApp(props.doc);
+      const { slice, actions } = fsmToApp(props.doc, { operators });
       /** @type {Record<string, any>} */
       const effects = {
 };
@@ -411,6 +416,7 @@ export function createFlowRuntime(env = {}) {
         document: handle.host.ownerDocument,
         schedule: env.schedule,
         effects,
+        operators,
         onError: (err) => handle.emit({ action: 'flow/run-log', with: { run: 'error', props: message(err) } }),
       });
       app.observe((tx) => handle.emit({
@@ -472,7 +478,7 @@ export function createFlowRuntime(env = {}) {
         // dag: a text-projected SKELETON is deliberately incomplete
         // (all-task stubs, no output yet), so the gate is the published
         // schema — compile problems surface at run, where they belong.
-        if (props.kind === 'fsm') compileFsm(doc);
+        if (props.kind === 'fsm') compileFsm(doc, { operators });
         else if (!validateDagDoc(doc)) throw new Error(words()('studio/flow/dag-schema'));
         dispatch('flow/parsed', { doc });
       }
@@ -500,7 +506,7 @@ export function createFlowRuntime(env = {}) {
         }
       }
       let dag;
-      try { dag = compileDag(props.doc, { tasks: env.tasks ?? {} }); }
+      try { dag = compileDag(props.doc, { tasks: env.tasks ?? {}, operators }); }
       catch (err) {
         send('flow/dag-fail', { message: message(err) });
         return Promise.resolve({ ok: false, error: message(err) });

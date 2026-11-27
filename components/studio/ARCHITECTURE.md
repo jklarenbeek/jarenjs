@@ -63,7 +63,8 @@ assets from its host; it has no filesystem, fetch or DOM dependency.
 - `src/validate.js` — `validateFile`: per-kind dispatch; the composed app
   meta-schema (over the registry's grammars when the document names one of
   its operators) + a headless render audit; jslt/query compiled with the
-  operator packs. When an app/fsm/dag document fails its grammar, its
+  operator packs; fsm/dag read against their grammars over the registry's
+  and compiled with it. When an app/fsm/dag document fails its grammar, its
   query-bearing members are compiled too, and an unknown operator the
   compiler names (`JQ0002`, with the nearest known one) replaces the
   branch errors it caused. Memoized on the file's IDENTITY (a `createWeakCache`
@@ -77,7 +78,7 @@ assets from its host; it has no filesystem, fetch or DOM dependency.
   admits each operator the registry mounts, with the operand shape its
   `params` descriptor states; the published objects themselves for a
   registry with none. The validator and the document host compile the app
-  meta-schema over them.
+  meta-schema over them, and the validator the fsm and dag ones.
 - `src/render-audit.js` — what an app view renders that its author did
   not mean, read with the view format's vnode rules over the stylesheet's
   literal elements and the first frame: an element written as an object
@@ -143,7 +144,8 @@ DOM-touching widgets. The website mounts it live at
 - the **flow host** embeds the existing editor as a private app. Its local
   actions edit the assembled document; changes echo back without discarding
   selection or undo history. FSM document effects are logged, and DAG tasks
-  come from the editor's local registry. Run generations and abort signals
+  come from the editor's local registry; guards and embedded documents
+  compile with the host's operator registry. Run generations and abort signals
   prevent a disposed run from publishing late output;
 - the **model host** owns one private in-memory SQLite worker per model file.
   Explicit model references share that worker across queries. File switches

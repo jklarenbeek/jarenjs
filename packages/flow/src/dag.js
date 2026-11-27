@@ -20,6 +20,7 @@ import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
 import { asError, FlowCompileError, FlowRuntimeError } from './errors.js';
+import { operatorOptions } from './fsm.js';
 
 const KINDS = ['input', 'output', 'const', 'query', 'jslt', 'task'];
 
@@ -37,13 +38,15 @@ const NEEDS_INBOUND = new Set(['query', 'jslt', 'task', 'output']);
 
 /**
  * Compile one embedded document, wrapping the engine error as JF0014.
- * @param {(d: any) => any} compile
+ * @param {(d: any, compileOptions?: any) => any} compile
  * @param {any} embedded
  * @param {string} docPath
+ * @param {{ extensions?: Record<string, any>, functions?: Record<string, any> }} [compileOptions] -
+ *   the operator registry's options, when `compileDag` was given one
  */
-function compileEmbedded(compile, embedded, docPath) {
+function compileEmbedded(compile, embedded, docPath, compileOptions) {
   try {
-    return compile(embedded);
+    return compile(embedded, compileOptions);
   }
   catch (err) {
     const cause = asError(err);
@@ -131,14 +134,22 @@ function normalizeTaskEntry(entry, name) {
  * @param {{ tasks?: Record<string, ((props: { with: any, input: any }, signal: AbortSignal, resources?: any) => any)
  *     | { run: (props: { with: any, input: any }, signal: AbortSignal, resources?: any) => any, version?: string,
  *         taskVersions?: Record<string, string> }>,
- *   checkpoint?: DagCheckpointStore, revision?: string }} [options]
+ *   checkpoint?: DagCheckpointStore, revision?: string,
+ *   operators?: { toOptions: () => { extensions?: Record<string, any>, functions?: Record<string, any> } } | null }} [options] -
+ *   `operators`: an operator registry (`createJsltRegistry().use(mathPack)`
+ *   from `@jarenjs/json/jslt`); every query, stylesheet, task `with` and
+ *   edge `select` compiles with its operators and `$call` functions.
+ *   Without it they compile with the core operators, and a pack operator
+ *   is refused (`JF0014`, with the `JQ0002` in its cause chain).
  * @returns {CompiledDag}
  * @throws {FlowCompileError} when the document violates the format (JF0xxx)
  * @throws {TypeError} when the options are malformed (a registry that is
- *   not an object, a registered handler that is not a function, or a
- *   checkpoint store missing one of load/save/complete)
+ *   not an object, a registered handler that is not a function, a
+ *   checkpoint store missing one of load/save/complete, or `operators`
+ *   that is no operator registry)
  */
 export function compileDag(doc, options) {
+  const compileOptions = operatorOptions(options?.operators, 'compileDag');
   const tasks = options?.tasks ?? {};
   if (!isJsonObject(tasks)) {
     throw new TypeError('compileDag: "tasks" must be an object of handler functions');
@@ -202,14 +213,14 @@ export function compileDag(doc, options) {
           throw new FlowCompileError('JF0011',
             `query node '${id}' must carry a "query" member`, base);
         }
-        node.query = compileEmbedded(compileJsonQuery, decl.query, `${base}/query`);
+        node.query = compileEmbedded(compileJsonQuery, decl.query, `${base}/query`, compileOptions);
         break;
       case 'jslt':
         if (decl.stylesheet === undefined) {
           throw new FlowCompileError('JF0011',
             `jslt node '${id}' must carry a "stylesheet" member`, base);
         }
-        node.transform = compileEmbedded(compileJsltStylesheet, decl.stylesheet, `${base}/stylesheet`);
+        node.transform = compileEmbedded(compileJsltStylesheet, decl.stylesheet, `${base}/stylesheet`, compileOptions);
         break;
       case 'task': {
         if (typeof decl.run !== 'string' || decl.run === '') {
@@ -256,7 +267,7 @@ export function compileDag(doc, options) {
         node.nestedVersions = entry.taskVersions;
         node.with = decl.with === undefined
           ? null
-          : compileEmbedded(compileJsonQuery, decl.with, `${base}/with`);
+          : compileEmbedded(compileJsonQuery, decl.with, `${base}/with`, compileOptions);
         break;
       }
       default:
@@ -317,7 +328,7 @@ export function compileDag(doc, options) {
       port: e.port ?? null,
       select: e.select === undefined
         ? null
-        : compileEmbedded(compileJsonQuery, e.select, `${base}/select`),
+        : compileEmbedded(compileJsonQuery, e.select, `${base}/select`, compileOptions),
       edgeIndex: i,
     });
   }
