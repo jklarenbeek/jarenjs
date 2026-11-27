@@ -209,20 +209,16 @@ delete it or fix it.
 
 ## @jarenjs/md
 
-- [ ] **Canonical printing: delimiter runs neither the derivation nor the search
-  reaches.** `toMarkdown` spells emphasis, strong and strikethrough whose
-  canonical spelling does not read back from the delimiter rules (each node's
-  delimiter, how many of the literal `*` and `_` beside a run print bare in
-  it, the characters beside a run that print as references), falls back to the
-  search where that spelling does not read back, and names what still does not
-  read back to `onLossy`. Some trees the reader makes are reached by neither
-  and are named `'unread'` instead of reading back: literal `*` or `_` inside
-  nested runs (`*_***_**__x*_____2;_*____*_` is one), where no spelling the
-  derivation weighs reads back or the derivation weighs one as reading back
-  that the reader reads otherwise. Wanted: those spellings derived and the
-  derivation's weighing agreeing with the reader, so that every tree the
-  reader makes reads back and the search can go; such content costs the
-  derivation and then the search.
+- [ ] **Canonical printing: delimiter runs neither the derivation nor the
+  search reaches.** `toMarkdown` spells emphasis, strong and strikethrough
+  whose canonical spelling does not read back from the delimiter rules, falls
+  back to the search where that spelling does not read back, and names what
+  still does not read back to `onLossy`. Some trees the reader makes are
+  reached by neither and are named `'unread'` instead of reading back: literal
+  `*` or `_` inside nested runs (`*\**2;_"_\*****\*_` is one), and long chains
+  of nested emphasis and strong. Wanted: those spellings derived, so that
+  every tree the reader makes reads back and the search can go; such content
+  costs the derivation and then the search.
 
 ## @jarenjs/mermaid
 

@@ -468,15 +468,6 @@ function isOpen(open, mark) {
 const UNREAD = 100;
 
 /**
- * What printing only some of a text's literal characters bare beside a run
- * costs: more than the small costs a spelling that reads back otherwise adds
- * up to, less than `UNREAD`, so that a run takes part of the literal
- * characters beside it only where taking none or all of them does not read
- * back.
- */
-const PARTIAL = 16;
-
-/**
  * What a run of `mark` between these edges costs to do what it `need`s:
  * nothing as it stands, a little when a character beside it must print as
  * a reference, `UNREAD` when it cannot.
@@ -618,10 +609,8 @@ function markCost(touching, spelling, previous, parent, atStart, atEnd, open, ot
   // `_` costs a little, and a little more the earlier it prints in its row,
   // so that the first of two nodes that may take either takes `*`
   cost += (mark === '_' ? 0.25 + (row.length - j) / 1024 : 0) + (spelling.lead + spelling.trail > 0 ? 0.5 : 0);
-  if ((spelling.lead > 0 && spelling.lead < t.lead[mark].count) || (spelling.trail > 0 && spelling.trail < t.trail[mark].count)) cost += PARTIAL;
   // literal characters that would touch the parent's run of the same delimiter merge with it
-  if ((spelling.lead > 0 && spelling.lead === t.lead[mark].count && t.lead[mark].beside && intoParent)
-    || (spelling.trail > 0 && spelling.trail === t.trail[mark].count && t.trail[mark].beside && intoParent)) cost += UNREAD;
+  if ((spelling.lead > 0 && t.lead[mark].beside && intoParent) || (spelling.trail > 0 && t.trail[mark].beside && intoParent)) cost += UNREAD;
   if (intoParent && atStart && atEnd && row.length === 1) {
     // the opener and the closer merge with the parent's: the reader takes
     // two characters from each end first, so only strong is inside
@@ -655,7 +644,7 @@ function markCost(touching, spelling, previous, parent, atStart, atEnd, open, ot
   }
   else {
     left = spelling.lead + t.length;
-    const before = spelling.lead > 0 ? edgeBeyond(t.lead[mark], spelling.lead) : t.before;
+    const before = spelling.lead > 0 ? t.lead[mark].edge : t.before;
     openerAlone = opensOnly(before, t.after);
     if (!t.nests && !openerAlone && pairsWithOpen(open, mark, left)) cost += UNREAD;
     if (!t.nests) cost += ableCost(mark, before, t.after, OPENS);
@@ -668,7 +657,7 @@ function markCost(touching, spelling, previous, parent, atStart, atEnd, open, ot
   }
   const closesIntoParent = j === row.length - 1 && atEnd && intoParent;
   const next = closesIntoParent ? /** @type {RowParent} */ (parent).next
-    : spelling.trail > 0 ? edgeBeyond(t.trail[mark], spelling.trail) : t.next;
+    : spelling.trail > 0 ? t.trail[mark].edge : t.next;
   const closing = t.length + spelling.trail + (closesIntoParent ? /** @type {RowParent} */ (parent).closing : 0);
   const closerAlone = closesOnly(t.last, next);
   if (!t.ends) cost += ableCost(mark, t.last, next, CLOSES);
@@ -697,40 +686,9 @@ function markCost(touching, spelling, previous, parent, atStart, atEnd, open, ot
 }
 
 /**
- * How many of `count` literal characters beside a run may print bare as
- * part of it: none or all, and then one or two fewer than all and one or
- * two, the counts the rule of three and the reader's pairing tell apart
- * (CommonMark §6.2: what pairs depends on a run's length modulo three),
- * the rest printed escaped.
- * @param {number} count
- * @returns {number[]}
- */
-function bareCounts(count) {
-  if (count <= 0) return [0];
-  const out = [0, count];
-  for (const k of [count - 1, count - 2, 1, 2]) {
-    if (k > 0 && k < count && !out.includes(k)) out.push(k);
-  }
-  return out;
-}
-
-/**
- * The edge beyond the literal characters of a text that print bare beside
- * a run: the text's own beyond them all, or an escaped one, a punctuation
- * character, when some of them print escaped.
- * @param {Literal} literal
- * @param {number} count how many print bare
- * @returns {Edge}
- */
-function edgeBeyond(literal, count) {
-  return count === literal.count ? literal.edge : PUNCT_EDGE;
-}
-
-/**
  * The ways a node of a row may print: either delimiter, and for the
  * first node literal characters before its opener and for the last
- * literal characters after its closer, where the text there has them,
- * all of them or some (`bareCounts`).
+ * literal characters after its closer, where the text there has them.
  * @param {Touching} t
  * @returns {Spelling[]}
  */
@@ -741,8 +699,8 @@ function spellingsOf(t) {
   for (const mark of t.node.type === 'strikethrough' ? ['~'] : MARKS) {
     const lead = t.lead[mark]?.count ?? 0;
     const trail = t.trail[mark]?.count ?? 0;
-    for (const a of bareCounts(lead)) {
-      for (const b of bareCounts(trail)) {
+    for (const a of lead > 0 ? [0, lead] : [0]) {
+      for (const b of trail > 0 ? [0, trail] : [0]) {
         for (const head of t.head ? [false, true] : [false]) {
           for (const tail of t.tail && !one ? [false, true] : [head]) out.push({ mark, lead: a, trail: b, head, tail });
         }
@@ -959,8 +917,8 @@ function contentOf(touching, spelling, parent, atStart, atEnd, open) {
   const into = t.j === t.row.length - 1 && atEnd && parent !== null && parent.run.mark === mark;
   const run = merged
     ? { mark, left: /** @type {RowParent} */ (parent).run.left + t.length, before: /** @type {RowParent} */ (parent).run.before }
-    : { mark, left: spelling.lead + t.length, before: spelling.lead > 0 ? edgeBeyond(t.lead[mark], spelling.lead) : t.before };
-  const next = into ? /** @type {RowParent} */ (parent).next : spelling.trail > 0 ? edgeBeyond(t.trail[mark], spelling.trail) : t.next;
+    : { mark, left: spelling.lead + t.length, before: spelling.lead > 0 ? t.lead[mark].edge : t.before };
+  const next = into ? /** @type {RowParent} */ (parent).next : spelling.trail > 0 ? t.trail[mark].edge : t.next;
   const closing = t.length + spelling.trail + (into ? /** @type {RowParent} */ (parent).closing : 0);
   const around = merged || parent === null ? open : open | runBit(parent.run.mark, parent.run.left);
   const alone = opensOnly(run.before, t.after);
@@ -984,7 +942,7 @@ function leftOpen(touching, spelling, parent) {
   const mark = spelling.mark;
   const t = asSpelled(touching, spelling, parent);
   let bits = spelling.lead > 0 ? runBit(mark, spelling.lead) : 0;
-  if (spelling.trail > 0 && !closesOnly(t.last, edgeBeyond(t.trail[mark], spelling.trail))) bits |= runBit(mark, spelling.trail);
+  if (spelling.trail > 0 && !closesOnly(t.last, t.trail[mark].edge)) bits |= runBit(mark, spelling.trail);
   return bits;
 }
 
@@ -1065,7 +1023,7 @@ function solveContent(nodes, parent, scope, open) {
         const after = step.open | leftOpen(t, spelling, parent);
         // what the next node of the row weighs of this one: its delimiter,
         // and whether literal characters lead its opener
-        const id = after + spelling.mark + (spelling.lead > 0 ? 'l' + spelling.lead : '');
+        const id = after + spelling.mark + (spelling.lead > 0 ? 'l' : '');
         const seen = next.get(id);
         if (seen === undefined || cost < seen.cost) next.set(id, { cost, open: after, index: i, spelling, touching: spelling, back: step });
       }
