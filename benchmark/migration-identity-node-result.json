@@ -1,6 +1,6 @@
 {
   "format": "jaren-migration-identity-cost/1",
-  "measuredAt": "2026-11-22T12:18:13.710Z",
+  "measuredAt": "2026-11-27T19:34:34.340Z",
   "runtime": {
     "name": "node",
     "version": "24.22.1",
@@ -9,9 +9,9 @@
     "arch": "x64",
     "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics",
     "loadavg": [
-      3.39,
-      3.05,
-      3.32
+      3.83,
+      4.09,
+      4.49
     ]
   },
   "sourceHashes": {
@@ -21,14 +21,14 @@
     "packages/json/src/canonical.js": "8b68e33f7264f4064085259cda50d68c07ed83b663939054c140f3b9ba79211a",
     "packages/linq/src/migration/define.js": "b2f8b1c2700d24224e7dbb47996cc8246f1b5c560354290c79f5c047e4030ff6",
     "packages/linq/src/migration/steps.js": "a4a21b3d61f05fba8b5adfb07f828e0e0dc574f1f2abbd474bf99641d5c52311",
-    "packages/db/src/migrate.js": "581d33f53a713ce7390eaaed8ea5e7bd61de1fd42828858fc019add949f40709",
-    "packages/db/src/migration-history.js": "1ebe6baa64f73d40a8191f5f929dce75785bc58163c80b7866e8cac6de6d6400",
-    "packages/db/src/model.js": "e1e35b5f4be8dca831e511415421b3f54fcc411cdb860ed4315a91731f74714f",
+    "packages/db/src/migrate.js": "782d4246712ff5d654ba6a791e5e9fbfaf79f3963e1fdc41ce679c894ae49439",
+    "packages/db/src/migration-history.js": "42149b705643c75f4df8f9b2596908cec8b1669f8c37e7836c45ce372827face",
+    "packages/db/src/model.js": "929ceb92ad66270d9ac0f14a42e3557d48e56d172c1428a2edf693897fbfe383",
     "packages/db/src/migration-target.js": "2a083fab968f6807ec10db982f4fc9ec83b9da7dde3744239149f6e9e18c7cb4",
     "packages/db/src/document-steps.js": "de0167d29b60e48ccad5e292711bbb9d8518a631a30b3a418702f9f8f15a3d2f",
     "packages/db/src/schema-positions.js": "04c7ae34365fdc06ecb76c6e08c6813bab77e49ff0f38285d1081e731a0725c1",
     "packages/validate/src/schema-keywords.js": "dc7d685577c09603fc8b267136325d242ceffb044073c457c85a12396305033b",
-    "packages/db/src/driver.js": "26144529eaec3df5d151728302870ef19cc8b28ee7750206d73bb36be22a77a3",
+    "packages/db/src/driver.js": "11849f3a9383d2cc841f15b924124c624f27c53f55cc3be9e2e3e8ecefc0a5b8",
     "packages/db/src/drivers/node.js": "aa83e4442b81ef1f02689b243ff16526e4bd113a325b9ecf9ed5a2af63367604"
   },
   "rounds": 5,
@@ -43,41 +43,41 @@
   },
   "samples": [
     {
-      "applyMs": 27.796267999999998,
-      "statusMs": 275.23521500000004,
-      "repeatMs": 275.88088799999997,
-      "observationMs": 84.29197999999997
+      "applyMs": 34.36480399999999,
+      "statusMs": 308.382991,
+      "repeatMs": 279.365853,
+      "observationMs": 85.82697900000005
     },
     {
-      "applyMs": 13.627851999999962,
-      "statusMs": 256.062048,
-      "repeatMs": 243.94672500000001,
-      "observationMs": 77.70192599999996
+      "applyMs": 12.341323000000102,
+      "statusMs": 259.60826700000007,
+      "repeatMs": 272.941112,
+      "observationMs": 89.75486100000012
     },
     {
-      "applyMs": 9.741733000000067,
-      "statusMs": 258.60940099999993,
-      "repeatMs": 252.82188099999985,
-      "observationMs": 74.97347800000011
+      "applyMs": 12.816935000000058,
+      "statusMs": 260.9711289999998,
+      "repeatMs": 293.7442050000002,
+      "observationMs": 86.42648699999972
     },
     {
-      "applyMs": 11.24672099999998,
-      "statusMs": 244.28014299999995,
-      "repeatMs": 250.05844399999978,
-      "observationMs": 72.7016450000001
+      "applyMs": 11.615404000000126,
+      "statusMs": 293.4617710000002,
+      "repeatMs": 338.83003899999994,
+      "observationMs": 94.86185599999999
     },
     {
-      "applyMs": 10.485461999999643,
-      "statusMs": 244.42569000000003,
-      "repeatMs": 248.339117,
-      "observationMs": 75.0545619999998
+      "applyMs": 16.94959000000017,
+      "statusMs": 310.57569399999966,
+      "repeatMs": 264.27254500000026,
+      "observationMs": 80.18298200000027
     }
   ],
   "medianMs": {
-    "applyMs": 11.24672099999998,
-    "statusMs": 256.062048,
-    "repeatMs": 250.05844399999978,
-    "observationMs": 75.0545619999998
+    "applyMs": 12.816935000000058,
+    "statusMs": 293.4617710000002,
+    "repeatMs": 279.365853,
+    "observationMs": 86.42648699999972
   },
   "checks": {
     "exactRows": true,
