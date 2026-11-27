@@ -365,11 +365,16 @@ delete it or fix it.
   CHECK verification, and the store's zoned writes, `rekey()` and open checks.
   Wanted: those call sites gathered behind one seam entry per module where
   that costs no per-query work.
-- [ ] **A store of a few thousand collections overflows the stack at open.**
-  `openStore` verifies or creates each collection's table in a chain that
-  recurses once per collection, so on a synchronous driver a model of 2048
-  collections throws `RangeError` (the host's stack) where 1536 opens. Wanted:
-  the shape walk iterative, a model of any size opening.
+- [ ] **Out of shared memory reads as a full disk on PostgreSQL.** A first open
+  whose created relations outgrow the server's lock table
+  (`max_locks_per_transaction`, POSTGRESQL.md "A first open of a large model")
+  is refused `JD0002` as "the database or its disk is full": SQLSTATE `53200`
+  is classified with `53100`. Wanted: `53200` a reason of its own that names
+  `max_locks_per_transaction`.
+- [ ] **Applying a chain of links costs the square of its length.** `migrate()` over
+  a chain of unchanged-model links takes about four times as long for twice
+  the links, atomic or link by link; a dry run stays flat. Wanted: each link's
+  history check reading what the chain already verified.
 - [ ] **A CHECK the model does not declare is read back as a declaration where
   the format has one.** On PostgreSQL a CHECK of someone else's opens, still
   refuses the writes it governs (`JD2005`) and is an `unmapped-constraint`

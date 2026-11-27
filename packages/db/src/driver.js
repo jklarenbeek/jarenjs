@@ -8,7 +8,8 @@
  * a `Connection` or a promise of one. Every connection method may
  * return a value or a promise — the store never assumes either, and
  * composes through {@link chain}, which does not allocate a promise
- * when the driver answered with a value. That is what keeps the public
+ * when the driver answered with a value, and walks many items through
+ * {@link inOrder}, which holds one on the stack. That is what keeps the public
  * asynchronous surface from paying twice while the synchronous fast
  * path stays exact.
  *
@@ -182,6 +183,30 @@ export function attempt(call, wrap) {
   return isThenable(out)
     ? /** @type {Promise<T>} */ (out).then(undefined, (error) => { throw wrap(error); })
     : out;
+}
+
+/**
+ * Run `each(0)` … `each(count - 1)` in order, each once the one before it
+ * has settled, and answer once the last has — the per-item walk of a
+ * sync-capable seam (a table per collection at open, a statement per
+ * step). It loops while `each` answers with a value and resumes the loop
+ * from a promise's settlement, so the stack holds one item however many
+ * there are: a walk that recursed once per item through {@link chain}
+ * overflowed the host's stack on a synchronous driver. A throw or a
+ * rejection stops the walk there and is the answer.
+ * @param {number} count
+ * @param {(index: number) => any} each - value-or-promise; its value is unused
+ * @returns {null | Promise<null>}
+ */
+export function inOrder(count, each) {
+  const from = (/** @type {number} */ start) => {
+    for (let i = start; i < count; i++) {
+      const out = each(i);
+      if (isThenable(out)) return out.then(() => from(i + 1));
+    }
+    return null;
+  };
+  return from(0);
 }
 
 /** Release a prepared value or promise without replacing the call's outcome.

@@ -27,7 +27,7 @@
  * into a member path.
  */
 
-import { chain, useStatementOnce } from './driver.js';
+import { chain, inOrder, useStatementOnce } from './driver.js';
 import { catalogRows, withNamespaceCatalog } from './namespace-catalog.js';
 import { DbCompileError } from './errors.js';
 import { readOptionsOrNull } from './options.js';
@@ -108,10 +108,10 @@ function readTable(connection, table, objects) {
             (!rows.some((row) => row.name == null) || dialect.introspect.indexKeyColumns === undefined ? null
               : chain(all('indexKeyColumns', name), (keys) =>
                 keys.map((key) => (typeof key.term === 'string' ? key.term : null))));
-          const withColumns = (i, out) => {
-            if (i >= declared.length) return out;
-            return chain(all('indexColumns', String(declared[i].name)),
-              (rows) => chain(termsOf(String(declared[i].name), rows), (terms) => withColumns(i + 1, [...out, {
+          const held = [];
+          const withColumns = inOrder(declared.length, (i) =>
+            chain(all('indexColumns', String(declared[i].name)),
+              (rows) => chain(termsOf(String(declared[i].name), rows), (terms) => { held.push({
                 name: String(declared[i].name),
                 unique: Number(declared[i].uniq) !== 0,
                 partial: Number(declared[i].partial ?? 0) !== 0,
@@ -124,12 +124,11 @@ function readTable(connection, table, objects) {
                 plain: declared[i].plain == null || Number(declared[i].plain) === 1,
                 ...keyOrderOf(declared[i]),
                 conforming: declared[i].conforming == null || String(declared[i].conforming) === 'on',
-              }])));
-          };
+              }); })));
           // an `ordered` index reads back as the plain index it was declared as,
           // and the index beside one that keys its number's double as nothing a
           // model declares: the plan of the index creates it
-          return chain(chain(withColumns(0, []), (held) => readOrderedIndexes(dialect, held)), (indexes) =>
+          return chain(chain(withColumns, () => readOrderedIndexes(dialect, held)), (indexes) =>
             chain(keyIndex === undefined
               ? []
               : all('indexColumns', String(keyIndex.name)), (keyRows) =>
@@ -223,10 +222,9 @@ export function readSchema(connection, options = undefined) {
   return chain(readNamespace(connection, wanted), ({ names, views, objects, inspected }) => {
     // one read of each catalog for every table it reads
     const reading = withNamespaceCatalog(connection, names);
-    const step = (i, out) => (i >= names.length
-      ? { tables: out, views, objects }
-      : chain(readTable(reading, names[i], objects), (table) => step(i + 1, [...out, table])));
-    return chain(step(0, []), (schema) => chain(readNativeCatalog(connection, inspected),
+    const tables = [];
+    const read = inOrder(names.length, (i) => chain(readTable(reading, names[i], objects), (table) => { tables.push(table); }));
+    return chain(chain(read, () => ({ tables, views, objects })), (schema) => chain(readNativeCatalog(connection, inspected),
       (catalog) => (catalog === undefined ? schema : { ...schema, catalog })));
   });
 }

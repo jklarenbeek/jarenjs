@@ -23,7 +23,14 @@ applies a continuation without allocating a promise when the driver
 answered with a value — the public asynchronous surface then lifts
 exactly once per call. Where the connection is synchronous the same
 operation cores are exposed promise-free under `store.sync`; where it
-is not, `store.sync` is absent rather than stubbed.
+is not, `store.sync` is absent rather than stubbed. A walk over many
+items — the tables an open creates or verifies, a table's indexes, a
+migration's steps and links, a write's memberships and invariants, a
+tick's due schedules, a rekey's rows — runs through the driver layer's
+private `inOrder`, which loops while each item answers with a value and
+resumes the loop from a promise: the stack holds one item however many
+there are, so a model of thousands of collections opens on a synchronous
+driver as it does on an asynchronous one.
 
 The driver layer also owns prepared-statement lifetimes. Its private
 `createStatementOwner` retains a preparation across calls; each `use` borrows it

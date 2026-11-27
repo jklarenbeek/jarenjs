@@ -1,6 +1,6 @@
 //@ts-check
 /** Logical row access through the store's validation and physical column plans. */
-import { chain, useStatementOnce } from './driver.js';
+import { chain, inOrder, useStatementOnce } from './driver.js';
 import { keyToken } from './capture.js';
 import { DbRuntimeError } from './errors.js';
 
@@ -98,10 +98,9 @@ export function createLogicalRows({ connection, shapes, collectionCore, entityCo
     empty: () => {
       let result = true;
       const entries = [...shapes.keys()];
-      const next = (i) => i === entries.length ? result : chain(
+      return chain(inOrder(entries.length, (i) => chain(
         statement(`SELECT 1 AS present FROM ${q(entries[i])} LIMIT 1`, 'get'),
-        (row) => { result &&= row === undefined; return next(i + 1); });
-      return next(0);
+        (row) => { result &&= row === undefined; })), () => result);
     },
   };
 }

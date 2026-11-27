@@ -18,7 +18,7 @@ import {
 } from '@jarenjs/core/calendar';
 import { DbCompileError } from './errors.js';
 import { readOptions, readOptionsOrNull } from './options.js';
-import { chain, attempt } from './driver.js';
+import { chain, inOrder, attempt } from './driver.js';
 import { PAGE_LIMIT_DEFAULT } from './cursor.js';
 import { JOB_SCHEDULES_TABLE } from './engine-metadata.js';
 import { scheduleStatements, SCHEDULE_COLUMNS } from './dialects/job-schedules.js';
@@ -681,8 +681,7 @@ function attach(context) {
         skipped = 0;
         const at = now();
         return chain(prepared('scheduleDue').all([at, limit]), (/** @type {any[]} */ rows) => {
-          const step = (i) => {
-            if (i >= rows.length) return rows.length;
+          const step = (/** @type {number} */ i) => {
             const row = rows[i];
             const lastRunAt = row.last_run_at === null || row.last_run_at === undefined ? null : Number(row.last_run_at);
             /** @type {any} */
@@ -715,24 +714,22 @@ function attach(context) {
             if (outcome.uncounted === true) counts.uncounted = (counts.uncounted ?? 0) + 1;
             skipped += passed;
             const latest = outcome.due.length === 0 ? null : outcome.due[outcome.due.length - 1];
-            const advance = () => chain(prepared('scheduleAdvance').run([
+            const advance = () => prepared('scheduleAdvance').run([
               outcome.state, outcome.next?.at ?? null, outcome.next?.recurrenceId ?? null,
               latest?.at ?? lastRunAt, latest?.recurrenceId ?? row.last_recurrence_id ?? null,
               definition === null ? row.provider_revision ?? null : revisionOf(definition),
               JSON.stringify(counts), outcome.stall === null ? null : JSON.stringify(outcome.stall), at,
-              row.id, row.next_run_at]), () => step(i + 1));
-            const enqueueAll = (j) => {
-              if (j >= fire.length) return advance();
+              row.id, row.next_run_at]);
+            const enqueue = (/** @type {number} */ j) => {
               const jobId = `${row.id}@${fire[j].recurrenceId}`;
               return chain(preparedJob('enqueue').run([jobId, row.kind, row.payload ?? null, fire[j].at,
                 maxAttempts, at, at]), () => {
                 fired.push(jobId);
-                return enqueueAll(j + 1);
               });
             };
-            return enqueueAll(0);
+            return chain(inOrder(fire.length, enqueue), advance);
           };
-          return step(0);
+          return chain(inOrder(rows.length, step), () => rows.length);
         });
       }), (advanced) => {
         if (fired.length > 0) wake();

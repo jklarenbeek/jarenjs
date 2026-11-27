@@ -6,7 +6,7 @@
  * locks the row it finds where writers do not serialize. */
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { isJsonObject } from '@jarenjs/core/object';
-import { chain } from './driver.js';
+import { chain, inOrder } from './driver.js';
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { refuseUnknownModelMembers } from './options.js';
 import { IDENTIFIER } from './engine-metadata.js';
@@ -605,45 +605,41 @@ function unlockableRow(name, target) {
 export function checkInvariants(rules, op, before, after, context = {}) {
   const assigned = context.assigned === undefined ? null : new Set(context.assigned);
   const record = { old: before ?? null, new: after ?? null, op };
-  const check = (i) => {
-    for (; i < rules.length; i++) {
-      const rule = rules[i];
-      if (rule.enforcement !== 'store' || !rule.on.includes(op)) continue;
-      if (op === 'update' && rule.columns !== undefined && assigned !== null && !rule.columns.some((member) => assigned.has(member))) continue;
-      if (op === 'update' && context.unchanged === true && rule.columns === undefined && rule.when !== 'assigned') continue;
-      if (rule.probes.length === 0) {
-        if (!withinDomain(rule, record) || rule.evaluate(record) !== true) throw invariantFailure(rule.name);
-        continue;
-      }
-      if (typeof context.probe !== 'function') throw new DbRuntimeError('JD2096', `persistence invariant '${rule.name}' needs a probe of '${rule.probes[0].entity}'`);
-      const probe = context.probe;
-      const run = () => {
-        const answers = [];
-        const answer = (j) => j >= rule.probes.length ? null
-          : chain(probe(rule.probes[j], record), (found) => { answers.push(found === true); return answer(j + 1); });
-        return chain(answer(0), () => {
-          if (!withinDomain(rule, record)) throw invariantFailure(rule.name);
-          if (rule.evaluate({ ...record, probes: answers }) === true) return null;
-          // refused: each probe that found nothing asks once more unlocked (one
-          // that takes no lock answers as it did, without a statement), and a
-          // row only that read finds which would pass the rule names the lock
-          const unlocked = [];
-          const again = (j) => j >= rule.probes.length ? null
-            : chain(answers[j] ? true : probe(rule.probes[j], record, true), (found) => { unlocked.push(found === true); return again(j + 1); });
-          return chain(again(0), () => {
-            const hidden = rule.probes.find((_, j) => unlocked[j] && !answers[j]);
-            if (hidden !== undefined && rule.evaluate({ ...record, probes: unlocked }) === true) throw unlockableRow(rule.name, hidden.entity);
-            throw invariantFailure(rule.name);
-          });
-        });
-      };
-      if (context.defer !== undefined) { context.defer(run); continue; }
-      const at = i;
-      return chain(run(), () => check(at + 1));
+  // one rule after another: the stack holds one rule however many the entity declares
+  return inOrder(rules.length, (i) => {
+    const rule = rules[i];
+    if (rule.enforcement !== 'store' || !rule.on.includes(op)) return null;
+    if (op === 'update' && rule.columns !== undefined && assigned !== null && !rule.columns.some((member) => assigned.has(member))) return null;
+    if (op === 'update' && context.unchanged === true && rule.columns === undefined && rule.when !== 'assigned') return null;
+    if (rule.probes.length === 0) {
+      if (!withinDomain(rule, record) || rule.evaluate(record) !== true) throw invariantFailure(rule.name);
+      return null;
     }
-    return null;
-  };
-  return check(0);
+    if (typeof context.probe !== 'function') throw new DbRuntimeError('JD2096', `persistence invariant '${rule.name}' needs a probe of '${rule.probes[0].entity}'`);
+    const probe = context.probe;
+    const run = () => {
+      const answers = [];
+      const answer = (j) => j >= rule.probes.length ? null
+        : chain(probe(rule.probes[j], record), (found) => { answers.push(found === true); return answer(j + 1); });
+      return chain(answer(0), () => {
+        if (!withinDomain(rule, record)) throw invariantFailure(rule.name);
+        if (rule.evaluate({ ...record, probes: answers }) === true) return null;
+        // refused: each probe that found nothing asks once more unlocked (one
+        // that takes no lock answers as it did, without a statement), and a
+        // row only that read finds which would pass the rule names the lock
+        const unlocked = [];
+        const again = (j) => j >= rule.probes.length ? null
+          : chain(answers[j] ? true : probe(rule.probes[j], record, true), (found) => { unlocked.push(found === true); return again(j + 1); });
+        return chain(again(0), () => {
+          const hidden = rule.probes.find((_, j) => unlocked[j] && !answers[j]);
+          if (hidden !== undefined && rule.evaluate({ ...record, probes: unlocked }) === true) throw unlockableRow(rule.name, hidden.entity);
+          throw invariantFailure(rule.name);
+        });
+      });
+    };
+    if (context.defer !== undefined) { context.defer(run); return null; }
+    return run();
+  });
 }
 
 /**

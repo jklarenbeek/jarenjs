@@ -689,6 +689,20 @@ rounded, so such an integer crosses there as its digits and is held to the
 same rule. Change capture records the documents the store read whole or wrote,
 and so never carries one.
 
+## A first open of a large model
+
+The open that creates a model's tables creates every missing table, with its
+indexes and rule programs, in one transaction, so an open that fails leaves no
+table of the model behind. PostgreSQL holds a lock on each relation that
+transaction creates until it commits, in a lock table shared by the server and
+sized by `max_locks_per_transaction` times the connections it allows
+(`max_connections` plus `max_prepared_transactions`). A model whose relations
+outgrow it is refused at that first open with `JD0002` (SQLSTATE `53200`,
+out of shared memory), the create rolled back whole; how many tables fit
+depends on that setting and on the indexes and programs each table holds. Raise
+`max_locks_per_transaction` (it takes a server restart) before the first open
+of such a model; the create stays one transaction.
+
 ## The writer lock and the lock family
 
 `store.transaction(fn, { mode: 'immediate' })` runs `BEGIN`, then takes the

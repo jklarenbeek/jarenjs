@@ -12,7 +12,9 @@
  * throwing stub — so portable code pays one declared microsecond and
  * code that wants it back opts in knowingly. Internally everything
  * composes through the sync-capable {@link chain}, so the async
- * surface allocates exactly one promise per call, not one per step.
+ * surface allocates exactly one promise per call, not one per step, and
+ * a walk over a model's tables or a write's rows through {@link inOrder},
+ * so the stack holds one item however many there are.
  *
  * Writes validate through an injected `compileSchema` hook with the
  * `compileTypeTest` signature; absent, writes are unvalidated and
@@ -30,7 +32,7 @@ import { equalsJson, isJsonObject } from '@jarenjs/core/object';
 import { utf8ByteLength } from '@jarenjs/core/string';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError, isDriverError, classifyDriverError } from './errors.js';
-import { chain, toPromise, isThenable, attempt, abortReason, createStatementOwner, useStatementOnce, releaseStatement } from './driver.js';
+import { chain, inOrder, toPromise, isThenable, attempt, abortReason, createStatementOwner, useStatementOnce, releaseStatement } from './driver.js';
 import { createSessionRouter } from './sessions.js';
 import { isPlainOptions, refuseUnknownMembers, refuseUnknownModelMembers, readOptions, readControls, refuseYieldEvery } from './options.js';
 import { canonicalKeyText, namesNoNumber, noNumberKeyReason, numericKeyValue } from './key-text.js';
@@ -1039,11 +1041,9 @@ function runCreate(connection, plan) {
       + 'arguments the expression passes (a number literal past the 4-byte integers is a bigint there)',
     call.docPath, failure);
   };
-  const run = (/** @type {number} */ j) => (j >= plan.createSql.length
-    ? null
-    : chain(attempt(() => connection.exec(plain.has(plan.createSql[j]) ? plan.createSql[j] : dialect.ddl.idempotent(plan.createSql[j])),
-      (failure) => declarationFailure(plan.createSql[j], failure)), () => run(j + 1)));
-  return run(0);
+  return inOrder(plan.createSql.length, (j) =>
+    attempt(() => connection.exec(plain.has(plan.createSql[j]) ? plan.createSql[j] : dialect.ddl.idempotent(plan.createSql[j])),
+      (failure) => declarationFailure(plan.createSql[j], failure)));
 }
 
 /**
@@ -1066,8 +1066,7 @@ function ensureShape(connection, collections, plans, createsNothing) {
     // and one read of each catalog every table
     const programs = namespacePrograms(connection);
     const reading = withNamespaceCatalog(connection, names.flatMap((name) => [name, plans.get(name).table]));
-    const step = (i) => {
-      if (i >= names.length) return null;
+    return inOrder(names.length, (i) => {
       const name = names[i];
       const collection = collections.get(name);
       const plan = plans.get(name);
@@ -1083,15 +1082,13 @@ function ensureShape(connection, collections, plans, createsNothing) {
           // name is read back from the table just created
           return chain(runCreate(connection, plan), () => chain(catalogRows(connection, 'tableExists', name), ([created]) => {
             recordKeyConstraint(plan, created);
-            return step(i + 1);
           }));
         }
         recordKeyConstraint(plan, row);
-        return chain(againOnDifference(reading, connection, name, (on) =>
-          verifyShape(on, plan, name, collection.docPath, 'collection', undefined, programs)), () => step(i + 1));
+        return againOnDifference(reading, connection, name, (on) =>
+          verifyShape(on, plan, name, collection.docPath, 'collection', undefined, programs));
       });
-    };
-    return step(0);
+    });
   });
 }
 
@@ -1146,8 +1143,7 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
   const created = [];
   const addDeferred = () => {
     const statements = created.flatMap((table) => entityPlans.get(table).deferredForeignKeys ?? []);
-    const run = (/** @type {number} */ k) => (k >= statements.length ? null : chain(connection.exec(statements[k]), () => run(k + 1)));
-    return run(0);
+    return inOrder(statements.length, (k) => connection.exec(statements[k]));
   };
   return verifyOrCreate(connection, createsNothing, (creates, connection) => {
     // one read of the namespace's rule programs serves every table verified here,
@@ -1175,14 +1171,12 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
       }
       return isThenable(out) ? out.then(undefined, again) : out;
     };
-    const step = (i) => {
-      if (i >= names.length) return addDeferred();
+    return chain(inOrder(names.length, (i) => {
       const name = names[i];
       const plan = entityPlans.get(name);
       const docPath = entities.get(name)?.docPath ?? `/entities/${name}`;
       if (plan.physical) return chain(verifiedPhysical(plan.physical), (schema) => {
         plan.keyConstraint = physicalKeyConstraint(schema, plan.physical.table);
-        return step(i + 1);
       });
       return chain(catalogRows(reading, 'tableExists', name), ([row]) => {
           if (row === undefined) {
@@ -1201,11 +1195,10 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
               // and each key CHECK it plans
               plan.keyChecked = new Set((plan.keyChecks ?? []).map((/** @type {any} */ check) => check.column));
               recordKeyConstraint(plan, made);
-              return step(i + 1);
             }));
           }
           recordKeyConstraint(plan, row);
-          return chain(againOnDifference(reading, connection, name, (on) =>
+          return againOnDifference(reading, connection, name, (on) =>
             chain(verifyShape(on, plan, name, docPath, 'entity', undefined, programs), () =>
             chain(readKeyChecks(on, plan), () =>
             chain(catalogRows(on, 'foreignKeyList', name), (fkRows) => {
@@ -1240,10 +1233,9 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
                     docPath);
                 }
                 return null;
-              })))), () => step(i + 1));
+              }))));
         });
-    };
-    return step(0);
+    }), addDeferred);
   });
 }
 
@@ -4329,41 +4321,35 @@ export function openStore(model, options) {
             const attach = (made, memberships) => {
               // the own key as its join column holds it (an instant kept as an epoch: the epoch)
               const ownKey = core.plan.keyValues([made[mapping.entities[name].keys[0]]])[0];
-              const next = (i) => {
-                if (i >= memberships.length) return null;
+              const next = (/** @type {number} */ i) => {
                 const { table, join, own, target, keys } = memberships[i];
                 const sql = `INSERT INTO ${dialect.quoteIdentifier(table)} `
                   + `(${dialect.quoteIdentifier(own.column)}, ${dialect.quoteIdentifier(target.column)}) `
                   + `VALUES (${dialect.parameterRef(1, 'v')}, ${dialect.parameterRef(2, 'v')})`;
-                return useStatementOnce(connection, sql, (statement) => {
-                  const row = (j) => {
-                    if (j >= keys.length) return next(i + 1);
-                    // the one classification of a driver failure, thrown
-                    // or rejected: a membership naming no target row is
-                    // JD2005 (class constraint) on both engines
-                    const ran = attempt(() => statement.run([ownKey, keys[j]]),
-                      (error) => wrapDriverError(error,
-                        { docPath: entities.get(name).docPath, collection: name, key: ownKey }));
-                    return chain(ran, () => {
-                      // recorded as every membership writer records its
-                      // row, in both modes and with the key it names: a
-                      // membership a delete in the same transaction removed
-                      // is a row stored again (capture `moved`)
-                      if (capture !== null) {
-                        const value = { [own.column]: ownKey, [target.column]: keys[j] };
-                        const ordered = {};
-                        for (const column of [join.left.column, join.right.column])
-                          ordered[column] = value[column];
-                        const parts = Object.values(ordered);
-                        capture.record(table, parts, null, ordered, parts);
-                      }
-                      return row(j + 1);
-                    });
-                  };
-                  return row(0);
-                });
+                return useStatementOnce(connection, sql, (statement) => inOrder(keys.length, (j) => {
+                  // the one classification of a driver failure, thrown
+                  // or rejected: a membership naming no target row is
+                  // JD2005 (class constraint) on both engines
+                  const ran = attempt(() => statement.run([ownKey, keys[j]]),
+                    (error) => wrapDriverError(error,
+                      { docPath: entities.get(name).docPath, collection: name, key: ownKey }));
+                  return chain(ran, () => {
+                    // recorded as every membership writer records its
+                    // row, in both modes and with the key it names: a
+                    // membership a delete in the same transaction removed
+                    // is a row stored again (capture `moved`)
+                    if (capture !== null) {
+                      const value = { [own.column]: ownKey, [target.column]: keys[j] };
+                      const ordered = {};
+                      for (const column of [join.left.column, join.right.column])
+                        ordered[column] = value[column];
+                      const parts = Object.values(ordered);
+                      capture.record(table, parts, null, ordered, parts);
+                    }
+                  });
+                }));
               };
-              return next(0);
+              return inOrder(memberships.length, next);
             };
             /** Track the row an immediate write stored. Inside a transaction
              * that rolls back, the row as written is gone again, and so is

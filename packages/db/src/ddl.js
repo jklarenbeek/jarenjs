@@ -20,7 +20,7 @@ import { hashContent, utf8ByteLength } from '@jarenjs/core/string';
 import { IDENTIFIER, ENGINE_TABLES } from './engine-metadata.js';
 import { DbCompileError } from './errors.js';
 import { unseamed } from './temporal-seam.js';
-import { chain } from './driver.js';
+import { chain, inOrder } from './driver.js';
 import { catalogRead } from './namespace-catalog.js';
 import { BBOX_COMPONENTS, BBOX_INDEX_ORDER, derivedMappingFor } from './derive.js';
 import { expressionSql, expressionStem, expressionFunctions, normalizeExpression } from './expression.js';
@@ -1857,8 +1857,7 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
                 ? ` — the database has ${extra.join(', ')}, which the model does not declare`
                 : ''));
           }
-          const collectColumns = (i) => {
-            if (i >= created.length) return null;
+          const collectColumns = (/** @type {number} */ i) => {
             const have = created[i];
             const want = wantedIndexes[i];
             if (have.name !== want.name || have.unique !== want.unique)
@@ -1882,7 +1881,7 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
                 const haveColumns = rows.map((row) => (row.name === null || row.name === undefined ? null : String(row.name)));
                 // an `ordered` index held as this release creates it; one an earlier
                 // release created holds it plain, and is compared so below
-                if (heldOrdered(dialect, have, haveColumns, want)) return chain(verifyIndexCondition(), () => collectColumns(i + 1));
+                if (heldOrdered(dialect, have, haveColumns, want)) return verifyIndexCondition();
                 // held plain: the statements read it as an earlier release's ({@link heldPlainOf})
                 if (want.ordered === true) heldPlainOf(plan).add(want.name);
                 const keyed = (/** @type {readonly string[]} */ terms) => haveColumns.length === want.columns.length + terms.length
@@ -1897,8 +1896,8 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
                 verifyIndexCondition();
                 // an expression key, where the engine keeps no CREATE text, is read
                 // back from the catalog and compared as the model plans it
-                return chain(readBack === undefined || (want.terms ?? []).length === 0 ? null
-                  : verifyIndexTerms(connection, have, want, disagree), () => collectColumns(i + 1));
+                return readBack === undefined || (want.terms ?? []).length === 0 ? null
+                  : verifyIndexTerms(connection, have, want, disagree);
               }));
           };
           // the table's rule programs: from the catalog where the engine keeps
@@ -1912,7 +1911,7 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
           // one beside that the table goes without orders nothing ({@link heldPlainOf})
           const heldNames = new Set(heldOrderIndexes.map((row) => String(row.name)));
           for (const name of orderIndexes.keys()) if (!heldNames.has(name)) heldPlainOf(plan).add(name);
-          return chain(collectColumns(0), () => chain(besides(), () => chain(verifyOrderIndexes(connection, orderIndexes, heldOrderIndexes, disagree), () =>
+          return chain(inOrder(created.length, collectColumns), () => chain(besides(), () => chain(verifyOrderIndexes(connection, orderIndexes, heldOrderIndexes, disagree), () =>
             chain(verifyIntervalChecks(connection, plan, disagree), () =>
               chain(verifyRulePrograms(connection, plan.table, plan.programs ?? [], disagree,
                 { installed: dialect.capabilities.declaredSqlText !== true, undeclared: true, namespace: programs, spelled: plan.programsAt }),
@@ -2029,7 +2028,6 @@ export function readOrderedIndexes(dialect, indexes) {
 function verifyOrderIndexes(connection, planned, rows, disagree) {
   const dialect = connection.dialect;
   const step = (/** @type {number} */ i) => {
-    if (i >= rows.length) return null;
     const row = rows[i];
     const name = String(row.name);
     const want = planned.get(name);
@@ -2044,10 +2042,10 @@ function verifyOrderIndexes(connection, planned, rows, disagree) {
           || identity.name !== want.keys[1].column ? `keys (${keys.map((key) => key.term ?? key.name).join(', ')})`
           : dialect.readBack.indexKey(double.term, want.keys[0].expression, readsConforming(row));
         if (difference !== null) disagree(`index '${name}' ${difference}`);
-        return step(i + 1);
+        return null;
       }));
   };
-  return step(0);
+  return inOrder(rows.length, step);
 }
 
 /**
@@ -2095,7 +2093,6 @@ function verifyIndexTerms(connection, have, want, disagree) {
 function verifyKindIndexes(connection, planned, rows, conditionColumns, disagree) {
   const dialect = connection.dialect;
   const step = (/** @type {number} */ i) => {
-    if (i >= rows.length) return null;
     const row = rows[i];
     const name = String(row.name);
     const want = planned.get(name);
@@ -2119,10 +2116,10 @@ function verifyKindIndexes(connection, planned, rows, conditionColumns, disagree
               || dialect.readBack.indexKey(key.term, planKey.alternate, readsConforming(row)) !== null ? difference : null;
           }).find((found) => found !== null) ?? null;
         if (difference !== null) disagree(`index '${name}' ${difference}`);
-        return step(i + 1);
+        return null;
       }));
   };
-  return step(0);
+  return inOrder(rows.length, step);
 }
 
 /**

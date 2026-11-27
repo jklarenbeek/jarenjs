@@ -31,7 +31,7 @@ import { schemaPosition } from './schema-positions.js';
 import { DbCompileError, isJarenCoded, wrapDriverError } from './errors.js';
 import { readOptions, readControls } from './options.js';
 import { storedKeyMatches } from './key-text.js';
-import { chain, attempt, useStatementOnce } from './driver.js';
+import { chain, inOrder, attempt, useStatementOnce } from './driver.js';
 import { isThenable } from '@jarenjs/core/function';
 import { relationalEngine } from './relational.js';
 import { createCursor, createSyncCursor } from './cursor.js';
@@ -1780,8 +1780,8 @@ function heldRulePrograms(connection, tables) {
   }
   /** @type {Map<string, any>} */
   const out = new Map();
-  const next = (/** @type {number} */ i) => (i >= tables.length ? out
-    : chain(useStatementOnce(connection, dialect.introspect.declaredSql(tables[i].table), (s) => s.all([])), (/** @type {any[]} */ rows) => {
+  return chain(inOrder(tables.length, (i) =>
+    chain(useStatementOnce(connection, dialect.introspect.declaredSql(tables[i].table), (s) => s.all([])), (/** @type {any[]} */ rows) => {
       const entry = tables[i];
       const same = entry.physical ? sameTriggerText
         : (/** @type {string} */ want, /** @type {string} */ have) => comparableDeclaredSql(want, MANAGED_SQL_OPTIONS) === comparableDeclaredSql(have, MANAGED_SQL_OPTIONS);
@@ -1793,9 +1793,7 @@ function heldRulePrograms(connection, tables) {
             : earlier(trigger.name, (want) => same(want.sql, actual));
           return { trigger, actual, spelling };
         }));
-      return next(i + 1);
-    }));
-  return next(0);
+    })), () => out);
 }
 
 /**
@@ -1858,8 +1856,7 @@ function reviewedPhysicalTarget(connection, steps) {
   let out;
   try {
     out = connection.transaction((/** @type {any} */ tx) => {
-      const run = (/** @type {number} */ i) => (i >= steps.length ? null : chain(tx.exec(steps[i].sql), () => run(i + 1)));
-      return chain(run(0), () => chain(preservationSchemaOf(tx), (catalog) => {
+      return chain(inOrder(steps.length, (i) => tx.exec(steps[i].sql)), () => chain(preservationSchemaOf(tx), (catalog) => {
         target = { dialect: connection.dialect.name, schema: connection.dialect.schema, catalog };
         throw review;
       }));
@@ -1964,11 +1961,10 @@ function missingNumberChecks(connection, plans) {
   const missing = { nan: [], key: [] };
   const numeric = dialect.typeFor('number', 'generated');
   const next = (/** @type {number} */ i) => {
-    if (i >= plans.length) return missing;
     const plan = plans[i];
-    if ((plan.numberChecks ?? []).length === 0 && (plan.keyChecks ?? []).length === 0) return next(i + 1);
+    if ((plan.numberChecks ?? []).length === 0 && (plan.keyChecks ?? []).length === 0) return null;
     return chain(connection.prepare(dialect.introspect.tableExists()), (exists) =>
-      chain(exists.get([plan.table]), (row) => (row === undefined ? next(i + 1)
+      chain(exists.get([plan.table]), (row) => (row === undefined ? null
         : chain(connection.prepare(dialect.introspect.columns(plan.table)), (columns) => chain(columns.all([]), (columnRows) =>
           chain(connection.prepare(dialect.introspect.checks(plan.table)), (checks) => chain(checks.all([]), (checkRows) => {
             const read = dialect.readChecks(checkRows).filter((/** @type {any} */ check) => check.validated !== false);
@@ -1994,10 +1990,10 @@ function missingNumberChecks(connection, plans) {
             };
             unheld('nan', plan.numberChecks ?? [], (check) => check.notNaN === true);
             unheld('key', plan.keyChecks ?? [], (check) => check.keyCheck === true);
-            return next(i + 1);
+            return null;
           })))))));
   };
-  return next(0);
+  return chain(inOrder(plans.length, next), () => missing);
 }
 
 /**
@@ -2015,13 +2011,12 @@ function refuseStoredNaN(connection, unchecked) {
   const q = connection.dialect.quoteIdentifier;
   const tables = [...new Set(unchecked.map((entry) => entry.table))];
   const next = (/** @type {number} */ i) => {
-    if (i >= tables.length) return null;
     const table = tables[i];
     const entries = unchecked.filter((entry) => entry.table === table);
     const columns = entries.map((entry) => entry.column);
     const keys = entries[0].keys;
     return chain(rowsNamedWhere(connection, table, keys, columns.map((column) => `${q(column)} = 'NaN'`).join(' OR ')), (rows) => {
-      if (rows.length === 0) return next(i + 1);
+      if (rows.length === 0) return null;
       const named = rows.slice(0, DUPLICATES_NAMED);
       throw Object.assign(refuse('JD0023', `the number column${columns.length === 1 ? '' : 's'} `
         + `${columns.map((column) => `'${column}'`).join(', ')} of '${table}' refuse${columns.length === 1 ? 's' : ''} the numeric 'NaN', `
@@ -2032,7 +2027,7 @@ function refuseStoredNaN(connection, unchecked) {
       { class: 'constraint', retryable: false, table, columns, rows: named });
     });
   };
-  return next(0);
+  return inOrder(tables.length, next);
 }
 
 /**
@@ -2070,12 +2065,11 @@ function refuseStoredKeyDigits(connection, unchecked) {
   const q = connection.dialect.quoteIdentifier;
   const tables = [...new Set(unchecked.map((entry) => entry.table))];
   const next = (/** @type {number} */ i) => {
-    if (i >= tables.length) return null;
     const table = tables[i];
     const entries = unchecked.filter((entry) => entry.table === table);
     const columns = entries.map((entry) => entry.column);
     return chain(rowsNamedWhere(connection, table, entries[0].keys, entries.map((entry) => `NOT (${entry.check})`).join(' OR ')), (rows) => {
-      if (rows.length === 0) return next(i + 1);
+      if (rows.length === 0) return null;
       const named = rows.slice(0, DUPLICATES_NAMED);
       throw Object.assign(refuse('JD0023', `the key column${columns.length === 1 ? '' : 's'} `
         + `${columns.map((column) => `'${column}'`).join(', ')} of '${table}' hold${columns.length === 1 ? 's' : ''} a number below 2^53 by its double's digits, `
@@ -2087,7 +2081,7 @@ function refuseStoredKeyDigits(connection, unchecked) {
       { class: 'constraint', retryable: false, table, columns, rows: named });
     });
   };
-  return next(0);
+  return inOrder(tables.length, next);
 }
 
 /**
@@ -2108,7 +2102,6 @@ function refuseDuplicates(connection, indexes) {
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   const next = (/** @type {number} */ i) => {
-    if (i >= indexes.length) return null;
     const { plan, index } = indexes[i];
     // a container key column the link adds is read as its trigger writes it, and the
     // rows are those the declared condition holds
@@ -2122,7 +2115,7 @@ function refuseDuplicates(connection, indexes) {
       + `WHERE ${keys.map((key) => `${key} IS NOT NULL`).join(' AND ')}) AS ${q('d')} `
       + `WHERE ${q('n')} > 1 ORDER BY ${q('g')}, ${q('k')} LIMIT ${DUPLICATES_NAMED + 1}`;
     return chain(connection.prepare(sql), (statement) => chain(statement.all([]), (rows) => {
-      if (rows.length === 0) return next(i + 1);
+      if (rows.length === 0) return null;
       /** @type {Map<string, string[]>} */
       const groups = new Map();
       for (const row of rows.slice(0, DUPLICATES_NAMED)) {
@@ -2141,7 +2134,7 @@ function refuseDuplicates(connection, indexes) {
       { class: 'constraint', retryable: false, collection: plan.table, index: declared, duplicates });
     }));
   };
-  return next(0);
+  return inOrder(indexes.length, next);
 }
 
 /** How many duplicate documents a refused upgrade names. */
@@ -2228,12 +2221,11 @@ function heldOrderSpellings(connection, plans) {
   /** @type {{ table: string, index: string, drop?: string, sql: string, note: string }[]} */
   const found = [];
   const next = (/** @type {number} */ i) => {
-    if (i >= plans.length) return found;
     const plan = plans[i];
     const ordered = plan.expected.indexes.filter((/** @type {any} */ index) => index.ordered === true);
-    if (ordered.length === 0 && (plan.orderIndexes ?? []).length === 0) return next(i + 1);
+    if (ordered.length === 0 && (plan.orderIndexes ?? []).length === 0) return null;
     return chain(connection.prepare(dialect.introspect.tableExists()), (exists) =>
-      chain(exists.get([plan.table]), (row) => (row === undefined ? next(i + 1)
+      chain(exists.get([plan.table]), (row) => (row === undefined ? null
         : chain(connection.prepare(dialect.introspect.indexes(plan.table)), (statement) =>
           chain(statement.all([]), (rows) => {
             const held = new Map(rows.map((/** @type {any} */ candidate) => [String(candidate.name), candidate]));
@@ -2249,10 +2241,10 @@ function heldOrderSpellings(connection, plans) {
               found.push({ table: plan.table, index: index.name, sql: orderIndexSql(dialect, plan.table, index),
                 note: `create the index '${index.name}' beside '${index.of}' on '${plan.table}', which keys its number's double, as a fresh store creates it` });
             }
-            return next(i + 1);
+            return null;
           })))));
   };
-  return next(0);
+  return chain(inOrder(plans.length, next), () => found);
 }
 
 /**
@@ -2269,20 +2261,19 @@ function missingIndexes(connection, plans, wanted) {
   /** @type {T[]} */
   const missing = [];
   const next = (/** @type {number} */ i) => {
-    if (i >= plans.length) return missing;
     const plan = plans[i];
     const indexes = wanted(plan);
-    if (indexes.length === 0) return next(i + 1);
+    if (indexes.length === 0) return null;
     return chain(connection.prepare(dialect.introspect.tableExists()), (exists) =>
-      chain(exists.get([plan.table]), (row) => (row === undefined ? next(i + 1)
+      chain(exists.get([plan.table]), (row) => (row === undefined ? null
         : chain(connection.prepare(dialect.introspect.indexes(plan.table)), (statement) =>
           chain(statement.all([]), (rows) => {
             const held = new Set(rows.map((/** @type {any} */ candidate) => String(candidate.name)));
             missing.push(...indexes.filter((index) => !held.has(index.index)));
-            return next(i + 1);
+            return null;
           })))));
   };
-  return next(0);
+  return chain(inOrder(plans.length, next), () => missing);
 }
 
 /**
@@ -2310,7 +2301,6 @@ function heldDefinitionsOf(connection, plans) {
   /** @type {Map<string, { types: Map<string, string>, columns: Map<string, string>, checks: Set<string>, indexes: Map<string, string[]>, containers: Set<string> }>} */
   const held = new Map();
   const next = (/** @type {number} */ i) => {
-    if (i >= plans.length) return held;
     const plan = plans[i];
     const spelled = readBack === undefined ? [] : plan.generated.filter((column) => column.alternate !== undefined || column.earlierReads !== undefined);
     const checked = readBack === undefined ? [] : (plan.intervals ?? []).filter((interval) => interval.alternate !== undefined);
@@ -2318,7 +2308,7 @@ function heldDefinitionsOf(connection, plans) {
     const containers = plan.containerKeys ?? [];
     if (!plan.generated.some((column) => column.legacyTypes !== undefined) && spelled.length === 0 && checked.length === 0 && !keyed
       && containers.length === 0)
-      return next(i + 1);
+      return null;
     const holding = { types: new Map(), columns: new Map(), checks: new Set(), indexes: new Map(), containers: new Set() };
     const record = () => (!keyed ? recorded()
       : chain(connection.prepare(dialect.introspect.declaredSql(plan.table)), (statement) => chain(statement.all([]), (objects) => {
@@ -2330,7 +2320,7 @@ function heldDefinitionsOf(connection, plans) {
     const recorded = () => {
       if (holding.types.size + holding.columns.size + holding.checks.size + holding.indexes.size + holding.containers.size > 0)
         held.set(plan.table, holding);
-      return next(i + 1);
+      return null;
     };
     return chain(connection.prepare(dialect.introspect.columns(plan.table)), (statement) =>
       chain(statement.all([]), (rows) => {
@@ -2365,7 +2355,7 @@ function heldDefinitionsOf(connection, plans) {
           }));
       }));
   };
-  return next(0);
+  return chain(inOrder(plans.length, next), () => held);
 }
 
 /**
@@ -4124,10 +4114,7 @@ function createShapeHolding(connection, model, expressions, legacy) {
     }
     for (const plan of plans) statements.push(...plan.deferredForeignKeys ?? []);
   }
-  const run = (i) => (i >= statements.length
-    ? null
-    : chain(connection.exec(statements[i]), () => run(i + 1)));
-  return run(0);
+  return inOrder(statements.length, (i) => connection.exec(statements[i]));
 }
 
 /**
@@ -4246,16 +4233,18 @@ function physicalLayoutDrift(connection, model, expressions) {
     return String(error.reason ?? error.message);
   };
   return chain(readSchema(connection), (schema) => {
+    // the first layout refused is the difference: the walk reads no further one
+    /** @type {string | null} */
+    let difference = null;
     /** @param {any} error */
-    const settle = (error) => ({ tables, difference: refused(error) });
-    const next = (/** @type {number} */ i) => {
-      if (i >= plans.length) return { tables, difference: null };
+    const settle = (error) => { difference = refused(error); };
+    return chain(inOrder(plans.length, (i) => {
+      if (difference !== null) return null;
       let verified;
       try { verified = verifyPhysical(connection, plans[i], schema); }
       catch (error) { return settle(error); }
-      return isThenable(verified) ? verified.then(() => next(i + 1), settle) : next(i + 1);
-    };
-    return next(0);
+      return isThenable(verified) ? verified.then(undefined, settle) : null;
+    }), () => ({ tables, difference }));
   });
 }
 
@@ -4518,8 +4507,7 @@ function runSteps(connection, migration, options) {
    * before that rebuild, and its step, against which a later rebuild's
    * references are judged. @type {{ before: any[], at: number } | null} */
   let held = null;
-  const step = (i) => {
-    if (i >= migration.steps.length) return null;
+  return inOrder(migration.steps.length, (i) => {
     // the cancellation boundary between steps: a refusal here rolls the
     // migration in flight back whole, as any step failure does
     if (options.check !== undefined) options.check();
@@ -4531,7 +4519,7 @@ function runSteps(connection, migration, options) {
     };
     // every step is its own savepoint inside the migration transaction, and
     // whatever it meets leaves it classified (stepFailed)
-    return chain(attempt(() => connection.transaction(() => {
+    return attempt(() => connection.transaction(() => {
       if (current.kind === 'table') return applyTableMigration(connection, current.plan);
       if (current.kind === 'host') return runHostStep(connection, migration, i, current, options);
       if (current.kind === 'ddl' || current.kind === 'sql') {
@@ -4744,9 +4732,8 @@ function runSteps(connection, migration, options) {
           });
         }, false, assertionMapping, options.check);
       });
-    }), (error) => stepFailed(migration, i, current.kind, error)), () => step(i + 1));
-  };
-  return step(0);
+    }), (error) => stepFailed(migration, i, current.kind, error));
+  });
 }
 
 /**
@@ -4772,20 +4759,19 @@ function validateTargetState(connection, model, options) {
     .filter((entity) => entity.physical !== null).map((entity) => mapping.entities[entity.name].table)));
   // entity tables carry no 'key' column; the batched walk goes by row
   // identity and validates every stored document against the target
-  const verifyEntity = (i) => {
-    if (i >= entities.length) return null;
+  const verifyEntity = (/** @type {number} */ i) => {
     const entity = entities[i];
     const validate = options.compileSchema !== undefined
       ? options.compileSchema(entity.schema)
       : null;
-    if (validate === null && entity.physical === null) return verifyEntity(i + 1);
+    if (validate === null && entity.physical === null) return null;
     // the WHOLE document — mapped columns folded in — is what the target
     // schema judges; the rest-document alone failed every entity whose
     // required members are columns, so a pure widening could not land
     const entityMapping = mapping.entities[entity.name];
     return chain(entity.physical === null ? null : chain(catalog(entityMapping.table), (schema) =>
       verifyPhysical(connection, planEntity(entity.name, entityMapping, mapping, dialect).physical, schema)), () =>
-      chain(walkRows(connection, entityMapping.table, options.batchSize, (rows) => {
+      walkRows(connection, entityMapping.table, options.batchSize, (rows) => {
       for (const row of rows) {
         const outcome = validate === null ? true : validate(mergeEntityRow(entityMapping, row, 'doc'));
         const valid = outcome === true || outcome?.valid === true;
@@ -4795,10 +4781,9 @@ function validateTargetState(connection, model, options) {
             + 'validate against the target schema — a narrowing needs a data transform');
         }
       }
-    }, false, entityMapping), () => verifyEntity(i + 1)));
+    }, false, entityMapping));
   };
-  const verifyNext = (i) => {
-    if (i >= collections.length) return null;
+  const verifyNext = (/** @type {number} */ i) => {
     const collection = collections[i];
     const plan = planCollection(collection.name, collection, dialect,
       mappingFor(connection, options.expressions));
@@ -4807,7 +4792,7 @@ function validateTargetState(connection, model, options) {
       : null;
     return chain(verifyShape({ ...connection, prepare: (sql, metadata) => temporaryStatement(connection, sql, metadata) },
       plan, collection.name, collection.docPath), () =>
-      chain(walkRows(connection, collection.name, options.batchSize, (rows) => {
+      walkRows(connection, collection.name, options.batchSize, (rows) => {
         for (const row of rows) {
           const doc = JSON.parse(row.doc);
           if (validate !== null) {
@@ -4833,9 +4818,9 @@ function validateTargetState(connection, model, options) {
             }
           }
         }
-      }), () => verifyNext(i + 1)));
+      }));
   };
-  return chain(verifyNext(0), () => verifyEntity(0));
+  return chain(inOrder(collections.length, verifyNext), () => inOrder(entities.length, verifyEntity));
 }
 
 /** One target-model acceptance owner for apply, adoption and the replay boundary. */
@@ -4908,18 +4893,19 @@ function programDrift(connection, model, expressions) {
   });
   /** @type {string | null} */
   let found = null;
+  // the first table departing is the drift: the walk reads no further one
   const next = (/** @type {number} */ i) => {
-    if (i >= plans.length || found !== null) return found;
+    if (found !== null) return null;
     const plan = plans[i];
     const departed = (/** @type {string} */ why) => {
       found ??= `entity '${plan.table}': ${why}`;
       return [];
     };
-    return chain(programs(plan.table), (/** @type {any[] | null} */ rows) => (rows === null ? next(i + 1)
-      : chain(verifyRulePrograms(connection, plan.table, plan.programs ?? [], /** @type {any} */ (departed),
-        { undeclared: true, namespace: programs, spelled: plan.programsAt }), () => next(i + 1))));
+    return chain(programs(plan.table), (/** @type {any[] | null} */ rows) => (rows === null ? null
+      : verifyRulePrograms(connection, plan.table, plan.programs ?? [], /** @type {any} */ (departed),
+        { undeclared: true, namespace: programs, spelled: plan.programsAt })));
   };
-  return next(0);
+  return chain(inOrder(plans.length, next), () => found);
 }
 
 /**
@@ -4943,13 +4929,12 @@ function acceptJoinTables(connection, model) {
       + 'renames a join table\'s index with it, or bring the table to the model in a sql step before the link ends');
   };
   const next = (/** @type {number} */ i) => {
-    if (i >= plans.length) return null;
     const plan = plans[i];
     return chain(connection.prepare(dialect.introspect.tableExists()), (exists) =>
-      chain(exists.get([plan.table]), (row) => (row === undefined ? next(i + 1)
-        : chain(verifyShape(connection, plan, plan.table, '', 'entity', refusal), () => next(i + 1)))));
+      chain(exists.get([plan.table]), (row) => (row === undefined ? null
+        : verifyShape(connection, plan, plan.table, '', 'entity', refusal))));
   };
-  return next(0);
+  return inOrder(plans.length, next);
 }
 
 /** Read every normal receipt field and raw side payload without changing either.
@@ -5347,8 +5332,7 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
             const rendered = [], counts = {};
             /** @type {string | null} */
             let textEncoding = null;
-            const collect = (i) => {
-              if (i >= pending.length) return null;
+            const collect = (/** @type {number} */ i) => {
               const migration = pending[i];
               // the preconditions are listed, never counted: a dry run reads
               // no table's rows against a CHECK
@@ -5384,8 +5368,7 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
                 }
               }
               const transforms = migration.steps.filter((s) => s.kind === 'jslt');
-              const count = (j) => {
-                if (j >= transforms.length) return null;
+              const count = (/** @type {number} */ j) => {
                 const current = transforms[j], mapping = entityStepMapping(runOptions, current.collection, current, dialect);
                 const table = mapping?.mapping.table ?? current.collection;
                 // Preview reads current relations; earlier planned SQL may create
@@ -5393,20 +5376,20 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
                 return chain(useStatementOnce(connection, dialect.introspect.tables(), (catalog) => catalog.all([])), (relations) => {
                   if (!relations.some((relation) => String(relation.name) === table)) {
                     setObjectMember(counts, current.collection, null);
-                    return count(j + 1);
+                    return null;
                   }
                   return chain(useStatementOnce(connection,
                     `SELECT COUNT(*) AS ${dialect.quoteIdentifier('n')} FROM ${dialect.quoteIdentifier(table)}`,
-                    (statement) => statement.get([])), (row) => { setObjectMember(counts, current.collection, row.n); return count(j + 1); });
+                    (statement) => statement.get([])), (row) => { setObjectMember(counts, current.collection, row.n); });
                 });
               };
-              return chain(count(0), () => collect(i + 1));
+              return inOrder(transforms.length, count);
             };
             // the run counts natively only where text order is code point order
             const asserts = pending.some((migration) => migration.steps.some((step) => step.kind === 'query'));
             return chain(asserts ? nonCodePointEncoding(connection) : null, (encoding) => {
               textEncoding = encoding;
-              return chain(collect(0), () => ({ dryRun: true, pending: pending.map((m) => m.id),
+              return chain(inOrder(pending.length, collect), () => ({ dryRun: true, pending: pending.map((m) => m.id),
                 statements: rendered, counts, shadowValidated: options.shadow !== false }));
             });
           }
@@ -5490,8 +5473,7 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
             });
           };
           // link by link: each commits on its own, and the last makes the final checks
-          const applyNext = (i) => {
-            if (i >= pending.length) return null;
+          const applyNext = (/** @type {number} */ i) => {
             check();
             const migration = pending[i], last = i === pending.length - 1;
             const body = (scope) => {
@@ -5504,7 +5486,7 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
             const transaction = () => connection.transaction(body, options.signal, 'immediate');
             return chain(attempt(() => bracketed(migration) ? withForeignKeySettings(connection, transaction) : transaction(),
               (error) => runFailure(error, `migration '${migration.id}' failed`)), () => {
-              historyExists = true; applied.push(migration.id); return applyNext(i + 1);
+              historyExists = true; applied.push(migration.id);
             });
           };
           // atomic: ONE immediate transaction, a savepoint per link, and the
@@ -5515,16 +5497,15 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
             const body = (scope) => {
               check();
               return chain(lockMigration(scope, check), () => chain(verifyHistory(scope, appliedRows.length), () => {
-                const next = (i) => {
-                  if (i >= pending.length) return null;
+                const next = (/** @type {number} */ i) => {
                   check();
                   const migration = pending[i];
                   return chain(attempt(() => scope.transaction((link) => linkWork(link, migration, false)),
                     (error) => runFailure(error, `migration '${migration.id}' failed`)), () => {
-                    applied.push(migration.id); return next(i + 1);
+                    applied.push(migration.id);
                   });
                 };
-                return chain(next(0), () => chain(acceptTarget(scope, finalTarget), () => finalChecks(scope, pending.at(-1))));
+                return chain(inOrder(pending.length, next), () => chain(acceptTarget(scope, finalTarget), () => finalChecks(scope, pending.at(-1))));
               }));
             };
             return attempt(() => connection.transaction(body, options.signal, 'immediate'),
@@ -5533,7 +5514,7 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
           // every link this run applies is stamped by this clock: one it
           // cannot store refuses here, before the first link's steps
           receiptStamp(runtime, 'migrate()', 'no step ran');
-          return chain(atomic ? applyAtomically() : applyNext(0),
+          return chain(atomic ? applyAtomically() : inOrder(pending.length, applyNext),
             () => ({ applied, skipped: appliedRows.map((row) => row.id), shape: expectedFrom }));
         });
       });

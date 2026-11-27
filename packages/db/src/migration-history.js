@@ -4,7 +4,7 @@
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { hashContent } from '@jarenjs/core/string';
 import { isJsonObject } from '@jarenjs/core/object';
-import { chain, useStatementOnce } from './driver.js';
+import { chain, inOrder, useStatementOnce } from './driver.js';
 import { DbCompileError } from './errors.js';
 import { HISTORY_TABLE, MIGRATION_IDENTITY_TABLE } from './engine-metadata.js';
 import { comparableDeclaredSql } from './schema-sql.js';
@@ -297,10 +297,8 @@ export function checkHistoryChain(migrations, applied, header, options = {}, rep
 /** Insert only missing NEW authority, always in the caller's link/adoption transaction. */
 export function writeIdentityRows(connection, rows, check) {
   const sql = historyStatements(connection.dialect);
-  const next = (at) => {
-    if (at === rows.length) return null;
+  return inOrder(rows.length, (at) => {
     check();
-    return chain(useStatementOnce(connection, sql.insertIdentity, (statement) => statement.run([rows[at].key, rows[at].value])), () => next(at + 1));
-  };
-  return next(0);
+    return useStatementOnce(connection, sql.insertIdentity, (statement) => statement.run([rows[at].key, rows[at].value]));
+  });
 }

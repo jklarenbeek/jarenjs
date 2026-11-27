@@ -28,7 +28,7 @@ import { parseTemporal, toUtc, RESOLUTION_POLICIES } from '@jarenjs/core/calenda
 import { isJsonObject } from '@jarenjs/core/object';
 import { utf8ByteLength } from '@jarenjs/core/string';
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
-import { chain, attempt, useStatementOnce } from './driver.js';
+import { chain, inOrder, attempt, useStatementOnce } from './driver.js';
 import { refuseUnknownModelMembers } from './options.js';
 import { IDENTIFIER } from './engine-metadata.js';
 import { compileIndexPath, schemaNodeAt, canonicalOf } from './ddl.js';
@@ -908,17 +908,15 @@ function rekey(store) {
     let keyed = 0;
     /** @param {number} at @returns {any} */
     const next = (at) => {
-      if (at >= rows.length) return keyed;
       const key = rows[at].key;
       return chain(atomically(key, (/** @type {any} */ doc) => (doc === undefined ? null
         : runWrite('rekeyTemporal', updateSql, [...zoned.map((column) =>
           zonedValueFor(column, readMember(doc, column.segments), zoneProvider)), whereKey(key)], key, false))),
       (result) => {
         if (result !== null) keyed++;
-        return next(at + 1);
       });
     };
-    return next(0);
+    return chain(inOrder(rows.length, next), () => keyed);
   });
 }
 
