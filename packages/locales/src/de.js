@@ -945,6 +945,8 @@ export const de = {
   'studio/data/oracle-disagreed': '{executor} stimmte bei {disagreed} von {ran} NICHT mit der Engine überein',
   'studio/data/oracle-verdict': '{verdict} ({entries} Einträge × {mappings}); {skipped} reine Engine-Einträge durch ihre Markierung ausgelassen',
   'studio/data/oracle-empty': 'die leere Sequenz',
+  'studio/data/oracle-disagreement': '{executor} ({mapping}) wich bei {name} ab — Abfrage {query}: aufgezeichnet {recorded}, geantwortet {answered}',
+  'studio/data/oracle-refused': '{executor} ({mapping}) wich bei {name} ab — Abfrage {query}: abgelehnt — {message}',
   'studio/data/operators-title': 'Registrierte Operatoren (Opt-in des Hosts)',
   'studio/data/operators-summary': '{count} registriert · {pushed} als UDFs an SQLite übergeben',
   'studio/data/operators-awaiting': 'die des besitzenden Tabs (Fähigkeiten stehen noch aus)',

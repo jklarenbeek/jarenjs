@@ -46,7 +46,7 @@ it('renders them in the reader\'s catalog', () => {
   assert.deepEqual(run('query', QUERY, () => german)[0], ['Elemente', 'Kompilieren', 'Ausführen']);
 });
 
-it('names the empty sequence of a disagreement in the reader\'s catalog', async (t) => {
+it('writes a disagreement line, and the empty sequence it names, in the reader\'s catalog', async (t) => {
   const { createDataRuntime } = await import('@jarenjs/studio/data');
   const model = { $model: '0.1', collections: { rows: { schema: { type: 'object', properties: { id: { type: 'string' }, value: { type: 'integer' } } }, key: '/id' } } };
   const query = [{ $for: { row: '$[*]' }, $return: '$row' }];
@@ -73,6 +73,8 @@ it('names the empty sequence of a disagreement in the reader\'s catalog', async 
       source: 'fixture', collection: 'rows', mappings: { plain: model }, skipped: [], entries: [
         { name: 'recorded-empty', documents, query, empty: true },
         { name: 'answered-empty', documents, query: none, expected: documents },
+        // a query the store refuses is a disagreement too
+        { name: 'refused', documents, query: { $nope: 1 }, expected: documents },
       ],
     } }), transport: () => ({ boot: () => request('data.init', null), request, bounded: (/** @type {any} */ _stage, /** @type {any} */ work) => work(),
       subscribe: (/** @type {any} */ input, /** @type {any} */ handlers) => client.subscribe('data.live', input, handlers),
@@ -89,11 +91,23 @@ it('names the empty sequence of a disagreement in the reader\'s catalog', async 
     }
     return assert.fail('the corpus did not settle');
   };
+  const refusal = 'operation data.oracle failed with db';
   const english = await disagreements(undefined);
   assert.deepEqual(english, [
     `sqlite (plain) disagreed on recorded-empty — query ${JSON.stringify(query)}: recorded the empty sequence, answered ${JSON.stringify(documents)}`,
     `sqlite (plain) disagreed on answered-empty — query ${JSON.stringify(none)}: recorded ${JSON.stringify(documents)}, answered the empty sequence`,
+    `sqlite (plain) disagreed on refused — query {"$nope":1}: refused — ${refusal}`,
   ]);
   const dutch = await disagreements(compileMessageCatalog(nl));
-  assert.deepEqual(dutch, english.map((line) => line.replace('the empty sequence', 'de lege sequentie')));
+  assert.deepEqual(dutch, [
+    `sqlite (plain) week af bij recorded-empty — query ${JSON.stringify(query)}: vastgelegd de lege sequentie, geantwoord ${JSON.stringify(documents)}`,
+    `sqlite (plain) week af bij answered-empty — query ${JSON.stringify(none)}: vastgelegd ${JSON.stringify(documents)}, geantwoord de lege sequentie`,
+    `sqlite (plain) week af bij refused — query {"$nope":1}: geweigerd — ${refusal}`,
+  ]);
+  const german = await disagreements(compileMessageCatalog(de));
+  assert.deepEqual(german, [
+    `sqlite (plain) wich bei recorded-empty ab — Abfrage ${JSON.stringify(query)}: aufgezeichnet die leere Sequenz, geantwortet ${JSON.stringify(documents)}`,
+    `sqlite (plain) wich bei answered-empty ab — Abfrage ${JSON.stringify(none)}: aufgezeichnet ${JSON.stringify(documents)}, geantwortet die leere Sequenz`,
+    `sqlite (plain) wich bei refused ab — Abfrage {"$nope":1}: abgelehnt — ${refusal}`,
+  ]);
 });

@@ -940,6 +940,8 @@ export const ja = {
   'studio/data/oracle-disagreed': '{executor} は {ran} 件中 {disagreed} 件でエンジンと一致しませんでした',
   'studio/data/oracle-verdict': '{verdict}（{entries} 件のエントリ × {mappings}）。エンジン専用の {skipped} 件のエントリはマーカーにより除外されています',
   'studio/data/oracle-empty': '空のシーケンス',
+  'studio/data/oracle-disagreement': '{executor} ({mapping}) は {name} で一致しませんでした — クエリ {query}: 記録 {recorded}、回答 {answered}',
+  'studio/data/oracle-refused': '{executor} ({mapping}) は {name} で一致しませんでした — クエリ {query}: 拒否 — {message}',
   'studio/data/operators-title': '登録済みの演算子（ホストのオプトイン）',
   'studio/data/operators-summary': '登録 {count} 件 · SQLite に UDF としてプッシュ {pushed} 件',
   'studio/data/operators-awaiting': '所有元タブのもの（ケイパビリティの取得待ち）',

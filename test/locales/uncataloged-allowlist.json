@@ -562,7 +562,6 @@
     ["recreating the store unlinks the database the owning tab holds:", "English-by-design-paragraph"]
   ],
   "components/studio/src/data/runtime.js": [
-    [") disagreed on ", "not-prose"],
     ["Only the owning tab can recreate the store.", "English-by-design-paragraph"],
     ["The Data editor is disposed.", "English-by-design-paragraph"],
     ["The store is not booted.", "English-by-design-paragraph"],

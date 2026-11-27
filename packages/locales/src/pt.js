@@ -943,6 +943,8 @@ export const pt = {
   'studio/data/oracle-disagreed': '{executor} DISCORDOU do motor em {disagreed} de {ran}',
   'studio/data/oracle-verdict': '{verdict} ({entries} entradas × {mappings}); {skipped} entradas exclusivas do motor deixadas de fora pelo seu marcador',
   'studio/data/oracle-empty': 'a sequência vazia',
+  'studio/data/oracle-disagreement': '{executor} ({mapping}) discordou em {name} — consulta {query}: registrado {recorded}, respondido {answered}',
+  'studio/data/oracle-refused': '{executor} ({mapping}) discordou em {name} — consulta {query}: recusada — {message}',
   'studio/data/operators-title': 'Operadores registrados (ativados pelo host)',
   'studio/data/operators-summary': '{count} registrados · {pushed} delegados ao SQLite como UDFs',
   'studio/data/operators-awaiting': 'os da aba proprietária (aguardando capacidades)',

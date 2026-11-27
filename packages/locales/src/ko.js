@@ -943,6 +943,8 @@ export const ko = {
   'studio/data/oracle-disagreed': '{executor}은(는) {ran}개 중 {disagreed}개 항목에서 엔진과 일치하지 않았습니다',
   'studio/data/oracle-verdict': '{verdict} (항목 {entries}개 × {mappings}). 엔진 전용 항목 {skipped}개는 표시에 따라 제외되었습니다',
   'studio/data/oracle-empty': '빈 시퀀스',
+  'studio/data/oracle-disagreement': '{executor} ({mapping})은(는) {name}에서 일치하지 않았습니다 — 쿼리 {query}: 기록 {recorded}, 응답 {answered}',
+  'studio/data/oracle-refused': '{executor} ({mapping})은(는) {name}에서 일치하지 않았습니다 — 쿼리 {query}: 거부됨 — {message}',
   'studio/data/operators-title': '등록된 연산자 (호스트 옵트인)',
   'studio/data/operators-summary': '{count}개 등록됨 · {pushed}개가 SQLite에 UDF로 푸시됨',
   'studio/data/operators-awaiting': '소유한 탭의 연산자 (기능 대기 중)',

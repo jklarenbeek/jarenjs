@@ -44,8 +44,9 @@ after(async () => { await pool?.end(); });
  * @param {{ series: any, zone?: string, limits?: Record<string, number> }} spec
  * @param {number} created
  * @param {number[]} ticks
+ * @param {typeof POLICIES | [string, any, number | null][]} [policies]
  */
-async function transcript(engine, spec, created, ticks) {
+async function transcript(engine, spec, created, ticks, policies = POLICIES) {
   const schema = `jaren_backlog_${process.pid}_${serial++}`;
   const clock = { at: created };
   const now = () => clock.at;
@@ -54,7 +55,7 @@ async function transcript(engine, spec, created, ticks) {
   const store = await openStore(model, { driver, runtime: createRuntime({ zoneProvider: provider, now }),
     jobs: { now, random: () => 0, schedules: jobSchedules() } });
   try {
-    for (const [id, missed, latenessMs] of POLICIES)
+    for (const [id, missed, latenessMs] of policies)
       await store.jobs.schedule({ id, kind: 'k', ...spec, missed, ...(latenessMs === null ? {} : { latenessMs }) });
     const answers = [];
     for (const at of ticks) {
@@ -64,7 +65,8 @@ async function transcript(engine, spec, created, ticks) {
     }
     const records = (await store.jobs.schedules()).map((/** @type {any} */ r) =>
       [r.id, r.state, r.counts, r.lastRecurrenceId, r.nextRecurrenceId]);
-    return { answers, records };
+    const stalls = (await store.jobs.schedules()).map((/** @type {any} */ r) => r.stall === null ? null : [r.stall.code ?? r.stall.limit, r.stall.recurrenceId]);
+    return { answers, records, stalls };
   }
   finally {
     try { await store.close(); }
@@ -136,6 +138,44 @@ for (const engine of /** @type {const} */ (['sqlite', 'postgres'])) {
         ['once', 'active', { fired: 3, skipped: 58 }, '2026-04-30T09:00:00', '2026-05-01T09:00:00'],
         ['skip', 'active', { fired: 2, skipped: 59 }, '2026-04-30T09:00:00', '2026-05-01T09:00:00'],
       ]);
+    });
+
+    it('reads on from a cut before a gap \'reject\' refuses, firing what the whole read fires and stalling at the gap', async () => {
+      const series = compileRecurrence({ dtstart: floatingValue('2026-03-01', '02:30'), rrule: 'FREQ=DAILY' });
+      const created = Date.UTC(2026, 2, 1, 1, 30);
+      const ticks = [created, Date.UTC(2026, 4, 1)];
+      /** @type {[string, any, number | null][]} */
+      const policies = [...POLICIES, ['week', { catchUp: 6 }, null], ['month', { catchUp: 30 }, null]];
+      const spec = { series, zone: ZONE, policy: 'reject' };
+      const whole = await transcript(engine, spec, created, ticks, policies);
+      const march = (/** @type {number} */ day) => `2026-03-${String(day).padStart(2, '0')}T02:30:00`;
+      const span = (/** @type {string} */ id, /** @type {number} */ first) =>
+        Array.from({ length: 29 - first }, (_, i) => `${id}@${march(first + i)}`);
+      // a cut after 20 of the 27 due, and after 10, which reads on twice; ticked before the gap too,
+      // where the read on from the cut ends at the next occurrence and the schedule stays active
+      const between = [created, Date.UTC(2026, 2, 25, 12), Date.UTC(2026, 2, 28, 12), Date.UTC(2026, 4, 1)];
+      const wholeBetween = await transcript(engine, spec, created, between, policies);
+      assert.deepEqual(wholeBetween.answers[1].fired.filter((id) => id.startsWith('week@')), span('week', 19).slice(0, 7));
+      for (const maxOccurrences of [20, 10]) {
+        const tight = await transcript(engine, { ...spec, limits: { maxOccurrences } }, created, ticks, policies);
+        assert.deepEqual(tight, whole);
+        const tightBetween = await transcript(engine, { ...spec, limits: { maxOccurrences } }, created, between, policies);
+        assert.deepEqual(tightBetween, wholeBetween);
+      }
+      // 2-28 March are due at the second tick, 29 March never happens
+      assert.deepEqual(whole.answers[1], {
+        fired: [...span('catchup', 25), ...span('month', 2), ...span('once', 27), ...span('skip', 28), ...span('week', 22)],
+        skipped: 23 + 27 + 25 + 26 + 0 + 20,
+      });
+      assert.deepEqual(whole.records, [
+        ['catchup', 'stalled', { fired: 5, skipped: 23 }, march(28), null],
+        ['late', 'stalled', { fired: 1, skipped: 27 }, march(28), null],
+        ['month', 'stalled', { fired: 28, skipped: 0 }, march(28), null],
+        ['once', 'stalled', { fired: 3, skipped: 25 }, march(28), null],
+        ['skip', 'stalled', { fired: 2, skipped: 26 }, march(28), null],
+        ['week', 'stalled', { fired: 8, skipped: 20 }, march(28), null],
+      ]);
+      assert.deepEqual(whole.stalls, Array(6).fill(['JY0002', march(29)]));
     });
 
     it('passes the backlog uncounted where the rule\'s occurrences are not one step apart', async () => {

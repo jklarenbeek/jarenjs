@@ -965,6 +965,8 @@ export const ru = {
   'studio/data/oracle-disagreed': '{executor} — РАСХОЖДЕНИЕ с движком в {disagreed} из {ran}',
   'studio/data/oracle-verdict': '{verdict} (записей: {entries} × {mappings}); записей только для движка, исключённых своим маркером: {skipped}',
   'studio/data/oracle-empty': 'пустая последовательность',
+  'studio/data/oracle-disagreement': '{executor} ({mapping}) — расхождение в {name} — запрос {query}: записано {recorded}, получено {answered}',
+  'studio/data/oracle-refused': '{executor} ({mapping}) — расхождение в {name} — запрос {query}: отклонён — {message}',
   'studio/data/operators-title': 'Зарегистрированные операторы (по выбору хоста)',
   'studio/data/operators-summary': 'зарегистрировано: {count} · передано в SQLite как UDF: {pushed}',
   'studio/data/operators-awaiting': 'операторы владельца (ожидаются возможности)',

@@ -55,9 +55,9 @@ const PSEUDO = compileMessageCatalog({
  * produce, and a forms failure the form widget catches. */
 const SOURCE_ONLY = new Set(['studio/store/ready', 'studio/store/committed', 'studio/store/live-failed',
   'studio/store/live-ended', 'studio/data/live-ended', 'studio/run/empty-sequence', 'studio/flow/dag-schema',
-  // a disagreement line names the empty sequence when the corpus runs on a
-  // live store (run-words.test.js)
-  'studio/data/oracle-empty',
+  // a disagreement line, and the empty sequence it names, is written when
+  // the corpus runs on a live store (run-words.test.js)
+  'studio/data/oracle-empty', 'studio/data/oracle-disagreement', 'studio/data/oracle-refused',
   // the forms build every JSON schema a document can hold: the widget's
   // catch is for a forms refusal none can provoke
   'studio/document/form-failed']);

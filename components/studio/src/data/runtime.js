@@ -343,8 +343,7 @@ export function createDataRuntime(env = {}) {
           const disagreements = [];
           for (const [mapping, model] of Object.entries(corpus.mappings)) {
             for (const entry of corpus.entries) {
-              const where = `${EXECUTOR} (${mapping}) disagreed on ${entry.name}`
-                + ` — query ${JSON.stringify(entry.query)}`;
+              const where = { executor: EXECUTOR, mapping, name: entry.name, query: JSON.stringify(entry.query) };
               let outcome;
               try {
                 outcome = await /** @type {NonNullable<typeof transport>} */ (transport)
@@ -356,15 +355,15 @@ export function createDataRuntime(env = {}) {
               catch (error) {
                 const message = String(/** @type {any} */ (error).message ?? error);
                 results.push({ mapping, name: entry.name, error: message, agreed: false });
-                disagreements.push(`${where}: refused — ${message}`);
+                disagreements.push(words()('studio/data/oracle-refused', { ...where, message }));
                 continue;
               }
               const agreed = agrees(entry, outcome);
               results.push({ mapping, name: entry.name, answer: outcome.answer, empty: outcome.empty, agreed });
               if (!agreed) {
                 const t = words();
-                disagreements.push(`${where}: recorded ${recorded(entry, t)}, answered `
-                  + `${outcome.empty ? t('studio/data/oracle-empty') : JSON.stringify(outcome.answer)}`);
+                disagreements.push(t('studio/data/oracle-disagreement', { ...where, recorded: recorded(entry, t),
+                  answered: outcome.empty ? t('studio/data/oracle-empty') : JSON.stringify(outcome.answer) }));
               }
             }
           }

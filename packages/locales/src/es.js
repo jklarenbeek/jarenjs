@@ -943,6 +943,8 @@ export const es = {
   'studio/data/oracle-disagreed': '{executor} NO COINCIDIÓ con el motor en {disagreed} de {ran}',
   'studio/data/oracle-verdict': '{verdict} ({entries} entradas × {mappings}); {skipped} entradas exclusivas del motor omitidas por su marcador',
   'studio/data/oracle-empty': 'la secuencia vacía',
+  'studio/data/oracle-disagreement': '{executor} ({mapping}) no coincidió en {name} — consulta {query}: registrado {recorded}, respondido {answered}',
+  'studio/data/oracle-refused': '{executor} ({mapping}) no coincidió en {name} — consulta {query}: rechazada — {message}',
   'studio/data/operators-title': 'Operadores registrados (activados por el anfitrión)',
   'studio/data/operators-summary': '{count} registrados · {pushed} delegados a SQLite como UDF',
   'studio/data/operators-awaiting': 'los de la pestaña propietaria (a la espera de capacidades)',

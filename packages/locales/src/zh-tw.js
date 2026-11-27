@@ -943,6 +943,8 @@ export const zhTW = {
   'studio/data/oracle-disagreed': '{executor} 在 {ran} 個項目中有 {disagreed} 個與引擎不一致',
   'studio/data/oracle-verdict': '{verdict}（{entries} 個項目 × {mappings}）；另有 {skipped} 個僅限引擎的項目依其標記排除',
   'studio/data/oracle-empty': '空序列',
+  'studio/data/oracle-disagreement': '{executor} ({mapping}) 在 {name} 上不一致 — 查詢 {query}：記錄 {recorded}，回答 {answered}',
+  'studio/data/oracle-refused': '{executor} ({mapping}) 在 {name} 上不一致 — 查詢 {query}：已拒絕 — {message}',
   'studio/data/operators-title': '已註冊的運算子（由主機選擇加入）',
   'studio/data/operators-summary': '已註冊 {count} 個 · {pushed} 個以 UDF 推送至 SQLite',
   'studio/data/operators-awaiting': '擁有者分頁的運算子（等待功能資訊）',

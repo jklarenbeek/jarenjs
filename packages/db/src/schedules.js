@@ -348,7 +348,8 @@ function wallBand(definition, provider, low, high) {
  * @param {{ from: number, inclusive: boolean, until: number }} span
  * @returns {{ due: { recurrenceId: string, at: number }[], next: { recurrenceId: string, at: number } | null,
  *   stall: null | { limit: string, counts: { emitted: number, work: number, providerCalls: number } }
- *     | { code: string, message: string, recurrenceId: string } }}
+ *     | { code: string, message: string, recurrenceId: string }, readOn?: true }}
+ *   `readOn` when the limit's cut came before a refusal: the search reads on from its cut
  */
 function searchSpan(definition, provider, span) {
   const { from, inclusive, until } = span;
@@ -426,14 +427,19 @@ function searchSpan(definition, provider, span) {
     counts.providerCalls += answer.counts.providerCalls + meter.calls;
     found.sort((a, b) => a.at - b.at || (a.recurrenceId < b.recurrenceId ? -1 : a.recurrenceId > b.recurrenceId ? 1 : 0));
     if (proven !== Infinity) found = found.filter((occurrence) => occurrence.at < proven);
+    let cut = false;
     if (floating && found.length > maxOccurrences) {
       found = found.slice(0, maxOccurrences);
       stopped = 'maxOccurrences';
+      cut = true;
     }
     counts.emitted += floating ? found.length : answer.counts.emitted;
     const due = found.filter((occurrence) => occurrence.at <= until);
     const next = found.find((occurrence) => occurrence.at > until) ?? null;
     if (next !== null) return { due, next, stall: null };
+    // the limit's cut comes before the refusal, so the occurrences between bind: the limit is
+    // answered, and the caller reads on from the cut ({@link occurrencesAfter})
+    if (cut && refused !== null) return { due, next: null, stall: { limit: stopped, counts }, readOn: true };
     if (refused !== null) return { due, next: null, stall: refused };
     // the last spellable day is an end, not a stall
     if (stopped !== null) return { due, next: null, stall: { limit: stopped, counts } };
@@ -452,13 +458,28 @@ function searchSpan(definition, provider, span) {
  * the rule's step counts them ({@link occurrencesBetween}), from the first
  * one the whole search read to the first one the span read, and otherwise
  * passed without being counted (`uncounted`). A tick's backlog never stalls
- * a schedule; a span its limits cannot read whatever its width does.
+ * a schedule; a span its limits cannot read whatever its width does. A
+ * search that met an occurrence its policy refuses, but whose
+ * `maxOccurrences` cut it before that one, reads on from the cut until the
+ * refusal, which it answers as the whole search does.
  * @param {ScheduleDefinition} definition @param {any} provider
  * @param {{ from: number, inclusive: boolean, until: number }} span
  * @param {number | null} [keep] - the missed occurrences `missed` fires (0, 1 or n), or no backward read
  */
 function occurrencesAfter(definition, provider, span, keep = null) {
-  const whole = searchSpan(definition, provider, span);
+  let { readOn, ...whole } = searchSpan(definition, provider, span);
+  // a search whose limit cut it before a refusal reads on from its cut, each read under the
+  // limits, until it reaches the refusal: from the last instant it kept, without the
+  // occurrences it already read there (a cut may fall between two occurrences of one instant)
+  while (readOn === true) {
+    const last = whole.due[whole.due.length - 1].at;
+    const read = new Set(whole.due.filter((occurrence) => occurrence.at === last).map((occurrence) => occurrence.recurrenceId));
+    const { readOn: more, ...on } = searchSpan(definition, provider, { from: last, inclusive: true, until: span.until });
+    const fresh = on.due.filter((occurrence) => !read.has(occurrence.recurrenceId));
+    whole = { ...on, due: [...whole.due, ...fresh] };
+    // a read that keeps no occurrence it had not read answers its limit
+    readOn = more === true && fresh.length > 0;
+  }
   const stall = /** @type {any} */ (whole.stall);
   if (keep === null || whole.next !== null || stall === null || stall.limit === undefined || stall.limit === 'maxHorizonDays')
     return whole;

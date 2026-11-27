@@ -209,16 +209,20 @@ delete it or fix it.
 
 ## @jarenjs/md
 
-- [ ] **Canonical printing: delimiter runs neither the derivation nor the
-  search reaches.** `toMarkdown` spells emphasis, strong and strikethrough
-  whose canonical spelling does not read back from the delimiter rules, falls
-  back to the search where that spelling does not read back, and names what
-  still does not read back to `onLossy`. Some trees the reader makes are
-  reached by neither and are named `'unread'` instead of reading back: literal
-  `*` or `_` inside nested runs (`*\**2;_"_\*****\*_` is one), and long chains
-  of nested emphasis and strong. Wanted: those spellings derived, so that
-  every tree the reader makes reads back and the search can go; such content
-  costs the derivation and then the search.
+- [ ] **Canonical printing: delimiter runs neither the derivation nor the search
+  reaches.** `toMarkdown` spells emphasis, strong and strikethrough whose
+  canonical spelling does not read back from the delimiter rules (each node's
+  delimiter, how many of the literal `*` and `_` beside a run print bare in
+  it, the characters beside a run that print as references), falls back to the
+  search where that spelling does not read back, and names what still does not
+  read back to `onLossy`. Some trees the reader makes are reached by neither
+  and are named `'unread'` instead of reading back: literal `*` or `_` inside
+  nested runs (`*_***_**__x*_____2;_*____*_` is one), where no spelling the
+  derivation weighs reads back or the derivation weighs one as reading back
+  that the reader reads otherwise. Wanted: those spellings derived and the
+  derivation's weighing agreeing with the reader, so that every tree the
+  reader makes reads back and the search can go; such content costs both
+  derivations and then the search.
 
 ## @jarenjs/mermaid
 
@@ -343,15 +347,6 @@ delete it or fix it.
   over counted once and multiplied, the EXDATEs and RDATEs in the span
   subtracted and added, and a sub-daily zoned span counted around the zone's
   offset changes.
-- [ ] **A floating `reject` schedule whose first search a limit cuts before a gap
-  stalls at the gap without firing the occurrences between.** A floating DAILY
-  02:30 in Europe/Amsterdam under `reject` with `maxOccurrences: 20`, ticked
-  on 1 March and then on 1 May, stalls with `JY0002` (29 March never happens)
-  having fired through 21 March. The same schedule under the default limits
-  fires through 28 March before stalling there. The search answers the refusal
-  over the limit's cut, so the 22-28 March occurrences, which bind, are
-  neither fired nor counted. Wanted: the limit's stop answered first (the
-  search reads on from its cut), every answer otherwise unchanged.
 - [ ] **The client bundle carries calendar-member plumbing without the seam.**
   The calendar kernel runs only when a host installs `@jarenjs/db/temporals`,
   and the tree-shaking gate keeps it out of the store client, but the
@@ -672,9 +667,7 @@ delete it or fix it.
 - [ ] **The uncataloged-text guard reads a window of tokens.** The guard refuses a
   literal equal to a catalog's English unless one of its ids sits beside it,
   but it reads a window of tokens, so a copy beside a word equal to an id's
-  last segment still passes. The data studio's corpus disagreement line
-  (`components/studio/src/data/runtime.js`) reads its catalog for the empty
-  sequence and is English around it (`) disagreed on ` is listed `not-prose`).
+  last segment still passes.
 
 ## @jarenjs/core
 

@@ -942,6 +942,8 @@ export const tr = {
   'studio/data/oracle-disagreed': '{executor}, {ran} girdinin {disagreed} tanesinde motorla UYUŞMADI',
   'studio/data/oracle-verdict': '{verdict} ({entries} girdi × {mappings}); yalnızca motora özgü {skipped} girdi, işaretleri nedeniyle dışarıda bırakıldı',
   'studio/data/oracle-empty': 'boş dizi',
+  'studio/data/oracle-disagreement': '{executor} ({mapping}) {name} girdisinde uyuşmadı — sorgu {query}: kaydedilen {recorded}, yanıtlanan {answered}',
+  'studio/data/oracle-refused': '{executor} ({mapping}) {name} girdisinde uyuşmadı — sorgu {query}: reddedildi — {message}',
   'studio/data/operators-title': 'Kayıtlı işleçler (ana makine katılımı)',
   'studio/data/operators-summary': "{count} kayıtlı · {pushed} tanesi UDF olarak SQLite'a aktarıldı",
   'studio/data/operators-awaiting': 'sahip sekmenin işleçleri (yetenekler bekleniyor)',

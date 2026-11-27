@@ -1003,6 +1003,8 @@ export const ar = {
   'studio/data/oracle-disagreed': 'اختلف ⁨{executor}⁩ مع المحرك في {disagreed} من أصل {ran}',
   'studio/data/oracle-verdict': '{verdict} (عدد المدخلات {entries} × ⁨{mappings}⁩)؛ مدخلات خاصة بالمحرك استُبعدت بعلامتها: {skipped}',
   'studio/data/oracle-empty': 'التسلسل الفارغ',
+  'studio/data/oracle-disagreement': 'اختلف ⁨{executor}⁩ (⁨{mapping}⁩) في ⁨{name}⁩ — الاستعلام ⁨{query}⁩: المسجَّل ⁨{recorded}⁩، المُجاب ⁨{answered}⁩',
+  'studio/data/oracle-refused': 'اختلف ⁨{executor}⁩ (⁨{mapping}⁩) في ⁨{name}⁩ — الاستعلام ⁨{query}⁩: مرفوض — ⁨{message}⁩',
   'studio/data/operators-title': 'العوامل المسجّلة (بتفعيل من المضيف)',
   'studio/data/operators-summary': 'المسجّلة: {count} · المدفوعة إلى ⁨SQLite⁩ كدوال ⁨UDFs⁩: {pushed}',
   'studio/data/operators-awaiting': 'عوامل علامة التبويب المالكة (بانتظار القدرات)',

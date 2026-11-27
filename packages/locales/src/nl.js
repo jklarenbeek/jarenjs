@@ -944,6 +944,8 @@ export const nl = {
   'studio/data/oracle-disagreed': '{executor} WEEK bij {disagreed} van de {ran} AF van de engine',
   'studio/data/oracle-verdict': '{verdict} ({entries} vermeldingen × {mappings}); {skipped} vermeldingen alleen voor de engine weggelaten door hun markering',
   'studio/data/oracle-empty': 'de lege sequentie',
+  'studio/data/oracle-disagreement': '{executor} ({mapping}) week af bij {name} — query {query}: vastgelegd {recorded}, geantwoord {answered}',
+  'studio/data/oracle-refused': '{executor} ({mapping}) week af bij {name} — query {query}: geweigerd — {message}',
   'studio/data/operators-title': 'Geregistreerde operators (opt-in door de host)',
   'studio/data/operators-summary': "{count} geregistreerd · {pushed} als UDF's aan SQLite doorgegeven",
   'studio/data/operators-awaiting': 'die van het eigenaartabblad (wacht op mogelijkheden)',

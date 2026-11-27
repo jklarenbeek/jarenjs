@@ -945,6 +945,8 @@ export const fr = {
   'studio/data/oracle-disagreed': '{executor} DIVERGE du moteur sur {disagreed} sur {ran}',
   'studio/data/oracle-verdict': '{verdict} ({entries} entrées × {mappings}) ; {skipped} entrées propres au moteur écartées par leur marqueur',
   'studio/data/oracle-empty': 'la séquence vide',
+  'studio/data/oracle-disagreement': '{executor} ({mapping}) diverge sur {name} — requête {query} : enregistré {recorded}, répondu {answered}',
+  'studio/data/oracle-refused': '{executor} ({mapping}) diverge sur {name} — requête {query} : refusée — {message}',
   'studio/data/operators-title': "Opérateurs enregistrés (activation par l'hôte)",
   'studio/data/operators-summary': '{count} enregistrés · {pushed} délégués à SQLite comme UDF',
   'studio/data/operators-awaiting': "ceux de l'onglet propriétaire (capacités en attente)",

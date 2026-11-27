@@ -217,6 +217,8 @@ export const studioMessagesEn = Object.freeze({
   'studio/data/oracle-disagreed': '{executor} DISAGREED with the engine on {disagreed} of {ran}',
   'studio/data/oracle-verdict': '{verdict} ({entries} entries × {mappings}); {skipped} engine-only entries left out by their marker',
   'studio/data/oracle-empty': 'the empty sequence',
+  'studio/data/oracle-disagreement': '{executor} ({mapping}) disagreed on {name} — query {query}: recorded {recorded}, answered {answered}',
+  'studio/data/oracle-refused': '{executor} ({mapping}) disagreed on {name} — query {query}: refused — {message}',
   'studio/data/operators-title': 'Registered operators (host opt-in)',
   'studio/data/operators-summary': '{count} registered · {pushed} pushed to SQLite as UDFs',
   'studio/data/operators-awaiting': 'the owner\'s (awaiting capabilities)',

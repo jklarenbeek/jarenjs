@@ -839,7 +839,13 @@ in a gap) passes them without counting them: the tick's `skipped` and
 (absent until it happens) counts the ticks that passed a backlog so. A
 rule with COUNT walks from its DTSTART, so its
 backward span costs the walk; a span the limits cannot read at any width
-leaves the schedule `stalled`, as a limit always did. The tick's
+leaves the schedule `stalled`, as a limit always did. A first search that
+met an occurrence the policy refuses to bind (`reject` at a gap or fold)
+but whose `maxOccurrences` cut it before that occurrence reads on from
+its cut instead, each read under the limits, until it reaches the
+refusal: the occurrences between bind, so the tick fires and counts what
+the whole backlog read at once does, and the schedule stalls at the
+refused one. The tick's
 statements are the same whatever the backlog: one read of the due rows,
 one enqueue per fired job, one advance per schedule.
 
