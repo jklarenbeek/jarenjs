@@ -780,11 +780,11 @@ On pool-3-readers, `reads: 'parallel'` runs the Store-level mixed work 2.47× fa
 
 | Bun 1.4.4 executable | Rows written | Rows streamed | Long read ms | Event-loop max ms |
 |---|---:|---:|---:|---:|
-| worker | 20001 | 20001 | 330.55 | 1.73 |
-| pool | 20001 | 20001 | 393.23 | 2.80 |
-| in-thread | 20001 | 20001 | 122.49 | 122.39 |
+| worker | 20001 | 20001 | 324.30 | 1.84 |
+| pool | 20001 | 20001 | 407.75 | 2.99 |
+| in-thread | 20001 | 20001 | 102.20 | 102.07 |
 
-Built with `bun build --compile ./worker-app.js ./worker-endpoint.js --outfile worker-hosts-bun` and run with every source and module path removed; the long read is 5 whole-collection reads of 20001 rows. The worker host held the event loop at most 1.73 ms against the 50 ms bound and took 2.70× as long as the in-thread binding, which held the loop 122.39 ms. The pool host held the event loop at most 2.80 ms against the 50 ms bound and took 3.21× as long as the in-thread binding, which held the loop 122.39 ms. Built without the second entrypoint, the open refused: worker JD0003 (retryable: false), pool JD0003 (retryable: false). The side-effect import of `@jarenjs/db/worker-endpoint`, bundled alone, keeps the endpoint: 534566 bytes with Bun, 603177 with esbuild.
+Built with `bun build --compile ./worker-app.js ./worker-endpoint.js --outfile worker-hosts-bun` and run with every source and module path removed; the long read is 5 whole-collection reads of 20001 rows. The worker host held the event loop at most 1.84 ms against the 50 ms bound and took 3.17× as long as the in-thread binding, which held the loop 102.07 ms. The pool host held the event loop at most 2.99 ms against the 50 ms bound and took 3.99× as long as the in-thread binding, which held the loop 102.07 ms. Built without the second entrypoint, the open refused: worker JD0003 (retryable: false), pool JD0003 (retryable: false). The side-effect import of `@jarenjs/db/worker-endpoint`, bundled alone, keeps the endpoint: 534955 bytes with Bun, 603958 with esbuild.
 
 | Include accounting | Encoded bytes | Time p50 ms | Uncollected heap growth p50 MiB |
 |---|---:|---:|---:|

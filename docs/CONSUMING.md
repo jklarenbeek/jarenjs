@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->746 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->11 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -278,7 +278,7 @@ included.
 | `./authoring` | 15 | core 8, linq 7 | 1.0 |
 | `./charts` | 15 | core 8, linq 7 | 1.0 |
 | `./contract` | 20 | core 10, linq 10 | 1.2 |
-| `./db` | 288 | core 101, db 87, json 38, validate 28, linq 27, formats 7 | 15.1 |
+| `./db` | 288 | core 101, db 87, json 38, validate 28, linq 27, formats 7 | 15.2 |
 | `./flow` | 19 | linq 11, core 8 | 1.1 |
 | `./forms` | 21 | linq 13, core 8 | 1.3 |
 | `./formula` | 93 | core 62, json 26, linq 5 | 4.3 |
@@ -320,7 +320,7 @@ included.
 <!--fact:closure.validate-->
 | Subpath | Modules | By package | Live heap MiB |
 |---|---:|---|---:|
-| `.` | 124 | core 73, validate 27, json 24 | 5.6 |
+| `.` | 124 | core 73, validate 27, json 24 | 5.5 |
 | `./load` | 41 | core 24, validate 11, json 6 | 1.8 |
 | `./normalize` | 126 | core 73, validate 29, json 24 | 5.9 |
 | `./output` | 42 | core 25, validate 11, json 6 | 2.0 |
