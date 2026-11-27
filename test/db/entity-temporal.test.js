@@ -141,6 +141,32 @@ describe('an entity temporal member is held to the collection\'s rules', () => {
     doc.entities.Ev.schema.properties.tk_u = { type: 'string' };
     assert.throws(() => entityPlan(doc, sqliteDialect), (/** @type {any} */ e) => e.code === 'JD0004' && /'tk_u'/.test(e.message));
   });
+  it('names the member, its place and the remedy in each refusal the table plan and the layout make', () => {
+    /** @param {string} code @param {string} docPath @param {string} reason */
+    const exactly = (code, docPath, reason) => (/** @type {any} */ e) => {
+      assert.deepEqual({ code: e.code, docPath: e.docPath, message: e.message }, { code, docPath, message: `${code}: ${reason} at ${docPath}` });
+      return true;
+    };
+    /** @param {string} entity @param {Record<string, any>} properties */
+    const plan = (entity, properties) => {
+      const mapping = explainMapping({ $model: '0.1', entities: { [entity]: { schema: { type: 'object', properties: {
+        id: { type: 'string', 'x-entity': { key: true } }, ...properties } } } } }, { temporals: temporalSeam });
+      return planEntity(entity, mapping.entities[entity], mapping, postgresDialect(), { temporalHooks: temporalSeam.hooks });
+    };
+    assert.throws(() => plan('Ev', { u: temporal('utc'), tk_u: { type: 'string' } }), exactly('JD0004', '/entities/Ev/schema/properties/u',
+      "the key column of the temporal member 'u' would be named 'tk_u', the name of the column for 'tk_u' — two columns of one table "
+      + 'cannot share a name: rename the member'));
+    const long = 'm'.repeat(54);
+    assert.throws(() => plan('EventsLog', { [long]: temporal('date', undefined, { index: true }) }), exactly('JD0004',
+      `/entities/EventsLog/schema/properties/${long}`, `the index over '${long}' would be named 'EventsLog_${long}', 64 bytes; the postgres `
+      + 'engine keeps 63 bytes of an identifier and truncates a longer one silently, so two names that share a prefix would be one — shorten the name'));
+    assert.throws(() => normalizeEntities({ $model: '0.1', entities: { Ev: {
+      physical: { table: 'ev', columns: { id: { name: 'id', codec: 'text', null: 'reject' }, a: { name: 'a', codec: 'json', null: 'null' } } },
+      schema: { type: 'object', properties: { id: { type: 'string', 'x-entity': { key: true } }, a: temporal('utc') } } } } }, { temporals: temporalSeam }),
+    exactly('JD0004', '/entities/Ev/schema/properties/a/x-entity/temporal', "'a' declares a calendar kind, keyed by columns generated from the "
+      + "entity's document, and an adopted layout (physical) has no document column: keep the value in the columns the application declares, "
+      + 'or declare the entity without physical'));
+  });
 });
 
 describe('the planned DDL is the collection\'s', () => {

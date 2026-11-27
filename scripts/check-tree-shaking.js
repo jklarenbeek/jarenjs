@@ -683,8 +683,9 @@ const clientEngineLeak = Object.entries(clientInputs)
 if (clientEngineLeak.length > 0)
   throw new Error(`The client pulled an unrelated package into the bundle: ${clientEngineLeak.map(([file]) => file).join(', ')}`);
 // The calendar kernel runs only behind the seam a host installs
-// (`@jarenjs/db/temporals`): a store client carries the seam and the
-// declaration's reading, never the kernel itself.
+// (`@jarenjs/db/temporals`): a store client carries the seam's brand, its
+// option checks, the refusal of a declaration met without it and the
+// seam's call sites, never the declaration's reading, keys, CHECK or read-back.
 const clientCalendarLeak = Object.entries(clientInputs)
   .filter(([file, info]) => /packages\/db\/src\/(temporal|temporals)\.js$/.test(file) && info.bytesInOutput > 0);
 if (clientCalendarLeak.length > 0)
@@ -887,7 +888,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,212,200 (measured 1212115): semanticKey joining a remembered frozen tree (object 655), four more string helpers' named refusal of a non-string (string 303), and the queue's SQLite writes beginning with the writer lock (jobs 80).
 // Raised to 1,212,400 (measured 1212310): the entity writes that read first beginning with the writer lock on SQLite (entity, tracker, store 195).
 // Raised to 1,212,700 (measured 1212616): core's escapePointerToken, isStringWhiteSpace, compareCodePoints, kebabCase and the case predicates refusing a non-string with a named TypeError (string 306).
-if (clientBytes > 1212700)
+// Lowered to 1,209,900 (measured 1209853): an entity's calendar members planned, read back, shaped, written and mapped behind the temporal seam, and one JD0017 refusal for the three doors (ddl -843, model -641, introspect -640, plan -236, store -163, query -121, entity -116, temporal-seam +157, minifier renames elsewhere net -160).
+if (clientBytes > 1209900)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

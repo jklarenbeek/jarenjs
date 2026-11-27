@@ -4324,16 +4324,8 @@ export function entityShape(entity, entityMapping, zoneStamp = null) {
         ...(fk.keyDigits === undefined ? {} : { keyDigits: fk.keyDigits }) });
   }
   // a declared calendar member (`x-entity.temporal`) compares by its key as a
-  // collection's does, through the seam's planner; a date's and a date
-  // range's members ARE their keys, each a text column the member's text is
-  const temporals = (entityMapping.temporals ?? []).map((/** @type {any} */ temporal) => ({ ...temporal,
-    ...(entity.temporalHooks?.temporalColumns(temporal) ?? {}) }));
-  for (const temporal of temporals) {
-    const members = temporal.kind === 'date' ? [['date', temporal.key]]
-      : temporal.kind === 'date-range' ? [['start', temporal.key], ['end', temporal.end]] : [];
-    for (const [member, column] of members)
-      flavors.set(canonicalOf([...temporal.segments, { name: member }]), { column, flavor: 'entity-column', storage: 'string' });
-  }
+  // collection's does, through the seam's planner
+  const temporals = entityMapping.temporals?.length ? entity.temporalHooks.entityShape(entityMapping.temporals, flavors) : [];
   return {
     collection: entity.name,
     schema: entity.schema,

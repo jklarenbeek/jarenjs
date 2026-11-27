@@ -195,18 +195,11 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   // key and stamp the store writes beside every document it writes
   const temporals = entity.temporals ?? [];
   const hooks = entity.temporalHooks;
-  const zonedColumns = (entityMapping.temporals ?? []).filter((/** @type {any} */ temporal) => temporal.kind === 'zoned')
-    .flatMap((/** @type {any} */ temporal) => {
-      const columns = hooks.temporalColumns(temporal);
-      return [{ name: columns.key, derive: 'zoned-instant', policy: temporal.policy, property: temporal.name },
-        { name: columns.stamp, derive: 'zoned-stamp', policy: temporal.policy, property: temporal.name }];
-    });
+  const calendar = temporals.length === 0 ? null : hooks.entityWrites(entityMapping.temporals ?? [], zoneProvider);
   /** The zoned key columns' values for a document as the database holds it.
-   * @param {any} doc @param {string} [property] - only this member's */
-  const zonedValues = (doc, property = undefined) => zonedColumns
-    .filter((column) => property === undefined || column.property === property)
-    .map((column) => ({ name: column.name, value: zoneProvider === null ? null
-      : hooks.zonedValueFor(column, memberOf(doc, column.property), zoneProvider) }));
+   * @param {any} doc @param {string} [property] - only this member's
+   * @returns {{ name: string, value: unknown }[]} */
+  const zonedValues = (doc, property = undefined) => calendar?.zonedValues(doc, property) ?? [];
 
   const relationNames = new Set(
     [...entity.properties.values()]
@@ -741,10 +734,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       /** The text each key column of a calendar member holds for its value
        * (the seam's `keyValues`), or `null` (absent, zoned, not the kind).
        * @param {string} property @param {unknown} value */
-      temporalKeyValues: (/** @type {string} */ property, /** @type {unknown} */ value) => {
-        const temporal = (entityMapping.temporals ?? []).find((/** @type {any} */ declared) => declared.name === property);
-        return temporal === undefined ? null : hooks.keyValues(temporal, value);
-      },
+      temporalKeyValues: (/** @type {string} */ property, /** @type {unknown} */ value) => calendar?.keyValues(property, value) ?? null,
       split,
       merge,
       encodeColumn,

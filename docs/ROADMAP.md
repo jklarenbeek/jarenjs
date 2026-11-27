@@ -346,13 +346,20 @@ delete it or fix it.
   over counted once and multiplied, the EXDATEs and RDATEs in the span
   subtracted and added, and a sub-daily zoned span counted around the zone's
   offset changes.
-- [ ] **The client bundle carries calendar-member plumbing without the seam.**
-  The calendar kernel runs only when a host installs `@jarenjs/db/temporals`,
-  and the tree-shaking gate keeps it out of the store client, but the
-  declaration's reading, its DDL and introspection terms and its refusals ship
-  in every store client, about 11 KB of the client bundle that a store
-  declaring no calendar member never runs. Wanted: the declaration read behind
-  the seam too, so a store without it keeps only the refusal.
+- [ ] **The client bundle carries the temporal seam's call sites.** The
+  declaration's reading, its key columns and CHECK, its read-back and an
+  entity's calendar writes run only behind `@jarenjs/db/temporals`; a store
+  client still carries the seam's option checks and the `JD0017` refusal,
+  which it needs, and the seam's call sites interleaved in the planner (a
+  member's comparison, overlap and order key), the collection DDL with its
+  CHECK verification, and the store's zoned writes, `rekey()` and open checks.
+  Wanted: those call sites gathered behind one seam entry per module where
+  that costs no per-query work.
+- [ ] **A store of a few thousand collections overflows the stack at open.**
+  `openStore` verifies or creates each collection's table in a chain that
+  recurses once per collection, so on a synchronous driver a model of 2048
+  collections throws `RangeError` (the host's stack) where 1536 opens. Wanted:
+  the shape walk iterative, a model of any size opening.
 - [ ] **A CHECK the model does not declare is read back as a declaration where
   the format has one.** On PostgreSQL a CHECK of someone else's opens, still
   refuses the writes it governs (`JD2005`) and is an `unmapped-constraint`
@@ -451,16 +458,6 @@ delete it or fix it.
   stored spelling (§13.4), where PostgreSQL and the store compare by codec;
   comparing by code point would change the text of every installed update
   program, so it waits for a reviewed migration of installed programs.
-- [ ] **A linq transaction that reads a handle builds a record of every name.** A
-  transaction client builds its `entities` and `collections` records when its
-  body first reads them, so a body that reads no handle costs the same at any
-  model size; a body that reads one still builds that record's getter for
-  every name of its kind, because a record holds the model's names as its own
-  frozen members (DB-CLIENT §2.1), which stays the contract. A shared
-  prototype holding the getters would make `Object.keys` of a transaction's
-  record answer no names, and a Proxy cannot answer the names of a frozen
-  record without holding them. Wanted: a cheaper build that keeps the names as
-  own frozen members.
 - [ ] **The native SQL census's mutation families on PostgreSQL.** The
   executable census proves five adopted-column read families and three SQLite
   mutation families ([native contracts](../packages/db/docs/NATIVE-PLANS.md)),

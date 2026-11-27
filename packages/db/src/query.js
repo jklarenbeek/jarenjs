@@ -1952,8 +1952,7 @@ export function createQueryEngine(context) {
     // only keeps its row a candidate
     temporals: physicalPlan.temporals ?? [],
     temporalPlanner: physicalPlan.temporalHooks?.planner ?? null,
-    zoneStamp: physicalPlan.temporalHooks === undefined || zoneProvider?.identity === undefined || zoneProvider?.identity === null
-      ? null : physicalPlan.temporalHooks.stampOf(zoneProvider.identity),
+    zoneStamp: physicalPlan.temporalHooks?.zoneStamp(zoneProvider) ?? null,
     // the R*Tree virtual tables this collection's `bbox` column sets are
     // realized as, by stem — empty under `physical: 'columns'`, and
     // empty on a driver whose build carries no R*Tree module, because
@@ -3353,8 +3352,7 @@ export function createEntityQueryEngine(context) {
   // comparison narrows a set residual's fetch (a key another provider
   // stamped keeps its row a candidate)
   const temporalHooks = [...entities.values()].find((entity) => entity.temporalHooks !== undefined)?.temporalHooks;
-  const zoneStamp = temporalHooks === undefined || zoneProvider?.identity === undefined || zoneProvider?.identity === null
-    ? null : temporalHooks.stampOf(zoneProvider.identity);
+  const zoneStamp = temporalHooks?.zoneStamp(zoneProvider) ?? null;
   /** Every driver failure this engine meets, classified under the
    * entity root. */
   const driverWrap = (/** @type {any} */ error) => wrapDriverError(error, { docPath: '/entities' });

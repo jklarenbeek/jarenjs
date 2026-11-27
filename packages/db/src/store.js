@@ -72,7 +72,7 @@ import {
 import {
   normalizeExpression, canonicalExpression, expressionMembers, registerExpressionFunctions, expressionFunctions,
 } from './expression.js';
-import { isStoreTemporals } from './temporal-seam.js';
+import { isStoreTemporals, unseamed } from './temporal-seam.js';
 
 /** The model format version this store implements. */
 import { MODEL_VERSION, IDENTIFIER } from './engine-metadata.js';
@@ -422,10 +422,6 @@ export function normalizeModel(model, expressions = undefined, temporals = null)
   }
   return normalized;
 }
-
-/** A model declaring a temporal member, met without the seam that keys it. @param {string} docPath */
-const unseamed = (docPath) => modelError('JD0017',
-  "a temporal member is keyed by the temporal seam: open the store with temporals: storeTemporals() from '@jarenjs/db/temporals'", docPath);
 
 /**
  * A collection's declared temporal members (`temporals[]`, MODEL-FORMAT §2)

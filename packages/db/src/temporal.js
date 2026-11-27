@@ -304,6 +304,85 @@ function zonedColumnsOf(temporals) {
   });
 }
 
+/**
+ * An entity's declared calendar members as its query shape reads them: each
+ * with its key columns, and a date's and a date range's members entered in
+ * `flavors` as the text columns they ARE, so a path to one reads its key as
+ * a collection's does.
+ * @param {any[]} declared - the entity mapping's `temporals`
+ * @param {Map<string, any>} flavors - the shape's column flavors, by canonical path
+ * @returns {any[]}
+ */
+function entityShapeTemporals(declared, flavors) {
+  return declared.map((temporal) => {
+    const keyed = { ...temporal, ...temporalColumns(temporal) };
+    const members = keyed.kind === 'date' ? [['date', keyed.key]]
+      : keyed.kind === 'date-range' ? [['start', keyed.key], ['end', keyed.end]] : [];
+    for (const [member, column] of members)
+      flavors.set(canonicalOf([...keyed.segments, { name: member }]), { column, flavor: 'entity-column', storage: 'string' });
+    return keyed;
+  });
+}
+
+/**
+ * An entity's normalized calendar members as mapping data: what the table
+ * plans each by, with its property's `index`/`unique` flag, which is over
+ * its key columns.
+ * @param {any[]} temporals - the normalized entity's
+ * @param {Map<string, any>} properties - the normalized entity's
+ * @returns {any[]}
+ */
+function entityMapping(temporals, properties) {
+  return temporals.map((temporal) => {
+    const property = properties.get(temporal.name);
+    return { name: temporal.name, path: temporal.path, kind: temporal.kind,
+      ...(temporal.policy === undefined ? {} : { policy: temporal.policy }), constraint: temporal.constraint,
+      segments: temporal.segments, canonical: temporal.canonical, docPath: temporal.docPath,
+      ...(property.unique ? { unique: true } : property.index ? { index: true } : {}) };
+  });
+}
+
+/**
+ * What an entity's writes carry for its declared calendar members: the
+ * table keys each one by columns generated from the document, except a
+ * zoned one, whose key and stamp the store writes beside every document it
+ * writes (`zonedValues`: each column's value for a document as the database
+ * holds it, or only one member's), and the text each key column of a member
+ * holds for a value of it (`keyValues`, `null` for no declared member).
+ * @param {any[]} declared - the entity mapping's `temporals`
+ * @param {any} zoneProvider - the store's, or `null`
+ * @returns {{ zonedValues: (doc: any, property?: string) => { name: string, value: unknown }[],
+ *   keyValues: (property: string, value: unknown) => any }}
+ */
+function entityWrites(declared, zoneProvider) {
+  const zoned = declared.filter((temporal) => temporal.kind === 'zoned').flatMap((temporal) => {
+    const columns = temporalColumns(temporal);
+    return [{ name: columns.key, derive: 'zoned-instant', policy: temporal.policy, property: temporal.name },
+      { name: /** @type {string} */ (columns.stamp), derive: 'zoned-stamp', policy: temporal.policy, property: temporal.name }];
+  });
+  return {
+    zonedValues: (doc, property) => zoned.filter((column) => property === undefined || column.property === property)
+      .map((column) => ({ name: column.name, value: zoneProvider === null ? null
+        : zonedValueFor(column, Object.hasOwn(doc, column.property) ? doc[column.property] : undefined, zoneProvider) })),
+    keyValues: (property, value) => {
+      const temporal = declared.find((member) => member.name === property);
+      return temporal === undefined ? null : temporalKeyValues(temporal, value);
+    },
+  };
+}
+
+/**
+ * The refusal of a calendar member on an adopted layout (`physical`), which
+ * has no document column its key columns could be generated from: `JD0004`.
+ * @param {any} temporal - the entity's first declared member
+ * @returns {never}
+ */
+function refuseAdopted(temporal) {
+  throw new DbCompileError('JD0004', `'${temporal.name}' declares a calendar kind, keyed by columns generated from the entity's `
+    + 'document, and an adopted layout (physical) has no document column: keep the value in the columns the '
+    + 'application declares, or declare the entity without physical', temporal.docPath);
+}
+
 /** Whether a stored derived column is a zoned key. @param {{ derive?: string }} column */
 export const isZonedColumn = (column) => column.derive === 'zoned-instant' || column.derive === 'zoned-stamp';
 
@@ -556,6 +635,57 @@ function planCollectionTemporals(collection, dialect, table) {
 }
 
 /**
+ * An entity's declared calendar members (`x-entity.temporal`) planned as a
+ * collection's are, the one implementation both document kinds share: each
+ * one's key columns, generated over the document (a zoned one's key and
+ * stamp written by the store), and its CHECK. A key column named as another
+ * column of the table is `JD0004`; `flag` takes each member's `index` or
+ * `unique` flag into the table's flag indexes, and `indexColumns` names the
+ * key columns such an index covers.
+ * @param {any[]} declared - the entity mapping's `temporals`
+ * @param {any} dialect
+ * @param {{ name: string, entityPath: string, docColumn: string, taken: Map<string, { name: string, what: string }>,
+ *   compare: (name: string) => string,
+ *   refuseLongName: (dialect: any, name: string, what: string, docPath: string) => void }} table
+ * @returns {{ temporals: any[], generated: any[], flag: (indexUnique: Map<string, boolean>) => void,
+ *   indexColumns: (column: string, index: { name: string, unique: boolean }) => string[] | null }}
+ */
+function planEntityTemporals(declared, dialect, table) {
+  const { name, entityPath, docColumn, taken, compare, refuseLongName } = table;
+  /** @type {any[]} */
+  const generated = [];
+  const plan = planCollectionTemporals({ temporals: declared }, dialect,
+    { docColumn, taken: new Set(), generated, derived: [], columnByCanonical: new Map(), safeIntegerColumns: new Set(), refuseLongName });
+  for (const column of generated) {
+    const holder = taken.get(compare(column.name));
+    if (holder !== undefined) {
+      throw new DbCompileError('JD0004', `the key column of the temporal member '${column.temporal}' would be named '${column.name}', `
+        + `the name of ${holder.what} — two columns of one table cannot share a name: rename the member`, `${entityPath}/schema/properties/${column.temporal}`);
+    }
+    taken.set(compare(column.name), { name: column.name, what: `the key column of the temporal member '${column.temporal}'` });
+  }
+  return {
+    temporals: plan.temporals,
+    generated,
+    // a member's `index`/`unique` flag: over its key columns, in the order a
+    // collection's index over the member keys them (a zoned key takes no
+    // unique index: `JD0004`), named as a column's flag index is
+    flag: (indexUnique) => {
+      for (const temporal of declared) {
+        if (temporal.unique !== true && temporal.index !== true) continue;
+        refuseLongName(dialect, `${name}_${temporal.name}`, `the index over '${temporal.name}'`, `${entityPath}/schema/properties/${temporal.name}`);
+        indexUnique.set(temporal.name, temporal.unique === true);
+      }
+    },
+    indexColumns: (column, index) => {
+      const temporal = declared.find((/** @type {any} */ member) => member.name === column);
+      return temporal === undefined ? null : plan.indexColumns(temporal.canonical,
+        { ...index, docPath: `${entityPath}/schema/properties/${column}/x-entity` });
+    },
+  };
+}
+
+/**
  * A declared temporal member's CHECK as the database holds it, read back
  * as the planned one: absent, not validated or another text is a
  * disagreement.
@@ -680,6 +810,48 @@ function readTable(dialect, table, byName, docColumn) {
   return { declarations, checks, keys, indexPaths: (columns, paths) => temporalPathsOf(columns, indexed, paths),
     /** The columns an index over a declared member's path covers, by its path. */
     indexColumns: (/** @type {string} */ path) => indexed.find((entry) => entry.path === path)?.columns ?? null };
+}
+
+/**
+ * An entity table's declared calendar members (`x-entity.temporal`), read
+ * back as a collection's are ({@link readTable}): each over a top-level
+ * member named as its CHECK is, with the key columns it plans, which are the
+ * member's and no property of their own. `claims` takes a one-member index
+ * named as the member's flag index, over the key columns that flag plans, as
+ * that flag; `members` answers each member's property, with the flags
+ * claimed; `null` for a table that declares none.
+ * @param {any} dialect @param {any} table @param {string} docColumn
+ * @returns {null | { keys: Set<string>, checks: Set<string>, claims: (index: any) => boolean,
+ *   members: () => [string, any][] }}
+ */
+function readEntityTemporals(dialect, table, docColumn) {
+  const read = readTable(dialect, table, new Map(table.columns.map((/** @type {any} */ column) => [column.name, column])), docColumn);
+  const temporals = read.declarations.filter((declaration) => declaration.path === modelPath([{ name: declaration.name }]));
+  if (temporals.length === 0) return null;
+  /** @type {Set<string>} */
+  const keys = new Set();
+  for (const declaration of temporals)
+    for (const column of Object.values(temporalColumns(declaration))) keys.add(/** @type {string} */ (column));
+  /** @type {Map<string, { unique: boolean }>} the members a flag's index covers */
+  const flags = new Map();
+  return {
+    keys,
+    checks: new Set(temporals.map((declaration) => `${declaration.name}_temporal`)),
+    claims: (index) => {
+      const member = temporals.find((declaration) => index.name === `${table.name}_${declaration.name}`);
+      const covers = member === undefined ? null : read.indexColumns(member.path);
+      if (member === undefined || index.partial || covers === null || covers.length !== index.columns.length
+        || !covers.every((column, at) => index.columns[at] === column) || (index.unique && member.kind === 'zoned')) return false;
+      flags.set(member.name, { unique: index.unique });
+      return true;
+    },
+    members: () => temporals.map((declaration) => {
+      const flag = flags.get(declaration.name);
+      return [declaration.name, { type: 'object', 'x-entity': {
+        temporal: { kind: declaration.kind, ...(declaration.policy === undefined ? {} : { policy: declaration.policy }) },
+        ...(flag === undefined ? {} : flag.unique ? { unique: true } : { index: true }) } }];
+    }),
+  };
 }
 
 // ————— The writes —————
@@ -950,15 +1122,22 @@ export const TEMPORAL_HOOKS = Object.freeze({
   normalizeEntity: normalizeEntityTemporal,
   refuseUnrecordedZones,
   planCollection: planCollectionTemporals,
+  planEntity: planEntityTemporals,
   verifyCheck,
   readTable,
+  readEntity: readEntityTemporals,
+  entityShape: entityShapeTemporals,
+  entityWrites,
+  mapping: entityMapping,
+  refuseAdopted,
   keyColumn: zonedKeyColumn,
   keyValues: temporalKeyValues,
   refuse: refuseFaults,
-  temporalColumns,
   zonedColumnsOf,
   zonedValueFor,
-  stampOf,
+  /** The stamp a zoned key a store keyed through `provider` carries, or `null`
+   * beside a provider that names no identity. @param {any} provider */
+  zoneStamp: (provider) => (provider?.identity === undefined || provider?.identity === null ? null : stampOf(provider.identity)),
   rekey,
   planner: TEMPORAL_PLANNER,
 });

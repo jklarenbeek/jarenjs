@@ -23,7 +23,7 @@ import { DbCompileError } from './errors.js';
 import { IDENTIFIER } from './engine-metadata.js';
 import { SCALAR_TYPES } from './scalar-types.js';
 import { refuseUnknownModelMembers, readOptions } from './options.js';
-import { isStoreTemporals } from './temporal-seam.js';
+import { isStoreTemporals, unseamed } from './temporal-seam.js';
 import { columnCodec, normalizePhysical } from './physical.js';
 import { normalizeInvariants, resolveInvariants } from './invariants.js';
 import { schemaPosition } from './schema-positions.js';
@@ -140,10 +140,7 @@ function effectiveSchema(node, root, anchors, docPath) {
  */
 function entityTemporal(name, block, effective, propertyPath, hooks) {
   const at = `${propertyPath}/x-entity/temporal`;
-  if (hooks === null) {
-    throw modelError("a temporal member is keyed by the temporal seam: open the store with temporals: storeTemporals() "
-      + "from '@jarenjs/db/temporals'", at, 'JD0017');
-  }
+  if (hooks === null) throw unseamed(at);
   return hooks.normalizeEntity(name, block, effective, propertyPath);
 }
 
@@ -585,11 +582,7 @@ function entitiesOf(model, queryOptions, temporalHooks = null) {
     const physical = normalizePhysical(spec.physical, properties, keys, docPath, historyReads > 0 ? undefined : declaredTypes);
     // an adopted layout has no document a key column could read: the
     // application owns the columns, and none of them is planned from one
-    if (physical !== null && temporals.length > 0) {
-      throw modelError(`'${temporals[0].name}' declares a calendar kind, keyed by columns generated from the entity's `
-        + 'document, and an adopted layout (physical) has no document column: keep the value in the columns the '
-        + 'application declares, or declare the entity without physical', temporals[0].docPath, 'JD0004');
-    }
+    if (physical !== null && temporals.length > 0) temporalHooks.refuseAdopted(temporals[0]);
     entities.set(name, {
       name,
       docPath,
@@ -954,13 +947,6 @@ function storageOf(property) {
   return property.column === 'integer' ? 'epoch' : 'column';
 }
 
-/**
- * A normalized temporal member as mapping data: what the table plans it by.
- * @param {any} temporal @returns {any}
- */
-const temporalMapping = (temporal) => ({ name: temporal.name, path: temporal.path, kind: temporal.kind,
-  ...(temporal.policy === undefined ? {} : { policy: temporal.policy }), constraint: temporal.constraint,
-  segments: temporal.segments, canonical: temporal.canonical, docPath: temporal.docPath });
 
 /** @param {any} model @param {Map<string,any>} entities @returns {any} */
 function mappingOf(model, entities) {
@@ -1072,10 +1058,7 @@ function mappingOf(model, entities) {
       // table keys it by the columns the declaration plans (`planEntity`)
       // (its `index`/`unique` flag is over its key columns, so it rides here,
       // never in `indexes`, whose every entry is a column's)
-      ...(entity.temporals.length ? { temporals: entity.temporals.map((/** @type {any} */ temporal) => {
-        const property = entity.properties.get(temporal.name);
-        return { ...temporalMapping(temporal), ...(property.unique ? { unique: true } : property.index ? { index: true } : {}) };
-      }) } : {}),
+      ...(entity.temporals.length ? { temporals: entity.temporalHooks.mapping(entity.temporals, entity.properties) } : {}),
     });
   }
 

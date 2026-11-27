@@ -934,31 +934,16 @@ function deriveEntity(dialect, table, report, edges, expressions, temporalHooks 
   const fkByColumn = new Map(table.foreignKeys.map((fk) => [fk.column, fk]));
   const uniqueColumns = new Set();
   const indexedColumns = new Set();
-  // a declared calendar member (`x-entity.temporal`): its CHECK, read back as
-  // a collection's is, over a top-level member named as the CHECK is — with
-  // the key columns it plans, which are the member's and no property of their own
-  const read = temporalHooks === null ? null
-    : temporalHooks.readTable(dialect, table, new Map(table.columns.map((/** @type {any} */ column) => [column.name, column])), DOC_COLUMN);
-  const temporals = (read?.declarations ?? []).filter((/** @type {any} */ declaration) => declaration.path === modelPath([{ name: declaration.name }]));
-  /** @type {Set<string>} */
-  const temporalKeys = new Set();
-  /** @type {Map<string, { unique: boolean }>} the members a flag's index covers */
-  const temporalFlags = new Map();
-  for (const declaration of temporals)
-    for (const column of Object.values(temporalHooks.temporalColumns(declaration))) temporalKeys.add(column);
-  const readable = readableColumns(dialect, table).filter((column) => !temporalKeys.has(column.name));
+  // a declared calendar member (`x-entity.temporal`): its CHECK, read back
+  // through the temporal seam, with the key columns it plans
+  const temporal = temporalHooks === null ? null : temporalHooks.readEntity(dialect, table, DOC_COLUMN);
+  const readable = readableColumns(dialect, table).filter((column) => !(temporal?.keys.has(column.name) ?? false));
   // a one-column index named as a `unique` or `index` property's own, over a
   // column the entity maps, is that property's when it is the very index the
   // flag plans; every other index is an entry of the entity's `indexes`
   const flags = [], others = [];
   for (const index of table.indexes) {
-    const member = temporals.find((/** @type {any} */ declaration) => index.name === `${table.name}_${declaration.name}`);
-    const covers = member === undefined ? null : read.indexColumns(member.path);
-    if (member !== undefined && !index.partial && covers !== null && covers.length === index.columns.length
-      && covers.every((column, at) => index.columns[at] === column) && !(index.unique && member.kind === 'zoned')) {
-      temporalFlags.set(member.name, { unique: index.unique });
-      continue;
-    }
+    if (temporal?.claims(index)) continue;
     const [only] = index.columns;
     const flag = !index.partial && index.doubleOrder !== true && index.columns.length === 1 && index.name === `${table.name}_${only}`
       && readable.some((c) => c.physical === only) && plannedDifference(dialect, table, index, undefined, readable) === null;
@@ -995,7 +980,7 @@ function deriveEntity(dialect, table, report, edges, expressions, temporalHooks 
   const properties = {};
   const required = [];
   for (const column of table.columns) {
-    if (column.name === identity || column.name === DOC_COLUMN || temporalKeys.has(column.name)) continue;
+    if (column.name === identity || column.name === DOC_COLUMN || (temporal?.keys.has(column.name) ?? false)) continue;
     if (column.generated) {
       report(loss('unmapped-column', `${table.name}.${column.name}`,
         'a generated column on an entity table is not an entity property'));
@@ -1019,15 +1004,9 @@ function deriveEntity(dialect, table, report, edges, expressions, temporalHooks 
     if (Object.keys(entity).length > 0) property['x-entity'] = entity;
     setObjectMember(properties, column.name, property);
   }
-  for (const declaration of temporals) {
-    const flag = temporalFlags.get(declaration.name);
-    setObjectMember(properties, declaration.name, { type: 'object', 'x-entity': {
-      temporal: { kind: declaration.kind, ...(declaration.policy === undefined ? {} : { policy: declaration.policy }) },
-      ...(flag === undefined ? {} : flag.unique ? { unique: true } : { index: true }) } });
-  }
-  const temporalChecks = new Set(temporals.map((/** @type {any} */ declaration) => `${declaration.name}_temporal`));
+  for (const [name, property] of temporal?.members() ?? []) setObjectMember(properties, name, property);
   for (const check of table.checks) {
-    if (temporalChecks.has(check.name)) continue;
+    if (temporal?.checks.has(check.name)) continue;
     const property = Object.hasOwn(properties, check.column) ? properties[check.column] : undefined;
     // the CHECK a store gives a number column on an engine whose number type holds
     // a NaN: the column's own, which declares nothing beyond its type

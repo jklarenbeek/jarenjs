@@ -19,6 +19,7 @@ import { explainMapping } from './model.js';
 import { hashContent, utf8ByteLength } from '@jarenjs/core/string';
 import { IDENTIFIER, ENGINE_TABLES } from './engine-metadata.js';
 import { DbCompileError } from './errors.js';
+import { unseamed } from './temporal-seam.js';
 import { chain } from './driver.js';
 import { catalogRead } from './namespace-catalog.js';
 import { BBOX_COMPONENTS, BBOX_INDEX_ORDER, derivedMappingFor } from './derive.js';
@@ -2498,28 +2499,11 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
   }
   for (const column of [...entityMapping.indexes.map((/** @type {any} */ index) => index.property), ...viaColumns])
     refuseLongName(dialect, `${name}_${column}`, `the index over '${column}'`, memberPath(column));
-  // the declared calendar members (`x-entity.temporal`): each one's key
-  // columns, generated over the document as a collection's are (a zoned
-  // one's key and stamp written by the store), and its CHECK — planned by
-  // the seam, the one implementation both document kinds share
+  // the declared calendar members (`x-entity.temporal`), planned by the seam
   const declaredTemporals = entityMapping.temporals ?? [];
-  if (declaredTemporals.length > 0 && options.temporalHooks === undefined) {
-    throw new DbCompileError('JD0017', "a temporal member is keyed by the temporal seam: open the store with temporals: storeTemporals() "
-      + "from '@jarenjs/db/temporals'", declaredTemporals[0].docPath);
-  }
-  /** @type {any[]} */
-  const generated = [];
-  const temporalPlan = declaredTemporals.length === 0 ? null : options.temporalHooks.planCollection({ temporals: declaredTemporals }, dialect,
-    { docColumn: DOC_COLUMN, taken: new Set(), generated, derived: [], columnByCanonical: new Map(), safeIntegerColumns: new Set(), refuseLongName });
-  for (const column of generated) {
-    const holder = taken.get(compare(column.name));
-    const at = `${entityPath}/schema/properties/${column.temporal}`;
-    if (holder !== undefined) {
-      throw new DbCompileError('JD0004', `the key column of the temporal member '${column.temporal}' would be named '${column.name}', `
-        + `the name of ${holder.what} — two columns of one table cannot share a name: rename the member`, at);
-    }
-    taken.set(compare(column.name), { name: column.name, what: `the key column of the temporal member '${column.temporal}'` });
-  }
+  if (declaredTemporals.length > 0 && options.temporalHooks === undefined) throw unseamed(declaredTemporals[0].docPath);
+  const temporalPlan = declaredTemporals.length === 0 ? null
+    : options.temporalHooks.planEntity(declaredTemporals, dialect, { name, entityPath, docColumn: DOC_COLUMN, taken, compare, refuseLongName });
   const storageType = (storage) => dialect.typeFor(storage, 'generated');
   /** @type {Map<string, string>} */
   const legacyTypes = new Map();
@@ -2580,7 +2564,7 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
     columns: deferred.size === 0 ? columns
       : columns.map((column) => (deferred.has(column.name) ? { ...column, references: undefined } : column)),
     compositeKey: singleKey ? undefined : entityMapping.keys,
-    ...(temporalPlan === null ? {} : { generated,
+    ...(temporalPlan === null ? {} : { generated: temporalPlan.generated,
       checks: temporalPlan.temporals.map((/** @type {any} */ temporal) => ({ name: temporal.constraint, sql: temporal.sql })) }),
   })];
   // one index per column, keyed by its name: a declared `index`/`unique`
@@ -2601,15 +2585,7 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
   // the table, the relations the engine gives it, and every index: one namespace
   const objects = [{ name, what: `the table for entity '${name}'`, docPath: entityPath, rename: 'the entity' },
     ...ownObjects(dialect, name, columns, entityPath)];
-  // a calendar member's `index`/`unique` flag: over its key columns, in the
-  // order a collection's index over the member keys them (a zoned key takes
-  // no unique index: `JD0004`), named as a column's flag index is
-  for (const temporal of declaredTemporals) {
-    if (temporal.unique !== true && temporal.index !== true) continue;
-    const at = `${entityPath}/schema/properties/${temporal.name}`;
-    refuseLongName(dialect, `${name}_${temporal.name}`, `the index over '${temporal.name}'`, at);
-    indexUnique.set(temporal.name, temporal.unique === true);
-  }
+  temporalPlan?.flag(indexUnique);
   // a number column holds the digits a writer spelled, and is ordered as its double;
   // a foreign key's holds a key's, and an epoch column's member is ordered by its
   // document text: an index led by either, or over a column that holds no NULL (a
@@ -2626,12 +2602,11 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
   const doubled = [];
   for (const [column, unique] of indexUnique) {
     const indexName = `${name}_${column}`;
-    const temporal = declaredTemporals.find((/** @type {any} */ declared) => declared.name === column);
-    const indexed = temporal === undefined ? [column] : /** @type {string[]} */ (temporalPlan?.indexColumns(temporal.canonical,
-      { name: indexName, unique, docPath: `${entityPath}/schema/properties/${column}/x-entity` }));
+    const keyed = temporalPlan?.indexColumns(column, { name: indexName, unique }) ?? null;
+    const indexed = keyed ?? [column];
     objects.push({ name: indexName, what: `the index over '${column}'`, docPath: memberPath(column), rename: `the member '${column}'` });
     // an index over a calendar member's key columns orders no statement
-    const ordered = temporal === undefined && orderedIndex({ unique, columns: indexed }) ? { ordered: true } : {};
+    const ordered = keyed === null && orderedIndex({ unique, columns: indexed }) ? { ordered: true } : {};
     createSql.push(dialect.ddl.createIndex({
       name: indexName, table: name, columns: indexed, unique, ...ordered,
     }));
@@ -2725,10 +2700,10 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
     // read and verified as a collection's are; the CHECKs every other column
     // carries are the table's own, which no member declares by name
     ...(temporalPlan === null ? {} : { temporals: temporalPlan.temporals, temporalHooks: options.temporalHooks,
-      generated, docColumn: DOC_COLUMN, columnChecks: true }),
+      generated: temporalPlan.generated, docColumn: DOC_COLUMN, columnChecks: true }),
     expected: {
       columns: [...expectedColumnsOf(columns, legacyTypes, dialect),
-        ...generated.map((column) => ({ name: column.name, type: column.type, generated: column.stored !== true }))]
+        ...(temporalPlan?.generated ?? []).map((/** @type {any} */ column) => ({ name: column.name, type: column.type, generated: column.stored !== true }))]
         .sort((a, b) => (a.name < b.name ? -1 : 1)),
       indexes: expectedIndexes.sort((a, b) => (a.name < b.name ? -1 : 1)),
     },
