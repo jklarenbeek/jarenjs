@@ -29,7 +29,6 @@ describe('flowchart — a quoted label may hold its own closing bracket', functi
     ['A{"a}b"} --> B', 'a}b', 'diamond'],
     ['A["x]y"] --> B', 'x]y', 'rect'],
     ['A("(a)") --> B', '(a)', 'round'],
-    ["A['it)s'] --> B", 'it)s', 'rect'],
     ['A([" ] "]) --> B', ' ] ', 'stadium'],
   ];
   for (const [body, label, shape] of CASES) {
@@ -120,9 +119,10 @@ describe('toMermaid — an edge label prints in a pipe form that reads back as t
   it('reads a quoted pipe-form label as one unit', () => {
     const edges = parseMermaid('flowchart LR\n  A -->|"x|y"| B -->|"a|#34;b"| C').ast.edges;
     assert.deepEqual(edges.map((/** @type {any} */ e) => [e.from, e.label, e.to]), [['A', 'x|y', 'B'], ['B', 'a|#34;b', 'C']]);
-    // `'…'` is no quoting to Mermaid: a `"` inside it is refused, as Mermaid refuses it
+    // `'…'` is no quoting to Mermaid: the label ends at its first `|`, and
+    // what follows is no node, as Mermaid refuses it
     assert.throws(() => parseMermaid('flowchart LR\n  A -->|"x|y"| B -->|\'a|"b\'| C'),
-      { msgid: 'mermaid/flowchart/quote-in-link-label', params: { from: 'B' }, line: 2 });
+      { msgid: 'mermaid/flowchart/expected-node', line: 2 });
   });
 
   it('leaves a label that needs no quotes bare', () => {

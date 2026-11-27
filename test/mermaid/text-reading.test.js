@@ -131,14 +131,14 @@ describe('sequenceDiagram — a `;` ends a statement, as in Mermaid', () => {
     assert.deepEqual(texts('sequenceDiagram\n  A->>B: hi; there'), [['message', 'hi; there']]);
   });
 
-  it('prints a `;` as #59; only where the line would split, so the tree reads back as one statement', () => {
+  it('prints a `;` as #59;, which Mermaid reads in a message where it refuses a `;`, so the tree reads back as one statement', () => {
     const doc = parseMermaid('sequenceDiagram\n  A->>B: hi; there\n  B->>A: x #9829; y');
     const message = doc.ast.statements[0];
     doc.ast.statements.push({ ...message, text: 'p #9829; q; B->>A: r' });
     const text = toMermaid(doc);
-    assert.match(text, /^A->>B: hi; there$/m);
+    assert.match(text, /^A->>B: hi#59; there$/m);
     assert.match(text, /^A->>B: p #9829; q#59; B->>A: r$/m);
     assert.deepEqual(parseMermaid(text).ast.statements.map((/** @type {any} */ s) => s.text),
-      ['hi; there', 'x #9829; y', 'p #9829; q#59; B->>A: r']);
+      ['hi#59; there', 'x #9829; y', 'p #9829; q#59; B->>A: r']);
   });
 });

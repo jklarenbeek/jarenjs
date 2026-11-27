@@ -184,18 +184,23 @@ export function stateDeclaration(id) {
 
 /**
  * The line after `lines[at]` that opens with the `{` of a composite state,
- * past comment lines (which reach the reader blank, so a blank line between
- * reads on too, where Mermaid refuses it); -1 when the next line with a
- * statement does not open with one.
+ * past blank and comment lines; -1 when the next line with a statement does
+ * not open with one, or an empty line stands before it, as Mermaid reads it
+ * once it has removed its comments (each with the blank lines just before
+ * it): `state X`, an empty line, `{` is refused, a line of blanks or a
+ * comment between them reads.
  * @param {string[]} lines
  * @param {number} at
+ * @param {boolean[]} removed which lines Mermaid removes before it reads them
  * @returns {number}
  */
-function braceLineAfter(lines, at) {
+function braceLineAfter(lines, at, removed) {
+  let empty = false;
   for (let i = at + 1; i < lines.length; i++) {
     const line = lines[i].trim();
-    if (line === '' || line.startsWith('%%')) continue;
-    return line.startsWith('{') ? i : -1;
+    if (removed[i] === true || line.startsWith('%%')) { empty = false; continue; }
+    if (line === '') { empty ||= lines[i] === ''; continue; }
+    return line.startsWith('{') && !empty ? i : -1;
   }
   return -1;
 }
@@ -206,9 +211,11 @@ const MAX_ANCESTOR_WALK = 1000;
 /**
  * @param {string[]} lines
  * @param {number} [lineOffset] absolute line number of `lines[0]`
+ * @param {boolean[]} [removed] which lines Mermaid removes before it reads
+ *   them (its `%%` comments), which reach this reader blank
  * @returns {object}
  */
-export function parseState(lines, lineOffset = 0) {
+export function parseState(lines, lineOffset = 0, removed = []) {
   /** @type {Map<string, { id: string, label: string }>} */
   const stateMap = new Map();
   const order = [];
@@ -361,7 +368,7 @@ export function parseState(lines, lineOffset = 0) {
     if (/^accDescr\s*\{/.test(line)) { inDescription = !line.includes('}'); continue; }
     // `state X` (or `state "…" as X`) whose `{` opens a later line, with
     // only comment lines between, opens X as `state X {` does
-    const brace = RE_STATE_PLAIN.test(line) || RE_STATE_AS.test(line) ? braceLineAfter(lines, li) : -1;
+    const brace = RE_STATE_PLAIN.test(line) || RE_STATE_AS.test(line) ? braceLineAfter(lines, li, removed) : -1;
     if (brace !== -1) {
       openComposite(line);
       li = brace;

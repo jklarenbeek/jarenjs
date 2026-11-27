@@ -99,6 +99,28 @@ function textCodePoint(n) {
 }
 
 /**
+ * A class's generic with each `~` inside it written as the `open` that opens
+ * a type's own generic or the `close` that closes it: `List~int~` is
+ * `List<int>` as the class box draws it, and `List#lt;int#gt;` as `toMermaid`
+ * prints it, which Mermaid draws the same. A `~` between two characters of a
+ * name opens one.
+ * @param {string} generic
+ * @param {string} open
+ * @param {string} close
+ * @returns {string}
+ */
+export function genericText(generic, open, close) {
+  let text = '';
+  for (let i = 0; i < generic.length; i++) {
+    const c = generic[i];
+    if (c !== '~') { text += c; continue; }
+    const opens = i > 0 && /[^\s~,]/.test(generic[i - 1]) && i + 1 < generic.length && /[^\s~,]/.test(generic[i + 1]);
+    text += opens ? open : close;
+  }
+  return text;
+}
+
+/**
  * Whether a label is a markdown string: its text wrapped in backticks, as
  * Mermaid's `` "`…`" `` leaves it once the quotes are read. (Mermaid reads
  * the unquoted `` [`…`] `` as plain text with its backticks; this engine,

@@ -191,8 +191,8 @@ describe('flowchart — quotes in a label as Mermaid reads them', () => {
     assert.deepEqual(labels(F('A["\'x\'"]')), [['A', '\'x\'']]);
   });
 
-  it('still reads a label in `\'…\'` without its quotes, where Mermaid keeps them as text', () => {
-    assert.deepEqual(labels(F('A[\'x\']')), [['A', 'x']]);
+  it('reads a label in `\'…\'` with its quotes, which Mermaid keeps as text', () => {
+    assert.deepEqual(labels(F('A[\'x\']')), [['A', '\'x\'']]);
   });
 });
 

@@ -46,7 +46,6 @@ const KEYWORDS = {
 /** Fully/partly modeled type parsers. */
 const TYPE_PARSERS = {
   class: parseClass,
-  state: parseState,
   er: parseEr,
   gantt: parseGantt,
   pie: parsePie,
@@ -90,6 +89,11 @@ export function parseMermaid(source, options = {}) {
   }
   else if (type === 'sequence') {
     ast = parseSequence(bodyLines, bodyOffset);
+  }
+  else if (type === 'state') {
+    // which lines Mermaid removes before it reads them (`%%` comments), as
+    // the blank lines they read as here are not
+    ast = parseState(bodyLines, bodyOffset, kept.slice(bodyOffset).map((line) => line === null));
   }
   else if (TYPE_PARSERS[type] !== undefined) {
     ast = TYPE_PARSERS[type](bodyLines, bodyOffset, header, options);

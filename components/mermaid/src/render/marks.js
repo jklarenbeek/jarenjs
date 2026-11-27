@@ -60,18 +60,22 @@ export function edgeMark(index, from, to, key, classes = null) {
 }
 
 /**
- * The tooltip text each id was given by the `click` statements: the last
- * one that names it with a tooltip wins, as in Mermaid.
+ * The tooltip text each id was given by the `click` statements, read as
+ * `decode` reads it (the renderers decode its entity codes, as Mermaid shows
+ * them: `a#34;b` shows `a"b`): the last one that names it with a tooltip
+ * wins, as in Mermaid.
  * @param {{ ids: string[], tooltip: string | null }[] | undefined} clicks
  *   a tree written before clicks were read has none
+ * @param {(text: string) => string} decode
  * @returns {Map<string, string>}
  */
-export function clickTooltips(clicks) {
+export function clickTooltips(clicks, decode) {
   /** @type {Map<string, string>} */
   const tips = new Map();
   for (const click of clicks ?? []) {
     if (click.tooltip === null) continue;
-    for (const id of click.ids) tips.set(id, click.tooltip);
+    const text = decode(click.tooltip);
+    for (const id of click.ids) tips.set(id, text);
   }
   return tips;
 }

@@ -5,8 +5,10 @@
  * relations (`<|--`, `*--`, `o--`, `-->`, `..>`, `..|>`, the lollipop
  * `()--`, …; blanks around the operator optional) with optional quoted
  * cardinalities on either side and an optional `: label`, a class's generic
- * (`Foo~T~`, named `Foo` wherever it is written, kept as `generic`; one
- * nested in a bare name is refused, as Mermaid refuses it), and `click`
+ * (`Foo~T~`, named `Foo` wherever it is written, the first one written kept
+ * as `generic`; one nested in a bare name is refused, as Mermaid refuses it,
+ * and a backtick-quoted name keeps the first two parts its `~`s split it
+ * into, as Mermaid does: `` `Grid~List~int~~` `` is `Grid` of `List`), and `click`
  * statements (a link or a call, with the tooltip text); a body's
  * `<<annotation>>` line is no member. Geometry-free: members and relations
  * preserve declaration order.
@@ -37,40 +39,78 @@ const RE_ANNOTATION = /^<<[^<>]*>>$/;
 const RE_DIRECTIVE = /^(?:note|classDef|cssClass|style|link|callback|direction|namespace|accTitle|accDescr|<<)(?=[\s:{<]|$)|^\}$/;
 
 /**
- * A name as the tree keeps it: a backtick-quoted name without its
- * backticks, and words without the blanks between them, as Mermaid reads it.
+ * A name as the tree keeps it, as Mermaid reads it, its generic (if any)
+ * written `Name~T~` after it: a backtick-quoted name without its backticks,
+ * split at its `~`s with the first two parts kept (`` `Grid~List~int~~` `` is
+ * `Grid` of `List`); words without the blanks between them, each empty `~~`
+ * dropped (`A~~B~~` is `AB`).
  * @param {string} name
  * @param {number} lineNo the line it is written on
  * @returns {string}
  */
 function className(name, lineNo) {
-  if (name.startsWith('`')) return name.slice(1, -1);
+  if (name.startsWith('`')) {
+    const close = name.indexOf('`', 1);
+    // a backtick no other closes stays as written
+    if (close === -1) return name;
+    const text = name.slice(1, close) + name.slice(close + 1);
+    if (text.indexOf('~') <= 0) return text;
+    const [base, generic] = text.split('~');
+    return `${base}~${generic}~`;
+  }
   refuseNestedGeneric(name, lineNo);
-  return name.replace(/\s+/g, '');
+  return bareName(name.replace(/\s+/g, ''), lineNo);
+}
+
+/**
+ * A bare class name as Mermaid reads it: each `~` opens a generic its next
+ * `~` closes, an empty one dropped; a generic is the name's last part and
+ * follows a name. A `~` never closed, or text or a generic after the generic,
+ * is refused, as Mermaid refuses it.
+ * @param {string} name the name without its blanks
+ * @param {number} lineNo
+ * @returns {string}
+ */
+function bareName(name, lineNo) {
+  if (!name.includes('~')) return name;
+  let base = '';
+  /** @type {string|null} */
+  let generic = null;
+  for (let i = 0; i < name.length;) {
+    const close = name[i] === '~' ? name.indexOf('~', i + 1) : i;
+    if (close === -1 || (close === i && generic !== null) || (close > i + 1 && (generic !== null || base === ''))) {
+      failWith('mermaid/class/generic-tilde', { name }, lineNo);
+    }
+    if (close === i) base += name[i++];
+    else {
+      if (close > i + 1) generic = name.slice(i + 1, close);
+      i = close + 1;
+    }
+  }
+  return generic === null ? base : `${base}~${generic}~`;
 }
 
 /**
  * A class name whose generic nests another: a name, then two or more
  * `~`-led words, then the `~`s that close them (`List~List~int~~`,
  * `A~B~C~`). Mermaid refuses each such name; it reads some other runs of
- * `~` (`A~~B~~` is a class `AB`), which this tree reads as before.
+ * `~` (`A~~B~~` is a class `AB`, as `bareName` reads it).
  */
 const RE_NESTED_GENERIC = /^[^~]+(?:~[^~]+){2,}~+$/;
 
 /**
- * Refuse a class name whose generic nests another, as Mermaid refuses it,
- * where it was read; a backtick-quoted name is text, and a member's type may
- * nest.
+ * Refuse a bare class name whose generic nests another, as Mermaid refuses
+ * it, where it was read; a member's type may nest.
  * @param {string} written the name as written
  * @param {number} lineNo
  */
 function refuseNestedGeneric(written, lineNo) {
-  if (written.charCodeAt(0) !== 0x60 /* ` */ && RE_NESTED_GENERIC.test(written)) {
+  if (RE_NESTED_GENERIC.test(written)) {
     failWith('mermaid/class/nested-generic', { name: written }, lineNo);
   }
 }
 
-/** A name's generic: `Square~Shape~` is `Square` of `Shape` (in a backtick-quoted name, `List~List~int~~` nests). */
+/** A name's generic, as `className` writes it: `Square~Shape~` is `Square` of `Shape`. */
 const RE_GENERIC = /^([^~]+)~(.*)~$/;
 
 /**
@@ -177,16 +217,17 @@ export function parseClass(lines, lineOffset = 0) {
   const clicks = [];
 
   // a class is named without its generic (`Square~Shape~` is `Square`),
-  // wherever the generic is written, and keeps the generic as `generic`
+  // wherever the generic is written, and keeps the generic it is first
+  // written with as `generic`, as Mermaid keeps it
   const ensure = (written) => {
     const { name, generic } = genericOf(written);
     let cls = classMap.get(name);
     if (cls === undefined) {
       cls = { name, label: name, members: [] };
+      if (generic !== null) cls.generic = generic;
       classMap.set(name, cls);
       order.push(name);
     }
-    if (generic !== null) cls.generic = generic;
     return cls;
   };
 
@@ -239,8 +280,7 @@ export function parseClass(lines, lineOffset = 0) {
 
     const ml = RE_MEMBER_LINE.exec(line);
     if (ml !== null && !line.startsWith('class')) {
-      refuseNestedGeneric(ml[1], lineOffset + li + 1);
-      ensure(ml[1]).members.push(member(ml[2].trim()));
+      ensure(className(ml[1], lineOffset + li + 1)).members.push(member(ml[2].trim()));
       continue;
     }
 

@@ -135,7 +135,9 @@ and `toMermaid` prints a link with `href` and a callback with `call`. A line
 that starts with `click ` and is none of these forms stays parse-accepted and
 out of the tree, as every click line was before they were read; a tree written
 before then lacks the member and reads as no clicks. A click's tooltip is what
-a hydrated diagram shows for its node (§7), as text.
+a hydrated diagram shows for its node (§7), as text, its entity codes decoded
+as Mermaid shows them (`"a#34;b"` shows `a"b`); `toMermaid` prints a `"` in a
+tooltip as `#34;`, which Mermaid reads inside the quotes.
 
 A flowchart declares at most 10,000 edges, counting the pairs a `&` group
 expands to; a source that names more is a `MermaidParseError` on the line that
@@ -193,13 +195,30 @@ no quote, or a second quoted unit: `A["a"b"c"]`) is refused, as Mermaid
 refuses it: in a node (`A[He said "hi]`, `mermaid/flowchart/quote-in-label`), a
 link (`A -->|a"b| B`, `A -- a"b --> B`, `mermaid/flowchart/quote-in-link-label`)
 and a bracketed subgraph title (`subgraph s [say "x"]`,
-`mermaid/flowchart/quote-in-title`; a bare title reads as written, quotes and
-all, as Mermaid reads `subgraph a"b`); write the quote as `#quot;` or quote the
-whole label. `'…'` is no quoting to
-Mermaid, so a `"` inside it is refused too (`A['He said "Hi"']`); a label in
-`'…'` holding no `"` reads without its quotes, where Mermaid keeps them. An
+`mermaid/flowchart/quote-in-title`); write the quote as `#quot;` or quote the
+whole label. A bare title (and the id before a bracketed one) reads as
+Mermaid's lexer reads it: a `"` that starts one of its words opens a string
+the next `"` closes, which only the first word may be (`subgraph "a"b` is
+titled and named `ab`, `subgraph "a" b` is `a b`), an empty `""` is no word
+(`subgraph s ""` is titled `s`), and a `"` inside a word is text
+(`subgraph a"b`, `subgraph -"x"`); a string after the first word, or one no
+`"` closes, is refused (`subgraph a "b" c`, `subgraph 6" pipes`, where `6` is a
+number and the quote opens a string, `mermaid/flowchart/quote-in-title`).
+`'…'` is no quoting to Mermaid: its quotes are the label's text (`A['x']` is
+`'x'`, in nodes, links and titles alike), a `"` inside it is refused
+(`A['He said "Hi"']`), and a closer inside it closes the label (`A['a]b']` is
+refused, as text after a node). An
 empty `""` in a node or link label, or a bracketed title, that opens with no
-quote is dropped, as Mermaid drops it (`A[a""b]` is `ab`). `subgraph` opens a subgraph
+quote is dropped, as Mermaid drops it (`A[a""b]` is `ab`). A node or link
+label with nothing in it but such pairs is refused, as Mermaid refuses it
+(`A[]`, `A[""]`, `A()`, `mermaid/flowchart/empty-label`; `A -->|| B`,
+`A -- "" --> B`, `mermaid/flowchart/empty-link-label`), and a blank reads as
+an empty label (`A[ ]`, `A -->| | B`), which is how `toMermaid` prints one. A
+bracket (`(`, `)`, `[`, `]`, `{`, `}`) in a pipe-form link label or a subgraph
+title that is not quoted is refused, as Mermaid refuses it
+(`A -->|x(y)| B`, `mermaid/flowchart/bracket-in-link-label`;
+`subgraph s [Core (x)]`, `subgraph a(b)`, `mermaid/flowchart/bracket-in-title`);
+quoted it reads, and so does the inline form (`A -- x(y) --> B`). `subgraph` opens a subgraph
 only as a word of its own: `subgraph1 --> B` links a node `subgraph1`, as in
 Mermaid; a bare `subgraph` (at most one blank after the keyword, on a line of
 its own or ending one after a `;`) is
@@ -300,16 +319,18 @@ A `;` ends a statement, as in Mermaid: `A->>B: hi; B->>A: yo` is two
 messages, and `A->>B: hi;` and `participant A;` end at the `;`. A line splits
 at every `;` outside an entity code only where each piece that is not blank
 reads as a statement; otherwise it is one statement whose text keeps the `;`
-(`A->>B: hi; there`, which Mermaid refuses). `toMermaid` prints a message's
-or note's `;` as `#59;` only where the line would otherwise split or end its
-statement early, so a tree reads back as the statements it holds and draws
-the same text.
+(`A->>B: hi; there`, which Mermaid refuses). `toMermaid` prints a `;` in a
+message, a note, a block label and a participant alias as `#59;`, which
+Mermaid reads there, so a tree reads back as the statements it holds (the
+text spelled with the code) and draws the same text.
 
 ### 4.3 class / er / state / pie
 
 Class: `{ classes:[{ name, label, members[], generic? }], relations[], clicks[] }`, a
 relation being `{ from, to, type, label }` plus `fromCardinality` and
-`toCardinality` when the line quotes one (`Customer "1" --> "*" Ticket`). A
+`toCardinality` when the line quotes one (`Customer "1" --> "*" Ticket`);
+`toMermaid` prints a `;` in a relation label as `#59;`, which Mermaid reads
+where it refuses a `;`. A
 relation reads with or without blanks around its operator (`A<|--B`), a name
 in backticks (`` `Animal Class!` ``) or as words Mermaid joins (`A --> B C`
 names `BC`), and the lollipop operators (`bar ()-- foo`), whose lollipop end
@@ -318,15 +339,27 @@ that end, and the relations box marks the end (`data-lollipop`, §7), so a
 class of the same name is not taken as it. A class is named without its generic
 wherever the generic is written (`class Square~Shape~`, `class Square~Shape~ {`,
 `Square~Shape~ <|-- Rect`, `Square~Shape~ : x` all name `Square`), as Mermaid
-names it, and keeps it as `generic` (`Shape`), which `toMermaid` prints after
-the name and the panel draws as Mermaid does (`Square<Shape>`, `Map<K,V>`). A
-nested generic in a class name — a name, two or more `~`-led words, then the
-`~`s that close them — is refused wherever the name is written, as Mermaid
-refuses it (`class List~List~int~~`, `class A~B~C~`, `mermaid/class/nested-generic`;
-other runs of `~` Mermaid reads, such as `A~~B~~`, read as before);
-a member's type may nest, and a backtick-quoted name reads one, drawn nested
-(`` `Grid~List~int~~` `` as `Grid<List<int>>`), which `toMermaid` prints back in
-backticks. An `<<annotation>>` line in a class body (`<<enumeration>>`) is no
+names it, and keeps the generic it is first written with as `generic`
+(`Shape`; `class A` then `class A~T~` keeps none, as in Mermaid), which
+`toMermaid` prints after the name and the panel draws as Mermaid does
+(`Square<Shape>`, `Map<K,V>`). A bare name reads its `~`s as Mermaid's lexer
+does: each `~` opens a generic the next `~` closes, an empty `~~` is dropped
+(`A~~B~~` is the class `AB`, `A~~B~T~` is `AB` of `T`), and the generic ends
+the name. A nested generic in a bare name — a name, two or more `~`-led
+words, then the `~`s that close them — is refused wherever the name is
+written, as Mermaid refuses it (`class List~List~int~~`, `class A~B~C~`,
+`mermaid/class/nested-generic`), as is a `~` nothing closes or text after a
+generic (`class A~~B~`, `class A~B~~`, `class A~T~B`, `class ~A~`,
+`mermaid/class/generic-tilde`). A backtick-quoted name is split at its `~`s and
+keeps the first two parts, as Mermaid splits it (`` `Grid~List~int~~` `` is
+`Grid` of `List`, `` `A B~T~` `` is `A B` of `T`; one that opens with a `~` is
+kept whole), so a class name holds no nested generic; a member's type may
+nest. `toMermaid` writes a generic's nesting with the codes `#lt;` and `#gt;`,
+each `~` as the `<` or `>` the panel draws it as (`class Grid~List#lt;int#gt;~`;
+a name that is not all words takes its generic inside its backticks,
+`` class `A B~T~` ``), which both readers read as one generic, kept with its
+codes, and both draw as the tree with `List~int~` draws (`Grid<List<int>>`).
+An `<<annotation>>` line in a class body (`<<enumeration>>`) is no
 member, as Mermaid reads it, and is not kept, as in a header. `class Name["label"]` sets the label, and
 a `:::style` after a class name is not kept; a
 click shaped as a flowchart's (§4.1) in the forms Mermaid's class grammar reads
@@ -352,7 +385,10 @@ guard, effect, parent }] }` — a composite state's members carry its id as
 inside `C`, or declaring an ancestor inside its own descendant, leaves it
 under the parent it already has); `state X` (or `state "Long" as X`, which
 labels X) whose `{` opens a later line opens X as `state X {` does, past
-comment lines (and blank ones, where Mermaid refuses a blank line between);
+comment lines and lines of blanks; an empty line between them leaves the `{`
+opening no state, as Mermaid reads it once it has removed its comments, each
+with the blank lines just before it (`state X`, an empty line, `{` is
+refused; an empty line a comment follows reads);
 a `{` that follows no `state X` is refused, as Mermaid refuses it
 (`mermaid/state/brace-unopened`; it read as a state `{`), and so is the `{`
 of a choice, fork or join (`state X <<choice>> {`,

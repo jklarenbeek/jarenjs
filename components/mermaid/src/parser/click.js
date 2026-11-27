@@ -345,7 +345,9 @@ export function printNodeClick(click) {
   let out = `click ${click.ids.join(',')}`;
   if (click.href !== null) out += ` href "${click.href}"`;
   else if (click.call !== null) out += ` call ${printCall(click.call)}`;
-  if (click.tooltip !== null) out += ` "${click.tooltip}"`;
+  // a `"` prints as its code, which Mermaid reads inside the quotes and
+  // shows as the quote (it ends the tooltip written raw)
+  if (click.tooltip !== null) out += ` "${click.tooltip.replaceAll('"', '#34;')}"`;
   if (click.target !== null) out += ` ${click.target}`;
   return out;
 }

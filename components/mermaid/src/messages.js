@@ -74,6 +74,10 @@ export const mermaidMessagesEn = /*#__PURE__*/ Object.freeze({
   'mermaid/flowchart/quote-in-title': 'a subgraph has a \'"\' inside a title that is not quoted: quote the whole title, or write the quote as #quot;',
   'mermaid/flowchart/quote-unclosed': 'node \'{id}\' opens a quote in its label that nothing closes: close it, or write the quote as #quot;',
   'mermaid/flowchart/quote-in-link-label': 'the link from \'{from}\' has a \'"\' inside a label that is not quoted: quote the whole label, or write the quote as #quot;',
+  'mermaid/flowchart/empty-label': 'node \'{id}\' has an empty label: write its text, a blank for none, or leave the brackets off',
+  'mermaid/flowchart/empty-link-label': 'the link from \'{from}\' has an empty label: write its text, a blank between the pipes for none, or leave the label off',
+  'mermaid/flowchart/bracket-in-link-label': 'the link from \'{from}\' has a bracket inside a label that is not quoted: quote the whole label',
+  'mermaid/flowchart/bracket-in-title': 'a subgraph has a bracket inside a title that is not quoted: quote the whole title',
   'mermaid/sequence/outside-block': '\'{word}\' outside a block',
   'mermaid/sequence/stray-end': 'unexpected \'end\'',
   'mermaid/state/transition': '\'{line}\' is no transition: From --> To, with an optional \': label\'',
@@ -83,6 +87,7 @@ export const mermaidMessagesEn = /*#__PURE__*/ Object.freeze({
   'mermaid/state/stereotype-composite': 'state \'{id}\' is a <<{kind}>>, which holds no states: it takes no \'{\'',
   'mermaid/class/relation': '\'{line}\' is no relation: From ["cardinality"] <operator> ["cardinality"] To, one per line, with an optional \': label\'',
   'mermaid/class/nested-generic': 'class \'{name}\' nests one generic in another: a class name takes one level (Name~T~), and only a member\'s type may nest',
+  'mermaid/class/generic-tilde': 'class \'{name}\' leaves a ~ unpaired or writes on after its generic: a class name\'s generic is one ~…~ pair at its end (Name~T~)',
   'mermaid/er/relationship': '\'{line}\' is no relationship: LEFT <cardinality>--<cardinality> RIGHT : label',
 
   // ——— parse diagnostics: pie ———

@@ -142,11 +142,15 @@ export function parseFlowchart(lines, lineOffset, direction) {
       const rest = line.slice('subgraph'.length).trim();
       // an empty bracketed title (`subgraph s []`, `subgraph s [""]`) Mermaid
       // refuses, and a `"` in a bracketed title it does not take as quotes (a
-      // bare title it reads as written, `subgraph a"b`)
+      // bare title it reads by its lexer's words, `bareTitle`)
       if (RE_EMPTY_TITLE.test(rest)) failWith('mermaid/flowchart/subgraph-empty-title', {}, lineNo);
       const title = bracketedTitle(rest);
       if (title !== null && strayQuote(title)) failWith('mermaid/flowchart/quote-in-title', {}, lineNo);
-      const sg = parseSubgraphHeader(rest);
+      // a bracket in a title that is not quoted, as Mermaid refuses it
+      if (RE_BRACKET.test(title === null ? (rest.startsWith('"') ? '' : rest) : afterQuotedUnit(title))) {
+        failWith('mermaid/flowchart/bracket-in-title', {}, lineNo);
+      }
+      const sg = parseSubgraphHeader(rest, lineNo);
       subgraphStack.push({ id: sg.id, label: sg.label, direction: null, nodes: [], line: lineNo });
       return true;
     }
@@ -363,27 +367,70 @@ const RE_MARKDOWN_TITLE = /^`([\s\S]+)`$/;
 /**
  * Parse `subgraph` header: `id`, `id[title]`, `"title"`, or `id [title]`.
  * A title that is also the id names the subgraph by its text (a quoted
- * markdown title without its backticks); one with a blank in it names
- * none (nor does an empty one), and the subgraph is numbered when it closes,
- * as Mermaid numbers it.
+ * markdown title without its backticks); one written with a blank in it
+ * names none (nor does an empty one), and the subgraph is numbered when it
+ * closes, as Mermaid numbers it.
  * @param {string} rest
+ * @param {number} lineNo the header's line, for a refusal
  * @returns {{ id: string|null, label: string }}
  */
-function parseSubgraphHeader(rest) {
+function parseSubgraphHeader(rest, lineNo) {
   if (rest === '') return { id: null, label: '' };
   // id[title] form
   const br = rest.indexOf('[');
   if (br !== -1 && rest.endsWith(']')) {
-    const id = rest.slice(0, br).trim();
+    const id = bareTitle(rest.slice(0, br).trim(), lineNo);
     const label = labelText(rest.slice(br + 1, -1).trim());
     return { id: id || label, label };
   }
-  if (rest.startsWith('"') && rest.endsWith('"')) {
-    const label = stripQuotes(rest.slice(1, -1));
+  if (rest.startsWith('"') && rest.indexOf('"', 1) === rest.length - 1) {
+    const label = lineBreaks(rest.slice(1, -1));
     const id = RE_MARKDOWN_TITLE.exec(label)?.[1] ?? label;
     return { id: id === '' || RE_BLANK.test(id) ? null : id, label };
   }
-  return { id: RE_BLANK.test(rest) ? null : rest, label: rest };
+  const label = bareTitle(rest, lineNo);
+  return { id: label === '' || RE_BLANK.test(rest) ? null : label, label };
+}
+
+/** Sticky: a word of Mermaid's lexer a `"` may stand inside (`a"b`, `-"x"`). */
+const RE_TITLE_WORD = /(?:[A-Za-z0-9!"#$%&'*+.`?\\_/]|-(?=[^>\-.]))+/y;
+
+/** Sticky: a number, which Mermaid's lexer reads before a word (`6"x"` is `6` and a string). */
+const RE_TITLE_NUMBER = /[0-9]+/y;
+
+/**
+ * A bare subgraph title (or the id before a bracketed one) as Mermaid's
+ * lexer reads it: a `"` that starts one
+ * of its words opens a string the next `"` closes, which only the title's
+ * first word may be (`"a"b` is `ab`, `"a" b` is `a b`); an empty `""` is no
+ * word and is dropped (`s ""` is `s`); a `"` inside a word is text (`a"b`).
+ * A string after the first word, or one never closed, is refused, as Mermaid
+ * refuses it (`subgraph a "b" c`, `subgraph 6" pipes`).
+ * @param {string} rest the header after `subgraph`, trimmed
+ * @param {number} lineNo
+ * @returns {string}
+ */
+function bareTitle(rest, lineNo) {
+  if (!rest.includes('"')) return rest;
+  let text = '';
+  let first = true;
+  for (let i = 0; i < rest.length;) {
+    if (rest.charCodeAt(i) === 0x22 /* " */) {
+      const close = rest.indexOf('"', i + 1);
+      if (close === -1 || (close > i + 1 && !first)) failWith('mermaid/flowchart/quote-in-title', {}, lineNo);
+      if (close > i + 1) first = false;
+      text += rest.slice(i + 1, close);
+      i = close + 1;
+      continue;
+    }
+    first = false;
+    RE_TITLE_NUMBER.lastIndex = i;
+    RE_TITLE_WORD.lastIndex = i;
+    const end = RE_TITLE_NUMBER.test(rest) ? RE_TITLE_NUMBER.lastIndex : RE_TITLE_WORD.test(rest) ? RE_TITLE_WORD.lastIndex : i + 1;
+    text += rest.slice(i, end);
+    i = end;
+  }
+  return text.trim();
 }
 
 /**
@@ -422,13 +469,15 @@ function afterQuotedUnit(written) {
  * A label as it reads, from the label as written, as Mermaid reads it: the
  * `"…"` unit it may open with joined to the text after it, without the
  * empty `""` pairs Mermaid drops (`"x"y` is `xy`, `"a] --> B["b` is
- * `a] --> B[b`, `a""b` is `ab`), then its quotes stripped (`stripQuotes`).
+ * `a] --> B[b`, `a""b` is `ab`), then its `"…"` quotes stripped; `'…'`
+ * is text.
  * @param {string} written the label, trimmed
  * @returns {string}
  */
 function labelText(written) {
   const rest = afterQuotedUnit(written).replaceAll('""', '');
-  if (written.charCodeAt(0) !== 0x22) return stripQuotes(rest);
+  // `'…'` is no quoting to Mermaid: `A['x']` is the text `'x'`
+  if (written.charCodeAt(0) !== 0x22) return lineBreaks(rest);
   // the unit and the text after it, read as one quoted unit
   return stripQuotes(`"${written.slice(1, written.length - afterQuotedUnit(written).length - 1)}${rest}"`);
 }
@@ -468,8 +517,11 @@ function parseChain(stmt, lineNo, ensureNode, edges, classes, edgeIds) {
     // what follows a node is a link or nothing, as in Mermaid: trailing text
     // is refused, where it was dropped without a word
     if (edge === null) failWith('mermaid/flowchart/expected-link', { rest: s.slice(pos) }, lineNo);
-    // a `"` in a link's label that opens with no quote, as Mermaid refuses it
+    // a `"` in a link's label that opens with no quote, and a label with
+    // nothing in it, as Mermaid refuses them
     if (edge.stray) failWith('mermaid/flowchart/quote-in-link-label', { from: prevGroup.ids.join(' & ') }, lineNo);
+    if (edge.empty) failWith('mermaid/flowchart/empty-link-label', { from: prevGroup.ids.join(' & ') }, lineNo);
+    if (edge.bracket) failWith('mermaid/flowchart/bracket-in-link-label', { from: prevGroup.ids.join(' & ') }, lineNo);
     pos = edge.pos;
     pos = skipSpace(s, pos);
     const nextGroup = readVertexGroup(s, pos, lineNo, ensureNode, classes);
@@ -532,7 +584,11 @@ function readVertex(s, pos, lineNo) {
       }
       failWith('mermaid/flowchart/unterminated-shape', { opener: opened.opener, id }, lineNo);
     }
-    const written = s.slice(opened.contentStart, closed.at).trim();
+    const raw = s.slice(opened.contentStart, closed.at);
+    // a label with nothing in it, but for the empty `""` pairs Mermaid drops,
+    // is refused, as Mermaid refuses it (`A[]`, `A[""]`; `A[ ]` reads)
+    if (raw.replaceAll('""', '') === '') failWith('mermaid/flowchart/empty-label', { id }, lineNo);
+    const written = raw.trim();
     // a `"` in a label that opens with no quote is refused, as Mermaid
     // refuses it (in `'…'` too, no quoting to Mermaid), where it was read as
     // text; an empty `""` Mermaid drops
@@ -697,17 +753,14 @@ function matchOpener(s, pos) {
 /** The closer of a pipe-form edge label. */
 const PIPE_CLOSER = /** @type {[string, string][]} */ ([['|', 'edge']]);
 
-/** A link operator (`-->`, `---`, `==>`, `-.->`, `--o`, `--x`, `<-->`) inside text. */
-const RE_LINK_INSIDE = /<?(?:-{2,}[>ox-]|={2,}[>ox=]|-\.+-[>ox-]?)/;
 
 /**
  * Scan for the earliest closer sequence from `from`. A label that opens
  * with a `"` reads as Mermaid reads it: each `"…"` is one unit, running to
  * the next `"` wherever it stands (past brackets and links:
  * `A["x] --> B[y"]` is one node), and one no `"` closes ends nothing (null,
- * for the reader to refuse). A label in `'…'` whose matching quote is
- * followed by the closer is one unit too; any other label (an apostrophe in
- * prose, a `'` whose partner lies past a link) is scanned as written.
+ * for the reader to refuse). Any other label is scanned as written: `'…'` is
+ * no quoting to Mermaid (`A['a]b']` closes at the first `]`).
  * @param {string} s
  * @param {number} from
  * @param {[string, string][]} closers
@@ -718,16 +771,6 @@ function scanToCloser(s, from, closers) {
   while (start < s.length && (s.charCodeAt(start) === 0x20 || s.charCodeAt(start) === 0x09)) start++;
   const quote = s[start];
   if (quote === '"') return closerAfterQuotes(s, start, closers);
-  if (quote === '\'') {
-    let end = s.indexOf(quote, start + 1);
-    // a link operator between the quotes means the second quote belongs to
-    // another node: this quote is a stray one, and the statement keeps its edge
-    if (end !== -1 && !RE_LINK_INSIDE.test(s.slice(start + 1, end))) {
-      end++;
-      while (end < s.length && (s.charCodeAt(end) === 0x20 || s.charCodeAt(end) === 0x09)) end++;
-      if (closers.some(([seq]) => s.startsWith(seq, end))) from = end;
-    }
-  }
   return firstCloser(s, from, closers);
 }
 
@@ -773,20 +816,30 @@ function firstCloser(s, from, closers) {
 
 /**
  * A link's label as it reads, from the label as written: its quotes
- * stripped, the empty `""` pairs Mermaid drops dropped, and whether it holds
- * a `"` Mermaid refuses (`strayQuote`).
+ * stripped, the empty `""` pairs Mermaid drops dropped, whether it holds
+ * a `"` Mermaid refuses (`strayQuote`), and whether it holds nothing else,
+ * which Mermaid refuses (`||`, `|""|`, `-- "" -->`; a blank between pipes
+ * reads, the blanks of the inline form are its markers'), and whether, between
+ * pipes, it holds a bracket outside its quoted unit, which Mermaid refuses
+ * (`|x(y)|`; the inline form `-- x(y) -->` reads).
  * @param {string} written
- * @returns {{ label: string, stray: boolean }}
+ * @param {boolean} [piped] written between pipes, where a blank is text
+ * @returns {{ label: string, stray: boolean, empty: boolean, bracket: boolean }}
  */
-function edgeLabel(written) {
+function edgeLabel(written, piped = false) {
   const text = written.trim();
-  return { label: labelText(text), stray: strayQuote(text) };
+  return { label: labelText(text), stray: strayQuote(text), empty: (piped ? written : text).replaceAll('""', '') === '',
+    bracket: piped && RE_BRACKET.test(afterQuotedUnit(text)) };
 }
+
+/** A bracket of a shape (`(`, `)`, `[`, `]`, `{`, `}`), which Mermaid refuses in a pipe label or title that is not quoted. */
+const RE_BRACKET = /[()[\]{}]/;
 
 /**
  * Read a link operator, plain or labeled; `stray` tells a label holding a
- * `"` Mermaid refuses, for the chain reader to refuse.
- * @returns {{ stroke: string, head: string, tail: string, length: number, label: string|null, stray: boolean, pos: number } | null}
+ * `"` Mermaid refuses, `empty` one holding nothing and `bracket` one holding
+ * a bracket it refuses, for the chain reader to refuse.
+ * @returns {{ stroke: string, head: string, tail: string, length: number, label: string|null, stray: boolean, empty: boolean, bracket: boolean, pos: number } | null}
  */
 function readEdge(s, pos) {
   let label = null;
@@ -796,6 +849,9 @@ function readEdge(s, pos) {
     // a quoted label is one unit, as in the pipe form: the link operators
     // inside its quotes are text, so `A -- "a --> b" --> B` is one edge
     const text = RE_EDGE_LABEL_OPEN.lastIndex;
+    // (a `'…'` label too, which is no quoting to Mermaid: it reads the
+    // `'a --> b'` of `A -- 'a --> b' --> B` as a link to a node `b'`, an id
+    // this reader does not take)
     const quote = s[text];
     const partner = quote === '"' || quote === '\'' ? s.indexOf(quote, text + 1) : -1;
     if (partner !== -1) {
@@ -827,17 +883,19 @@ function readEdge(s, pos) {
   const info = classifyLink(m[1] ?? '', m[2], m[3]);
   let p = RE_EDGE_PLAIN.lastIndex;
   let stray = false;
+  let empty = false;
+  let bracket = false;
   // Optional |label|, blanks before it allowed: a quoted label is one unit,
   // as in a node's brackets, so `|"x|y"|` reads `x|y`
   const pipe = skipSpace(s, p);
   if (s.charCodeAt(pipe) === 0x7c /* | */) {
     const close = scanToCloser(s, pipe + 1, PIPE_CLOSER);
     if (close !== null) {
-      ({ label, stray } = edgeLabel(s.slice(pipe + 1, close.at)));
+      ({ label, stray, empty, bracket } = edgeLabel(s.slice(pipe + 1, close.at), true));
       p = close.end;
     }
   }
-  return { ...info, label, stray, pos: p };
+  return { ...info, label, stray, empty, bracket, pos: p };
 }
 
 /**
@@ -876,7 +934,8 @@ function skipSpace(s, pos) {
 }
 
 /**
- * Strip surrounding matching quotes from a label.
+ * Strip surrounding matching quotes (`"…"` or `'…'`) from a label, its
+ * `<br>`s read as line breaks (`lineBreaks`).
  * @param {string} s @returns {string}
  */
 export function stripQuotes(s) {
@@ -886,11 +945,18 @@ export function stripQuotes(s) {
     const b = out.charCodeAt(out.length - 1);
     if ((a === 0x22 && b === 0x22) || (a === 0x27 && b === 0x27)) out = out.slice(1, -1);
   }
-  // `<br/>` is Mermaid's line break inside a label. Normalizing it to a real
-  // newline here — the one place every label passes through — is what lets
-  // both the text measurement and the renderer treat it as one, instead of
-  // printing the tag and sizing the box for a single long line.
-  return RE_BR.test(out) ? out.replace(RE_BR, '\n') : out;
+  return lineBreaks(out);
+}
+
+/**
+ * A label's `<br>`s as line breaks. `<br/>` is Mermaid's line break inside a
+ * label. Normalizing it to a real newline where a label is read is what lets
+ * both the text measurement and the renderer treat it as one, instead of
+ * printing the tag and sizing the box for a single long line.
+ * @param {string} s @returns {string}
+ */
+function lineBreaks(s) {
+  return RE_BR.test(s) ? s.replace(RE_BR, '\n') : s;
 }
 
 /** `<br>`, `<br/>`, `<br />` — the spellings Mermaid accepts. */

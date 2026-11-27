@@ -51,11 +51,14 @@ describe('flowchart — a quoted label over lines', () => {
     // Mermaid refuses `A[He said "hi]`; it was read as the text `He said "hi`
     assert.throws(() => parseMermaid('flowchart LR\n  A[He said "hi]\n  B["x"]'),
       (/** @type {any} */ error) => error.msgid === 'mermaid/flowchart/quote-in-label' && error.line === 2 && error.params.id === 'A');
-    // a subgraph title the quote does not open reads alone, as before (its
-    // blank leaves it no id, so it is numbered)
-    const { ast } = parseMermaid('flowchart LR\n  subgraph 6" pipes\n  a\n  end\n  c[say hi]');
+    // a subgraph title holding a quote inside a word reads alone, as before
+    // (its blank leaves it no id, so it is numbered); after a number the
+    // quote opens a string no quote closes, which Mermaid refuses
+    const { ast } = parseMermaid('flowchart LR\n  subgraph 6in" pipes\n  a\n  end\n  c[say hi]');
     assert.deepEqual([ast.subgraphs.map((/** @type {any} */ g) => [g.id, g.label, g.nodes]), ast.nodes.map((/** @type {any} */ n) => [n.id, n.label])],
-      [[['subGraph0', '6" pipes', ['a']]], [['a', 'a'], ['c', 'say hi']]]);
+      [[['subGraph0', '6in" pipes', ['a']]], [['a', 'a'], ['c', 'say hi']]]);
+    assert.throws(() => parseMermaid('flowchart LR\n  subgraph 6" pipes\n  a\n  end'),
+      (/** @type {any} */ error) => error.msgid === 'mermaid/flowchart/quote-in-title' && error.line === 2);
     assert.throws(() => parseMermaid('flowchart LR\n  a["`never closed\n  b --> c'),
       (/** @type {any} */ error) => error.name === 'MermaidParseError' && error.line === 2);
   });
@@ -132,11 +135,11 @@ describe('classDiagram — a generic', () => {
     printsBack('classDiagram\n  class A["x<y"] {\n    +m\n  }');
   });
 
-  it('prints it back after the name and draws it as Mermaid does, a nested one (read only in a backtick-quoted name) nested', () => {
+  it('prints it back after the name and draws it as Mermaid does, a backtick-quoted name split at its `~`s as Mermaid splits it', () => {
     assert.equal(printsBack('classDiagram\n  class Square~Shape~\n  Map~K,V~ --> List~int~\n  class `Grid~List~int~~`'),
-      'classDiagram\nclass Square~Shape~\nclass Map~K,V~\nclass List~int~\nclass `Grid~List~int~~`\nMap --> List\n');
+      'classDiagram\nclass Square~Shape~\nclass Map~K,V~\nclass List~int~\nclass Grid~List~\nMap --> List\n');
     const svg = renderToString(renderMermaid('classDiagram\n  class Square~Shape~\n  class Map~K,V~\n  class `Grid~List~int~~`'));
-    assert.ok(svg.includes('Square&lt;Shape&gt;') && svg.includes('Map&lt;K,V&gt;') && svg.includes('Grid&lt;List&lt;int&gt;&gt;'), svg);
+    assert.ok(svg.includes('Square&lt;Shape&gt;') && svg.includes('Map&lt;K,V&gt;') && svg.includes('Grid&lt;List&gt;'), svg);
   });
 });
 

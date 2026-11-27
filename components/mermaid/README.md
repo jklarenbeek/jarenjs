@@ -692,12 +692,11 @@ it kept its bracket shape, and a name Mermaid has with no shape here, such as
 inside a node label that is not quoted (`A[He said "hi]`,
 `mermaid/flowchart/quote-in-label`; write `#quot;` or quote the label); a bare
 `subgraph` line (`mermaid/flowchart/subgraph-unnamed`); a nested generic in a
-class name (`class List~List~int~~`, `mermaid/class/nested-generic`; a
-backtick-quoted name still reads, and `toMermaid` prints a nested generic in
-one); a pie line that is no quoted slice, title or accessibility line
-(`Dogs : 1`, a value with a sign, a leading zero or a bare `.`,
-`mermaid/pie/line`), and a pie header word that is neither `showData` nor
-`title` (`pie titled`, `mermaid/pie/header`). The tab-spelled gantt directives
+class name (`class List~List~int~~`, `mermaid/class/nested-generic`); a pie
+line that is no quoted slice, title or accessibility line (`Dogs : 1`, a
+value with a sign, a leading zero or a bare `.`, `mermaid/pie/line`), and a
+pie header word that is neither `showData` nor `title` (`pie titled`,
+`mermaid/pie/header`). The tab-spelled gantt directives
 now meet the header checks the blank-spelled ones always met (`tickInterval<TAB>1decade`
 is refused as `tickInterval 1decade` is). `toMermaid` writes a pie label holding a
 `"` in `'…'` (Mermaid refused the `"…"` it wrote). A subgraph whose members are
@@ -727,6 +726,35 @@ quote that opens a label runs to the next quote wherever it stands
 (`A["x] --> B[y"]` is one node labelled `x] --> B[y`), the text after a quoted
 unit joins it (`A["x"y]` is `xy`), and an empty `""` in a label that opens
 with no quote is dropped (`A[a""b]` is `ab`).
+A flowchart label in `'…'` keeps its quotes as text, as Mermaid keeps them
+(`A['x']` is `'x'`, it read as `x`), and a closer inside them closes the
+label (`A['a]b']` is refused, it read as `'a]b'`). A bare subgraph title reads
+its quotes as Mermaid's lexer does (`subgraph "a"b` is `ab`, `subgraph s ""`
+is `s`; they read as written). A class name reads its `~`s as Mermaid does: a
+backtick-quoted one keeps the first two parts they split it into
+(`` `Grid~List~int~~` `` is `Grid` of `List`, it read `List~int~` and drew
+`Grid<List<int>>`), a bare one drops each empty `~~` (`A~~B~~` is the class
+`AB`, it read `A` of `~B~`), a class keeps the generic it is first written
+with, and `` `Foo` : +x `` names `Foo` (it named `` `Foo` ``); `toMermaid`
+prints a generic's nesting as `#lt;`/`#gt;` (`class Grid~List#lt;int#gt;~`,
+drawn `Grid<List<int>>` here and in Mermaid) where it printed the backtick form,
+which now reads as `Grid` of `List`, and a generic of a name that is not all
+words inside its backticks (`` class `A B~T~` ``, it printed `` `A B`~T~ ``).
+`toMermaid` prints a `;` in a sequence message, note, block label or
+participant alias and in a class relation label as `#59;`, a `"` in a click
+tooltip as `#34;` (a tooltip's entity codes now show decoded), and an empty
+flowchart label as a blank (`A[ ]`; it printed `A[]`). These lines are
+refused, as Mermaid refuses them, where they read: an empty node or link
+label (`A[]`, `A[""]`, `mermaid/flowchart/empty-label`; `A -->|| B`,
+`mermaid/flowchart/empty-link-label`), a bracket in a pipe label or subgraph
+title that is not quoted (`A -->|x(y)| B`, `mermaid/flowchart/bracket-in-link-label`;
+`subgraph s [Core (x)]`, `mermaid/flowchart/bracket-in-title`), a string after
+a bare subgraph title's first word or one never closed (`subgraph a "b" c`,
+`subgraph 6" pipes`, `mermaid/flowchart/quote-in-title`), a `{` after
+`state X` past an empty line (`mermaid/state/brace-unopened`), and a class
+name with a `~` nothing closes or text after its generic (`class A~~B~`,
+`class A~T~B`, `mermaid/class/generic-tilde`); quote such a label or title to
+keep it reading.
 The marks Mermaid draws and this renderer read but drew plain are drawn, by
 Mermaid's shape class: a sequence participant's `type` as Mermaid's glyph for
 it (a boundary, a control and an entity as a circle with a bar, an arrow or a

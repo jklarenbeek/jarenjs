@@ -29,9 +29,10 @@ const both = (/** @type {string} */ body) => {
 };
 
 describe('flowchart — an inline edge label reads a quoted label as one unit', function () {
-  for (const quote of ['"', "'"]) {
+  // a label in `'…'` keeps its quotes, which are no quoting to Mermaid
+  for (const [quote, label] of [['"', 'a --> b'], ["'", "'a --> b'"]]) {
     it(`reads A -- ${quote}a --> b${quote} --> B as one labelled edge`, () => {
-      const want = { nodes: [['A', 'A'], ['B', 'B']], edges: [['A', 'B', 'a --> b']] };
+      const want = { nodes: [['A', 'A'], ['B', 'B']], edges: [['A', 'B', label]] };
       assert.deepEqual(both(`A -- ${quote}a --> b${quote} --> B`), [want, want]);
     });
   }

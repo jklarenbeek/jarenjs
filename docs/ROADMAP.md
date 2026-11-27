@@ -234,30 +234,18 @@ delete it or fix it.
 ## @jarenjs/mermaid
 
 - [ ] **Mermaid forms still read differently from Mermaid** — measured against
-  Mermaid 11.16.1: a few lines Mermaid refuses still read: a `{` line that
-  follows `state X` past a blank line, an unquoted link label or subgraph
-  title holding a bracket (`A -->|x(y)| B`, `subgraph s [Core (x)]`; two repo
-  fences are written so, and `toMermaid` now prints them quoted), a bare
-  subgraph title holding a blank and a `"` (`subgraph 6" pipes`, `subgraph a
-  "b" c`; Mermaid reads `subgraph a"b` as written), `A[""]`, and the tilde
-  runs `class A~~B~` and `class A~B~~`; and a few read otherwise: a label in
-  `'…'`, which Mermaid does not take for quotes (`A['x']` is Mermaid's `'x'`,
-  here `x`, in nodes, links and titles alike), a class name with runs of `~`
-  (`A~~B~~`, Mermaid's class `AB`), `subgraph "a"b` and `subgraph s ""`
-  (Mermaid's titles `ab` and `s`), an ER relationship label holding a `"` (`A
-  ||--o{ B : say"hi"`, Mermaid's label `say` and an entity `hi`), and a
-  class's `<<annotation>>`, which is not kept where Mermaid draws it above the
-  name. `toMermaid` still prints text Mermaid refuses for a `;` in a class
-  relation label, a sequence message or a participant alias, and for a `"` in
-  a click tooltip.
-- [ ] **A backtick class name holding a nested generic reads otherwise than in
-  Mermaid** — Mermaid reads `` class `Grid~List~int~~` `` as the class `Grid`
-  of `List` (it splits a name at its `~` and keeps the first two parts), where
-  this reader keeps `Grid` of `List~int~` and draws `Grid<List<int>>`; and
-  `toMermaid` prints a class generic that nests in that backtick form, the
-  only spelling it has. Reading it as Mermaid does leaves a nested class
-  generic no spelling at all, so the printer would first need one that reads
-  back (the inner `~` as `#126;`, decoded where the class box draws it).
+  Mermaid 11.16.1: a few lines Mermaid refuses still read: a backtick class
+  name that opens with `~` (`` class `~A` ``), a bracket in the id before a
+  bracketed subgraph title (`subgraph a(b) [t]`), a `;` in a sequence message,
+  note or block label and in a class relation label (`A->>B: a;b` reads whole;
+  `toMermaid` prints it as `#59;`, which Mermaid reads), and the inline link
+  form's `'…'`, read as one unit (`A -- 'a -- b' --> B`); and a few read
+  otherwise: `A -- 'a --> b' --> B` (Mermaid's link to a node `b'`: a node id
+  holding a `'`, `A --> b'`, is refused here), an ER relationship label of
+  more than one word or holding a `"` (`A ||--o{ B : places order` is
+  Mermaid's label `places` and an entity `order`; `say"hi"` is `say` and an
+  entity `hi`), and a class's `<<annotation>>`, which is not kept where
+  Mermaid draws it above the name.
 - [ ] **Full layout for the secondary types** — class and ER render as structured panels, not domain-specific layouts; mindmap/gitGraph/journey/timeline parse-accept with a placeholder. Real layouts are the next coverage push (tracked honestly in the benchmark scorecard).
 - [ ] **Layout/perf workstream** — dagre-lite handles ranks and straight
   edges; orthogonal edge routing, subgraph clustering and crossing reduction

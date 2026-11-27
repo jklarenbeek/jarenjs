@@ -19,7 +19,7 @@
  */
 
 import { svgRoot, group, rect, path, textAt, num, textWidth } from '@jarenjs/view/helpers';
-import { readTextLines, textBlock } from '../label-text.js';
+import { readTextLines, textBlock, decodeEntityCodes, genericText } from '../label-text.js';
 import { nodeMark, edgeMark, withTooltip, clickTooltips } from './marks.js';
 import { mermaidText } from '../messages.js';
 
@@ -110,24 +110,6 @@ export function renderPlaceholder(type, theme, hash, noteId = 'mermaid/placehold
 }
 
 /**
- * A class's generic as Mermaid draws it, each `~` inside it as the `<` that
- * opens a type's own generic or the `>` that closes it (`List~int~` is
- * `List<int>`): a `~` between two characters of a name opens one.
- * @param {string} generic
- * @returns {string}
- */
-function genericText(generic) {
-  let text = '';
-  for (let i = 0; i < generic.length; i++) {
-    const c = generic[i];
-    if (c !== '~') { text += c; continue; }
-    const opens = i > 0 && /[^\s~,]/.test(generic[i - 1]) && i + 1 < generic.length && /[^\s~,]/.test(generic[i + 1]);
-    text += opens ? '<' : '>';
-  }
-  return text;
-}
-
-/**
  * A class relation's two ends, and the end its lollipop stands at: the
  * interface a lollipop names (`foo --() bar` names `bar`) is no class, and
  * the relations box marks it so (`data-lollipop`) that a class of the same
@@ -152,10 +134,10 @@ function relationEnds(r) {
 export function structuredSections(diagram, ast, messages = null) {
   const say = mermaidText(messages);
   if (diagram === 'class') {
-    const tips = clickTooltips(ast.clicks);
+    const tips = clickTooltips(ast.clicks, decodeEntityCodes);
     /** @type {PanelSection[]} */
     const sections = ast.classes.map((c) => ({
-      heading: c.generic == null ? c.name : `${c.name}<${genericText(c.generic)}>`,
+      heading: c.generic == null ? c.name : `${c.name}<${genericText(c.generic, '<', '>')}>`,
       rows: c.members.map((m) => `${m.visibility ?? ''}${m.text}`),
       id: c.name,
       tooltip: tips.get(c.name),

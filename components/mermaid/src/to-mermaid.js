@@ -4,9 +4,11 @@
  * The reverse arrow of `parseMermaid`, mirroring
  * `@jarenjs/md`'s `to-md.js`: one specialized closure per diagram type,
  * a **round-trip fixed point** — `parseMermaid(toMermaid(doc))`
- * deep-equals `doc.ast` for the fully-modeled types (but for a label
- * holding a `"` where Mermaid reads none, which reads back spelled with its
- * entity code `#34;`: see `labelSource` and `inQuotes`).
+ * deep-equals `doc.ast` for the fully-modeled types (but for text holding a
+ * character Mermaid reads nowhere it stands, which reads back spelled with
+ * its entity code: a label's or tooltip's `"` as `#34;` (`labelSource`,
+ * `inQuotes`), a `;` in sequence text or a class relation label as `#59;`
+ * (`semicolonsCoded`), a class generic's nesting as `#lt;`/`#gt;`).
  *
  * The printer is *canonical*, not verbatim: it does not preserve source
  * whitespace or comments (the stored Markdown fence `value` gives
@@ -15,9 +17,8 @@
  */
 
 import { parseState, stateStatements, stateDeclaration } from './parser/state.js';
-import { sequenceStatements } from './parser/sequence.js';
 import { printClick, printNodeClick } from './parser/click.js';
-import { isMarkdownString } from './label-text.js';
+import { isMarkdownString, genericText } from './label-text.js';
 import { FLOW_NAMED_SHAPES } from './ast.js';
 
 //#region public ----------------------------------------------------
@@ -105,12 +106,14 @@ const RE_TITLE_NEEDS_QUOTE = /[[\](){};]|^[\s"']|[\s"']$/;
  * Mermaid reads a `"` in no label (it has no escape inside a quoted one, and
  * refuses one in an unquoted one; `'…'` is no quoting to it), so a label
  * holding a `"` prints in `"…"` with each `"` as its entity code `#34;`,
- * which renders as the quote and reads back as the code.
+ * which renders as the quote and reads back as the code. An empty label
+ * prints as a blank, which reads back empty (Mermaid refuses `A[]`).
  * @param {string} label
  * @param {RegExp} needsQuote what the label needs its quotes for where it stands
  * @returns {string}
  */
 function labelSource(label, needsQuote) {
+  if (label === '') return ' ';
   // a markdown string breaks its lines as Mermaid writes it, at a newline
   // inside its quotes (one with a quote of its own prints `<br/>`)
   let text = isMarkdownString(label) && !/["']/.test(label) ? label : label.replace(/\n/g, '<br/>');
@@ -304,7 +307,7 @@ function printSequence(ast) {
   for (const p of ast.participants) {
     const decl = p.kind === 'actor' ? 'actor' : 'participant';
     const type = p.type == null ? '' : `@{ "type": "${p.type}" }`;
-    out.push(p.label === p.id ? `${decl} ${p.id}${type}` : `${decl} ${p.id}${type} as ${p.label}`);
+    out.push(p.label === p.id ? `${decl} ${p.id}${type}` : `${decl} ${p.id}${type} as ${semicolonsCoded(p.label)}`);
   }
   printSeqStatements(ast.statements, out, 0);
   return out.join('\n') + '\n';
@@ -323,10 +326,10 @@ function printSeqStatements(statements, out, depth) {
       const act = stmt.activation === 'activate' ? '+' : stmt.activation === 'deactivate' ? '-' : '';
       const fromMark = stmt.central === 'from' || stmt.central === 'both' ? '()' : '';
       const toMark = stmt.central === 'to' || stmt.central === 'both' ? '()' : '';
-      out.push(pad + oneStatement(`${stmt.from}${fromMark}${arrow}${act}${toMark}${stmt.to}: `, stmt.text, sequenceStatements));
+      out.push(`${pad}${stmt.from}${fromMark}${arrow}${act}${toMark}${stmt.to}: ${semicolonsCoded(stmt.text)}`);
     }
     else if (stmt.kind === 'note') {
-      out.push(pad + oneStatement(`note ${stmt.placement} ${stmt.actors.join(',')}: `, stmt.text, sequenceStatements));
+      out.push(`${pad}note ${stmt.placement} ${stmt.actors.join(',')}: ${semicolonsCoded(stmt.text)}`);
     }
     else if (stmt.kind === 'activate' || stmt.kind === 'deactivate') {
       out.push(`${pad}${stmt.kind} ${stmt.actor}`);
@@ -335,11 +338,11 @@ function printSeqStatements(statements, out, depth) {
       const branchWord = stmt.blockType === 'par' ? 'and'
         : stmt.blockType === 'critical' ? 'option' : 'else';
       const b0 = stmt.branches[0];
-      out.push(`${pad}${stmt.blockType}${b0.label ? ' ' + b0.label : ''}`);
+      out.push(`${pad}${stmt.blockType}${b0.label ? ' ' + semicolonsCoded(b0.label) : ''}`);
       printSeqStatements(b0.statements, out, depth + 1);
       for (let i = 1; i < stmt.branches.length; i++) {
         const b = stmt.branches[i];
-        out.push(`${pad}${branchWord}${b.label ? ' ' + b.label : ''}`);
+        out.push(`${pad}${branchWord}${b.label ? ' ' + semicolonsCoded(b.label) : ''}`);
         printSeqStatements(b.statements, out, depth + 1);
       }
       out.push(`${pad}end`);
@@ -350,8 +353,8 @@ function printSeqStatements(statements, out, depth) {
 /**
  * A line that reads back as one statement: a `;` in its text prints as
  * `#59;`, which the drawing decodes, only where the line would otherwise
- * split into statements or end its statement early (MERMAID-FORMAT §4.2,
- * §4.3).
+ * split into statements or end its statement early (a state's description
+ * or transition label, MERMAID-FORMAT §4.3).
  * @param {string} head - the statement up to its text
  * @param {string} text
  * @param {(line: string) => string[]} statements - the type's statement splitter
@@ -360,8 +363,18 @@ function printSeqStatements(statements, out, depth) {
 function oneStatement(head, text, statements) {
   const line = head + text;
   const read = statements(line.trim());
-  return read.length === 1 && read[0] === line.trim() ? line
-    : head + text.replace(/(#[A-Za-z0-9]+;)|;/g, (m, code) => code ?? '#59;');
+  return read.length === 1 && read[0] === line.trim() ? line : head + semicolonsCoded(text);
+}
+
+/**
+ * Text whose every `;` prints as `#59;`, which the drawing decodes, an
+ * entity code it holds kept: Mermaid refuses a `;` in a sequence message,
+ * note, block label or participant alias and in a class relation label.
+ * @param {string} text
+ * @returns {string}
+ */
+function semicolonsCoded(text) {
+  return text.replace(/(#[A-Za-z0-9]+;)|;/g, (m, code) => code ?? '#59;');
 }
 
 /** Each half-arrow head's marks, written after the line or (`-reverse`) before it. */
@@ -398,6 +411,15 @@ function isUnbracedMember(member) {
   return member.text.includes('}') || (member.visibility === null && member.text.startsWith('%%'));
 }
 
+/** A class name only words spell, which is written bare. */
+const RE_BARE_CLASS = /^[^\s"`:;<>*|()\-[\]{}~]+$/;
+
+/** A generic written bare after a bare name: words and entity codes (`#lt;`), its nesting written as codes. */
+const RE_BARE_GENERIC = /^[^\s"`:;<>*|()\-[\]{}]+$/;
+
+/** An entity code, which Mermaid reads before it reads a line. */
+const RE_ENTITY_CODE = /#\w+;/g;
+
 /**
  * @param {any} ast
  * @returns {string}
@@ -405,12 +427,17 @@ function isUnbracedMember(member) {
 function printClass(ast) {
   const out = ['classDiagram'];
   // a name only words may spell is written bare; any other in backticks
-  const name = (/** @type {string} */ n) => (/^[^\s"`:;<>*|()\-[\]{}~]+$/.test(n) ? n : `\`${n}\``);
+  const name = (/** @type {string} */ n) => (RE_BARE_CLASS.test(n) ? n : `\`${n}\``);
   for (const cls of ast.classes) {
-    // a nested generic reads only inside a backtick-quoted name (Mermaid
-    // refuses it in a bare one)
-    const written = cls.generic == null ? name(cls.name)
-      : cls.generic.includes('~') ? `\`${cls.name}~${cls.generic}~\`` : `${name(cls.name)}~${cls.generic}~`;
+    // a generic follows its name, both inside the backticks of a quoted
+    // one; a generic it nests is written with `#lt;`/`#gt;`, which no reader
+    // splits the name at and both draw nested (Mermaid reads
+    // `Grid~List~int~~` as no class, and `` `Grid~List~int~~` `` as `Grid` of
+    // `List`)
+    const generic = cls.generic == null ? null : genericText(cls.generic, '#lt;', '#gt;');
+    const written = generic === null ? name(cls.name)
+      : RE_BARE_CLASS.test(cls.name) && RE_BARE_GENERIC.test(generic.replace(RE_ENTITY_CODE, '')) ? `${cls.name}~${generic}~`
+        : `\`${cls.name}~${generic}~\``;
     const head = `class ${written}${cls.label !== cls.name ? `[${inQuotes(cls.label)}]` : ''}`;
     if (cls.members.length === 0) {
       out.push(head);
@@ -430,7 +457,7 @@ function printClass(ast) {
   for (const r of ast.relations) {
     const fromCard = r.fromCardinality === undefined ? '' : ` ${inQuotes(r.fromCardinality)}`;
     const toCard = r.toCardinality === undefined ? '' : `${inQuotes(r.toCardinality)} `;
-    out.push(`${name(r.from)}${fromCard} ${r.type} ${toCard}${name(r.to)}${r.label ? ' : ' + r.label : ''}`);
+    out.push(`${name(r.from)}${fromCard} ${r.type} ${toCard}${name(r.to)}${r.label ? ' : ' + semicolonsCoded(r.label) : ''}`);
   }
   for (const click of ast.clicks ?? []) out.push(printNodeClick(click));
   return out.join('\n') + '\n';

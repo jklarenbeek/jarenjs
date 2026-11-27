@@ -165,10 +165,11 @@ describe('classDiagram — a nested generic in a class name', () => {
 
   it('still reads one in a member\'s type, a one-level generic and a backtick-quoted name', () => {
     const classes = (/** @type {string} */ source) => ast(source).classes.map((/** @type {any} */ c) => [c.name, c.generic ?? null, c.members.length]);
+    // a backtick-quoted name keeps the first two parts its `~`s split it into, as Mermaid does
     assert.deepEqual(classes('classDiagram\nclass A {\n  +List~List~int~~ items\n}\nB : +List~List~int~~ items\nclass Map~K,V~\nclass `Grid~List~int~~`'),
-      [['A', null, 1], ['B', null, 1], ['Map', 'K,V', 0], ['Grid', 'List~int~', 0]]);
-    // a run of `~` Mermaid reads (as a class `AB`) is no nested generic; it reads as before
-    assert.deepEqual(classes('classDiagram\nclass A~~B~~'), [['A', '~B~', 0]]);
+      [['A', null, 1], ['B', null, 1], ['Map', 'K,V', 0], ['Grid', 'List', 0]]);
+    // a run of `~` Mermaid reads (as a class `AB`) is no nested generic
+    assert.deepEqual(classes('classDiagram\nclass A~~B~~'), [['AB', null, 0]]);
   });
 });
 

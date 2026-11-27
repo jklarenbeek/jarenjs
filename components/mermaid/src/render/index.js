@@ -20,6 +20,7 @@ import { renderStructured, renderPlaceholder, structuredSections } from './misc.
 import { errorVnode } from './error.js';
 import { mermaidErrorText } from '../messages.js';
 import { clickTooltips } from './marks.js';
+import { decodeEntityCodes } from '../label-text.js';
 
 /**
  * Compute the pure `PositionedDiagram` scene for a document (no vnode):
@@ -112,7 +113,7 @@ export function diagramToVnode(docOrSource, options = {}) {
     switch (doc.diagram) {
       case 'flowchart':
         return renderFlowchart(layoutFlowchart(doc.ast, labelLayout(doc.config, options)), theme, hash,
-          undefined, clickTooltips(doc.ast.clicks));
+          undefined, clickTooltips(doc.ast.clicks, decodeEntityCodes));
       case 'state':
         // a state diagram IS a graph: the state adapter feeds the same
         // layout and renderer as flowcharts (MERMAID-FORMAT §6)
