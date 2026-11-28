@@ -399,6 +399,7 @@ export const ja = {
   'query/sort-mixed': "'$sort' の項目はすべて数値か、すべて文字列でなければなりませんが、{got}でした",
   'query/regex-invalid': "'{pattern}' は有効な I-Regexp パターンではありません",
   'query/replace-empty-match': "パターン '{pattern}' が長さ 0 の文字列に一致します",
+  'query/replace-template-invalid': "置換文字列 '{replacement}' に、数字が続かない '$'、または '\\' か '$' が続かない '\\' があります",
   'query/range-bounds': "'$range' の境界は安全な整数でなければなりませんが、{got}でした",
   'query/range-guard': "'$range' の項目数 {count} が、リソース保護の上限である {limit} 個を超えています",
   'query/index-of-item': "'$index-of' には単一の検索項目が必要ですが、{got}でした",

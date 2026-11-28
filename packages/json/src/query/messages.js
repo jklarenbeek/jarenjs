@@ -188,6 +188,7 @@ export const queryMessagesEn = Object.freeze({
   'query/sort-mixed': "'$sort' items must be all numbers or all strings, got {got}",
   'query/regex-invalid': "'{pattern}' is not a valid I-Regexp pattern",
   'query/replace-empty-match': "the pattern '{pattern}' matches the zero-length string",
+  'query/replace-template-invalid': "the replacement '{replacement}' holds a '$' not before a digit or a '\\' not before '\\' or '$'",
   'query/range-bounds': "'$range' bounds must be safe integers, got {got}",
   'query/range-guard': "'$range' of {count} items exceeds the {limit}-item resource guard",
   'query/index-of-item': "'$index-of' takes a single search item, got {got}",

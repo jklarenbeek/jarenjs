@@ -450,14 +450,14 @@
       "additionalProperties": false
     },
     "replacePhrase": {
-      "description": "$replace [input, pattern, replacement]: exactly three operand expressions (I-Regexp has no flags argument, D5).",
+      "description": "$replace [input, pattern, replacement, template?]: three or four operand expressions (I-Regexp has no flags argument, D5); where the fourth is true the replacement is read as an F&O template ($N a capture group, \\\\ and \\$ escapes).",
       "type": "object",
       "properties": {
         "$replace": {
           "type": "array",
           "items": { "$ref": "#/$defs/expression" },
           "minItems": 3,
-          "maxItems": 3
+          "maxItems": 4
         }
       },
       "required": ["$replace"],

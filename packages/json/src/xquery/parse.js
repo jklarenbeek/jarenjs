@@ -866,12 +866,37 @@ const XS_TABLE = Object.freeze(Object.fromEntries(Object.keys(XS_TYPES).map((nam
 //   outside ASCII are refused: whether the dotted capital I (U+0130)
 //   matches `i` depends on which case mapping F&O's reading takes.
 //
-// A pattern computed when the query runs, flags so computed, a pattern
-// that is no I-Regexp after `x`, and a replacement that may hold F&O's
-// capture references (`$1`, `\$`; literal under `q`) are refused by name.
+// A pattern computed when the query runs, flags so computed and a pattern
+// that is no I-Regexp after `x` are refused by name.
 // A letter F&O does not define is F&O's FORX0001, raised when the call is
 // evaluated; the empty sequence for flags is XQuery's type error.
 const REGEX_FLAGS = 'smixq';
+
+// F&O's reading of a `replace` replacement written in the query (under
+// `q` it is literal text): `\\` is `\` and `\$` is `$`, every other
+// character itself, and `$` before a digit a capture reference (`refers`).
+// A `$` not before a digit or a `\` before anything but `\` and `$` is
+// F&O's FORX0004 (`text` null).
+function replacementText(text) {
+  let out = '';
+  let refers = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (ch === '\\' && (next === '\\' || next === '$')) {
+      out += next;
+      i++;
+    }
+    else if (ch === '\\' || (ch === '$' && !/[0-9]/.test(next ?? ''))) {
+      return { text: null, refers };
+    }
+    else {
+      refers ||= ch === '$';
+      out += ch;
+    }
+  }
+  return { text: out, refers };
+}
 
 // the I-Regexp that matches `text` and nothing else: every character an
 // I-Regexp reads as syntax escaped, `^` and `$` included (the translation
@@ -1037,7 +1062,7 @@ function flaggedPattern(pattern, flags) {
 }
 
 // The entry of a function whose regular expression is its second argument
-// and whose flags follow its `arity` arguments; `call(args)` is the
+// and whose flags follow its `arity` arguments; `call(args, flags)` is the
 // engine's call over the arguments without the flags.
 function regexFunction(local, arity, call) {
   return {
@@ -1045,7 +1070,7 @@ function regexFunction(local, arity, call) {
     max: arity + 1,
     emit: (args, refuse) => {
       if (args.length === arity)
-        return call(args);
+        return call(args, '');
       const flagsArg = args[arity];
       if (isEmptySeqExpr(flagsArg))
         return raisedWith(xqueryCode('XPTY0004'), `fn:${local}: the flags are the empty sequence`);
@@ -1058,19 +1083,15 @@ function regexFunction(local, arity, call) {
       }
       const plain = args.slice(0, arity);
       if (flags === '')
-        return call(plain);
+        return call(plain, '');
       const pattern = literalText(args[1]);
       if (pattern === null)
         return refuse(`unsupported construct '${local} flag ${flags[0]} with a computed pattern'`);
       const read = flaggedPattern(pattern, flags);
       if (read.reason !== undefined)
         return refuse(`unsupported construct '${local} flag ${read.flag} ${read.reason}'`);
-      // F&O reads `$1` and `\` in a replacement as references and escapes, but for `q`
-      const replacement = local === 'replace' && !flags.includes('q') ? literalText(args[2]) : '';
-      if (replacement === null || /[$\\]/.test(replacement))
-        return refuse("unsupported construct 'replace flags with a replacement that may hold a capture reference'");
       plain[1] = emitString(read.pattern);
-      return call(plain);
+      return call(plain, flags);
     },
   };
 }
@@ -1090,7 +1111,25 @@ const tokenizeFunction = Object.freeze({
 // `$match` is the anchored RFC 9535 match() - see XQUERY-FRONTEND.md
 const matchesFunction = Object.freeze(regexFunction('matches', 2, (args) => ({ '$search': args })));
 
-const replaceFunction = Object.freeze(regexFunction('replace', 3, (args) => ({ '$replace': args })));
+// fn:replace is `$replace` over the replacement F&O reads, literal under
+// `q`. A replacement written in the query is read by `replacementText`:
+// its text where it names no capture group, else the engine's template
+// reading (a fourth operand `true`), and F&O's FORX0004, raised when the
+// call is evaluated, where F&O refuses it. A computed one is read as the
+// engine's template.
+const replaceFunction = Object.freeze(regexFunction('replace', 3, (args, flags) => {
+  if (flags.includes('q'))
+    return { '$replace': args };
+  const written = literalText(args[2]);
+  if (written === null)
+    return { '$replace': [...args, true] };
+  const read = replacementText(written);
+  if (read.text === null)
+    return raisedWith(xqueryCode('FORX0004'), `fn:replace: invalid replacement '${written}'`);
+  if (read.refers)
+    return { '$replace': [...args, true] };
+  return { '$replace': read.text === written ? args : [args[0], args[1], emitString(read.text)] };
+}));
 
 //#endregion
 

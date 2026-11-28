@@ -1,8 +1,8 @@
 {
  "$comment": "QT3 baseline: every attributed tier-A failure (see benchmark/qt3-README.md). Deviation ids: D1-D7 QUERY-FORMAT.md section 11; E1/E2 engine rules (comparison/no-atomization, sections 8.4-8.10); E3 resource guards (section 8.9); E4 NaN ordering (section 6.6); F1-F7 front-end approximations (XQUERY-FRONTEND.md sections 3 and 4.9). skip: fatal resource exhaustion, never run in-process.",
  "summary": {
-  "pass": 7221,
-  "unsupported-syntax": 15148
+  "pass": 7244,
+  "unsupported-syntax": 15144
  },
  "tests": {
   "ArrayTest-044": {
@@ -380,26 +380,6 @@
    "id": "D5",
    "note": "XSD-regex construct with different or no I-Regexp semantics (captures, back-refs, non-greedy, anchors)"
   },
-  "K-ReplaceFunc-6": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
-  },
-  "K-ReplaceFunc-7": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
-  },
-  "K-ReplaceFunc-8": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
-  },
-  "K-ReplaceFunc-9": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
-  },
   "K-SeqExprCast-78": {
    "status": "deviation",
    "id": "D1",
@@ -754,16 +734,6 @@
    "status": "deviation",
    "id": "D1",
    "note": "no numeric tower: an integral double is an integer, so 1e3 is a valid $range bound"
-  },
-  "K2-ReplaceFunc-1": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
-  },
-  "K2-ReplaceFunc-2": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
   "K2-RoundEvenFunc-13": {
    "status": "deviation",
@@ -2415,11 +2385,6 @@
    "id": "D1",
    "note": "equality is the engine's (equalsJson): NaN equals nothing, where fn:deep-equal treats NaN as equal to itself"
   },
-  "fn-replace-10": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "XSD-regex construct with different or no I-Regexp semantics (captures, back-refs, non-greedy, anchors)"
-  },
   "fn-replace-3": {
    "status": "deviation",
    "id": "D5",
@@ -2429,26 +2394,6 @@
    "status": "deviation",
    "id": "D5",
    "note": "pattern is valid XSD regex but not I-Regexp"
-  },
-  "fn-replace-37": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "XSD-regex construct with different or no I-Regexp semantics (captures, back-refs, non-greedy, anchors)"
-  },
-  "fn-replace-38": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "XSD-regex construct with different or no I-Regexp semantics (captures, back-refs, non-greedy, anchors)"
-  },
-  "fn-replace-39": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "XSD-regex construct with different or no I-Regexp semantics (captures, back-refs, non-greedy, anchors)"
-  },
-  "fn-replace-45": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "XSD-regex construct with different or no I-Regexp semantics (captures, back-refs, non-greedy, anchors)"
   },
   "fn-replace-46": {
    "status": "deviation",
@@ -2460,21 +2405,6 @@
    "id": "D5",
    "note": "pattern is valid XSD regex but not I-Regexp"
   },
-  "fn-replace-48": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "XSD-regex construct with different or no I-Regexp semantics (captures, back-refs, non-greedy, anchors)"
-  },
-  "fn-replace-5": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "XSD-regex construct with different or no I-Regexp semantics (captures, back-refs, non-greedy, anchors)"
-  },
-  "fn-replace-55": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "XSD-regex construct with different or no I-Regexp semantics (captures, back-refs, non-greedy, anchors)"
-  },
   "fn-replace-56": {
    "status": "deviation",
    "id": "D5",
@@ -2485,11 +2415,6 @@
    "id": "D5",
    "note": "pattern is valid XSD regex but not I-Regexp"
   },
-  "fn-replace-59": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "XSD-regex construct with different or no I-Regexp semantics (captures, back-refs, non-greedy, anchors)"
-  },
   "fn-replace-8": {
    "status": "deviation",
    "id": "D5",
@@ -2499,16 +2424,6 @@
    "status": "deviation",
    "id": "D5",
    "note": "pattern is valid XSD regex but not I-Regexp"
-  },
-  "fn-replaceErr-2": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
-  },
-  "fn-replaceErr-3": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
   "fn-round-half-to-even-20": {
    "status": "deviation",
@@ -2765,11 +2680,6 @@
    "id": "D5",
    "note": "pattern is valid XSD regex but not I-Regexp"
   },
-  "fo-test-fn-replace-005": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "XSD-regex construct with different or no I-Regexp semantics (captures, back-refs, non-greedy, anchors)"
-  },
   "fo-test-fn-replace-007": {
    "status": "deviation",
    "id": "D5",
@@ -2834,11 +2744,6 @@
    "status": "deviation",
    "id": "D5",
    "note": "pattern is valid XSD regex but not I-Regexp"
-  },
-  "functx-fn-replace-16": {
-   "status": "deviation",
-   "id": "D5",
-   "note": "XSD-regex construct with different or no I-Regexp semantics (captures, back-refs, non-greedy, anchors)"
   },
   "functx-fn-replace-17": {
    "status": "deviation",

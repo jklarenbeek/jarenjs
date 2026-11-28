@@ -627,6 +627,9 @@ export const CATALOGS = deepFreeze({
     "query/replace-empty-match": [
       "pattern"
     ],
+    "query/replace-template-invalid": [
+      "replacement"
+    ],
     "query/range-bounds": [
       "got"
     ],

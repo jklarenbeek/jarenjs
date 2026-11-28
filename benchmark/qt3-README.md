@@ -128,7 +128,7 @@ Divergences from XDM to keep in mind when triaging:
     `Infinity`/`1e+21`/`-0` → `"0"`), `D2` structural equality (an array item
     compares structurally, never atomized), `D3` EBV of arrays/objects is true,
     `D5` I-Regexp not XSD regex (invalid patterns → `false`, no captures/
-    back-refs/anchors/flags, literal replacements), `D6` 0-based positions
+    back-refs/anchors/flags in a pattern), `D6` 0-based positions
     (`at`/`count` variables).
   - **Engine rules** (QUERY-FORMAT.md §§8.4–8.10): `E1` only numbers order with
     numbers and strings with strings — every other pair (booleans, mixed types)

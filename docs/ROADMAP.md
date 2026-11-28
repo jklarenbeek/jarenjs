@@ -83,14 +83,7 @@ delete it or fix it.
   by text; `m` beside an anchor and a pattern or flags computed when the query
   runs, which need flags on the engine's regex operators; `i` beside the
   letter `i` (whether U+0130 is its case variant) or a character outside ASCII
-  (a case-variant table); a `replace` replacement that may hold F&O's capture
-  references or escapes under flags other than `""` and `q`, which needs
-  `$replace` to read them; and the `declare decimal-format` prolog.
-- [ ] **`fn:replace` reads its replacement as literal text.** F&O reads `$N` as a
-  capture group and `\\`/`\$` as escapes: `replace("abc", "b", "\\")` is `a\c`
-  in XQuery and `a\\c` here (D5). Wanted: the escapes translated where the
-  replacement is literal, `$N` refused by name; with flags, `replace` refuses
-  such a replacement today.
+  (a case-variant table); and the `declare decimal-format` prolog.
 - [ ] **A value that may be a date is told apart only by where it is written.** A
   sequence written as parts of known types (`($x, xs:date(...))`) is read part
   by part by `min`, `max`, a `group by` or `order by` key holding a date

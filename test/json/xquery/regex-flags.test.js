@@ -16,7 +16,7 @@ const emitted = (pattern, flags) => validated(`matches($s, ${literal(pattern)}, 
 describe('XQuery front-end regular-expression flags', () => {
   it('should read no flags as the call without them, for each function', () => {
     assert.deepStrictEqual(validated('matches($s, "a.", "")'), { '$search': ['$s', 'a.'] });
-    assert.deepStrictEqual(validated('replace($s, "a", "$1", "")'), { '$replace': ['$s', 'a', '$$1'] });
+    assert.deepStrictEqual(validated('replace($s, "a", "\\$", "")'), { '$replace': ['$s', 'a', '$$'] });
     assert.deepStrictEqual(validated('fn:tokenize($s, ",", "")'), { '$tokenize': ['$s', ','] });
     assert.deepStrictEqual(values('replace("abracadabra", "bra", "*", "")'), ['a*cada*']);
   });
@@ -128,12 +128,13 @@ describe('XQuery front-end regular-expression flags', () => {
     failsAtRun('tokenize("abc", " ", "x")');
   });
 
-  it('should take a replacement literally under q, and refuse one that may hold a capture reference otherwise', () => {
+  it("should take a replacement literally under q, and read F&O's escapes in it otherwise", () => {
     assert.deepStrictEqual(values('replace("abracadabra", "a", "$1", "q")'), ['$1br$1c$1d$1br$1']);
     assert.deepStrictEqual(values('replace("a/b/c", "/", "\\", "q")'), ['a\\b\\c']);
     assert.deepStrictEqual(values('replace("aB", "b", "$0", "qi")'), ['a$0']);
-    for (const replacement of ['"$1"', '"\\\\"', '$r'])
-      failsWith(`replace($s, "b", ${replacement}, "i")`, "unsupported construct 'replace flags with a replacement that may hold a capture reference'", 0);
+    assert.deepStrictEqual(values('replace("aB", "b", "\\\\", "i")'), ['a\\']);
+    assert.deepStrictEqual(validated('replace($s, "(b)", "$1", "i")'), { '$replace': ['$s', '([bB])', '$$1', true] });
+    assert.deepStrictEqual(validated('replace($s, "b", $r, "i")'), { '$replace': ['$s', '[bB]', '$r', true] });
   });
 
   it('should refuse a pattern or flags computed when the query runs, and a pattern no I-Regexp reads', () => {

@@ -402,6 +402,7 @@ export const pt = {
   'query/sort-mixed': "os itens de '$sort' devem ser todos números ou todos textos, obteve-se {got}",
   'query/regex-invalid': "'{pattern}' não é um padrão I-Regexp válido",
   'query/replace-empty-match': "o padrão '{pattern}' corresponde ao texto de comprimento zero",
+  'query/replace-template-invalid': "a substituição '{replacement}' contém um '$' não seguido de um dígito ou uma '\\' não seguida de '\\' ou '$'",
   'query/range-bounds': "os limites de '$range' devem ser inteiros seguros, obteve-se {got}",
   'query/range-guard': "'$range' de {count} itens excede a salvaguarda de recursos de {limit} itens",
   'query/index-of-item': "'$index-of' aceita um único item de busca, obteve-se {got}",

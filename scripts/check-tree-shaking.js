@@ -399,7 +399,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 261,000 (measured 260936): the string helpers' named refusal of a non-string, which every chain reaches through core's string module (string 338).
 // Raised to 261,600 (measured 261591): semanticKey joining a frozen tree remembered inside a per-call wrapper (object 655).
 // Raised to 261,800 (measured 261742): core's escapePointerToken, isStringWhiteSpace, compareCodePoints, kebabCase and the case predicates refusing a non-string with a named TypeError (string 151).
-if (chainBytes > 261800)
+// Raised to 263,000 (measured 262913): XQuery's fn:replace template read by the query's $replace, capture groups by F&O's rules and a refused template raising its named JQ2001 (operators 1171).
+if (chainBytes > 263000)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -890,7 +891,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,212,700 (measured 1212616): core's escapePointerToken, isStringWhiteSpace, compareCodePoints, kebabCase and the case predicates refusing a non-string with a named TypeError (string 306).
 // Lowered to 1,209,900 (measured 1209853): an entity's calendar members planned, read back, shaped, written and mapped behind the temporal seam, and one JD0017 refusal for the three doors (ddl -843, model -641, introspect -640, plan -236, store -163, query -121, entity -116, temporal-seam +157, minifier renames elsewhere net -160).
 // Raised to 1,210,000 (measured 1209930): a PostgreSQL server out of shared memory refused under a reason of its own, naming the lock-table setting the server's hint names (errors +314).
-if (clientBytes > 1210000)
+// Raised to 1,211,200 (measured 1211124): the query's $replace reading a replacement template, capture groups by F&O's rules and a refused template raising its named JQ2001 (operators 1172).
+if (clientBytes > 1211200)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

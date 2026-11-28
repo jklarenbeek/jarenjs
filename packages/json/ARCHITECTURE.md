@@ -210,7 +210,7 @@ The performance culture is the same as the JSONPath compiler's — specializatio
 - **Existence tests never materialize**: `$exists`/`$empty` over a path compile to `compileExists` (first hit wins), and `$where` over a bare path tests emptiness without building a nodelist.
 - **Early exit at the top of a query**: `query.first()`/`query.exists()`/`query.iterate()` pull the lazy segment chain, so they stop at the first hit instead of materializing the nodelist — O(1) rather than O(document) on a wildcard, filter or descendant segment.
 - **Guard-free arithmetic**: `ONE`-card operands skip the empty-propagation branches.
-- **Literal regexes** (`$match`/`$search`/`$replace`, and path filters) are compiled to `RegExp` at query-compile time; dynamic patterns get a per-callsite monomorphic cache.
+- **Literal regexes** (`$match`/`$search`/`$replace`, and path filters) are compiled to `RegExp` at query-compile time; dynamic patterns get a per-callsite monomorphic cache, and so do the pattern and the F&O replacement template of a `$replace` with its fourth operand.
 - **Barriers snapshot only live slots** (`collectReadSlots` liveness), so a sort key that `$return` ignores is never copied per tuple.
 - **Short-circuiting is universal**: `$and`/`$or`/`$if`/`$coalesce`/quantifiers evaluate nothing after the deciding operand.
 - **Compiled-query caches**: `queryJson` keeps a `WeakMap` for object documents (identity) and a FIFO-512 map for string documents — the same pattern as `queryJSONPath`.

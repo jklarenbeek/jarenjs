@@ -121,6 +121,7 @@ const ARGS_3 = Object.freeze({ kinds: Object.freeze(['expr', 'expr', 'expr']), m
 const ARGS_1_2 = Object.freeze({ kinds: Object.freeze(['expr', 'expr']), min: 1 });
 const ARGS_2_3 = Object.freeze({ kinds: Object.freeze(['expr', 'expr', 'expr']), min: 2 });
 const ARGS_1_3 = Object.freeze({ kinds: Object.freeze(['expr', 'expr', 'expr']), min: 1 });
+const ARGS_3_4 = Object.freeze({ kinds: Object.freeze(['expr', 'expr', 'expr', 'expr']), min: 3 });
 const ARGS_0N = Object.freeze({ kinds: Object.freeze(['expr']), min: 0, variadic: true });
 const ARGS_1N = Object.freeze({ kinds: Object.freeze(['expr']), min: 1, variadic: true });
 // the schema operators $valid/$assert: [expr, schema] (section 8.11)
@@ -774,7 +775,7 @@ function compileReplace(gets, args) {
       if (gre === null || gre === false)
         throw replaceRegexpError(gre, patNode.value, patPath);
       // function replacement: `rep` is inserted literally, no `$`-group
-      // references (I-Regexp guarantees no capture semantics - D5)
+      // references (a fourth operand reads them: compileReplaceTemplate)
       return s.replace(gre, () => rep);
     };
   }
@@ -792,6 +793,105 @@ function compileReplace(gets, args) {
     if (lastGre === null || lastGre === false)
       throw replaceRegexpError(lastGre, p, patPath);
     return s.replace(lastGre, () => rep);
+  };
+}
+
+// the number of capturing groups of the RegExp `gre`
+function groupCount(gre) {
+  return new RegExp(`${gre.source}|`, 'u').exec('').length - 1;
+}
+
+// F&O's fn:replace template read against a pattern of `groups` capturing
+// groups: `\\` and `\$` are `\` and `$`; `$` and the digits after it
+// are a reference, N the number they spell - 0 the whole match, 1 to
+// `groups` that group (the empty string where it did not match), above
+// `groups` but at most 9 the empty string, and above both the last digit
+// is text and the rest is read again (`$23` with 5 groups is group 2, then
+// `3`). Every other character is itself; a `$` not before a digit or a
+// `\` before anything but `\` and `$` is F&O's FORX0004, and makes the
+// result null. Else the result is the replacement function
+// `String.prototype.replace` calls; a template naming no group inserts
+// its text alone.
+function replaceTemplate(rep, groups) {
+  const limit = Math.max(groups, 9);
+  const pieces = [];
+  let text = '';
+  for (let i = 0; i < rep.length; i++) {
+    const ch = rep[i];
+    const next = rep[i + 1];
+    if (ch === '\\') {
+      if (next !== '\\' && next !== '$')
+        return null;
+      text += rep[++i];
+      continue;
+    }
+    if (ch !== '$') {
+      text += ch;
+      continue;
+    }
+    if (!(next >= '0' && next <= '9'))
+      return null;
+    // the longest run of digits whose number is at most `limit`: stripping
+    // the last digit until N <= groups or N <= 9 stops there, and the
+    // digits after it are text, read in one pass
+    let n = 0;
+    let end = i + 1;
+    while (rep[end] >= '0' && rep[end] <= '9' && n * 10 + Number(rep[end]) <= limit) {
+      n = n * 10 + Number(rep[end]);
+      end++;
+    }
+    i = end - 1;
+    if (n <= groups) {
+      if (text !== '')
+        pieces.push(text);
+      pieces.push(n);
+      text = '';
+    }
+  }
+  if (pieces.length === 0)
+    return () => text;
+  if (text !== '')
+    pieces.push(text);
+  return (...match) => {
+    let out = '';
+    for (const piece of pieces)
+      out += typeof piece === 'string' ? piece : (match[piece] ?? '');
+    return out;
+  };
+}
+
+// $replace with a fourth operand: where its EBV is true the replacement is
+// F&O's template (`replaceTemplate`; one F&O refuses is JQ2001), else the
+// literal text of three operands. The pattern and the template are read
+// once per distinct value, never per call.
+function compileReplaceTemplate(gets, args) {
+  const [sGet, patGet, repGet, templateGet] = gets;
+  const [sPath, patPath, repPath, templatePath] = args.map((a) => a.docPath);
+  let lastPattern = null;
+  let lastGre = null;
+  let lastRep = null;
+  let lastReplacer = null;
+  return (f) => {
+    const s = stringArg(sGet(f), sPath);
+    const p = stringArg(patGet(f), patPath);
+    const rep = stringArg(repGet(f), repPath);
+    const template = ebv(templateGet(f), templatePath);
+    if (p !== lastPattern) {
+      lastPattern = p;
+      lastGre = replaceRegexp(p);
+      lastRep = null;
+    }
+    if (lastGre === null || lastGre === false)
+      throw replaceRegexpError(lastGre, p, patPath);
+    if (!template)
+      return s.replace(lastGre, () => rep);
+    if (rep !== lastRep) {
+      lastRep = rep;
+      lastReplacer = replaceTemplate(rep, groupCount(lastGre));
+    }
+    if (lastReplacer === null)
+      throw runtimeError('JQ2001', 'query/replace-template-invalid', { replacement: rep }, repPath);
+    return s.replace(lastGre, lastReplacer);
   };
 }
 
@@ -1645,10 +1745,10 @@ export const OPERATORS = Object.freeze({
   '$search': regexTestEntry(false),
 
   '$replace': {
-    params: ARGS_3,
+    params: ARGS_3_4,
     result: RESULT_ONE,
     resultType: RT_STRING,
-    compile: compileReplace,
+    compile: (gets, args) => (gets.length === 4 ? compileReplaceTemplate(gets, args) : compileReplace(gets, args)),
   },
 
   //#endregion

@@ -1060,14 +1060,14 @@ single items.
 | `$normalize-space` | `{"$normalize-space": e}` | Strips leading and trailing whitespace (space, tab, CR, LF) and collapses every internal whitespace run to one space (`fn:normalize-space`). |
 | `$match` | `[input, pattern]` | `true` iff *pattern* matches **all** of *input* (anchored, the RFC 9535 `match()` behavior). |
 | `$search` | `[input, pattern]` | `true` iff *pattern* matches a substring of *input* (RFC 9535 `search()`, XQuery `fn:matches`). |
-| `$replace` | `[input, pattern, replacement]` (exactly 3) | Replaces every non-overlapping match of *pattern* in *input* with *replacement* (`fn:replace`). *replacement* is inserted **literally** — there are no capture-group references (I-Regexp guarantees no capture semantics). |
+| `$replace` | `[input, pattern, replacement, template?]` (3–4) | Replaces every non-overlapping match of *pattern* in *input* with *replacement* (`fn:replace`). *replacement* is inserted **literally**, unless *template*'s EBV is `true`: then it is read as F&O's `fn:replace` replacement (below). |
 | `$tokenize` | `[input, pattern]` | The pieces of *input* between the non-overlapping matches of *pattern*, leftmost first, as a sequence of strings: a match at the start or the end leaves an empty piece there, and an empty *input* has no pieces whatever the pattern (`fn:tokenize#2`: `{"$tokenize": ["a,,b", ","]}` is `"a"`, `""`, `"b"`). *pattern* MUST be a single string — the empty sequence too is `JQ2001`. |
 | `$format-number` | `[value, picture, format?]` (2–3) | *value* spelled through an F&O picture under a decimal format (below; `fn:format-number`). |
 | `$quantity` | `[text, unit, format?]` (2–3) | The first measured quantity in *text* of *unit*'s dimension, as a number in *unit*; none is the empty sequence (below). |
 
 Regular expression operators use **I-Regexp (RFC 9485)** syntax — the same
 interoperable regex dialect RFC 9535 uses — not XSD regular expressions
-(**D5**). I-Regexp has no flags argument, hence `$replace`'s fixed arity 3.
+(**D5**). I-Regexp has no flags argument, so `$replace` has none either.
 A *pattern* that is not a syntactically valid I-Regexp makes `$match` and
 `$search` evaluate to `false` (the RFC 9535 rule for nonconforming
 patterns), but is runtime error `JQ2001` in `$replace` and `$tokenize`
@@ -1076,6 +1076,22 @@ silently do nothing). A `$replace` or `$tokenize` *pattern* that matches
 the zero-length string (e.g. `"a*"`) is also `JQ2001` (F&O
 `err:FORX0003`). Pattern *type* errors remain `JQ2001` in all four
 operators per the string-parameter rule above.
+
+**The replacement template.** With a fourth operand whose EBV is `true`,
+`$replace` reads *replacement* as F&O's `fn:replace` does without the `q`
+flag: `\\` is a backslash, `\$` a dollar sign, and `$` followed by digits a
+reference to the number N they spell, S being the pattern's capturing
+groups. `$0` is the whole match; for 1 ≤ N ≤ S it is group N (the empty
+string where that group did not match); for S < N ≤ 9 the empty string;
+otherwise the last digit is text and the rest is read again (`$23` with 5
+groups is group 2, then `3`). Every other character is itself. A `$` not
+before a digit or a `\` before anything but `\` and `$` is runtime error
+`JQ2001` when the call runs (F&O's `err:FORX0004`; message id
+`query/replace-template-invalid`, its parameter the replacement). The
+template is read once per pattern and replacement, never per call:
+`{"$replace": ["abracadabra", "a(.)", "a$1$1", true]}` is
+`"abbraccaddabbra"`. Without the fourth operand, or where it is `false`,
+the replacement is the literal text.
 
 `$substring-before`, `$substring-after`, `$translate` and `$tokenize` read
 their text once, so their cost grows with the text's length, not its
@@ -2271,7 +2287,7 @@ a query error raised inside a formula keeps its own message, a reference in
 
 | Code | Condition | XQuery analogue (non-normative) |
 |---|---|---|
-| `JQ2001` | Runtime type error (non-number arithmetic operand, bad cast, ...) | XPTY0004 |
+| `JQ2001` | Runtime type error (non-number arithmetic operand, bad cast, ...), and a `$replace`/`$tokenize` pattern or a `$replace` template its operator refuses (§8.7) | XPTY0004; FORX0002–FORX0004 |
 | `JQ2002` | `$idiv`/`$mod` by zero (§8.5) | FOAR0001 |
 | `JQ2003` | EBV of a multi-item sequence (§2.2) | FORG0006 |
 | `JQ2004` | `$map` key expression not a single string (§3.5.2) | XPTY0004 |

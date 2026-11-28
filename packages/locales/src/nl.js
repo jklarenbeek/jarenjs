@@ -403,6 +403,7 @@ export const nl = {
   'query/sort-mixed': "de items van '$sort' moeten allemaal getallen of allemaal strings zijn, {got} gekregen",
   'query/regex-invalid': "'{pattern}' is geen geldig I-Regexp-patroon",
   'query/replace-empty-match': "het patroon '{pattern}' komt overeen met de string van lengte nul",
+  'query/replace-template-invalid': "de vervanging '{replacement}' bevat een '$' zonder cijfer erna of een '\\' zonder '\\' of '$' erna",
   'query/range-bounds': "de grenzen van '$range' moeten veilige gehele getallen zijn, {got} gekregen",
   'query/range-guard': "'$range' met {count} items overschrijdt de resourcelimiet van {limit} items",
   'query/index-of-item': "'$index-of' verwacht één zoekitem, {got} gekregen",

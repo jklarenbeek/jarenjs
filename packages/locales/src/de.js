@@ -404,6 +404,7 @@ export const de = {
   'query/sort-mixed': "die Elemente von '$sort' müssen alle Zahlen oder alle Zeichenketten sein, erhalten: {got}",
   'query/regex-invalid': "'{pattern}' ist kein gültiges I-Regexp-Muster",
   'query/replace-empty-match': "das Muster '{pattern}' passt auf die Zeichenkette der Länge null",
+  'query/replace-template-invalid': "die Ersetzung '{replacement}' enthält ein '$', auf das keine Ziffer folgt, oder ein '\\', auf das weder '\\' noch '$' folgt",
   'query/range-bounds': "die Grenzen von '$range' müssen sichere ganze Zahlen sein, erhalten: {got}",
   'query/range-guard': "'$range' mit {count} Elementen überschreitet das Ressourcenlimit von {limit} Elementen",
   'query/index-of-item': "'$index-of' erwartet ein einzelnes Suchelement, erhalten: {got}",
