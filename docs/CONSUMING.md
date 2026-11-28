@@ -155,7 +155,7 @@ the table and stale in the paragraph that cites it:
 
 | Subpath | Bundle | What rides along |
 |---|---:|---|
-| `.` | <!--fact:bundle.chain.kb-->262<!--/fact--> kB | the query engine — a chain's document has to run somewhere |
+| `.` | <!--fact:bundle.chain.kb-->263<!--/fact--> kB | the query engine — a chain's document has to run somewhere |
 | `./schema` | <!--fact:bundle.schema.kb-->48<!--/fact--> kB | the builders and the recording proxy `check()` captures through |
 | `./model` | <!--fact:bundle.model.kb-->60<!--/fact--> kB | the schema pen it subclasses |
 | `./jslt` | <!--fact:bundle.jslt.kb-->29<!--/fact--> kB | the body capture; of the schema pen, only the builder brand |
@@ -169,7 +169,7 @@ the table and stale in the paragraph that cites it:
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->26<!--/fact--> kB | text template capture; no renderer |
 | `./project` | <!--fact:bundle.project.kb-->5<!--/fact--> kB | project files; no Studio engine |
 | `./charts` | <!--fact:bundle.charts.kb-->7<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->1210<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->1211<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both
@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->746 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->30 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -312,7 +312,7 @@ included.
 | `./query/calendar` | 36 | core 28, json 8 | 2.0 |
 | `./rules` | 90 | core 62, json 28 | 4.0 |
 | `./write` | 20 | core 11, json 9 | 1.1 |
-| `./xquery` | 87 | core 62, json 25 | 4.2 |
+| `./xquery` | 87 | core 62, json 25 | 4.3 |
 <!--/fact-->
 
 **`@jarenjs/validate`**
