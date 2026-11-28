@@ -893,7 +893,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,210,000 (measured 1209930): a PostgreSQL server out of shared memory refused under a reason of its own, naming the lock-table setting the server's hint names (errors +314).
 // Raised to 1,211,200 (measured 1211124): the query's $replace reading a replacement template, capture groups by F&O's rules and a refused template raising its named JQ2001 (operators 1172).
 // Raised to 1,211,400 (measured 1211320): PostgreSQL's status and acceptance verifying every table the store owns as the open does (store 196).
-if (clientBytes > 1211400)
+// Raised to 1,212,300 (measured 1212244): introspect naming each enum or interval CHECK the store's model does not declare as an unmapped constraint (introspect, store 924).
+if (clientBytes > 1212300)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

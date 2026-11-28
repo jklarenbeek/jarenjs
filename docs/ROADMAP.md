@@ -347,15 +347,15 @@ delete it or fix it.
   link), so the rows read grow with the square of the chain while a dry run
   stays flat. Wanted: a guard that notices an earlier row's edit without
   reading it, before the next link's steps run.
-- [ ] **A CHECK the model does not declare is read back as a declaration where
-  the format has one.** On PostgreSQL a CHECK of someone else's opens, still
-  refuses the writes it governs (`JD2005`) and is an `unmapped-constraint`
-  line of `introspect()` on a collection, an entity and a join table alike,
-  where SQLite's CREATE-text comparison answers `JD0002`; but one of a shape
-  the model format declares — an enum over an entity column, an interval over
-  a collection — is read into `introspect()`'s derived model rather than
-  reported, and `jaren-db plan --store` reaches SQLite alone. Wanted:
-  `store.introspect()` naming each CHECK its own model does not declare.
+- [ ] **jaren-db reaches SQLite alone.** Every `jaren-db` command that reads a
+  `--store` (`plan --store`, `status`, `check`, `history`, `introspect`,
+  `apply`, `adopt-history`) opens it with the Node SQLite driver, and `plan`
+  renders for the SQLite dialect, so a PostgreSQL store's shape — an
+  undeclared CHECK among it, which its open keeps apart from the table and
+  `store.introspect()` reports as `unmapped-constraint` (MODEL-FORMAT §1) — is
+  read only through the API (`migrationStatus`, `store.introspect()`). Wanted:
+  the CLI reaching a PostgreSQL store with the host's client, under the
+  zero-dependency rule.
 - [ ] **Read the store's own rule programs back on PostgreSQL.** On SQLite,
   introspect({ triggers: sqliteTriggers }) reads a store-owned table's
   _jaren_rule_* programs back as the rules that plan them (MODEL-FORMAT

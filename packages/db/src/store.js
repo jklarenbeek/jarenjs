@@ -64,7 +64,7 @@ import { normalizeEventTime } from './live-time.js';
 import { createJobEngine, JOB_DEFAULTS, checkStopOptions } from './jobs.js';
 import { isJobSchedules } from './job-schedules.js';
 import { createOwnerLease, OWNER_LEASE_DEFAULT_MS, OWNER_LEASE_MIN_MS } from './owner.js';
-import { introspectModel, namespaceSchema } from './introspect.js';
+import { introspectDeclared, namespaceSchema } from './introspect.js';
 import { catalogCovers, catalogRows, withNamespaceCatalog } from './namespace-catalog.js';
 import { collectEntityRoots, entityRoot, intervalBounds, keyHoldingColumns } from './plan.js';
 import {
@@ -1268,6 +1268,35 @@ export function verifyModelTables(connection, { collections, plans, entities, en
   const createsNothing = 'a verification';
   return chain(ensureShape(connection, collections, plans, createsNothing, refuse, absentIsOpen), () =>
     ensureEntityShape(connection, entityPlans, entities, createsNothing, refuse, absentIsOpen));
+}
+
+/**
+ * The CHECKs a store's own model declares on the tables it owns, as its
+ * introspection compares them (`introspect.js` `introspectDeclared`): each
+ * collection's declared intervals, by the CHECK names they plan, and each
+ * entity column's enum values, in the spelling the CHECK stores (a boolean
+ * as its integer). A physical layout's table is the application's, and has
+ * no entry: its CHECKs read as the database holds them.
+ * @param {Map<string, any>} plans - the collections' plans
+ * @param {Map<string, any>} entityPlans - the entities' and join tables' plans
+ * @param {any} mapping - the entity mapping, or `null` for a model without entities
+ * @returns {{ collections: Map<string, Set<string>>, entities: Map<string, Map<string, readonly unknown[]>> }}
+ */
+function declaredChecksOf(plans, entityPlans, mapping) {
+  /** @type {Map<string, Set<string>>} */
+  const collections = new Map();
+  for (const plan of plans.values())
+    collections.set(plan.table, new Set((plan.intervals ?? []).map((/** @type {any} */ interval) => interval.constraint)));
+  /** @type {Map<string, Map<string, readonly unknown[]>>} */
+  const entities = new Map();
+  for (const [name, entity] of Object.entries(mapping?.entities ?? {})) {
+    const plan = entityPlans.get(name);
+    if (plan === undefined || plan.physical !== undefined) continue;
+    entities.set(plan.table, new Map(entity.columns.filter((/** @type {any} */ column) => column.check !== undefined)
+      .map((/** @type {any} */ column) => [column.name,
+        column.check.map((/** @type {unknown} */ value) => (typeof value === 'boolean' ? Number(value) : value))])));
+  }
+  return { collections, entities };
 }
 
 /**
@@ -5015,7 +5044,7 @@ export function openStore(model, options) {
             // derived model is an ANSWER, and applying it is the
             // migration planner's job and the operator's decision
             introspect: lift((introspectOptions) =>
-              gated(() => introspectModel(connection, withTemporals(introspectOptions)))),
+              gated(() => introspectDeclared(connection, withTemporals(introspectOptions), declaredChecksOf(plans, entityPlans, mapping)))),
             // the maintenance surface: each operation holds the store
             // gate for its own extent, so a checkpoint can never
             // interleave an in-flight write; none takes a transaction
@@ -5650,7 +5679,8 @@ export function openStore(model, options) {
               // the transaction's own connection: the root's introspect
               // takes the gate, which from inside the transaction is a
               // wait for itself (JD0012 at queueTimeout, then a rollback)
-              introspect: lift((/** @type {any} */ introspectOptions) => runScoped(identity, () => introspectModel(connection, withTemporals(introspectOptions)))),
+              introspect: lift((/** @type {any} */ introspectOptions) => runScoped(identity,
+                () => introspectDeclared(connection, withTemporals(introspectOptions), declaredChecksOf(plans, entityPlans, mapping)))),
               dataVersion: lift(() => runScoped(identity, () => readDataVersion())),
               // a transaction view does not own the store lifetime: the
               // member is ABSENT rather than a second way to close the

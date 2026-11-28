@@ -248,7 +248,9 @@ another path.
 `store.introspect(options)` — and `introspectModel(connection, options)`
 under it — reads a live database's catalog and derives the
 `jaren-model` document that would produce it, beside a report of
-everything it could not.
+everything it could not. The store reads its own tables against the model
+it opened with (`introspectDeclared`, the CHECKs its plans declare): a CHECK
+of a declarable shape that model does not declare is reported, not derived.
 
 It is **read-only**, and a statement trace is what says so: every
 statement it issues begins `SELECT` (or `PRAGMA`, on SQLite). A derived
@@ -267,7 +269,7 @@ stable code, an object and a detail, sorted, once:
 | `unmapped-table` | a table with neither a document column nor a key |
 | `unmapped-column` | a generated column whose expression is not a member path this dialect wrote |
 | `unmapped-index` | an index over an expression, a predicate the condition reader does not read back exactly, or a column no member path explains |
-| `unmapped-constraint` | a CHECK that is not a complete scalar enum of a mapped entity column |
+| `unmapped-constraint` | a CHECK that is not a complete scalar enum of a mapped entity column, or one the store's own model does not declare |
 | `unmapped-type` | a column type no schema type maps back from — the member is derived untyped, or, over a PostgreSQL `jsonb` column with indexes beside it for scalar kinds, as `['object', 'array', ...those kinds, 'null']` |
 | `lossy-type` | a column type two schema types are stored as (SQLite `INTEGER`; PostgreSQL `numeric`, `smallint`) — the derived type is a choice |
 | `ambiguous-relation` | a foreign key says which entity it points at; which side declared the edge, whether the other holds many, and under what name, is not in the shape — the relation is declared on the parent (the child, where the key is unique) and reported here |

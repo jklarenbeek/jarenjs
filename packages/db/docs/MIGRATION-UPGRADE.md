@@ -1392,6 +1392,18 @@ value the store did not honor now refuse by code, before any statement:
   an applied step are history and are not held to it: a history that carries such
   a column still plans (`planPhysicalMigration`) and applies the migration that
   retypes the property, whose target model is the declaration.
+- On PostgreSQL, `store.introspect()` read a CHECK added behind the store's
+  back that spells an enum over an entity column, or an interval over a
+  collection that declares none, into the derived model: a column gained an
+  `enum` (several CHECKs of one column read as their intersection) and a
+  collection an `intervals` entry, so `planModelMigration` from the derived
+  model to the store's model planned a step for a declaration nobody made
+  (an `ALTER TABLE … DROP CONSTRAINT` of the interval's CHECK). Each such
+  CHECK its model does not declare is now an `unmapped-constraint` row (`a
+  CHECK the store's own model does not declare`), and the derived model is the
+  one the store's model gives (MODEL-FORMAT §1); `strict: true` refuses it. A
+  caller that wants the database's own reading calls `introspectModel` over a
+  connection, which has no model and reads it as before.
 
 ### Allocated entity keys on PostgreSQL
 

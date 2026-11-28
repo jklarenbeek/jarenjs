@@ -58,7 +58,7 @@ export const INTROSPECT_CODES = Object.freeze({
   'unmapped-type': 'a column type no schema type maps back from',
   'unmapped-index': 'an index over something the model cannot name — an expression, '
     + 'a partial predicate the condition reader does not read back exactly, or a column that is not mapped',
-  'unmapped-constraint': 'a CHECK or a constraint the model has no vocabulary for',
+  'unmapped-constraint': 'a CHECK or a constraint the model has no vocabulary for, or one the store\'s own model does not declare',
   'lossy-type': 'two schema types share this column type, so the derived one is a choice',
   'key-source': 'the key column cannot say which document member filled it',
   'document-members': 'the document\'s unindexed members are not in the physical shape',
@@ -67,6 +67,9 @@ export const INTROSPECT_CODES = Object.freeze({
   'trigger-rule': 'an application trigger read back as a declared database rule: the rule refuses with its own '
     + 'message, and the database holds the trigger, not the rule\'s program',
 });
+
+/** The detail of a CHECK of a store's own table that its model does not declare. */
+const NOT_DECLARED = 'a CHECK the store\'s own model does not declare: it is not read back as a declaration';
 
 /**
  * One report row.
@@ -542,9 +545,12 @@ const SCALAR_KIND_TYPES = KIND_TYPES.slice(0, 3);
  * @param {{ type: string, name: string, owner: string, sql: string | null }[]} objects - the schema's objects
  * @param {Set<string>} owned - collects the triggers the collection's container keys own
  * @param {any} temporalHooks - the temporal seam's hooks (`@jarenjs/db/temporals`), or `null`
+ * @param {Set<string> | undefined} declaredChecks - the names of the CHECKs the
+ *   store's own model declares on the table (its intervals'), when the store
+ *   reads its own table; `undefined` reads every interval CHECK as a declaration
  * @returns {any}
  */
-function deriveCollection(dialect, table, report, keys, functionNames, objects, owned, temporalHooks) {
+function deriveCollection(dialect, table, report, keys, functionNames, objects, owned, temporalHooks, declaredChecks) {
   const identity = dialect.identityColumn?.name;
   const byName = new Map(table.columns.map((column) => [column.name, column]));
   const expressions = new Map(table.generated.map((entry) => [entry.name, entry.expression]));
@@ -703,7 +709,8 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
   // a declared interval: the one CHECK, under the name the store gives it,
   // over the generated columns of its span's two bounds, each covered by a
   // plain index — read back into the declaration, which types the bounds;
-  // every other CHECK is a loss
+  // every other CHECK is a loss, and so is one the store's own model does
+  // not declare, read by the store's introspection
   const intervals = [];
   /** @type {{ span: import('./dialect.js').JsonPathSegment[], start: string, end: string }[]} */
   const spans = [];
@@ -712,6 +719,10 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
     const interval = intervalOf(dialect, check, paths, indexedColumns);
     if (typeof interval === 'string') {
       report(loss('unmapped-constraint', `${table.name}.${check.name}`, interval));
+      continue;
+    }
+    if (declaredChecks !== undefined && !declaredChecks.has(check.name)) {
+      report(loss('unmapped-constraint', `${table.name}.${check.name}`, NOT_DECLARED));
       continue;
     }
     intervals.push(interval.declaration);
@@ -921,12 +932,16 @@ function indexName(table, physical) {
  *   foreign key: its edge is declared once every entity is derived
  * @param {EntityExpressions} expressions - the host's declarations, by which an
  *   index over an expression reads back
- * @param {any} [temporalHooks] - the temporal seam's hooks (`@jarenjs/db/temporals`),
+ * @param {any} temporalHooks - the temporal seam's hooks (`@jarenjs/db/temporals`),
  *   by which a declared calendar member's CHECK and key columns read back; `null`
  *   without it, when they are losses
+ * @param {Map<string, readonly unknown[]> | undefined} declaredEnums - each
+ *   column's enum values as the store's own model declares them on the table,
+ *   in their stored spelling, when the store reads its own table; `undefined`
+ *   reads every complete scalar enum CHECK as a declaration
  * @returns {any}
  */
-function deriveEntity(dialect, table, report, edges, expressions, temporalHooks = null) {
+function deriveEntity(dialect, table, report, edges, expressions, temporalHooks, declaredEnums) {
   const identity = dialect.identityColumn?.name;
   const primaryKey = new Set(table.primaryKey ?? []);
   const fkByColumn = new Map(table.foreignKeys.map((fk) => [fk.column, fk]));
@@ -1003,6 +1018,8 @@ function deriveEntity(dialect, table, report, edges, expressions, temporalHooks 
     setObjectMember(properties, column.name, property);
   }
   for (const [name, property] of temporal?.members() ?? []) setObjectMember(properties, name, property);
+  /** The columns whose own enum CHECK was read. @type {Set<string>} */
+  const claimed = new Set();
   for (const check of table.checks) {
     if (temporal?.checks.has(check.name)) continue;
     const property = Object.hasOwn(properties, check.column) ? properties[check.column] : undefined;
@@ -1020,6 +1037,17 @@ function deriveEntity(dialect, table, report, edges, expressions, temporalHooks 
       report(loss('unmapped-constraint', `${table.name}.${check.name}`,
         'the CHECK is not a complete scalar enum of the mapped column type'));
       continue;
+    }
+    // the store's own model gives a column at most one enum CHECK, of the
+    // values it declares; any other is not the model's, however it reads
+    if (declaredEnums !== undefined) {
+      const own = declaredEnums.get(check.column);
+      if (own === undefined || claimed.has(check.column) || own.length !== check.values.length
+        || !own.every((value) => check.values.includes(value))) {
+        report(loss('unmapped-constraint', `${table.name}.${check.name}`, NOT_DECLARED));
+        continue;
+      }
+      claimed.add(check.column);
     }
     // Several enum CHECKs constrain the same column by intersection.
     const values = property.enum === undefined ? check.values
@@ -1396,6 +1424,23 @@ function looksLikeJoinTable(dialect, table) {
  * @returns {any} value-or-promise of `{ model, report }`
  */
 export function introspectModel(connection, options = undefined) {
+  return introspectDeclared(connection, options, null);
+}
+
+/**
+ * {@link introspectModel} for a store reading its own tables (`store.introspect()`):
+ * a CHECK of a shape the format declares (a collection's interval, an entity
+ * column's enum) on a table the store's model owns is read back as a
+ * declaration only where that model declares it, and is otherwise an
+ * `unmapped-constraint` row. A table the model does not own reads as without it.
+ * @param {any} connection
+ * @param {any} options - {@link introspectModel}'s
+ * @param {{ collections: Map<string, Set<string>>, entities: Map<string, Map<string, readonly unknown[]>> } | null} declared -
+ *   by table: a collection's declared interval CHECK names, an entity's
+ *   declared enum values by column (stored spelling); `null` for none
+ * @returns {any} value-or-promise of `{ model, report, inventory }`
+ */
+export function introspectDeclared(connection, options, declared) {
   readIntrospectOptions(options);
   const dialect = connection.dialect;
   // the engine's function name back to the model's: the registration
@@ -1459,7 +1504,7 @@ export function introspectModel(connection, options = undefined) {
       }
       if (looksLikeCollection(dialect, table, options?.temporals?.hooks ?? null)) {
         setObjectMember(collections, table.name, deriveCollection(dialect, table, add, options?.keys, byName, schema.objects, owned,
-          options?.temporals?.hooks ?? null));
+          options?.temporals?.hooks ?? null, declared?.collections.get(table.name)));
         continue;
       }
       const hasDocument = table.columns.some((column) => column.name === DOC_COLUMN);
@@ -1471,7 +1516,7 @@ export function introspectModel(connection, options = undefined) {
         continue;
       }
       setObjectMember(entities, table.name, deriveEntity(dialect, table, add, edges, { byName, declarations: options?.expressions },
-        options?.temporals?.hooks ?? null));
+        options?.temporals?.hooks ?? null, declared?.entities.get(table.name)));
       reportUnguardedNumbers(dialect, table, add);
     }
     declareEdges(dialect, entities, schema.tables, rules === null ? edges : edges.filter((edge) => rules.keepsEdge(edge, add)), add);

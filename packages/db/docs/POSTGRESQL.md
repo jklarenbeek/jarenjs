@@ -621,16 +621,23 @@ the open reads as `bigint`.
 
 A CHECK the model does not declare — one an operator added by hand, or
 another writer's — is not refused at open on PostgreSQL, which keeps each
-CHECK apart from the table and verifies only the ones the model declares (a
-declared interval's, a temporal member's): it still governs writes, which it
-refuses `JD2005` with `class: 'constraint'`, and `introspect()` reports it as
-`unmapped-constraint`, on a collection, an entity and a join table alike — the
-CHECKs the store gives its own tables (the `NaN` CHECK, the key CHECK, an
-enum's, an interval's) are none of them. SQLite keeps a table's CHECKs in its
-CREATE text, which its open compares whole, so there the same table is
-`JD0002` at open (and `jaren-db plan --store` names the CREATE text that
-differs), and `introspect()` over the database reports the CHECK as
-PostgreSQL's does.
+CHECK apart from the table and verifies the ones the model declares (a
+declared interval's, a temporal member's); only a collection that declares
+an interval or a temporal member refuses every other CHECK at open
+(`JD0002`), and an entity that declares a temporal member refuses a
+`<name>_temporal` CHECK none of its members declares. It still governs writes, which it refuses `JD2005` with `class:
+'constraint'`, and the store's `introspect()` reports it as
+`unmapped-constraint`, on a collection, an entity and a join table alike,
+whatever it spells — one that reads as an enum over an entity column or an
+interval over a collection is a line too, not a declaration of the derived
+model ([MODEL-FORMAT](MODEL-FORMAT.md) §1) — while the CHECKs the store
+gives its own tables (the `NaN` CHECK, the key CHECK, an enum's, an
+interval's) are none of them. SQLite keeps a table's CHECKs in its CREATE
+text, which its open compares whole, so there the same table is `JD0002` at
+open (and `jaren-db plan --store` names the CREATE text that differs), and
+`introspectModel` over the database, which has no model, reports the CHECK
+as PostgreSQL's store does, except one that spells an enum or an interval,
+which it reads as that declaration.
 
 A collection member the schema types `number` or `integer` is read typed: its
 generated column, and the `CASE` a statement reads an unindexed one by, hold a

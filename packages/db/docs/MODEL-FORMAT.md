@@ -39,7 +39,16 @@ written otherwise is reported as its own loss (`unmapped-object`,
 A collection's declared interval comes back from its CHECK as the `intervals`
 entry that declared it, the span typed an object of two required `integer`
 bounds, which is no loss; a CHECK of another shape or name, or one added
-`NOT VALID`, is `unmapped-constraint`. An entity's number column's
+`NOT VALID`, is `unmapped-constraint`. A store's own `introspect()` (a
+transaction's too) reads the tables its model owns against that model: an
+interval CHECK, or an entity column's enum CHECK, that the model does not
+declare there — on PostgreSQL, whose open keeps a CHECK apart from the table
+(POSTGRESQL.md), one added behind the store's back — is `unmapped-constraint`
+(`a CHECK the store's own model does not declare`), and a column keeps the
+one enum CHECK of exactly the values its model declares. Without a model
+(`introspectModel(connection)`), and on a table the model does not own, each
+reads as the declaration it spells, several enum CHECKs of one column as
+their intersection. An entity's number column's
 `CHECK (column <> 'NaN')` on PostgreSQL (§9.3) is the store's own, validated,
 and declares nothing beyond the column's type: no loss, nothing in the derived
 schema. A number column of an entity or a join table whose type holds a `NaN`

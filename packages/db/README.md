@@ -1500,7 +1500,13 @@ its table comes back as an entity with loss rows — as before. CHECKs outside t
 complete scalar enum grammar, including NULL lists, collation-dependent
 equality and unproven type conversions, and an interval CHECK of another
 shape or name, or one added `NOT VALID`, remain
-`unmapped-constraint`.
+`unmapped-constraint`. A store's own `introspect()` reads its tables against
+the model it opened with: on a table that model owns, an enum or interval
+CHECK it does not declare — one added behind the store's back on PostgreSQL,
+whose open keeps such a CHECK apart from the table — is `unmapped-constraint`
+as well, never a declaration folded into the derived model.
+`introspectModel(connection)`, which has no model, and a table the store's
+model does not own read each such CHECK as the declaration it spells.
 
 The derived model reproduces the physical shape — tables, keys, mapped
 columns, foreign keys and the indexes above — not the schema that made it:
