@@ -1571,11 +1571,19 @@ their declared columns and invariants; complete application schema acceptance
 requires a reviewed `physicalTarget`, including retained programs. The
 shadow and primary use the same selected acceptance rule before publication.
 PostgreSQL keeps no CREATE text to compare, so there the acceptance verifies
-each many-to-many join table the database holds as the next open verifies it:
-a link that would leave one the open refuses (`JD0002`) — a rename an earlier
-release planned, which leaves the index over the second key column under the
-table's old name — fails `JD0023` before it commits, as SQLite's comparison
-fails it, and names the repair (plan the link again with this release).
+every table the store owns as the next open verifies it, the reading
+`migrationStatus` gives (§12): a link that would leave one the open refuses
+(`JD0002`) — an entity's index, column or foreign key a `sql` step dropped or
+changed, a collection's, a rule program no release planned, a trigger the
+model does not declare — fails `JD0023` before it commits (`the migrated shape does not equal the target model's: <difference>;
+the next open would refuse the table (JD0002), so nothing was changed`), as
+SQLite's comparison fails it, and the link rolls back whole; a table the
+database does not hold is the next open's to create, as it was. A join table's
+index a rename an earlier release planned left under the table's old name is
+named with its repair (plan the link again with this release). The
+acceptance reads each catalog once for every table, so its queries do not
+grow with the tables the store owns (only the pages of a catalog's rows do);
+it reads no physical layout, which its own verification reads.
 
 **UDF-expression indexes.** An index over a registered deterministic
 function is invisible to any connection that has not registered the
@@ -1599,6 +1607,7 @@ jaren-db apply    --store <db> --baseline <model> --migrations <dir> [--model <m
 jaren-db check    --model <model> --store <db> [--migrations <dir>] [--snapshot <file>]
 jaren-db shape    --model <model>
 jaren-db history  --store <db> [--out <observation.json>]
+jaren-db introspect --store <db> [--triggers] [--out <model.json>]
 jaren-db adopt-history --store <db> --migrations <applied-prefix-dir> --observed <observation.json>
                        --model <model> [--physical-target <json>] [--yes]
 jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place --yes | --check)
@@ -1609,15 +1618,15 @@ jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place
 
 - **A flag that takes a value is given one.** `--store` as the last word,
   or followed by another `--flag`, is refused by name (`jaren-db: --store
-  needs a value`, exit 1; exit 2 for `documents`, `history` and
-  `adopt-history`) before any file is read or written — the next flag is
+  needs a value`, exit 1; exit 2 for `documents`, `history`,
+  `adopt-history` and `introspect`) before any file is read or written — the next flag is
   never taken for its value, and a missing value is never read as an absent
   option.
 - **A flag is the command's own.** Each command reads the flags its synopsis
   lists (`status` and `check` also accept `--baseline`, which they do not
   use); a flag only another command reads is refused by name (`jaren-db:
-  snapshot does not take '--out'`, exit 1; exit 2 for `documents`, `history`
-  and `adopt-history`), never taken and ignored.
+  snapshot does not take '--out'`, exit 1; exit 2 for `documents`, `history`,
+  `adopt-history` and `introspect`), never taken and ignored.
 - **A model or a migration is a `.json` file or a MODULE.** `--model`,
   `--from`, `--to` and `--baseline` accept a `.json` file or a module
   (`.js`, `.mjs`, `.cjs` — and `.ts` where the host strips types: Node
@@ -1650,11 +1659,23 @@ jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place
   its snapshot plans nothing and reads no store: no migration's from-shape
   is asserted, and a store a written plan has not been applied to yet is
   rightly behind its snapshot.
-- No `introspect` command ships: a model is read back from a database
-  through the API, `introspectModel(connection, options)` or
-  `store.introspect(options)` (MODEL-FORMAT §1), which also takes the
-  trigger reader (`triggers`, MODEL-FORMAT §13.6) and the host's index
-  functions (`expressions`).
+- `introspect` reads a model back from `--store`: the `{ model, report }`
+  `introspectModel(connection, options)` answers (MODEL-FORMAT §1), the model
+  printed as JSON on stdout, or written with `--out` (`wrote <file>`, and
+  `unchanged <file>` when the file already holds it), and each report row a
+  line on stderr, `<code> <object>: <detail>`, with the row's `reason` after
+  it where the detail does not already say it. It reads with the CLI's
+  temporal seam, so a declared temporal member's CHECK comes back as its
+  declaration; `--triggers` passes the SQLite trigger reader (`triggers:
+  sqliteTriggers` from `@jarenjs/db/trigger-rules`, MODEL-FORMAT §13.6),
+  loaded only then, so an application trigger it reads comes back as the
+  database rule it equals (a `trigger-rule` line). The command line passes
+  no index functions: an index over a declared expression comes back as its
+  `expression` entry only where `expressions` reads its key back by the
+  declarations, through the API (`store.introspect(options)` or
+  `introspectModel`), which also takes `keys`, `tables` and `strict`. A report row exits nothing: the command
+  exits 0 with the model derived, 2 for a misuse of its flags, 1 for a
+  database that cannot be read.
 - `plan --upgrade-columns` plans the link `planColumnUpgrade` plans from the
   catalog (§3, "Upgrading the definitions a table holds"): `--model` is the
   model the database holds, which `--store` is first compared with as
@@ -1718,7 +1739,7 @@ jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place
   code. Normal status,
   check and apply (including `--dry-run`) refuse unverifiable legacy history
   and pending 0.1 with `JD0028`; a printout is not a legacy bypass.
-- `status`, `check`, `history`, `apply --dry-run`, `plan --store` (with or
+- `status`, `check`, `history`, `introspect`, `apply --dry-run`, `plan --store` (with or
   without `--upgrade-columns` or `--upgrade-programs`) and `adopt-history` never create a `--store` database named by a plain path: a
   `--store` naming a file that does not exist is refused (`the database file
   does not exist: <path>`, exit 1) and no file is left behind, because opening
@@ -1793,13 +1814,24 @@ chain is fully applied, `migrationStatus` compares the explicit
 `options.physicalTarget`, or the last migration's saved `physical.target`.
 Without either target, `options.model` enables comparison with a fresh
 model build (`options.expressions` the host's index-expression functions it
-is built with): on SQLite every stored CREATE text, on PostgreSQL, which
-keeps none, the rule programs of each table the store owns that declares
-database rules, read back as the open reads them, so a program a hand edit
-left is drift on both engines (a table whose plan calls the host's index
-functions is read only with `expressions`). PostgreSQL's status compares no
-other part of the shape. On SQLite a physical layout (MODEL-FORMAT §12) is
-compared by its shape, as its open verifies it, not by its CREATE text: a
+is built with): on SQLite every stored CREATE text; on PostgreSQL, which
+keeps none, every table the store owns — each collection's, each entity's,
+each join table — verified as the open verifies it: its columns, indexes,
+the CHECK of each declared interval or temporal member, foreign keys, rule
+programs and any trigger the model does not declare. The first table the open would refuse is the drift, in the open's
+words (`entity 'User': column 'age' is TEXT, the model declares 'age'
+NUMERIC`), and a table the database does not hold is drift too
+(`collection 'items': the table does not exist`), as on SQLite, so a
+column, an index or a program a hand edit left is drift on both engines. A
+shape the open opens is no drift on PostgreSQL: a join table an earlier
+release created without the index over its second key column, a rule
+program an earlier release planned, a number column without the CHECK the
+store creates over it. A table whose plan calls the host's
+index functions is read only with `expressions`. PostgreSQL's status reads
+each catalog once for every table, as the open does, so its statements do
+not grow with the tables the model owns; it does not read a physical layout
+(MODEL-FORMAT §12), which the application owns. On SQLite a physical layout
+is compared by its shape, as its open verifies it, not by its CREATE text: a
 table the application spelled its own way is no drift. With neither a target nor a model it reports history only.
 An already-applied `migrate` call also checks a supplied complete target.
 

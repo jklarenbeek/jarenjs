@@ -1426,7 +1426,10 @@ const { model, report } = await store.introspect({ keys: { users: '/id' } });
 ```
 
 It issues no DDL and no DML — every statement it runs begins `SELECT` —
-so reading a production database is a read. What comes back is exact
+so reading a production database is a read. `jaren-db introspect --store
+<db>` is the same read at the command line: the model as JSON, each report
+row a line on standard error, `--triggers` the trigger reader
+(MIGRATION-FORMAT §11). What comes back is exact
 where the shape carries the fact and REPORTED where it does not: a
 document's unindexed members are not in the physical shape
 (`document-members`), a text key column cannot say which member filled

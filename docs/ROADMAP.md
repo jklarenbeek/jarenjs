@@ -364,10 +364,6 @@ delete it or fix it.
   same re-planning oracle over the PL/pgSQL function bodies, which needs a
   reader of their bounded shapes (MODEL-FORMAT §13.6 states that the reader
   reads SQLite programs only).
-- [ ] **A jaren-db introspect command.** The CLI reads no model back from a
-  database: introspectModel(connection, options) and store.introspect(options)
-  do, with the trigger reader (MIGRATION-FORMAT §11 says none ships). Wanted:
-  a subcommand over introspectModel that can pass the trigger reader.
 - [ ] **PostgreSQL entity grouping over a store-owned table.** One-root scalar
   grouping, guarded integer sums and counts and groups ordered by an integer
   sum lower on SQLite over every table, and on PostgreSQL over one adopted
@@ -637,13 +633,17 @@ delete it or fix it.
   probe on that failure path and a refusal the store reports as `JD2099` — new
   text for every installed program, so a program spelling of its own and a
   reviewed upgrade link.
-- [ ] **PostgreSQL migrationStatus compares only rule programs.** On
-  PostgreSQL, migrationStatus(…, { model }) and plan --store's comparison read
-  the rule programs of each ruled store-owned entity table as the open does
-  (MIGRATION-FORMAT §12), and acceptance verifies join tables and collections
-  too, but status compares no column, index, or undeclared trigger of a table,
-  where SQLite compares every stored CREATE text. Wanted: status reads every
-  table the model owns as the open verifies it.
+- [ ] **PostgreSQL migrationStatus reads no physical layout.** On PostgreSQL,
+  migrationStatus(…, { model }) verifies every table the store owns as the
+  open verifies it (MIGRATION-FORMAT §12): columns, indexes, the CHECK of a
+  declared interval or temporal member, foreign keys, rule programs,
+  undeclared triggers, a missing table. It does not read a physical layout
+  (MODEL-FORMAT §12), which SQLite's status verifies by its shape, so an
+  application table the open refuses is called current there; and without
+  `expressions` it reads no table whose plan calls the host's index functions,
+  where SQLite refuses `JD0004`. Wanted: physical layouts read as their open
+  reads them (a history model's layout whose table is absent is pinned `null`
+  today), and one answer for the unread expression tables on both engines.
 
 ## Lexical search (cross-package)
 

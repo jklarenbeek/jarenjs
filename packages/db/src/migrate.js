@@ -35,7 +35,7 @@ import { chain, inOrder, attempt, useStatementOnce } from './driver.js';
 import { isThenable } from '@jarenjs/core/function';
 import { relationalEngine } from './relational.js';
 import { createCursor, createSyncCursor } from './cursor.js';
-import { normalizeModel as normalizeStoreModel } from './store.js';
+import { normalizeModel as normalizeStoreModel, verifyModelTables } from './store.js';
 import { TEMPORAL_HOOKS } from './temporal.js';
 import { planQuery } from './plan.js';
 import { createQueryEngine, createQueryState } from './query.js';
@@ -59,7 +59,7 @@ import { withForeignKeySettings } from './foreign-key-scope.js';
 import { withMigrationConnection, checkMigrationTarget, physicalTargetOf, comparePhysicalTarget, verifyShadowOwnership, physicalObjectKey, migrationOwnerOf, lockMigration, migrationWriterSettings, preservationSchemaOf, verifyPreservation, checkPhysicalPreservation } from './migration-target.js';
 import { readSchema, namespaceSchema } from './introspect.js';
 import { withNamespaceCatalog } from './namespace-catalog.js';
-import { nonCodePointEncoding, verifyPhysical, verifyRulePrograms, heldPrograms, earlierSpellings, sameTriggerText, namespacePrograms } from './physical.js';
+import { nonCodePointEncoding, verifyPhysical, heldPrograms, earlierSpellings, sameTriggerText } from './physical.js';
 import { CURRENT_SPELLING, PROGRAM_SPELLINGS } from './dialects/program-spellings.js';
 import { STORED_ROW } from './dialects/invariant-sql.js';
 import { walkPhysicalRows, transformPhysicalRows } from './physical-transform.js';
@@ -4161,25 +4161,24 @@ export function schemaShapeOf(connection, options = undefined) {
  * Compare a migrated database's schema against the shape a fresh
  * `createModelShape(model)` produces, via a throwaway reference
  * database. Returns `null` when equal, or a one-line difference. Where
- * the engine keeps no CREATE text (PostgreSQL) the store-owned entity
- * tables' rule programs are read back as the open reads them instead
- * ({@link programDrift}).
+ * the engine keeps no CREATE text (PostgreSQL) every table the store owns
+ * is verified as the open verifies it instead ({@link ownedTableDrift}).
  * @param {any} driver
  * @param {any} connection - the migrated database
  * @param {any} model - the target model
  * @param {((connection: any) => any) | undefined} registerFunctions
+ * @param {Record<string, any>} [expressions] - the host's index-expression functions
  * @returns {any} value-or-promise of `string | null`
  */
 export function compareShapeToModel(driver, connection, model, registerFunctions, expressions) {
   // The comparison IS a text comparison: it builds the model's shape in
   // a reference database and compares the two engines' stored CREATE
   // statements. An engine that keeps none has no text to compare: it
-  // reads the store-owned tables' rule programs back as the next open
-  // reads them, field by field, instead of reading an undefined
-  // statement — the structural drift check (columns, indexes,
-  // foreign-key tuples) runs per collection and per entity either way,
-  // and `declaredSqlText` is what tells a reader which half they got.
-  if (connection.dialect.capabilities.declaredSqlText !== true) return programDrift(connection, model, expressions);
+  // verifies every table the store owns as the next open verifies it —
+  // columns, indexes, interval and temporal CHECKs, foreign-key tuples,
+  // rule programs and undeclared triggers — instead of reading an undefined statement, and
+  // `declaredSqlText` is what tells a reader which half they got.
+  if (connection.dialect.capabilities.declaredSqlText !== true) return ownedTableDrift(connection, model, expressions);
   return withMigrationConnection({ driver, path: ':memory:' }, (reference) =>
     chain(chain(registerDeriveFunctions(reference),
       () => (registerFunctions !== undefined ? registerFunctions(reference) : null)), () =>
@@ -4831,7 +4830,7 @@ function acceptMigrationModel(connection, model, options, driver, physical, targ
     if (entities.size === 0 || physical || target !== undefined || [...entities.values()].some((entity) => entity.physical)) return null;
     if (typeof driver?.open !== 'function') throw refuse('JD0021', 'borrowed model comparison requires shadowDriver or a complete physicalTarget');
     if (connection.dialect.capabilities.declaredSqlText !== true)
-      return chain(acceptJoinTables(connection, model), () => acceptPrograms(connection, model, options.expressions));
+      return chain(acceptJoinTables(connection, model), () => acceptTables(connection, model, options.expressions));
     return chain(compareShapeToModel(driver, connection, model, options.registerFunctions, options.expressions), (difference) => {
       if (difference !== null) throw refuse('JD0023', `the migrated shape does not equal the target model's: ${difference}`);
     });
@@ -4839,19 +4838,20 @@ function acceptMigrationModel(connection, model, options, driver, physical, targ
 }
 
 /**
- * On an engine that keeps no CREATE text to compare (PostgreSQL), the rule
- * programs of every ruled entity table the store owns and the database holds, read
- * back as the next open reads them ({@link programDrift}): a link that leaves
- * a program no release planned — one it names, or one a hand edit left that
- * an ordinary link (an index, say) does not touch — or a trigger the model
- * does not declare is refused `JD0023` before it commits, as SQLite's shape
- * comparison refuses it. A program an earlier release planned passes, as the
- * open opens it.
+ * On an engine that keeps no CREATE text to compare (PostgreSQL), every table
+ * the store owns as a link leaves it, verified as the next open verifies it
+ * ({@link ownedTableDrift}): a link that leaves one the open would refuse — a
+ * column, an index, a CHECK, a foreign key or a program no release planned,
+ * one it names or one a hand edit left that an ordinary link does not touch,
+ * a trigger the model does not declare — is refused `JD0023` before it
+ * commits, as SQLite's shape comparison refuses it. A program an earlier
+ * release planned passes, as the open opens it, and a table the database does
+ * not hold is the next open's to create.
  * @param {any} connection @param {any} model @param {Record<string, any> | undefined} expressions
  * @returns {any} value-or-promise
  */
-function acceptPrograms(connection, model, expressions) {
-  return chain(programDrift(connection, model, expressions), (difference) => {
+function acceptTables(connection, model, expressions) {
+  return chain(ownedTableDrift(connection, model, expressions, true), (difference) => {
     if (difference !== null) {
       throw refuse('JD0023', `the migrated shape does not equal the target model's: ${difference}; the next open `
         + 'would refuse the table (JD0002), so nothing was changed');
@@ -4860,52 +4860,72 @@ function acceptPrograms(connection, model, expressions) {
 }
 
 /**
- * Where an engine deparses rule programs (PostgreSQL), the first way the
- * programs of the entity tables a model's store owns and declares database
- * rules on depart from what the next open reads ({@link verifyRulePrograms},
- * from one read of the namespace): `entity '<table>': <why>`, or `null`. A
- * table the database does not hold is the open's to create, and a physical
- * layout's programs are verified with its layout. The model may be history
- * (a from-model, an adopted one), read as history. On an engine that keeps
- * CREATE text, `null`: its shape comparison reads the programs as text.
+ * On an engine that keeps no CREATE text to compare (PostgreSQL), the first
+ * way a table the model's store owns — a collection's, an entity's, a join
+ * table — departs from what the next open verifies ({@link verifyModelTables},
+ * planned as the open plans it): `<kind> '<table>': <why>`, a table the
+ * database does not hold too unless `absentIsOpen` leaves it to the next
+ * open, or `null`. A physical layout is the
+ * application's table, read by the open only. A table whose plan calls the
+ * host's index functions is read with them (`expressions`), as its open is;
+ * without them it is not read. The model may be history (a from-model, an
+ * adopted one), read as history.
  * @param {any} connection @param {any} model @param {Record<string, any> | undefined} expressions
+ * @param {boolean} [absentIsOpen]
  * @returns {any} value-or-promise of `string | null`
  */
-function programDrift(connection, model, expressions) {
+function ownedTableDrift(connection, model, expressions, absentIsOpen = false) {
   const dialect = connection.dialect;
-  const programs = namespacePrograms(connection);
-  if (programs === undefined || asHistory(() => normalizeEntities(model)).size === 0) return null;
-  const plans = asHistory(() => {
-    const mapping = explainMapping(model);
-    return Object.entries(mapping.entities)
-      .filter(([, entity]) => (entity.invariants ?? []).some((/** @type {any} */ rule) => rule.enforcement === 'database'))
-      .flatMap(([name, entity]) => {
-        // a table whose plan calls the host's index functions is read with them (`expressions`), as its open is;
-        // without them it is not read here, and answers as it did before programs were read
-        try { return [planEntity(name, entity, mapping, dialect, { expressions })]; }
-        catch (error) {
-          const refused = /** @type {any} */ (error);
-          if (expressions === undefined && refused?.code === 'JD0004' && /\/indexes\/\d+\/expression/.test(String(refused.docPath ?? ''))) return [];
-          throw error;
-        }
-      })
-      .filter((plan) => !plan.physical);
-  });
-  /** @type {string | null} */
-  let found = null;
-  // the first table departing is the drift: the walk reads no further one
-  const next = (/** @type {number} */ i) => {
-    if (found !== null) return null;
-    const plan = plans[i];
-    const departed = (/** @type {string} */ why) => {
-      found ??= `entity '${plan.table}': ${why}`;
-      return [];
-    };
-    return chain(programs(plan.table), (/** @type {any[] | null} */ rows) => (rows === null ? null
-      : verifyRulePrograms(connection, plan.table, plan.programs ?? [], /** @type {any} */ (departed),
-        { undeclared: true, namespace: programs, spelled: plan.programsAt })));
+  const mapping = mappingFor(connection, expressions);
+  /** Whether a refusal is of an index expression read without the host's functions. @param {any} error @param {RegExp} at */
+  const unread = (error, at) => expressions === undefined && error?.code === 'JD0004' && at.test(String(error.docPath ?? ''));
+  /** The model's collections, less each whose index expression calls a function not given. @param {any} document @returns {Map<string, any>} */
+  const collectionsOf = (document) => {
+    try { return normalizeModel(document, expressions); }
+    catch (error) {
+      const name = unread(error, /^\/collections\/[^/]+\/indexes\/\d+\/expression/)
+        ? String(/** @type {any} */ (error).docPath).split('/')[2].replaceAll('~1', '/').replaceAll('~0', '~') : undefined;
+      if (name === undefined) throw error;
+      const { [name]: _, ...rest } = document.collections;
+      return Object.keys(rest).length === 0 ? new Map() : collectionsOf({ ...document, collections: rest });
+    }
   };
-  return chain(inOrder(plans.length, next), () => found);
+  const tables = asHistory(() => {
+    const collections = collectionsOf(model);
+    const plans = new Map([...collections].map(([name, collection]) => [name, planCollection(name, collection, dialect, mapping)]));
+    const entities = new Map([...normalizeEntities(model)].filter(([, entity]) => entity.physical === null));
+    /** @type {Map<string, any>} */
+    const entityPlans = new Map();
+    if (entities.size > 0) {
+      const entityMapping = explainMapping(model);
+      for (const name of [...entities.keys()]) {
+        try { entityPlans.set(name, planEntity(name, entityMapping.entities[name], entityMapping, dialect, { deferCycles: true, expressions })); }
+        catch (error) {
+          if (!unread(error, /\/indexes\/\d+\/expression/)) throw error;
+          entities.delete(name);
+        }
+      }
+      for (const name of Object.keys(entityMapping.joinTables))
+        entityPlans.set(name, planJoinTable(name, entityMapping.joinTables[name], entityMapping, dialect));
+    }
+    return { collections, plans, entities, entityPlans };
+  });
+  const departures = new WeakSet();
+  /** @param {string} difference @returns {never} */
+  const departed = (difference) => {
+    const error = new DbCompileError('JD0002', difference);
+    departures.add(error);
+    throw error;
+  };
+  /** @param {any} error */
+  const settle = (error) => {
+    if (!departures.has(error)) throw error;
+    return String(error.reason);
+  };
+  let out;
+  try { out = verifyModelTables(connection, tables, departed, absentIsOpen); }
+  catch (error) { return settle(error); }
+  return isThenable(out) ? out.then(() => null, settle) : null;
 }
 
 /**

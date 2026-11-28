@@ -18,7 +18,7 @@ import { loadDocument as loadDocumentFile, isDocumentFile } from '@jarenjs/json/
 
 import {
   planModelMigration, planColumnUpgrade, planProgramUpgrade, migrate, migrationStatus, migrationHistory, adoptMigrationHistory,
-  shapeHash, compareShapeToModel,
+  shapeHash, compareShapeToModel, introspectModel,
   sqliteDialect, normalizeModel, normalizeEntities as normalizeModelEntities, explainMapping as explainModelMapping,
   planCollection, planEntity, planJoinTable, HISTORY_TABLE, entityEmitModel,
   migrateDocuments, streamDocuments, classifyAssertion,
@@ -56,6 +56,7 @@ Usage:
   jaren-db check    --model <model> --store <db> [--migrations <dir>] [--snapshot <file>]
   jaren-db shape    --model <model>
   jaren-db history  --store <db> [--out <observation.json>]
+  jaren-db introspect --store <db> [--triggers] [--out <model.json>]
   jaren-db adopt-history --store <db> --migrations <applied-prefix-dir>
                         --observed <observation.json> --model <model> [--physical-target <json>] [--yes]
   jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place --yes | --check)
@@ -107,6 +108,13 @@ check     The CI command: exit 1 on an unplanned model change, pending
 shape     Print the physical mapping a model produces.
 history   Read full history and exact metadata as one JSON observation;
           create neither table. --out writes that JSON to a file.
+introspect
+          Read back the model the database's shape says it is, as JSON on
+          standard output (--out writes it to a file), and name on standard
+          error, one line each, what the shape does not carry (code,
+          object, detail). --triggers reads SQLite triggers back as the
+          database rules they equal (@jarenjs/db/trigger-rules). Reads
+          only. Exit: 2 command misuse, 1 a database that cannot be read.
 adopt-history
           Attest the complete reviewed applied 0.1 prefix and current
           model against --observed; record only exact side metadata.
@@ -126,7 +134,7 @@ documents Run a migration's DOCUMENT steps (jslt, query) over a file of
           while writing nothing. Exit: 0 applicable and valid, 1 a
           migration or source failure, 2 a misuse of this command line.
 
-status, check, history, apply --dry-run, plan --store (with or without
+status, check, history, introspect, apply --dry-run, plan --store (with or without
 --upgrade-columns or --upgrade-programs) and adopt-history never create a --store database named by a plain path: one that does not
 exist is refused (exit 1). An apply that is only printed, or that finds
 nothing pending without --yes, creates nothing either. :memory: is an
@@ -170,6 +178,7 @@ const COMMAND_FLAGS = Object.freeze({
   apply: ['--store', '--baseline', '--migrations', '--model', '--dry-run', '--yes'],
   shape: ['--model'],
   history: ['--store', '--out'],
+  introspect: ['--store', '--out', '--triggers'],
   'adopt-history': ['--store', '--migrations', '--observed', '--model', '--physical-target', '--yes'],
   documents: ['--migrations', '--in', '--out', '--in-place', '--check', '--yes', '--format', '--out-format',
     '--collection', '--batch-size', '--max-rows', '--max-bytes', '--max-distinct'],
@@ -185,15 +194,16 @@ function parseArgs(argv) {
     inputs: [], maxRows: undefined, maxBytes: undefined, maxDistinct: undefined,
     in: null, format: null, outFormat: null, collection: null,
     batchSize: null, inPlace: false, check: false, upgradeColumns: false, upgradePrograms: false,
-    dryRun: false, yes: false, help: false,
+    dryRun: false, yes: false, triggers: false, help: false,
   };
-  const historyCommand = options.command === 'history' || options.command === 'adopt-history';
+  // the commands that answer exit 2 for a misuse of their flags
+  const historyCommand = ['history', 'adopt-history', 'introspect'].includes(options.command);
   const taken = Object.hasOwn(COMMAND_FLAGS, options.command) ? new Set(COMMAND_FLAGS[options.command]) : null;
   for (let i = 3; i < argv.length; i++) {
     const flag = argv[i];
     if (historyCommand) {
       if (!taken.has(flag) && flag !== '--help' && flag !== '-h') misuse(`${options.command} does not take '${flag}'`);
-      if (!['--yes', '--help', '-h'].includes(flag)
+      if (!['--yes', '--triggers', '--help', '-h'].includes(flag)
         && (!argv[i + 1] || argv[i + 1].startsWith('--') || argv[i + 1] === '-h'))
         misuse(`${flag} needs a value`);
     }
@@ -235,6 +245,7 @@ function parseArgs(argv) {
       case '--upgrade-programs': options.upgradePrograms = true; break;
       case '--dry-run': options.dryRun = true; break;
       case '--yes': options.yes = true; break;
+      case '--triggers': options.triggers = true; break;
       case '--help': case '-h': options.help = true; break;
       // an unrecognised flag is a misuse of the command line, which is
       // what `documents` promises exit 2 for; the five older commands
@@ -565,6 +576,37 @@ async function commandHistory(options) {
   else writeIfChanged(options.out, json);
 }
 
+/**
+ * `introspect`: the model `introspectModel` derives from --store, read with
+ * the CLI's temporal seam (a declared temporal member's CHECK comes back as
+ * its declaration) and, with --triggers, the SQLite trigger reader, which is
+ * loaded only then. The model is JSON on standard output, or written with
+ * --out; each report row is a line on standard error.
+ */
+async function commandIntrospect(options) {
+  if (options.store === null) misuse('introspect needs --store');
+  requireStore(options.store);
+  const triggers = options.triggers ? (await import('./trigger-rules.js')).sqliteTriggers : undefined;
+  const connection = await nodeDriver().open(existingStore(options.store), {}).catch((error) => fail(error.message));
+  let derived;
+  try {
+    derived = await Promise.resolve(introspectModel(connection,
+      { temporals: PLANNING.temporals, ...(triggers === undefined ? {} : { triggers }) }));
+  }
+  catch (error) {
+    fail(error.message);
+  }
+  finally {
+    await connection.close();
+  }
+  const json = `${JSON.stringify(derived.model, null, 2)}\n`;
+  if (options.out === null) process.stdout.write(json);
+  else console.log(`${writeIfChanged(options.out, json) ? 'unchanged' : 'wrote'} ${options.out}`);
+  for (const row of derived.report)
+    // a reason the detail does not already say is said after it
+    console.error(`${row.code} ${row.object}: ${row.detail}${row.reason === undefined || row.detail.includes(row.reason) ? '' : ` (${row.reason})`}`);
+}
+
 async function commandAdoptHistory(options) {
   if ([options.store, options.migrations, options.observed, options.model].some((value) => value === null))
     misuse('adopt-history needs --store, --migrations, --observed and --model');
@@ -837,6 +879,7 @@ async function main() {
     case 'check': return commandStatus(options, { asCheck: true });
     case 'apply': return commandApply(options);
     case 'history': return commandHistory(options);
+    case 'introspect': return commandIntrospect(options);
     case 'adopt-history': return commandAdoptHistory(options);
     case 'shape': return commandShape(options);
     case 'documents': return commandDocuments(options);

@@ -1056,9 +1056,14 @@ function runCreate(connection, plan) {
  * @param {string | null} createsNothing - what the store is when it may
  *   create no table ('a read-only store', 'an adopted store …'), for the
  *   refusal; `null` when it creates what is missing
+ * @param {(difference: string) => never} [refuse] - raises a difference in
+ *   its reader's words, the table named first ({@link verifyShape}'s);
+ *   `JD0002` where none is given
+ * @param {boolean} [absentIsOpen] - with `refuse`: a table the database does
+ *   not hold is the next open's to create, not a difference
  * @returns {any} value-or-promise
  */
-function ensureShape(connection, collections, plans, createsNothing) {
+function ensureShape(connection, collections, plans, createsNothing, refuse = undefined, absentIsOpen = false) {
   const names = [...collections.keys()];
   if (names.length === 0) return null;
   return verifyOrCreate(connection, createsNothing, (creates, connection) => {
@@ -1073,6 +1078,7 @@ function ensureShape(connection, collections, plans, createsNothing) {
       return chain(catalogRows(reading, 'tableExists', name), ([row]) => {
         if (row === undefined) {
           if (createsNothing !== null) {
+            if (refuse !== undefined) return absentIsOpen ? null : refuse(`collection '${name}': the table does not exist`);
             throw new DbCompileError('JD0002',
               `collection '${name}': the table does not exist and ${createsNothing} creates nothing`,
               collection.docPath);
@@ -1086,7 +1092,7 @@ function ensureShape(connection, collections, plans, createsNothing) {
         }
         recordKeyConstraint(plan, row);
         return againOnDifference(reading, connection, name, (on) =>
-          verifyShape(on, plan, name, collection.docPath, 'collection', undefined, programs));
+          verifyShape(on, plan, name, collection.docPath, 'collection', refuse, programs));
       });
     });
   });
@@ -1130,9 +1136,11 @@ function againOnDifference(reading, connection, table, verify) {
  * @param {Map<string, any>} entityPlans
  * @param {Map<string, any>} entities
  * @param {string | null} createsNothing - as {@link ensureShape}'s
+ * @param {(difference: string) => never} [refuse] - as {@link ensureShape}'s
+ * @param {boolean} [absentIsOpen] - as {@link ensureShape}'s
  * @returns {any} value-or-promise
  */
-function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
+function ensureEntityShape(connection, entityPlans, entities, createsNothing, refuse = undefined, absentIsOpen = false) {
   if (entityPlans.size === 0) return null;
   const dialect = connection.dialect;
   // a table is created after the tables it references: PostgreSQL has no
@@ -1181,6 +1189,7 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
       return chain(catalogRows(reading, 'tableExists', name), ([row]) => {
           if (row === undefined) {
             if (createsNothing !== null) {
+              if (refuse !== undefined) return absentIsOpen ? null : refuse(`entity '${name}': the table does not exist`);
               throw new DbCompileError('JD0002',
                 `entity '${name}': the table does not exist and ${createsNothing} creates nothing`,
                 docPath);
@@ -1199,7 +1208,7 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
           }
           recordKeyConstraint(plan, row);
           return againOnDifference(reading, connection, name, (on) =>
-            chain(verifyShape(on, plan, name, docPath, 'entity', undefined, programs), () =>
+            chain(verifyShape(on, plan, name, docPath, 'entity', refuse, programs), () =>
             chain(readKeyChecks(on, plan), () =>
             chain(catalogRows(on, 'foreignKeyList', name), (fkRows) => {
                 // the whole TUPLE, not the count: a key that changed
@@ -1227,16 +1236,38 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
                 })).sort();
                 const wanted = expectedFks.map(describe).sort();
                 if (actual.join(' | ') !== wanted.join(' | ')) {
-                  throw new DbCompileError('JD0002',
-                    `entity '${name}': the foreign keys are [${actual.join(', ')}], `
-                    + `the model declares [${wanted.join(', ')}]`,
-                    docPath);
+                  const difference = `entity '${name}': the foreign keys are [${actual.join(', ')}], `
+                    + `the model declares [${wanted.join(', ')}]`;
+                  if (refuse !== undefined) refuse(difference);
+                  throw new DbCompileError('JD0002', difference, docPath);
                 }
                 return null;
               }))));
         });
     }), addDeferred);
   });
+}
+
+/**
+ * Verify the tables a model's store owns as its open verifies them
+ * ({@link ensureShape}, {@link ensureEntityShape}), creating none: every
+ * collection, then every entity and join table, each departure raised by
+ * `refuse` in its reader's words, the table named first — a table the
+ * database does not hold as well (`<kind> '<name>': the table does not
+ * exist`), unless `absentIsOpen` leaves it to the next open, which creates
+ * it. The plans are the caller's, planned as the open plans them.
+ * @param {any} connection
+ * @param {{ collections: Map<string, any>, plans: Map<string, any>,
+ *   entities: Map<string, any>, entityPlans: Map<string, any> }} tables
+ * @param {(difference: string) => never} refuse - raises the difference, a `DbCompileError`,
+ *   so a table read against the pass's shared catalog read is read once more on its own first
+ * @param {boolean} [absentIsOpen]
+ * @returns {any} value-or-promise
+ */
+export function verifyModelTables(connection, { collections, plans, entities, entityPlans }, refuse, absentIsOpen = false) {
+  const createsNothing = 'a verification';
+  return chain(ensureShape(connection, collections, plans, createsNothing, refuse, absentIsOpen), () =>
+    ensureEntityShape(connection, entityPlans, entities, createsNothing, refuse, absentIsOpen));
 }
 
 /**

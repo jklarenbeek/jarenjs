@@ -892,7 +892,8 @@ if (asyncLiveLeak.length)
 // Lowered to 1,209,900 (measured 1209853): an entity's calendar members planned, read back, shaped, written and mapped behind the temporal seam, and one JD0017 refusal for the three doors (ddl -843, model -641, introspect -640, plan -236, store -163, query -121, entity -116, temporal-seam +157, minifier renames elsewhere net -160).
 // Raised to 1,210,000 (measured 1209930): a PostgreSQL server out of shared memory refused under a reason of its own, naming the lock-table setting the server's hint names (errors +314).
 // Raised to 1,211,200 (measured 1211124): the query's $replace reading a replacement template, capture groups by F&O's rules and a refused template raising its named JQ2001 (operators 1172).
-if (clientBytes > 1211200)
+// Raised to 1,211,400 (measured 1211320): PostgreSQL's status and acceptance verifying every table the store owns as the open does (store 196).
+if (clientBytes > 1211400)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

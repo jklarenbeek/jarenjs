@@ -246,6 +246,21 @@ a connection is acquired or a link runs:
 - `jaren-db apply` of pending work onto a database that drifted from its target
   exited 0 and left the verdict to the next run; it now reports the applied
   links and exits 1 naming the drift, as the no-op rerun does.
+- On PostgreSQL, `migrationStatus(…, { model })` compared only the rule
+  programs of a table the store owns, so a store whose index, column, foreign
+  key, trigger or interval or temporal CHECK another writer altered, or whose
+  table is gone, read
+  as current (`drift: null`) while the next open refused it (`JD0002`). It now
+  verifies every table the store owns as the open does and names the first
+  one the open would refuse (MIGRATION-FORMAT §12): a status read that reported
+  `upToDate: true` over such a store now reports the drift.
+- On PostgreSQL, `migrate(…, { model })` accepted a link after verifying its
+  collections, join tables and rule programs only, so a link whose `sql` step
+  dropped or changed an entity's index, column or foreign key committed and
+  the next open refused the table (`JD0002`). Acceptance now verifies every
+  table the store owns as the open does and refuses such a link `JD0023`
+  before it commits (MIGRATION-FORMAT §10): bring the table to the model
+  within the link, or leave the edit out of it.
 
 ### Rebuilt PostgreSQL tables
 

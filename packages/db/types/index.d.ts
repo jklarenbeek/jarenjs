@@ -2093,7 +2093,8 @@ export interface MigrationStatusOptions {
 }
 /** Read and verify exact migration authority without creating metadata.
  * Unadopted legacy history or newly pending 0.1 work refuses JD0028.
- * `model` enables drift comparison once the chain is fully applied.
+ * `model` enables drift comparison once the chain is fully applied: on
+ * PostgreSQL every table the store owns is read as the open verifies it.
  * A borrowed PostgreSQL transaction retains its own read view. */
 export declare function migrationStatus(
   target: MigrationTarget,
@@ -2175,10 +2176,15 @@ export declare function createModelShape(connection: unknown, model: unknown): u
 export declare function schemaShapeOf(connection: unknown, options?: DeclaredSqlOptions):
   Promise<Array<{ type: string; name: string; owner: string; sql: string }>>
   | Array<{ type: string; name: string; owner: string; sql: string }>;
-/** Null when the database's shape equals a fresh build of the model. */
+/** Null when the database's shape equals a fresh build of the model, or a
+ * one-line difference: on SQLite the stored CREATE texts compared, on
+ * PostgreSQL every table the store owns verified as the open verifies it
+ * (the driver is then not used). `expressions` are the host's declared
+ * index-expression functions, which the model's shape is planned with. */
 export declare function compareShapeToModel(
-  driver: Driver, connection: unknown, model: unknown,
+  driver: Driver | undefined, connection: unknown, model: unknown,
   registerFunctions?: (connection: unknown) => unknown,
+  expressions?: Record<string, unknown>,
 ): Promise<string | null> | string | null;
 export declare function shapeHash(model: unknown): string;
 export declare function migrationChecksum(migration: unknown): string;
