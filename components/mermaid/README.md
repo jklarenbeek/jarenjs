@@ -755,6 +755,37 @@ a bare subgraph title's first word or one never closed (`subgraph a "b" c`,
 name with a `~` nothing closes or text after its generic (`class A~~B~`,
 `class A~T~B`, `mermaid/class/generic-tilde`); quote such a label or title to
 keep it reading.
+A flowchart node id may hold a `'` (`A --> b'`, which was refused), and an
+inline link label's text runs to the first link of its opening run's kind, as
+Mermaid lexes it: `'…'` is no unit there (`A -- 'a --> b' --> B` is a link
+labelled `'a` to a node `b'`; it was one link labelled `'a --> b'`), a link
+with no blank before it ends the text (`A -- a--> B` is labelled `a`; it read
+a node `a`). An ER relationship's label is the one word or quoted string after
+the `:`, the rest of the line the statements after it (`A ||--o{ B : places
+order` is the label `places` and an entity `order`; it was the label
+`places order`; quote such a label to keep it whole, as `toMermaid` prints
+it). A class keeps its `<<annotation>>`s as `annotations` (they were dropped),
+draws the first as `«interface»` above its name, and `toMermaid` prints them
+as body lines; `toMermaid` writes a class name's `~` and a first character
+Mermaid reads as syntax in backticks as entity codes (`` class `#126;A` ``),
+and a bare name Mermaid reads as a keyword (`link`, `note`) in backticks so
+coded. These lines are refused, as Mermaid refuses them, where they read: a
+`;` before what is no statement in a sequence message, note, block label or
+participant line (`A->>B: a;b`, `mermaid/sequence/semicolon`) and outside
+quotes, backticks or a body in a class line (`A --> B : a;b`, `A : +x;y`,
+`mermaid/class/semicolon`); a run in an inline link label that ends no link of
+its kind (`A -- a -- b --> B`, `A -- 'a -- b' --> B`, `A == a=b ==> B`,
+`mermaid/flowchart/link-in-link-label`); a bracket, `<`, `>` or `|` in the id
+before a bracketed subgraph title (`subgraph a(b) [t]`,
+`mermaid/flowchart/bracket-in-subgraph-id`; quote the id); a backtick class
+name whose text opens with a `~` its `~~`s leave over or with a keyword, `<<`,
+`>>` or `"` (`` class `~A` ``, `mermaid/class/generic-tilde`;
+`` class `note A` ``, `mermaid/class/backtick-lead`; write the first character
+as its entity code); an annotation outside a body that is not one word
+(`<<x y>> A`, `mermaid/class/annotation`) or that names a class no line before
+it writes (`<<interface>> A` before `class A`, on which Mermaid fails,
+`mermaid/class/annotation-unwritten`; write the class first); and an ER label or the rest of its
+line that opens no statement (`A ||--o{ B : a(b)`, `mermaid/er/relationship`).
 The marks Mermaid draws and this renderer read but drew plain are drawn, by
 Mermaid's shape class: a sequence participant's `type` as Mermaid's glyph for
 it (a boundary, a control and an entity as a circle with a bar, an arrow or a

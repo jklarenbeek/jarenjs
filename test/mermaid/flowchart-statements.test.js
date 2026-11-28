@@ -29,13 +29,14 @@ const both = (/** @type {string} */ body) => {
 };
 
 describe('flowchart — an inline edge label reads a quoted label as one unit', function () {
-  // a label in `'…'` keeps its quotes, which are no quoting to Mermaid
-  for (const [quote, label] of [['"', 'a --> b'], ["'", "'a --> b'"]]) {
-    it(`reads A -- ${quote}a --> b${quote} --> B as one labelled edge`, () => {
-      const want = { nodes: [['A', 'A'], ['B', 'B']], edges: [['A', 'B', label]] };
-      assert.deepEqual(both(`A -- ${quote}a --> b${quote} --> B`), [want, want]);
-    });
-  }
+  it('reads A -- "a --> b" --> B as one labelled edge', () => {
+    const want = { nodes: [['A', 'A'], ['B', 'B']], edges: [['A', 'B', 'a --> b']] };
+    assert.deepEqual(both('A -- "a --> b" --> B'), [want, want]);
+  });
+  it("reads A -- 'a --> b' --> B as Mermaid does: `'…'` is no quoting, so a link labelled 'a to a node b'", () => {
+    const want = { nodes: [['A', 'A'], ["b'", "b'"], ['B', 'B']], edges: [['A', "b'", "'a"], ["b'", 'B', null]] };
+    assert.deepEqual(both("A -- 'a --> b' --> B"), [want, want]);
+  });
   it('closes a quoted label at the link run after its quote, a blank between them or not', () => {
     assert.deepEqual(summary(parse('A -- "x --> y"--> B')).edges, [['A', 'B', 'x --> y']]);
     assert.deepEqual(summary(parse('A -- "x"-->B')).edges, [['A', 'B', 'x']]);

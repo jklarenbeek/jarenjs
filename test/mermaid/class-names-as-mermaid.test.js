@@ -50,8 +50,8 @@ describe('classDiagram — a backtick-quoted name holding `~`', () => {
     assert.deepEqual(classes(C('`Grid~List~int~~` : +x')), [['Grid', 'List', 1]]);
   });
 
-  it('still keeps a name that opens with `~` whole, and one whose backtick nothing closes as written', () => {
-    assert.deepEqual(classes(C('class `~A`')), [['~A', null, 0]]);
+  it('refuses a name that opens with a `~` its `~~`s leave over, as Mermaid refuses it, and keeps one whose backtick nothing closes as written', () => {
+    refuses(C('class `~A`'), 'mermaid/class/generic-tilde', 2, { name: '`~A`' });
     assert.deepEqual(classes(C('`Foo : +x')), [['`Foo', null, 1]]);
   });
 });

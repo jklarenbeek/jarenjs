@@ -28,6 +28,7 @@ import { mermaidText } from '../messages.js';
  * @property {string} heading
  * @property {string[]} rows
  * @property {string | null} id the class or entity a box draws, null for the relations box
+ * @property {string} [annotation] the class's first `<<annotation>>`, drawn as `«text»` above its heading
  * @property {string} [tooltip] the tooltip text a `click` gave the class
  * @property {{ from: string, to: string, lollipop?: 'from' | 'to' }[]} [edges] the relations box's
  *   rows, as endpoints, and the end a lollipop (`foo --() bar`) names an interface at
@@ -47,8 +48,13 @@ export function renderStructured(title, sections, theme, hash) {
   const fs = 13;
   const rowH = 22;
   const headH = 26;
-  const read = sections.map((s) => ({ heading: readTextLines(s.heading), rows: s.rows.map(readTextLines) }));
+  const read = sections.map((s) => ({
+    annotation: s.annotation === undefined ? null : `«${decodeEntityCodes(s.annotation)}»`,
+    heading: readTextLines(s.heading),
+    rows: s.rows.map(readTextLines),
+  }));
   const boxW = Math.max(180, ...read.flatMap((s) => [
+    ...(s.annotation === null ? [] : [textWidth(s.annotation, fs) + 24]),
     ...s.heading.map((line) => textWidth(line, fs, 700) + 24),
     ...s.rows.flat().map((line) => textWidth(line, fs) + 24),
   ]));
@@ -58,13 +64,16 @@ export function renderStructured(title, sections, theme, hash) {
   children.push(textAt(16, 24, title, fs + 3, { 'font-weight': 'bold', class: 'mm-text', fill: t.nodeText }));
   for (let si = 0; si < sections.length; si++) {
     const section = sections[si];
-    const { heading, rows } = read[si];
-    // a line of a heading or a row takes a row's height
-    const sectionHeadH = headH + (heading.length - 1) * rowH;
+    const { annotation, heading, rows } = read[si];
+    // a line of a heading or a row takes a row's height, and so does the
+    // annotation Mermaid draws above the name
+    const above = annotation === null ? 0 : rowH;
+    const sectionHeadH = headH + above + (heading.length - 1) * rowH;
     const boxH = sectionHeadH + rows.reduce((n, lines) => n + lines.length, 0) * rowH + 8;
     const box = [
       rect(16, y, boxW, boxH, { rx: 4, fill: t.nodeFill, stroke: t.nodeStroke, 'stroke-width': 1, class: 'mm-panel' }),
-      textBlock(26, y + 17, heading, fs, rowH,
+      ...(annotation === null ? [] : [textAt(26, y + 17, annotation, fs, { class: 'mm-text', fill: t.nodeText })]),
+      textBlock(26, y + 17 + above, heading, fs, rowH,
         section.id === null ? { 'font-weight': 'bold', class: 'mm-text', fill: t.nodeText } : { 'font-weight': 'bold', class: 'mm-label', fill: t.nodeText }),
       path(`M16,${num(y + sectionHeadH)} h${boxW}`, { class: 'mm-panel-rule', stroke: t.nodeStroke, 'stroke-width': 1 }),
     ];
@@ -138,6 +147,8 @@ export function structuredSections(diagram, ast, messages = null) {
     /** @type {PanelSection[]} */
     const sections = ast.classes.map((c) => ({
       heading: c.generic == null ? c.name : `${c.name}<${genericText(c.generic, '<', '>')}>`,
+      // Mermaid draws a class's first annotation, and only that one
+      ...(c.annotations?.length ? { annotation: c.annotations[0] } : {}),
       rows: c.members.map((m) => `${m.visibility ?? ''}${m.text}`),
       id: c.name,
       tooltip: tips.get(c.name),

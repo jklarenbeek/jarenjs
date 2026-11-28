@@ -77,9 +77,12 @@ export const mermaidMessagesEn = /*#__PURE__*/ Object.freeze({
   'mermaid/flowchart/empty-label': 'node \'{id}\' has an empty label: write its text, a blank for none, or leave the brackets off',
   'mermaid/flowchart/empty-link-label': 'the link from \'{from}\' has an empty label: write its text, a blank between the pipes for none, or leave the label off',
   'mermaid/flowchart/bracket-in-link-label': 'the link from \'{from}\' has a bracket inside a label that is not quoted: quote the whole label',
+  'mermaid/flowchart/link-in-link-label': 'the link from \'{from}\' has \'{run}\' inside its label, which ends no link of the label\'s kind: quote the whole label',
   'mermaid/flowchart/bracket-in-title': 'a subgraph has a bracket inside a title that is not quoted: quote the whole title',
+  'mermaid/flowchart/bracket-in-subgraph-id': 'subgraph \'{id}\' has a bracket, \'<\', \'>\' or \'|\' in its id: quote the id, or leave the character out',
   'mermaid/sequence/outside-block': '\'{word}\' outside a block',
   'mermaid/sequence/stray-end': 'unexpected \'end\'',
+  'mermaid/sequence/semicolon': 'a \';\' ends a statement, and \'{rest}\' after it is none: write the \';\' as #59; to keep it in the text',
   'mermaid/state/transition': '\'{line}\' is no transition: From --> To, with an optional \': label\'',
   'mermaid/state/note': '\'{line}\' is no note: note left of|right of <state> with \': text\' or a block up to \'end note\', or note "text" as <id>',
   'mermaid/state/unclosed-note': 'a note opened here is never closed with \'end note\'',
@@ -88,6 +91,10 @@ export const mermaidMessagesEn = /*#__PURE__*/ Object.freeze({
   'mermaid/class/relation': '\'{line}\' is no relation: From ["cardinality"] <operator> ["cardinality"] To, one per line, with an optional \': label\'',
   'mermaid/class/nested-generic': 'class \'{name}\' nests one generic in another: a class name takes one level (Name~T~), and only a member\'s type may nest',
   'mermaid/class/generic-tilde': 'class \'{name}\' leaves a ~ unpaired or writes on after its generic: a class name\'s generic is one ~…~ pair at its end (Name~T~)',
+  'mermaid/class/backtick-lead': 'class name {name} opens with \'{lead}\', which Mermaid reads as its own syntax inside backticks: write it as {coded}',
+  'mermaid/class/annotation': '\'{line}\' is no annotation: it is <<word>> Class, or class Class <<word>>, the annotation one word (a class body takes <<any text>>)',
+  'mermaid/class/annotation-unwritten': '\'{line}\' annotates class \'{name}\', which no line before it writes: write the class first',
+  'mermaid/class/semicolon': '\'{line}\' holds a \';\', which Mermaid reads in no class statement outside quotes, backticks or a class body: write it as #59; in a label or member, and leave it out of a name',
   'mermaid/er/relationship': '\'{line}\' is no relationship: LEFT <cardinality>--<cardinality> RIGHT : label',
 
   // ——— parse diagnostics: pie ———

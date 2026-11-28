@@ -3,7 +3,9 @@
  * @file ER-diagram grammar → ER AST. Entity blocks
  * (`CUSTOMER { string name PK }`, an alias as `p[Person]`) and
  * relationships (`CUSTOMER ||--o{ ORDER : places`, or with Mermaid's word
- * aliases: `CAR 1 to zero or more DRIVER : allows`). Cardinality tokens are
+ * aliases: `CAR 1 to zero or more DRIVER : allows`), whose label is the one
+ * word or quoted string after the `:`, the rest of the line read as the
+ * statements after it, as Mermaid reads them. Cardinality tokens are
  * preserved verbatim for a faithful, geometry-free model.
  */
 
@@ -39,10 +41,11 @@ const RE_LOOSE_REL = new RegExp(`^${NAME}\\s+[|}{o]{1,2}(?:--|\\.\\.)[|}{o]{1,2}
 
 /**
  * A line of entity names Mermaid reads one by one (`A B C`, `A o--o B`):
- * each a run of word characters, `-` and `*`, or quoted; a line opening
+ * each a run of word characters, `-`, `*` and `.`, or quoted, a quoted one
+ * standing against the next with no blank or one (`"b"c`); a line opening
  * with a directive's word (`direction TB`) is that directive.
  */
-const RE_NAMES = /^(?!(?:direction|classDef|class|style|accTitle|accDescr)\s)(?:[\w*\u0080-\uffff-]+|"[^"]*")(?:\s+(?:[\w*\u0080-\uffff-]+|"[^"]*"))+$/;
+const RE_NAMES = /^(?!(?:direction|classDef|class|style|accTitle|accDescr)\s)(?:[\w*.\u0080-\uffff-]+|"[^"]*")(?:(?:\s+|(?<=")|(?="))(?:[\w*.\u0080-\uffff-]+|"[^"]*"))+$/;
 
 /** The quoted comment that ends an attribute line. */
 const RE_COMMENT = /\s+"([^"]*)"\s*$/;
@@ -73,6 +76,44 @@ function unquote(name) {
   return name.length >= 2 && name.startsWith('"') && name.endsWith('"') ? name.slice(1, -1) : name;
 }
 
+/** Sticky: one word of Mermaid's ER lexer: letters, digits, `_`, `-`, `*`, `.`, any non-ASCII character, an entity code. */
+const RE_ROLE_WORD = /(?:#\w+;|[\w*.-]|[\u0080-\uffff])+/y;
+
+/** What opens a statement after a label on its line: a quoted name, or a word. */
+const RE_STATEMENT_START = /^(?:"|#\w+;|[\w*.-]|[\u0080-\uffff])/;
+
+/**
+ * A relationship's label as Mermaid reads it: the one quoted string or word
+ * after the `:` (`places`, `"places order"`), and the rest of the line,
+ * which Mermaid reads as the statements after it (`A ||--o{ B : places
+ * order` adds an entity `order`; `say"hi"` is `say` and an entity `hi`). A
+ * label that opens with neither, or a rest that opens no statement
+ * (`a(b)`, `a, b`, `a"b`), is refused, as Mermaid refuses it.
+ * @param {string} written what follows the `:`
+ * @param {string} line the line, for a refusal
+ * @param {number} lineNo
+ * @returns {{ label: string, rest: string }}
+ */
+function roleOf(written, line, lineNo) {
+  const text = written.trim();
+  if (text === '') return { label: '', rest: '' };
+  let end;
+  if (text.charCodeAt(0) === 0x22 /* " */) {
+    end = text.indexOf('"', 1) + 1;
+    if (end === 0) failWith('mermaid/er/relationship', { line }, lineNo);
+  }
+  else {
+    RE_ROLE_WORD.lastIndex = 0;
+    end = RE_ROLE_WORD.test(text) ? RE_ROLE_WORD.lastIndex : 0;
+    if (end === 0) failWith('mermaid/er/relationship', { line }, lineNo);
+  }
+  const rest = text.slice(end).trim();
+  if (rest !== '' && (!RE_STATEMENT_START.test(rest) || (rest.charCodeAt(0) === 0x22 && rest.indexOf('"', 1) === -1))) {
+    failWith('mermaid/er/relationship', { line }, lineNo);
+  }
+  return { label: unquote(text.slice(0, end)), rest };
+}
+
 /**
  * @param {string[]} lines
  * @returns {object}
@@ -95,8 +136,13 @@ export function parseEr(lines, lineOffset = 0) {
     return ent;
   };
 
+  // what follows a relationship's label on its line, read as the statements
+  // after it, as Mermaid reads them
+  /** @type {string | null} */
+  let after = null;
   for (let li = 0; li < lines.length; li++) {
-    let line = lines[li].trim();
+    let line = after ?? lines[li].trim();
+    after = null;
     if (line === '' || line.startsWith('%%')) continue;
 
     // Relationships are matched BEFORE the '{' entity-block check: a
@@ -115,14 +161,19 @@ export function parseEr(lines, lineOffset = 0) {
       ensure(rel[1]);
       ensure(rel[5]);
       const connector = rel[3].trim();
+      const role = roleOf(rel[6], line, lineOffset + li + 1);
       relationships.push({
         left,
         right,
         leftCard: rel[2],
         rightCard: rel[4],
         identifying: connector === '--' || connector === 'to',
-        label: unquote((rel[6] ?? '').trim()),
+        label: role.label,
       });
+      if (role.rest !== '') {
+        after = role.rest;
+        li--;
+      }
       continue;
     }
 
@@ -157,7 +208,7 @@ export function parseEr(lines, lineOffset = 0) {
     if (bare !== null && entityName(bare[1]).name !== '') ensure(bare[1]);
     // several names, each an entity, as Mermaid reads them
     else if (RE_NAMES.test(line)) {
-      for (const written of line.match(/"[^"]*"|\S+/g) ?? []) if (entityName(written).name !== '') ensure(written);
+      for (const written of line.match(/"[^"]*"|[^\s"]+/g) ?? []) if (entityName(written).name !== '') ensure(written);
     }
   }
 

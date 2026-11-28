@@ -526,6 +526,13 @@ describe('tooltips — every type that draws something to point at', () => {
     assert.strictEqual(say(er, all(er, '.mm-edge', 'data-edge', 0)[0]), 'CUSTOMER → ORDER');
   });
 
+  it('names an annotated class by its name, the «annotation» drawn above it no part of its name', () => {
+    const f = figure('classDiagram\n  class Shape {\n    <<interface>>\n    +draw()\n  }\n  Shape <|-- Square');
+    attachDiagramTooltips(f.el, { document: f.document });
+    assert.strictEqual(f.node('Shape').getAttribute('aria-label'), 'Shape');
+    assert.strictEqual(say(f, f.node('Shape')), 'Shape\nto: Square');
+  });
+
   it('takes a lollipop\'s end as the interface it names, never the class of that name', () => {
     // `foo --() bar` gives `foo` an interface `bar`: Mermaid draws it as an
     // interface of its own, so the class `bar` is neither end of the row

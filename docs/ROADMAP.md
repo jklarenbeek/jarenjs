@@ -240,18 +240,17 @@ delete it or fix it.
 ## @jarenjs/mermaid
 
 - [ ] **Mermaid forms still read differently from Mermaid** — measured against
-  Mermaid 11.16.1: a few lines Mermaid refuses still read: a backtick class
-  name that opens with `~` (`` class `~A` ``), a bracket in the id before a
-  bracketed subgraph title (`subgraph a(b) [t]`), a `;` in a sequence message,
-  note or block label and in a class relation label (`A->>B: a;b` reads whole;
-  `toMermaid` prints it as `#59;`, which Mermaid reads), and the inline link
-  form's `'…'`, read as one unit (`A -- 'a -- b' --> B`); and a few read
-  otherwise: `A -- 'a --> b' --> B` (Mermaid's link to a node `b'`: a node id
-  holding a `'`, `A --> b'`, is refused here), an ER relationship label of
-  more than one word or holding a `"` (`A ||--o{ B : places order` is
-  Mermaid's label `places` and an entity `order`; `say"hi"` is `say` and an
-  entity `hi`), and a class's `<<annotation>>`, which is not kept where
-  Mermaid draws it above the name.
+  Mermaid 11.16.1: a few lines Mermaid refuses still read: an inline link
+  label that no link of its kind ends (`A -- a ==> B` reads a thick link
+  labelled `a`; `A -- B`, `A == B` and `A -. B` read as links), an ER label or
+  entity name that is a keyword or a number of Mermaid's ER lexer (`A ||--o{ B
+  : one`, `: to`, `: 2nd`, `: places many`), a bare class name that is a
+  keyword of its class lexer (`class note`, `class link`, `class _self`;
+  `toMermaid` prints such a name in backticks, coded where Mermaid reads it as
+  a keyword there too), an entity code in a bare class name (`class A#59;`), a
+  class relation label holding a `:` (`A --> B : a:b`), a sequence `title` or
+  `link`/`links` line holding a `;`, a class annotation after a `:::style`
+  (`class A:::c <<x>>`), and an ER line of a name holding a bracket (`a(b)`).
 - [ ] **Full layout for the secondary types** — class and ER render as structured panels, not domain-specific layouts; mindmap/gitGraph/journey/timeline parse-accept with a placeholder. Real layouts are the next coverage push (tracked honestly in the benchmark scorecard).
 - [ ] **Layout/perf workstream** — dagre-lite handles ranks and straight
   edges; orthogonal edge routing, subgraph clustering and crossing reduction

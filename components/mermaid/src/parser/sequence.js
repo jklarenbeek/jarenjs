@@ -46,16 +46,24 @@ const STATEMENT_WORDS = new Set([...OPEN_BLOCKS, 'participant', 'actor', 'create
 const RE_SEPARATOR = /#[A-Za-z0-9]+;|;/g;
 
 /**
+ * Statements Mermaid reads after a `;` that this reader passes over: a
+ * title and the accessible title and description.
+ */
+const RE_IGNORED_STATEMENT = /^(?:title\s|accTitle\s*:|accDescr\s*[:{])/;
+
+/**
  * One line's statements. Mermaid ends a statement at `;` (`A->>B: hi;
  * B->>A: yo` is two messages, and `A->>B: hi;` one message `hi`; a message
  * writes the character as `#59;`), so a line splits at every `;` outside an
- * entity code where each piece that is not blank reads as a statement; a
- * line whose pieces do not all read so is one statement, as before, and its
- * text keeps the `;`.
+ * entity code where each piece that is not blank reads as a statement. A
+ * message, note, block or participant line whose pieces do not all read so
+ * is refused, as Mermaid refuses it (`A->>B: a;b`), where its text kept the
+ * `;`; any other line is one statement, as before.
  * @param {string} line - trimmed
+ * @param {number} lineNo the line's number, for a refusal
  * @returns {string[]}
  */
-export function sequenceStatements(line) {
+export function sequenceStatements(line, lineNo) {
   if (line.indexOf(';') === -1) return [line];
   const pieces = [];
   let start = 0;
@@ -66,7 +74,12 @@ export function sequenceStatements(line) {
   }
   pieces.push(line.slice(start).trim());
   const statements = pieces.filter((piece) => piece !== '');
-  return statements.every(readsAsStatement) ? statements : [line];
+  const unread = statements.findIndex((piece) => !readsAsStatement(piece) && !RE_IGNORED_STATEMENT.test(piece));
+  if (unread === -1) return statements;
+  if (unread > 0 && readsAsStatement(statements[0])) {
+    failWith('mermaid/sequence/semicolon', { rest: statements[unread] }, lineNo);
+  }
+  return [line];
 }
 
 /**
@@ -208,7 +221,7 @@ export function parseSequence(lines, lineOffset) {
     const whole = lines[li].trim();
     if (whole === '') continue;
     const lineNo = lineOffset + li + 1;
-    for (const line of sequenceStatements(whole)) read(line, lineNo);
+    for (const line of sequenceStatements(whole, lineNo)) read(line, lineNo);
   }
 
   return sequenceAst(participants, rootStatements, autonumber);

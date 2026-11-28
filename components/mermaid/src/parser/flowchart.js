@@ -40,9 +40,10 @@ const SHAPE_OPENERS = [
 ];
 
 /**
- * Sticky: an edge with an inline ` text ` label between two link runs. The
- * opening run is exactly `--`, `==` or `-.` and a blank, as Mermaid opens edge
- * text: `A --- B --> C` is two links, never a link labelled `B`.
+ * Sticky: an edge with an inline ` text ` label between two link runs, for
+ * text no link of its opening run's kind ends (`inlineText` reads the rest).
+ * The opening run is exactly `--`, `==` or `-.` and a blank, as Mermaid opens
+ * edge text: `A --- B --> C` is two links, never a link labelled `B`.
  */
 const RE_EDGE_LABELED = /(<?)(?:--|==|-\.)\s+(.+?)\s+([-.=]{2,})([>ox]?)/y;
 /** Sticky: what opens an inline label, the `<` of a two-way link included. */
@@ -62,11 +63,12 @@ const RE_EDGE_ID = /[A-Za-z_][\w-]*@(?=[-=.~<ox])/y;
 /** `e1@{ … }`: an edge id's animation or curve, which the tree does not keep. */
 const RE_EDGE_META = /^([A-Za-z_][\w-]*)@\{[\s\S]*\}$/;
 /** Sticky: an identifier (vertex id, class name, …). Ids are
- * alphanumeric/underscore (plus Unicode letters); `-`/`.` are excluded
- * so they cannot swallow a following link operator. */
-const RE_ID = /[A-Za-z0-9_À-￿][\wÀ-￿]*/y;
+ * alphanumeric/underscore (plus Unicode letters) and may hold a `'`, as
+ * Mermaid's do (`b'`); `-`/`.` are excluded so they cannot swallow a
+ * following link operator. */
+const RE_ID = /[A-Za-z0-9_'À-￿][\w'À-￿]*/y;
 /** Sticky: one character an identifier may hold. */
-const RE_ID_CHAR = /[\wÀ-￿]/y;
+const RE_ID_CHAR = /[\w'À-￿]/y;
 
 /**
  * Parse a flowchart body (config already stripped) into the flowchart
@@ -145,6 +147,10 @@ export function parseFlowchart(lines, lineOffset, direction) {
       // bare title it reads by its lexer's words, `bareTitle`)
       if (RE_EMPTY_TITLE.test(rest)) failWith('mermaid/flowchart/subgraph-empty-title', {}, lineNo);
       const title = bracketedTitle(rest);
+      // a bracket, `<`, `>` or `|` in the id before a bracketed title that is
+      // not quoted, as Mermaid refuses it (`subgraph a(b) [t]`)
+      const id = title === null ? '' : rest.slice(0, rest.indexOf('[')).trim();
+      if (RE_ID_BRACKET.test(afterQuotedUnit(id))) failWith('mermaid/flowchart/bracket-in-subgraph-id', { id }, lineNo);
       if (title !== null && strayQuote(title)) failWith('mermaid/flowchart/quote-in-title', {}, lineNo);
       // a bracket in a title that is not quoted, as Mermaid refuses it
       if (RE_BRACKET.test(title === null ? (rest.startsWith('"') ? '' : rest) : afterQuotedUnit(title))) {
@@ -522,6 +528,7 @@ function parseChain(stmt, lineNo, ensureNode, edges, classes, edgeIds) {
     if (edge.stray) failWith('mermaid/flowchart/quote-in-link-label', { from: prevGroup.ids.join(' & ') }, lineNo);
     if (edge.empty) failWith('mermaid/flowchart/empty-link-label', { from: prevGroup.ids.join(' & ') }, lineNo);
     if (edge.bracket) failWith('mermaid/flowchart/bracket-in-link-label', { from: prevGroup.ids.join(' & ') }, lineNo);
+    if (edge.run !== null) failWith('mermaid/flowchart/link-in-link-label', { from: prevGroup.ids.join(' & '), run: edge.run }, lineNo);
     pos = edge.pos;
     pos = skipSpace(s, pos);
     const nextGroup = readVertexGroup(s, pos, lineNo, ensureNode, classes);
@@ -835,11 +842,16 @@ function edgeLabel(written, piped = false) {
 /** A bracket of a shape (`(`, `)`, `[`, `]`, `{`, `}`), which Mermaid refuses in a pipe label or title that is not quoted. */
 const RE_BRACKET = /[()[\]{}]/;
 
+/** What Mermaid's lexer reads as no part of a subgraph id: a bracket, `<`, `>` or `|`. */
+const RE_ID_BRACKET = /[()[\]{}<>|]/;
+
 /**
  * Read a link operator, plain or labeled; `stray` tells a label holding a
- * `"` Mermaid refuses, `empty` one holding nothing and `bracket` one holding
- * a bracket it refuses, for the chain reader to refuse.
- * @returns {{ stroke: string, head: string, tail: string, length: number, label: string|null, stray: boolean, empty: boolean, bracket: boolean, pos: number } | null}
+ * `"` Mermaid refuses, `empty` one holding nothing, `bracket` one holding
+ * a bracket it refuses and `run` the run in an inline label's text that ends
+ * no link of its kind (`--` in `A -- a -- b --> B`), for the chain reader to
+ * refuse.
+ * @returns {{ stroke: string, head: string, tail: string, length: number, label: string|null, stray: boolean, empty: boolean, bracket: boolean, run: string|null, pos: number } | null}
  */
 function readEdge(s, pos) {
   let label = null;
@@ -848,19 +860,26 @@ function readEdge(s, pos) {
   if (open !== null) {
     // a quoted label is one unit, as in the pipe form: the link operators
     // inside its quotes are text, so `A -- "a --> b" --> B` is one edge
+    // (`'…'` is no quoting to Mermaid: `A -- 'a --> b' --> B` is a link
+    // labelled `'a` to a node `b'`)
     const text = RE_EDGE_LABEL_OPEN.lastIndex;
-    // (a `'…'` label too, which is no quoting to Mermaid: it reads the
-    // `'a --> b'` of `A -- 'a --> b' --> B` as a link to a node `b'`, an id
-    // this reader does not take)
-    const quote = s[text];
-    const partner = quote === '"' || quote === '\'' ? s.indexOf(quote, text + 1) : -1;
+    const partner = s[text] === '"' ? s.indexOf('"', text + 1) : -1;
     if (partner !== -1) {
       RE_EDGE_LABEL_CLOSE.lastIndex = partner + 1;
       const close = RE_EDGE_LABEL_CLOSE.exec(s);
       if (close !== null) {
         const info = classifyLink(open[1], close[1], close[2]);
-        return { ...info, ...edgeLabel(s.slice(text, partner + 1)), pos: RE_EDGE_LABEL_CLOSE.lastIndex };
+        return { ...info, ...edgeLabel(s.slice(text, partner + 1)), run: null, pos: RE_EDGE_LABEL_CLOSE.lastIndex };
       }
+    }
+    // the text runs to the first link of the opening run's kind, as Mermaid
+    // lexes it; a run that ends no such link is refused, as Mermaid refuses
+    // it (`A -- a -- b --> B`)
+    const inline = inlineText(s, text, open[0].trim().slice(open[1].length));
+    if (inline !== null) {
+      if (inline.run !== null) return { stroke: 'solid', head: 'none', tail: 'none', length: 1, label: null, stray: false, empty: false, bracket: false, run: inline.run, pos: text };
+      const info = classifyLink(open[1], inline.body, inline.head);
+      return { ...info, ...edgeLabel(s.slice(text, inline.at)), run: null, pos: inline.end };
     }
     RE_EDGE_LABELED.lastIndex = pos;
     const m = RE_EDGE_LABELED.exec(s);
@@ -868,14 +887,14 @@ function readEdge(s, pos) {
       // the inline form's text reads as the pipe form's: quotes stripped and
       // `<br>` a line break, as Mermaid reads both
       const info = classifyLink(m[1], m[3], m[4]);
-      return { ...info, ...edgeLabel(m[2]), pos: RE_EDGE_LABELED.lastIndex };
+      return { ...info, ...edgeLabel(m[2]), run: null, pos: RE_EDGE_LABELED.lastIndex };
     }
   }
   RE_EDGE_LABELED_TIGHT.lastIndex = pos;
   const tight = RE_EDGE_LABELED_TIGHT.exec(s);
   if (tight !== null) {
     const info = classifyLink(tight[1], tight[3], tight[4]);
-    return { ...info, ...edgeLabel(tight[2]), pos: RE_EDGE_LABELED_TIGHT.lastIndex };
+    return { ...info, ...edgeLabel(tight[2]), run: null, pos: RE_EDGE_LABELED_TIGHT.lastIndex };
   }
   RE_EDGE_PLAIN.lastIndex = pos;
   const m = RE_EDGE_PLAIN.exec(s);
@@ -895,7 +914,50 @@ function readEdge(s, pos) {
       p = close.end;
     }
   }
-  return { ...info, label, stray, empty, bracket, pos: p };
+  return { ...info, label, stray, empty, bracket, run: null, pos: p };
+}
+
+/**
+ * Mermaid's lexer for an inline label's text, by the run that opens it: the
+ * link that ends the text (`--` text ends at `---`, `-->`, `--x`, `--o`, a
+ * longer run too), and the one character the text may hold (a `-` not before
+ * another, no `=` in `==` text, no `.` in `-.` text). A mark before the
+ * closing run (`x-->`) is its own, not the text's.
+ * @type {Record<string, { close: RegExp, text: RegExp, kind: string }>}
+ */
+const INLINE_TEXT = {
+  __proto__: null,
+  '--': { close: /\s*[xo<]?(-{2,}(?=[-xo>])-*)([xo>]?)\s*/y, text: /[^-]|-(?!-)/y, kind: '--' },
+  '==': { close: /\s*[xo<]?(={2,}(?=[=xo>])=*)([xo>]?)\s*/y, text: /[^=]/y, kind: '==' },
+  '-.': { close: /\s*[xo<]?(-?\.+-)([xo>]?)\s*/y, text: /[^.]/y, kind: '-.' },
+};
+
+/**
+ * Where an inline label's text, read from `from` as Mermaid's lexer reads
+ * it, ends: at the first link of its opening run's kind (a `"…"` string in
+ * it is one unit), the link's body and head mark; or the run it holds that
+ * ends no such link (`--` in `--` text, `=` in `==` text, `.` in `-.`
+ * text), which Mermaid refuses. Null when no link of its kind ends it.
+ * @param {string} s
+ * @param {number} from where the text starts, after the opening run's blanks
+ * @param {string} opening the opening run (`--`, `==`, `-.`)
+ * @returns {{ at: number, body: string, head: string, end: number, run: null } | { run: string } | null}
+ */
+function inlineText(s, from, opening) {
+  const lexer = INLINE_TEXT[opening];
+  for (let i = from; i < s.length;) {
+    if (s.charCodeAt(i) === 0x22 /* " */) {
+      const partner = s.indexOf('"', i + 1);
+      if (partner !== -1) { i = partner + 1; continue; }
+    }
+    lexer.close.lastIndex = i;
+    const close = lexer.close.exec(s);
+    if (close !== null && i > from) return { at: i, body: close[1], head: close[2], end: lexer.close.lastIndex, run: null };
+    lexer.text.lastIndex = i;
+    if (lexer.text.test(s)) { i++; continue; }
+    return { run: opening === '--' ? '--' : s[i] };
+  }
+  return null;
 }
 
 /**

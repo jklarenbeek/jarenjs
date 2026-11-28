@@ -9,9 +9,11 @@
  * as `generic`; one nested in a bare name is refused, as Mermaid refuses it,
  * and a backtick-quoted name keeps the first two parts its `~`s split it
  * into, as Mermaid does: `` `Grid~List~int~~` `` is `Grid` of `List`), and `click`
- * statements (a link or a call, with the tooltip text); a body's
- * `<<annotation>>` line is no member. Geometry-free: members and relations
- * preserve declaration order.
+ * statements (a link or a call, with the tooltip text); a class's
+ * `<<annotation>>`s (a body line `<<any text>>`, a head's `class A
+ * <<interface>>`, a statement `<<interface>> A`) are kept as `annotations`,
+ * in the order written, and are no members. Geometry-free: members and
+ * relations preserve declaration order.
  */
 
 import { collectBraceBody, commentStart } from '../utils.js';
@@ -33,10 +35,16 @@ const RE_FROM = new RegExp(`^${NAME}(?:\\s*"([^"]*)")?$`);
 const RE_TO = new RegExp(`^(?:"([^"]*)"\\s*)?${NAME}(?:\\s*:\\s*(.*))?$`);
 /** `ClassName : member` line form. */
 const RE_MEMBER_LINE = /^(\S+)\s*:\s*(.+)$/;
-/** A class annotation on a body line of its own: `<<interface>>`, `<<enumeration>>`. */
-const RE_ANNOTATION = /^<<[^<>]*>>$/;
+/** A class annotation on a body line of its own, any text in it: `<<interface>>`, `<<enumeration>>`. */
+const RE_ANNOTATION = /^<<.*>>$/;
+/**
+ * An annotation outside a body, in a class statement's head (`class A
+ * <<interface>>`) or a statement of its own (`<<interface>> A`): one word
+ * of Mermaid's lexer between the marks, then the class it annotates.
+ */
+const RE_ANNOTATION_WORD = /^<<\s*(\w+|[\u0080-\uffff])\s*>>\s*(.*)$/;
 /** Lines Mermaid reads as notes, styling, links or grouping, which this tree does not keep. */
-const RE_DIRECTIVE = /^(?:note|classDef|cssClass|style|link|callback|direction|namespace|accTitle|accDescr|<<)(?=[\s:{<]|$)|^\}$/;
+const RE_DIRECTIVE = /^(?:note|classDef|cssClass|style|link|callback|direction|namespace|accTitle|accDescr)(?=[\s:{<]|$)|^\}$/;
 
 /**
  * A name as the tree keeps it, as Mermaid reads it, its generic (if any)
@@ -53,13 +61,47 @@ function className(name, lineNo) {
     const close = name.indexOf('`', 1);
     // a backtick no other closes stays as written
     if (close === -1) return name;
-    const text = name.slice(1, close) + name.slice(close + 1);
+    const text = backtickText(name.slice(1, close), name, lineNo) + name.slice(close + 1);
     if (text.indexOf('~') <= 0) return text;
     const [base, generic] = text.split('~');
     return `${base}~${generic}~`;
   }
   refuseNestedGeneric(name, lineNo);
   return bareName(name.replace(/\s+/g, ''), lineNo);
+}
+
+/**
+ * What Mermaid's lexer reads as syntax, not as a name, where a backtick
+ * name's text starts: a keyword of a class statement, `<<`/`>>` or a `"`.
+ */
+export const RE_BACKTICK_KEYWORD = /^(?:(?:cssClass|callback|link|click|note|href)\b|<<|>>|")/;
+
+/**
+ * A backtick name's text as Mermaid reads it. Where the text starts,
+ * Mermaid's lexer reads its own tokens before a name: each leading `~~` is
+ * an empty generic it drops (`` `~~A` `` is `A`); a `~` left over opens a
+ * generic before any name, and a keyword (`` `note A` ``), `<<`, `>>` or a
+ * `"` is syntax, so each such name, and one with nothing after its `~~`s, is
+ * refused, as Mermaid refuses it. An entity code spells such a first
+ * character (`` `#126;A` ``, `` `#110;ote A` ``, `` `#60;#60;A` ``).
+ * @param {string} inner the text between the backticks
+ * @param {string} written the name as written, for a refusal
+ * @param {number} lineNo
+ * @returns {string}
+ */
+function backtickText(inner, written, lineNo) {
+  let at = 0;
+  while (inner.startsWith('~~', at)) at += 2;
+  const text = inner.slice(at);
+  if (text === '' || text.startsWith('~')) failWith('mermaid/class/generic-tilde', { name: written }, lineNo);
+  const lead = RE_BACKTICK_KEYWORD.exec(text);
+  if (lead !== null) {
+    // the spelling to write instead: `<<` and `>>` coded whole, a keyword's first character
+    const coded = lead[0] === '<<' || lead[0] === '>>' ? lead[0].replace(/./g, (c) => `#${c.charCodeAt(0)};`)
+      : `#${text.charCodeAt(0)};${lead[0].slice(1)}`;
+    failWith('mermaid/class/backtick-lead', { name: written, lead: lead[0], coded }, lineNo);
+  }
+  return text;
 }
 
 /**
@@ -242,9 +284,18 @@ export function parseClass(lines, lineOffset = 0) {
     if (line.startsWith('class ')) {
       const rest = line.slice('class '.length).trim();
       const brace = rest.indexOf('{');
-      const head = classHead(classStatementHead(rest), lineOffset + li + 1);
+      const written = classStatementHead(rest);
+      refuseSemicolon(written, line, lineOffset + li + 1);
+      const head = classHead(written, lineOffset + li + 1);
       const cls = ensure(head.name);
       if (head.label !== null) cls.label = head.label;
+      // `class A <<interface>>`: the one annotation the head may end with
+      const tail = (brace === -1 ? rest : rest.slice(0, brace)).slice(written.length).trim();
+      if (tail !== '') {
+        const annotation = RE_ANNOTATION_WORD.exec(tail);
+        if (annotation === null || annotation[2] !== '') failWith('mermaid/class/annotation', { line }, lineOffset + li + 1);
+        annotate(cls, annotation[1]);
+      }
       if (brace === -1) continue;
       // Consume until closing brace across lines.
       let body;
@@ -253,7 +304,8 @@ export function parseClass(lines, lineOffset = 0) {
         const mem = raw.trim();
         // an `<<enumeration>>` line annotates the class, as in its header,
         // and is no member
-        if (mem !== '' && !RE_ANNOTATION.test(mem)) cls.members.push(member(mem));
+        if (RE_ANNOTATION.test(mem)) annotate(cls, mem.slice(2, -2));
+        else if (mem !== '') cls.members.push(member(mem));
       }
       continue;
     }
@@ -266,10 +318,23 @@ export function parseClass(lines, lineOffset = 0) {
       continue;
     }
 
+    // `<<interface>> A` annotates a class written before it; one that names
+    // no such class is refused, as Mermaid fails on it
+    if (line.startsWith('<<')) {
+      const annotation = RE_ANNOTATION_WORD.exec(line);
+      if (annotation === null || annotation[2] === '') failWith('mermaid/class/annotation', { line }, lineOffset + li + 1);
+      const { name } = genericOf(className(annotation[2], lineOffset + li + 1));
+      const annotated = classMap.get(name);
+      if (annotated === undefined) failWith('mermaid/class/annotation-unwritten', { line, name }, lineOffset + li + 1);
+      annotate(annotated, annotation[1]);
+      continue;
+    }
+
     if (RE_DIRECTIVE.test(line)) continue;
 
     const rel = relationOf(line, lineOffset + li + 1);
     if (rel !== null) {
+      refuseSemicolon(line, line, lineOffset + li + 1);
       // the end at a lollipop (`bar ()-- foo`) names an interface, not a class
       const lollipop = rel.type.startsWith('()') !== rel.type.endsWith('()');
       if (!lollipop || !rel.type.startsWith('()')) rel.from = ensure(rel.from).name;
@@ -280,6 +345,7 @@ export function parseClass(lines, lineOffset = 0) {
 
     const ml = RE_MEMBER_LINE.exec(line);
     if (ml !== null && !line.startsWith('class')) {
+      refuseSemicolon(line, line, lineOffset + li + 1);
       ensure(className(ml[1], lineOffset + li + 1)).members.push(member(ml[2].trim()));
       continue;
     }
@@ -292,6 +358,34 @@ export function parseClass(lines, lineOffset = 0) {
   }
 
   return { classes: order.map((n) => classMap.get(n)), relations, clicks };
+}
+
+/** What may hold a `;` Mermaid reads: a quoted string, a backtick name, an entity code (`#59;`). */
+const RE_NOT_SEPARATOR = /"[^"]*"|`[^`]*`|#\w+;/g;
+
+/**
+ * Refuse a `;` outside a quoted string, a backtick name or an entity code, which Mermaid's
+ * class lexer reads nowhere outside a class body (`A --> B : a;b`,
+ * `A : +x;y`, `class A;`), where it was read as text.
+ * @param {string} text the statement's text to look in
+ * @param {string} line the line, for the refusal
+ * @param {number} lineNo
+ */
+function refuseSemicolon(text, line, lineNo) {
+  if (text.indexOf(';') !== -1 && text.replace(RE_NOT_SEPARATOR, '').indexOf(';') !== -1) {
+    failWith('mermaid/class/semicolon', { line }, lineNo);
+  }
+}
+
+/**
+ * Add an annotation to a class, after any it holds: a class holds
+ * `annotations` only once it is annotated, in the order they are written
+ * (Mermaid draws the first above the name).
+ * @param {{ annotations?: string[] }} cls
+ * @param {string} text
+ */
+function annotate(cls, text) {
+  (cls.annotations ??= []).push(text);
 }
 
 /**

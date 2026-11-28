@@ -18,6 +18,7 @@
 
 import { parseState, stateStatements, stateDeclaration } from './parser/state.js';
 import { printClick, printNodeClick } from './parser/click.js';
+import { RE_BACKTICK_KEYWORD } from './parser/class.js';
 import { isMarkdownString, genericText } from './label-text.js';
 import { FLOW_NAMED_SHAPES } from './ast.js';
 
@@ -94,6 +95,12 @@ const RE_EDGE_NEEDS_QUOTE = /[|;[\](){}]|^[\s"']|[\s"']$/;
  * the quote), and a quote or a space at either end.
  */
 const RE_TITLE_NEEDS_QUOTE = /[[\](){};]|^[\s"']|[\s"']$/;
+
+/**
+ * What a subgraph id before its bracketed title needs its quotes for: a
+ * bracket, `<`, `>` or `|`, which Mermaid reads in no unquoted id.
+ */
+const RE_SUBGRAPH_ID_NEEDS_QUOTE = /[()[\]{}<>|]/;
 
 /**
  * A label as source text that reads back as the same label. A line break
@@ -202,7 +209,7 @@ function printFlowchart(ast) {
   const inner = nestedSubgraphs(ast);
   const printSubgraph = (/** @type {any} */ sg, /** @type {string} */ indent) => {
     out.push(indent + (sg.label && sg.label !== ''
-      ? `subgraph ${sg.id} [${labelSource(sg.label, RE_TITLE_NEEDS_QUOTE)}]`
+      ? `subgraph ${RE_SUBGRAPH_ID_NEEDS_QUOTE.test(sg.id) ? `"${sg.id}"` : sg.id} [${labelSource(sg.label, RE_TITLE_NEEDS_QUOTE)}]`
       : `subgraph ${sg.id}`));
     if (sg.direction) out.push(indent + '  direction ' + sg.direction);
     for (const id of sg.nodes) {
@@ -369,7 +376,8 @@ function oneStatement(head, text, statements) {
 /**
  * Text whose every `;` prints as `#59;`, which the drawing decodes, an
  * entity code it holds kept: Mermaid refuses a `;` in a sequence message,
- * note, block label or participant alias and in a class relation label.
+ * note, block label or participant alias and in a class relation label or
+ * `Name : member` line.
  * @param {string} text
  * @returns {string}
  */
@@ -414,8 +422,28 @@ function isUnbracedMember(member) {
 /** A class name only words spell, which is written bare. */
 const RE_BARE_CLASS = /^[^\s"`:;<>*|()\-[\]{}~]+$/;
 
+/** A bare word Mermaid's class lexer reads as a keyword, not as a name (`note`, `link`, `_self`). */
+const RE_BARE_KEYWORD = /^(?:cssClass|callback|link|click|note|href|_self|_blank|_parent|_top)\b/;
+
 /** A generic written bare after a bare name: words and entity codes (`#lt;`), its nesting written as codes. */
 const RE_BARE_GENERIC = /^[^\s"`:;<>*|()\-[\]{}]+$/;
+
+/**
+ * A class name as it is written between backticks: each `~` as `#126;`
+ * (Mermaid splits a backtick name at its `~`s) and a first character
+ * Mermaid's lexer reads as syntax there (`note`, `<<`, a `"`) as its entity
+ * code, both of which the drawing decodes.
+ * @param {string} name
+ * @returns {string}
+ */
+function backtickClassName(name) {
+  const text = name.replaceAll('~', '#126;');
+  const lead = RE_BACKTICK_KEYWORD.exec(text);
+  if (lead === null) return text;
+  // `<<` and `>>` are two characters of syntax, a keyword is one word
+  const coded = lead[0] === '<<' || lead[0] === '>>' ? 2 : 1;
+  return [...text.slice(0, coded)].map((c) => `#${c.codePointAt(0)};`).join('') + text.slice(coded);
+}
 
 /** An entity code, which Mermaid reads before it reads a line. */
 const RE_ENTITY_CODE = /#\w+;/g;
@@ -427,7 +455,8 @@ const RE_ENTITY_CODE = /#\w+;/g;
 function printClass(ast) {
   const out = ['classDiagram'];
   // a name only words may spell is written bare; any other in backticks
-  const name = (/** @type {string} */ n) => (RE_BARE_CLASS.test(n) ? n : `\`${n}\``);
+  const bare = (/** @type {string} */ n) => RE_BARE_CLASS.test(n) && !RE_BARE_KEYWORD.test(n);
+  const name = (/** @type {string} */ n) => (bare(n) ? n : `\`${backtickClassName(n)}\``);
   for (const cls of ast.classes) {
     // a generic follows its name, both inside the backticks of a quoted
     // one; a generic it nests is written with `#lt;`/`#gt;`, which no reader
@@ -436,20 +465,24 @@ function printClass(ast) {
     // `List`)
     const generic = cls.generic == null ? null : genericText(cls.generic, '#lt;', '#gt;');
     const written = generic === null ? name(cls.name)
-      : RE_BARE_CLASS.test(cls.name) && RE_BARE_GENERIC.test(generic.replace(RE_ENTITY_CODE, '')) ? `${cls.name}~${generic}~`
-        : `\`${cls.name}~${generic}~\``;
+      : bare(cls.name) && RE_BARE_GENERIC.test(generic.replace(RE_ENTITY_CODE, '')) ? `${cls.name}~${generic}~`
+        : `\`${backtickClassName(cls.name)}~${generic}~\``;
     const head = `class ${written}${cls.label !== cls.name ? `[${inQuotes(cls.label)}]` : ''}`;
-    if (cls.members.length === 0) {
+    // an annotation is a body line, which takes any text but the `}` that
+    // ends the body (written as its code)
+    const annotations = (cls.annotations ?? []).map((/** @type {string} */ a) => `  <<${a.replaceAll('}', '#125;')}>>`);
+    if (cls.members.length === 0 && annotations.length === 0) {
       out.push(head);
     }
     else if (cls.members.some(isUnbracedMember)) {
       // a body ends at its first `}` and drops comment-looking lines, so
       // such a member can only be written as a `Name : member` line
-      out.push(head);
-      for (const m of cls.members) out.push(`${cls.name} : ${m.visibility ?? ''}${m.text}`);
+      out.push(...(annotations.length === 0 ? [head] : [`${head} {`, ...annotations, '}']));
+      // and a `;` there is refused, so it prints as its code
+      for (const m of cls.members) out.push(`${cls.name} : ${semicolonsCoded(`${m.visibility ?? ''}${m.text}`)}`);
     }
     else {
-      out.push(`${head} {`);
+      out.push(`${head} {`, ...annotations);
       for (const m of cls.members) out.push(`  ${m.visibility ?? ''}${m.text}`);
       out.push('}');
     }
@@ -574,15 +607,22 @@ function printStateLines(ast, declareAll) {
 }
 
 /**
- * A relationship label as Mermaid reads it: one word with no quote and no
- * `;` as it stands, anything else (a space, a quote, nothing at all) in
- * quotes (`inQuotes`), so a coded label prints as it did when it held the
- * quote.
+ * A label Mermaid reads as one word, which prints bare: its word characters
+ * (letters, digits, `_`, `-`, `*`, `.`, any non-ASCII one), opening with no
+ * digit and no keyword of its lexer (`one`, `many`, `to`, `class`, `u-`).
+ */
+const RE_ER_BARE_LABEL = /^(?![0-9])(?!(?:one|many|to|class|classdef|style|erdiagram)\b|u[.-])[\w*.\u0080-\uffff-]+$/i;
+
+/**
+ * A relationship label as Mermaid reads it: one word (`RE_ER_BARE_LABEL`) as
+ * it stands, anything else (more than one word, a quote, nothing at all) in
+ * quotes (`inQuotes`), as Mermaid reads only one word or one quoted string
+ * as the label, so a coded label prints as it did when it held the quote.
  * @param {string} label
  * @returns {string}
  */
 function erLabel(label) {
-  return /^[^\s";]+$/.test(label) ? label : inQuotes(label);
+  return RE_ER_BARE_LABEL.test(label) ? label : inQuotes(label);
 }
 
 /**

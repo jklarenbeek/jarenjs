@@ -80,7 +80,9 @@ describe('class and ER panels read their rows', () => {
   });
 
   it('decodes an ER relationship\'s label', () => {
-    assert.ok(svgOf('erDiagram\nA ||--o{ B : has #9829;').includes('>A ||--o{ B : has ♥</text>'));
+    // quoted: a bare label is one word, and Mermaid reads `has #9829;` as the
+    // label `has` and an entity `#9829;`
+    assert.ok(svgOf('erDiagram\nA ||--o{ B : "has #9829;"').includes('>A ||--o{ B : has ♥</text>'));
   });
 });
 
@@ -126,14 +128,16 @@ describe('sequenceDiagram — a `;` ends a statement, as in Mermaid', () => {
     assert.deepEqual(texts('sequenceDiagram\n  note over A: n; A->>B: m'), [['note', 'n'], ['message', 'm']]);
   });
 
-  it('keeps an entity code\'s `;`, and a line whose pieces are not all statements, as text', () => {
+  it('keeps an entity code\'s `;` as text, and refuses a `;` that ends a message before what is no statement, as Mermaid refuses it', () => {
     assert.deepEqual(texts('sequenceDiagram\n  A->>B: I #9829; you #59; ok'), [['message', 'I #9829; you #59; ok']]);
-    assert.deepEqual(texts('sequenceDiagram\n  A->>B: hi; there'), [['message', 'hi; there']]);
+    assert.throws(() => parseMermaid('sequenceDiagram\n  A->>B: hi; there'), (/** @type {any} */ e) =>
+      e.msgid === 'mermaid/sequence/semicolon' && e.line === 2 && e.params.rest === 'there');
   });
 
   it('prints a `;` as #59;, which Mermaid reads in a message where it refuses a `;`, so the tree reads back as one statement', () => {
-    const doc = parseMermaid('sequenceDiagram\n  A->>B: hi; there\n  B->>A: x #9829; y');
+    const doc = parseMermaid('sequenceDiagram\n  A->>B: hi\n  B->>A: x #9829; y');
     const message = doc.ast.statements[0];
+    message.text = 'hi; there';
     doc.ast.statements.push({ ...message, text: 'p #9829; q; B->>A: r' });
     const text = toMermaid(doc);
     assert.match(text, /^A->>B: hi#59; there$/m);

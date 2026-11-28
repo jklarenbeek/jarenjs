@@ -47,11 +47,12 @@ function refuses(source, msgid, line, params) {
 }
 
 describe('classDiagram — an annotation line in a class body', () => {
-  it('is no member, as Mermaid reads it', () => {
+  it('is no member but the class\'s annotation, as Mermaid reads it', () => {
     const { classes } = ast('classDiagram\nclass Color{\n  <<enumeration>>\n  RED\n  GREEN\n}\nclass Shape{\n    <<interface>>\n    noOfVertices\n    draw()\n}');
     assert.deepEqual(classes.map((/** @type {any} */ c) => [c.name, c.members.map((/** @type {any} */ m) => [m.kind, m.text])]),
       [['Color', [['attribute', 'RED'], ['attribute', 'GREEN']]], ['Shape', [['attribute', 'noOfVertices'], ['method', 'draw()']]]]);
-    assert.equal(printsBack('classDiagram\nclass Color{\n  <<enumeration>>\n  RED\n}'), 'classDiagram\nclass Color {\n  RED\n}\n');
+    assert.deepEqual(classes.map((/** @type {any} */ c) => c.annotations), [['enumeration'], ['interface']]);
+    assert.equal(printsBack('classDiagram\nclass Color{\n  <<enumeration>>\n  RED\n}'), 'classDiagram\nclass Color {\n  <<enumeration>>\n  RED\n}\n');
   });
 });
 
