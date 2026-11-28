@@ -64,7 +64,8 @@ function isAbsentMember(data, dataKeys, key) {
 
 /**
  * Whether every name is an own member of data: what `dependentRequired` and
- * a `dependencies` list require once their trigger is there.
+ * a `dependencies` list require once their trigger is there, and the member
+ * walks' `required` names a walk over the listed members did not meet.
  * @param {object} data
  * @param {string[]} names
  * @returns {boolean}
@@ -75,6 +76,10 @@ function hasOwnAll(data, names) {
   }
   return true;
 }
+
+// Object.prototype.hasOwnProperty, called inside a `for…in` over the same
+// object, where V8 answers it from the enumeration cache.
+const hasOwnProperty = Object.prototype.hasOwnProperty;
 
 /**
  * Whether `key` is an own member of data that the walk over `dataKeys`, the
@@ -982,7 +987,8 @@ function isPureMember(code, data) {
  * validators `propsMap` holds) with `required`, alone or with
  * `additionalProperties` (`closed`). A member whose schema is type-only or
  * asserts nothing is tested by code (isPureMember), any other by its
- * validator.
+ * validator. A `required` name `properties` declares is tested where its
+ * member is read, once; the other `required` names before any member is.
  * @param {import('./index.js').ValidationObject} schemaObj
  * @param {object} jsonSchema
  * @param {Map<string, Function>} propsMap
@@ -993,15 +999,18 @@ function isPureMember(code, data) {
 function compilePropertiesWalk(schemaObj, jsonSchema, propsMap, closed, typeError) {
   // required belongs to the validation vocabulary; assert nothing when
   // the metaschema disables it.
-  const requiredKeys = schemaObj.options.vocabValidation !== false
-    ? getArrayClassMinItems(jsonSchema.required, 1) || null
-    : null;
-  const requiredCount = requiredKeys === null ? 0 : requiredKeys.length;
+  const requiredNames = new Set(schemaObj.options.vocabValidation !== false
+    ? getArrayClassMinItems(jsonSchema.required, 1)
+    : undefined);
 
   const propKeys = Array.from(propsMap.keys());
   const propValidators = Array.from(propsMap.values());
   const propCount = propKeys.length;
   const codes = propValidators.map((validator) => PURE_MEMBERS.indexOf(validator));
+  const requiredAt = propKeys.map((key) => requiredNames.has(key));
+  const requiredDeclared = propKeys.filter((key) => requiredNames.has(key));
+  const requiredRest = Array.from(requiredNames).filter((key) => !propsMap.has(key));
+  const restCount = requiredRest.length;
 
   if (closed) {
     const additional = getBoolOrObjectClass(jsonSchema.additionalProperties);
@@ -1011,24 +1020,29 @@ function compilePropertiesWalk(schemaObj, jsonSchema, propsMap, closed, typeErro
       : null;
     const additionalCode = additionalValidator === null ? -1 : PURE_MEMBERS.indexOf(additionalValidator);
     const propIndex = new Map(propKeys.map((key, i) => [key, i]));
+    const declaredCount = requiredDeclared.length;
 
-    // The general path's walk: the instance's own keys in their order, so a
-    // member additionalProperties refuses answers before any member after
-    // it is read. A key at the schema's next position is matched without
-    // the map.
+    // The general path's walk: the instance's own enumerable keys in their
+    // order (those Object.keys lists, which `for…in` visits first and
+    // V8 tests for ownness from its enumeration cache), so a member
+    // additionalProperties refuses answers before any member after it is
+    // read. A key at the schema's next position is matched without the map.
+    // A declared `required` name the walk does not meet may still be an own
+    // non-enumerable member: those are probed after it.
     return function validateObjectClosedProperties(data, dataPath, dataRoot) {
       if (!isObjectInstance(data)) return otherKind(typeError, data, dataPath);
-      const dataKeys = Object.keys(data);
-      for (let i = 0; i < requiredCount; ++i) {
-        if (!Object.hasOwn(data, requiredKeys[i]))
+      for (let i = 0; i < restCount; ++i) {
+        if (!Object.hasOwn(data, requiredRest[i]))
           return false;
       }
       let next = 0;
-      for (let i = 0; i < dataKeys.length; ++i) {
-        const key = dataKeys[i];
+      let met = 0;
+      for (const key in data) {
+        if (!hasOwnProperty.call(data, key)) continue;
         const at = key === propKeys[next] ? next : propIndex.get(key);
         if (at !== undefined) {
           next = at + 1;
+          if (requiredAt[at]) ++met;
           const code = codes[at];
           if (code >= 0 ? !isPureMember(code, data[key]) : propValidators[at](data[key], dataPath, dataRoot, key) === false)
             return false;
@@ -1040,7 +1054,7 @@ function compilePropertiesWalk(schemaObj, jsonSchema, propsMap, closed, typeErro
           : additionalValidator(data[key], dataPath, dataRoot, key) === false))
           return false;
       }
-      return true;
+      return met === declaredCount || hasOwnAll(data, requiredDeclared);
     };
   }
 
@@ -1054,8 +1068,8 @@ function compilePropertiesWalk(schemaObj, jsonSchema, propsMap, closed, typeErro
   if (extendPaths || track) {
     return function validateObjectPropertiesOnlyTracked(data, dataPath, dataRoot) {
       if (!isObjectInstance(data)) return otherKind(typeError, data, dataPath);
-      for (let i = 0; i < requiredCount; ++i) {
-        if (!Object.hasOwn(data, requiredKeys[i]))
+      for (let i = 0; i < restCount; ++i) {
+        if (!Object.hasOwn(data, requiredRest[i]))
           return false;
       }
       for (let i = 0; i < propCount; ++i) {
@@ -1067,6 +1081,8 @@ function compilePropertiesWalk(schemaObj, jsonSchema, propsMap, closed, typeErro
             return false;
           if (track) root.evalLog.add(data, key);
         }
+        else if (requiredAt[i])
+          return false;
       }
       return true;
     };
@@ -1074,8 +1090,8 @@ function compilePropertiesWalk(schemaObj, jsonSchema, propsMap, closed, typeErro
 
   return function validateObjectPropertiesOnly(data, dataPath, dataRoot) {
     if (!isObjectInstance(data)) return otherKind(typeError, data, dataPath);
-    for (let i = 0; i < requiredCount; ++i) {
-      if (!Object.hasOwn(data, requiredKeys[i]))
+    for (let i = 0; i < restCount; ++i) {
+      if (!Object.hasOwn(data, requiredRest[i]))
         return false;
     }
     for (let i = 0; i < propCount; ++i) {
@@ -1086,6 +1102,8 @@ function compilePropertiesWalk(schemaObj, jsonSchema, propsMap, closed, typeErro
         if (code >= 0 ? !isPureMember(code, data[key]) : propValidators[i](data[key], dataPath, dataRoot, key) === false)
           return false;
       }
+      else if (requiredAt[i])
+        return false;
     }
     return true;
   };
@@ -1096,9 +1114,10 @@ function compileObjectGroup(schemaObj, jsonSchema, typeError) {
   // additionalProperties. Alone, the walk iterates the (fixed) schema keys
   // with direct property access instead of allocating Object.keys(data) and
   // doing a map lookup per data key; required membership is a per-key
-  // Object.hasOwn probe. With additionalProperties, where no annotation is
-  // kept and no member location is read, it walks the instance's keys as
-  // the general path does, with fewer calls.
+  // Object.hasOwn probe, made once for a name properties also declares.
+  // With additionalProperties, where no annotation is kept and no member
+  // location is read, it walks the instance's own enumerable keys as the
+  // general path does, with fewer calls and no key list.
   const closed = jsonSchema.additionalProperties != null;
   if (schemaObj.options.skipErrors
     && holdsPropertiesOnly(jsonSchema)

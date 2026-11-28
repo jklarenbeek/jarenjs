@@ -134,27 +134,29 @@ delete it or fix it.
   longer read). Testing the two positions without the loop measured a fifth
   faster per row in one process but does not stand out of the published rows'
   spread. Wanted: such a tuple at Ajv's speed, every answer unchanged.
-- [ ] **A typical object schema validates at a third to a sixth of Ajv's
-  speed.** Compiled alone and called warm (best of five rounds of two million
-  calls on one pinned core), `{ type: 'object', properties: { query: { type:
-  'string' }, limit: { type: 'integer' }, exact: { type: 'boolean' } },
-  required: ['query'], additionalProperties: false }` takes about 53 ns per
-  valid call where Ajv takes 17, the same without `additionalProperties` about
-  69 ns to 12 and without `required` too about 62 ns to 12. A leading `type`
-  (`object`, `array`, `string`), a type-only member or item and
-  `additionalProperties` no longer cost a closure of their own; what is left
-  is how a closure reads a member: a declared name probed with `Object.hasOwn`
-  and read by a varying key costs about 13 ns where Ajv's generated code reads
-  it by a fixed name in under 2 ns, and the validator generates no code by
-  design. A `required` name is one more such probe, and a name `properties`
-  also declares is probed twice: the second probe matters only to an instance
-  that changes while it is validated, which is read in an unspecified order
-  and may answer differently in the two modes (packages/validate/README.md,
-  'Values JSON cannot carry'), so it may go. `additionalProperties` lists the
-  instance's keys (`Object.keys`). The validator benchmark's properties,
-  required and additionalProperties rows take 1.3–1.5× Ajv's time together.
-  Wanted: those costs gone, every answer unchanged, non-JSON values included,
-  an instance that changes while it is validated excepted.
+- [ ] **An object schema without `additionalProperties` validates at a quarter
+  to a tenth of Ajv's speed.** Compiled alone and called warm (best of five
+  rounds of two million calls on one pinned core), `{ type: 'object',
+  properties: { query: { type: 'string' }, limit: { type: 'integer' }, exact:
+  { type: 'boolean' } }, required: ['query'] }` takes about 52 ns per valid
+  call where Ajv takes 13, and without `required` about 53 ns to 6; with
+  `additionalProperties: false` beside them it takes about 23 ns to 19. What
+  is left is how the walk reads a declared member: probed with
+  `Object.hasOwn`, which V8 does not inline (about 7 ns a call), and read by a
+  varying key, where Ajv's generated code reads it by a fixed name; the
+  validator generates no code by design. A `required` name `properties` does
+  not declare is one more probe. Reading a member before probing it saves the
+  probe only where an inherited accessor cannot answer; gated on the prototype
+  (`Object.prototype` or null) it saved about 12 ns on one schema but cost
+  more than it saved where many instance shapes meet the walk, and ungated it
+  calls accessors the keywords never read. A closure per declared name or per
+  arity lost to the loop beside other schemas. The validator benchmark's
+  properties, required and additionalProperties rows answer within the noise
+  of Ajv's time when their rounds are long, and at 1.2 to 1.7 times it in the
+  profiler's short rounds, which move with the compiler's tiering. The walk
+  beside `additionalProperties` reads an instance V8 holds without an
+  enumeration cache (one a member was deleted from, one of some hundreds of
+  members, one with integer keys) 1.4 to 1.7 times slower than before.
 - [ ] **An object member holding `undefined` is present to `required` and
   passes `type`, and a bare `undefined` passes `type`.** `{ required: ['a']
   }` accepts `{ a: undefined }` and `{ dependentSchemas: { a: { required:

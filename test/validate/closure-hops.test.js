@@ -279,6 +279,15 @@ describe('the object and array walks answer as the compositions they replace', f
     }
   });
 
+  // Stopping at the first failure, a `required` name `properties` declares
+  // is tested where its member is read, so a getter read before it runs
+  // where that name is missing, and one that throws answers in place of the
+  // general walk's `false` (packages/validate/README.md, 'Values JSON cannot
+  // carry'): of these values, those whose `a` is a throwing getter.
+  const throwsBeforeMissing = (schema, value) => typeof value === 'object' && value !== null
+    && (schema.required ?? []).some((name) => !Object.hasOwn(value, name))
+    && typeof Object.getOwnPropertyDescriptor(value, 'a')?.get === 'function';
+
   it('properties with additionalProperties answer as the general member walk', function () {
     const schemas = [{ properties: { a: { type: 'string' } }, additionalProperties: false },
       { properties: { a: { type: 'string' }, b: { type: 'integer' } }, required: ['a'], additionalProperties: false },
@@ -292,7 +301,8 @@ describe('the object and array walks answer as the compositions they replace', f
       // minProperties: 0 asserts nothing and keeps the schema off the fast path
       const general = compile({ ...schema, minProperties: 0 });
       for (const value of OBJECTS) {
-        assert.strictEqual(outcome(walk, value), outcome(general, value), `${JSON.stringify(schema)} ${show(value)}`);
+        const expected = throwsBeforeMissing(schema, value) ? 'throws getter' : outcome(general, value);
+        assert.strictEqual(outcome(walk, value), expected, `${JSON.stringify(schema)} ${show(value)}`);
       }
     }
   });
@@ -364,20 +374,26 @@ describe('the member and element walks read as the compositions they replace', f
     }
   });
 
-  // The own members a proxy is asked for, in order.
-  const probed = (target) => {
+  // The own members a proxy is asked for and the members it is read, in order.
+  const traced = (target) => {
     const seen = [];
     const data = new Proxy(target, {
-      getOwnPropertyDescriptor(object, key) { seen.push(key); return Reflect.getOwnPropertyDescriptor(object, key); },
+      getOwnPropertyDescriptor(object, key) { seen.push(`own ${key}`); return Reflect.getOwnPropertyDescriptor(object, key); },
+      get(object, key) { seen.push(`get ${String(key)}`); return Reflect.get(object, key); },
     });
     return { data, seen };
   };
 
-  it('properties with additionalProperties list the members, then probe the required ones, then read in instance order', function () {
+  it('properties with additionalProperties read the members in instance order, then probe the required ones the walk did not meet', function () {
     const validate = new JarenValidator().compile({ properties: { a: { type: 'string' }, b: { type: 'integer' } }, required: ['a'], additionalProperties: false });
-    const { data, seen } = probed({ a: 'x', b: 1 });
-    assert.strictEqual(validate(data), true);
-    assert.deepStrictEqual(seen, ['a', 'b', 'a']);
+    const listed = traced({ a: 'x', b: 1 });
+    assert.strictEqual(validate(listed.data), true);
+    assert.deepStrictEqual(listed.seen.filter((step) => step.startsWith('get')), ['get a', 'get b']);
+    assert.strictEqual(listed.seen.at(-1), 'get b');
+    const unlisted = traced(Object.defineProperty({ b: 1 }, 'a', { value: 'x', enumerable: false }));
+    assert.strictEqual(validate(unlisted.data), true);
+    assert.deepStrictEqual(unlisted.seen.filter((step) => step.startsWith('get')), ['get b']);
+    assert.strictEqual(unlisted.seen.at(-1), 'own a');
     const closed = new JarenValidator().compile({ properties: { a: { type: 'string' } }, additionalProperties: false });
     assert.strictEqual(outcome(closed, throwingAt(['x', 'a'])), false);
     assert.strictEqual(outcome(closed, throwingAt(['a', 'x'])), 'throws getter');

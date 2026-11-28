@@ -894,7 +894,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,211,200 (measured 1211124): the query's $replace reading a replacement template, capture groups by F&O's rules and a refused template raising its named JQ2001 (operators 1172).
 // Raised to 1,211,400 (measured 1211320): PostgreSQL's status and acceptance verifying every table the store owns as the open does (store 196).
 // Raised to 1,212,300 (measured 1212244): introspect naming each enum or interval CHECK the store's model does not declare as an unmapped constraint (introspect, store 924).
-if (clientBytes > 1212300)
+// Raised to 1,212,500 (measured 1212429): an object walk probing a required name `properties` declares once, where its member is read, and walking the members beside additionalProperties without listing them (object 185).
+if (clientBytes > 1212500)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
