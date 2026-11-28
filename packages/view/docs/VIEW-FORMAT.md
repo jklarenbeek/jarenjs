@@ -383,6 +383,26 @@ equal.
   so a memo-stable subtree can never leave a poisoned widget inert.
 - `memo` is never rendered and never serialized (§3, §6).
 
+### 5.6 A form's controls
+
+A `form` answers a member looked up on it through its controls' names and
+ids before its own: `<input name="insertBefore">` is the form's
+`insertBefore`, `<input id="childNodes">` its `childNodes`, and a write to a
+name only a control holds throws. A DOM renderer therefore MUST NOT reach a
+form's children, attributes or listeners through the element. The reference
+renderer reaches them, and the parent of any node it walks up from, through the `Node`, `Element` and `EventTarget` prototypes of the
+document's `defaultView`, or, in a document without one (as
+`createHTMLDocument` and `DOMParser` make), of the container's own prototype
+chain. A form whose controls are named or id'd after any DOM member thus
+mounts, patches, moves, hydrates and binds as the serializer writes it, in
+every mode. A prop the form has no property of, named like one of its
+controls (`['form', { foo: 'a' }, ['input', { name: 'foo' }]]`), is written as
+the form's attribute. No other element answers a member through named
+properties, and those are asked directly.
+The renderer's own bookkeeping on a form is not covered: a control named
+`__jarenOn` or `__jarenEmit` still breaks the form's `on` binding, and one
+named `__jarenWidget` keeps the widgets inside the form from unmounting.
+
 ## 6. Serialization
 
 `renderToString(vnode)` MUST produce markup equivalent to what a
@@ -759,7 +779,9 @@ focus when possible; otherwise the supplied fallback does. Without
 a usable fallback, native browser focus settlement remains visible.
 The helper does not cross shadow roots or iframe documents to search
 for a `data-ref`. `findByRef(root, token)` is separately public at
-`@jarenjs/view/helpers/focus` and is shared with app focus intents.
+`@jarenjs/view/helpers/focus` and is shared with app focus intents; it reads
+the tree through the DOM's own accessors (§5.6), so a ref inside a form
+whose controls are named `childNodes` or `getAttribute` is found.
 
 `dispose()` is idempotent, closes the native modal, restores focus,
 destroys nested owners and removes listeners/DOM even when a nested

@@ -78,6 +78,10 @@
  * sets them, `false` and `null` clear them.
  */
 
+import { attributeOf, localNameOf, removeAttribute, setAttribute } from './members.js';
+
+/** @typedef {import('./members.js').DomReader} DomReader */
+
 /**
  * The event names whose `on<name>` content attribute is an event handler: the
  * GlobalEventHandlers, WindowEventHandlers and DocumentAndElementEventHandlers
@@ -277,9 +281,9 @@ const NUMERIC_REFLECTIONS = Object.freeze(Object.assign(Object.create(null), {
   loop: ['marquee'], scrollAmount: ['marquee'], scrollDelay: ['marquee'],
 }));
 
-/** @param {any} node @param {string} name @returns {boolean} */
-function reflectsNumber(node, name) {
-  return name === 'tabIndex' || NUMERIC_REFLECTIONS[name]?.includes(String(node.localName ?? node.tagName).toLowerCase()) === true;
+/** @param {DomReader} dom @param {any} node @param {string} name @returns {boolean} */
+function reflectsNumber(dom, node, name) {
+  return name === 'tabIndex' || NUMERIC_REFLECTIONS[name]?.includes(localNameOf(dom, node)) === true;
 }
 
 /**
@@ -291,22 +295,25 @@ function reflectsNumber(node, name) {
  * a number-typed property is the string (`width: '100px'`, where the
  * property writes `0`). Reflected numbers and non-boolean values on boolean
  * properties also retain their attribute spelling. Other values are assigned.
+ * Attributes are written through the DOM's own accessors (members.js), which
+ * a form's controls cannot shadow.
+ * @param {DomReader} dom
  * @param {any} node - an HTML element that has the property
  * @param {string} name - the property name
  * @param {any} value - the prop value, neither nullish nor `false`
  */
-export function writeProperty(node, name, value) {
+export function writeProperty(dom, node, name, value) {
   const type = typeof node[name];
   if (type === 'boolean') {
     // Presence is true even for 0 or ''. Also update live booleans such as
     // selected/muted, whose dirty state need not follow their attribute.
     node[name] = true;
-    node.setAttribute(name, value === true ? '' : String(value));
+    setAttribute(dom, node, name, value === true ? '' : String(value));
     return;
   }
   if (value === true || (type === 'number'
-    && (typeof value === 'string' || (typeof value === 'number' && reflectsNumber(node, name))))) {
-    node.setAttribute(name, value === true ? '' : String(value));
+    && (typeof value === 'string' || (typeof value === 'number' && reflectsNumber(dom, node, name))))) {
+    setAttribute(dom, node, name, value === true ? '' : String(value));
     return;
   }
   node[name] = value;
@@ -317,20 +324,21 @@ export function writeProperty(node, name, value) {
  * rule above): a boolean property is cleared, any other drops the
  * attribute it reflects, and one with no attribute of its name is cleared
  * to `''` when this renderer wrote it.
+ * @param {DomReader} dom
  * @param {any} node - an HTML element that has the property
  * @param {string} name - the property name
  * @param {any} oldValue - the value the previous frame wrote (`undefined`
  *   on a fresh node)
  */
-export function removeProperty(node, name, oldValue) {
+export function removeProperty(dom, node, name, oldValue) {
   if (typeof node[name] === 'boolean') {
     node[name] = false;
-    node.removeAttribute(name);
+    removeAttribute(dom, node, name);
     return;
   }
   const attribute = REFLECTED_ELSEWHERE[name] ?? name;
-  if (node.getAttribute(attribute) !== null) {
-    node.removeAttribute(attribute);
+  if (attributeOf(dom, node, attribute) !== null) {
+    removeAttribute(dom, node, attribute);
     return;
   }
   if (oldValue != null && oldValue !== false) node[name] = '';

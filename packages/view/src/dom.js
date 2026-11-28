@@ -54,6 +54,11 @@ import {
 } from './vnode.js';
 import { ENUMERATED_ALIASES, attributePresent, attributeText, enumeratedAttribute, isAliased, isInlineHandler, removeProperty, writeProperty, writingSpelling } from './properties.js';
 import { NAMED_TAGS, createSafePolicy, grantedWidgets, idPrefixOf, projectEvent } from './safe.js';
+import {
+  DIRECT_MEMBERS, appendChild, attributeNamesOf, attributeOf, childNodesOf, domReaderOf, insertChild, listen, localNameOf,
+  namespaceOf, nodeTypeOf, parentOf, removeAttribute, removeAttributeNS, removeChild, replaceChild, setAttribute,
+  setAttributeNS, unlisten,
+} from './members.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -225,9 +230,9 @@ export function createDomRenderer(container, options = {}) {
     : null;
   const ctx = {
     doc,
-    /** How the renderer reads an element's parent, tag, namespace and
-     * attributes where a member of the element may be shadowed. */
-    dom: domReaderOf(doc),
+    /** How the renderer reaches an element's DOM members, which a `form`'s
+     * controls shadow by their names and ids (members.js). */
+    dom: domReaderOf(doc, container),
     onEvent: options.onEvent ?? null,
     /** Under the interactive profile, only the granted widgets. */
     widgets: granted === null ? options.widgets ?? EMPTY_PROPS
@@ -373,12 +378,12 @@ export function createDomRenderer(container, options = {}) {
           }
           else {
             container.textContent = '';
-            for (const child of childrenOf(['root', {}, next])) container.appendChild(createNode(ctx, child, null, false));
+            for (const child of childrenOf(['root', {}, next])) appendChild(ctx.dom, container, createNode(ctx, child, null, false));
           }
           rootNode = container;
         }
         else {
-          patchChildren(ctx, container, childrenOf(['root', {}, oldVnode]), childrenOf(['root', {}, next]), null, false);
+          patchChildren(ctx, container, childrenOf(['root', {}, oldVnode]), childrenOf(['root', {}, next]), null, false, ctx.dom);
         }
         oldVnode = next;
         // mount flush: after the patch completes every queued host is
@@ -681,16 +686,19 @@ function createNode(ctx, vnode, ns, foreign) {
   const node = ns !== null
     ? ctx.doc.createElementNS(ns, tag)
     : ctx.doc.createElement(tag);
-  if (ctx.policy !== null) writeFixed(ctx, node, tag);
+  const dom = ns === null && tag.length === 4 ? membersOf(ctx, tag, ns) : DIRECT_MEMBERS;
+  if (ctx.policy !== null) writeFixed(ctx, node, tag, dom);
   const props = propsOf(vnode);
   for (const name in props) {
-    setProp(ctx, node, name, undefined, props[name], ns);
+    setProp(ctx, node, name, undefined, props[name], ns, dom);
   }
   const children = childrenOf(vnode);
   // only a policy reads the parser's state, so a trusted root never computes it
   const below = ctx.policy !== null && foreignBelow(tag, foreign);
   for (let i = 0; i < children.length; i++) {
-    node.appendChild(createNode(ctx, children[i], childNamespace(tag, ns), below));
+    const child = createNode(ctx, children[i], childNamespace(tag, ns), below);
+    if (dom === DIRECT_MEMBERS) node.appendChild(child);
+    else appendChild(dom, node, child);
   }
   registerControlled(ctx, node, props);
   return node;
@@ -700,28 +708,30 @@ function createNode(ctx, vnode, ns, foreign) {
  * has the same vnode baseline as a fresh mount. Browser parser repairs and
  * missing/extra nodes are local mismatches, never a second tree of state. */
 function adoptChildren(ctx, parent, children, ns) {
+  const dom = ctx.dom;
+  const live = childNodesOf(dom, parent);
   for (let i = 0; i < children.length; i++) {
     const vnode = children[i];
-    const node = parent.childNodes[i];
-    if (node && isTextNode(vnode) && node.nodeType === 3) {
+    const node = live[i];
+    if (node && isTextNode(vnode) && nodeTypeOf(dom, node) === 3) {
       if (node.nodeValue !== String(vnode)) node.nodeValue = String(vnode);
       continue;
     }
     const tag = isElementNode(vnode) ? vnode[0] : null;
     if (tag !== null && tag !== WIDGET_TAG && !isElementName(tag)) throw elementNameError(ctx.root, vnode, tag);
     const namespace = tag === 'svg' ? SVG_NS : ns;
-    if (node && tag && tag !== WIDGET_TAG && node.nodeType === 1
-      && (node.localName ?? node.tagName?.toLowerCase()) === tag
-      && (namespace === null ? isHtmlNamespace(node.namespaceURI) : node.namespaceURI === namespace)) {
+    if (node && tag && tag !== WIDGET_TAG && nodeTypeOf(dom, node) === 1 && localNameOf(dom, node) === tag
+      && (namespace === null ? isHtmlNamespace(namespaceOf(dom, node)) : namespaceOf(dom, node) === namespace)) {
       const props = propsOf(vnode);
       // the attributes the vnode writes: an inline handler value writes none,
       // so the one server markup carried from before that rule is removed
       const names = new Set(Object.keys(props).filter((name) => !isInlineHandler(name, props[name]))
         .map((name) => name === 'className' ? 'class' : name === 'htmlFor' ? 'for' : name.toLowerCase()));
-      for (const name of node.getAttributeNames()) {
-        if (!names.has(name.toLowerCase())) node.removeAttribute(name);
+      for (const name of attributeNamesOf(dom, node)) {
+        if (!names.has(name.toLowerCase())) removeAttribute(dom, node, name);
       }
-      for (const name in props) setProp(ctx, node, name, undefined, props[name], namespace);
+      const members = membersOf(ctx, tag, namespace);
+      for (const name in props) setProp(ctx, node, name, undefined, props[name], namespace, members);
       // A textarea's server text is its default value, not a vnode child
       // when `value` supplies the authoritative content.
       if (!(tag === 'textarea' && Object.hasOwn(props, 'value')))
@@ -731,11 +741,11 @@ function adoptChildren(ctx, parent, children, ns) {
     else {
       // hydration adopts in trusted mode only, where nothing reads `foreign`
       const fresh = createNode(ctx, vnode, ns, false);
-      if (node) parent.replaceChild(fresh, node);
-      else parent.appendChild(fresh);
+      if (node) replaceChild(dom, parent, fresh, node);
+      else appendChild(dom, parent, fresh);
     }
   }
-  while (parent.childNodes.length > children.length) parent.removeChild(parent.childNodes[parent.childNodes.length - 1]);
+  while (live.length > children.length) removeChild(dom, parent, live[live.length - 1]);
 }
 
 /**
@@ -836,14 +846,16 @@ function patchNode(ctx, parent, node, oldV, newV, ns, foreign) {
       && ctx.poisonedCount === 0) {
       return node;
     }
-    patchProps(ctx, node, propsOf(oldV), propsOf(newV), ns);
+    // only a four-letter HTML tag can be a form: the rest skip the call
+    const dom = ns === null && newV[0].length === 4 ? membersOf(ctx, newV[0], ns) : DIRECT_MEMBERS;
+    patchProps(ctx, node, propsOf(oldV), propsOf(newV), ns, dom);
     patchChildren(ctx, node, childrenOf(oldV), childrenOf(newV), childNamespace(newV[0], ns),
-      ctx.policy !== null && foreignBelow(newV[0], foreign));
+      ctx.policy !== null && foreignBelow(newV[0], foreign), dom);
     return node;
   }
   destroyNode(ctx, node);
   const next = createNode(ctx, newV, ns, foreign);
-  parent.replaceChild(next, node);
+  replaceChild(ctx.dom, parent, next, node);
   return next;
 }
 
@@ -854,21 +866,22 @@ function patchNode(ctx, parent, node, oldV, newV, ns, foreign) {
  * @param {Record<string, any>} oldProps
  * @param {Record<string, any>} newProps
  * @param {string | null} ns
+ * @param {import('./members.js').DomReader} dom - how `node`'s members are reached ({@link membersOf})
  */
-function patchProps(ctx, node, oldProps, newProps, ns) {
+function patchProps(ctx, node, oldProps, newProps, ns, dom) {
   if (oldProps !== newProps) {
     let aliased = false;
     for (const name in oldProps) {
       if (!Object.hasOwn(newProps, name)) {
         if (isAliased(name)) aliased = true;
-        else setProp(ctx, node, name, oldProps[name], undefined, ns);
+        else setProp(ctx, node, name, oldProps[name], undefined, ns, dom);
       }
     }
     for (const name in newProps) {
       if (isAliased(name)) aliased = true;
-      else if (oldProps[name] !== newProps[name]) setProp(ctx, node, name, oldProps[name], newProps[name], ns);
+      else if (oldProps[name] !== newProps[name]) setProp(ctx, node, name, oldProps[name], newProps[name], ns, dom);
     }
-    if (aliased) patchAliased(ctx, node, oldProps, newProps, ns);
+    if (aliased) patchAliased(ctx, node, oldProps, newProps, ns, dom);
   }
   // Record (or refresh) this control's authoritative value; the actual write
   // happens in the end-of-pass reconciliation so it survives the skip paths.
@@ -884,16 +897,17 @@ function patchProps(ctx, node, oldProps, newProps, ns) {
  * @param {Record<string, any>} oldProps
  * @param {Record<string, any>} newProps
  * @param {string | null} ns
+ * @param {import('./members.js').DomReader} dom - how `node`'s members are reached ({@link membersOf})
  */
-function patchAliased(ctx, node, oldProps, newProps, ns) {
+function patchAliased(ctx, node, oldProps, newProps, ns, dom) {
   for (const [a, b] of ENUMERATED_ALIASES) {
     const was = writingSpelling(oldProps, a, b);
     const now = writingSpelling(newProps, a, b);
     if (now === undefined) {
-      if (was !== undefined) setProp(ctx, node, was, oldProps[was], undefined, ns);
+      if (was !== undefined) setProp(ctx, node, was, oldProps[was], undefined, ns, dom);
     }
     else if (was === undefined || was !== now || oldProps[was] !== newProps[now]) {
-      setProp(ctx, node, now, was === undefined ? undefined : oldProps[was], newProps[now], ns);
+      setProp(ctx, node, now, was === undefined ? undefined : oldProps[was], newProps[now], ns, dom);
     }
   }
 }
@@ -1099,84 +1113,9 @@ function isConnectedTo(ctx, node, root) {
   let n = node;
   while (n != null) {
     if (n === root) return true;
-    n = parentOf(ctx, n);
+    n = parentOf(ctx.dom, n);
   }
   return false;
-}
-
-/**
- * @typedef {object} DomReader
- * @property {((this: any) => any) | null} parentNode
- * @property {((this: any) => string) | null} localName
- * @property {((this: any) => string | null) | null} namespaceURI
- * @property {((this: any, name: string) => string | null) | null} getAttribute
- */
-
-/**
- * The DOM's own member accessors of a document's realm. An element answers a
- * member looked up on it through its own named properties first: a `form`
- * through its controls' names (`<input name="getAttribute">` is the form's
- * `getAttribute`), and in Chromium a lookup on a page `object` costs many
- * times one through the accessor. Reading through these accessors reads the
- * element itself. A document without a `defaultView` (a stub, or one made by
- * `createHTMLDocument`) is read through the element.
- * @param {any} doc
- * @returns {DomReader}
- */
-function domReaderOf(doc) {
-  const view = doc?.defaultView;
-  const element = view?.Element?.prototype;
-  return {
-    parentNode: accessorOf(view?.Node?.prototype, 'parentNode'),
-    localName: accessorOf(element, 'localName'),
-    namespaceURI: accessorOf(element, 'namespaceURI'),
-    getAttribute: typeof element?.getAttribute === 'function' ? element.getAttribute : null,
-  };
-}
-
-/**
- * The getter a prototype defines for `name`, or null.
- * @param {any} proto
- * @param {string} name
- * @returns {any}
- */
-function accessorOf(proto, name) {
-  const get = proto == null ? undefined : Object.getOwnPropertyDescriptor(proto, name)?.get;
-  return typeof get === 'function' ? get : null;
-}
-
-/**
- * `node`'s parent, read as {@link domReaderOf} says.
- * @param {any} ctx
- * @param {any} node
- * @returns {any}
- */
-function parentOf(ctx, node) {
-  const get = ctx.dom.parentNode;
-  return get !== null ? get.call(node) : node.parentNode;
-}
-
-/**
- * `node`'s attribute `name`, read as {@link domReaderOf} says.
- * @param {any} ctx
- * @param {any} node
- * @param {string} name
- * @returns {string | null}
- */
-function attributeOf(ctx, node, name) {
-  const get = ctx.dom.getAttribute;
-  return get !== null ? get.call(node, name) : node.getAttribute(name);
-}
-
-/**
- * `node`'s lower-case tag name, read as {@link domReaderOf} says.
- * @param {any} ctx
- * @param {any} node
- * @returns {string}
- */
-function localNameOf(ctx, node) {
-  const get = ctx.dom.localName;
-  return get !== null ? get.call(node) : node.localName ?? String(node.tagName).toLowerCase();
 }
 
 /**
@@ -1237,9 +1176,9 @@ function isHtmlNamespace(namespace) {
  * @returns {string | null}
  */
 function documentIdOf(ctx, node, name) {
-  const tag = localNameOf(ctx, node);
+  const tag = localNameOf(ctx.dom, node);
   if (tag !== 'object' && (tag !== 'img' || !name)) return null;
-  return attributeOf(ctx, node, 'id') || null;
+  return attributeOf(ctx.dom, node, 'id') || null;
 }
 
 /**
@@ -1264,17 +1203,16 @@ function reportHeldNames(ctx) {
   /** @type {Set<string>} */
   const ids = new Set();
   for (const owner of owners) {
-    const id = documentIdOf(ctx, owner, attributeOf(ctx, owner, 'name'));
+    const id = documentIdOf(ctx, owner, attributeOf(ctx.dom, owner, 'name'));
     if (id !== null && !ctx.heldNames.has(id)) ids.add(id);
   }
   if ((names.size === 0 && ids.size === 0) || typeof ctx.doc?.querySelectorAll !== 'function') return;
-  const namespaceOf = ctx.dom.namespaceURI;
   for (const held of ctx.doc.querySelectorAll('form[name], img[name], embed[name], object[name], iframe[name], object[id]')) {
-    const name = attributeOf(ctx, held, 'name');
+    const name = attributeOf(ctx.dom, held, 'name');
     const id = documentIdOf(ctx, held, name);
     const byName = name !== null && (names.has(name) || ids.has(name)) && !ctx.heldNames.has(name) ? name : null;
     const byId = id !== null && id !== name && names.has(id) && !ctx.heldNames.has(id) ? id : null;
-    if ((byName === null && byId === null) || !isHtmlNamespace(namespaceOf !== null ? namespaceOf.call(held) : held.namespaceURI)
+    if ((byName === null && byId === null) || !isHtmlNamespace(namespaceOf(ctx.dom, held))
       || !isHeldOutside(ctx, held)) continue;
     for (const key of [byName, byId]) {
       if (key === null) continue;
@@ -1292,8 +1230,9 @@ function reportHeldNames(ctx) {
  * @param {any} oldValue
  * @param {any} newValue
  * @param {string | null} ns
+ * @param {import('./members.js').DomReader} dom - how `node`'s members are reached ({@link membersOf})
  */
-function setProp(ctx, node, name, oldValue, newValue, ns) {
+function setProp(ctx, node, name, oldValue, newValue, ns, dom) {
   if (name === 'on') {
     // Safe mode strips event bindings: an untrusted document must not bind
     // the host's application actions. Never wires the listener.
@@ -1306,17 +1245,17 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
     if (ctx.policy !== null) {
       const decided = ctx.policy.events(newValue);
       if (ctx.onUnsafe !== null) for (const dropped of decided.dropped) ctx.onUnsafe({ kind: 'event', name: dropped });
-      setEvents(ctx, node, decided.kept ?? undefined);
+      setEvents(ctx, node, decided.kept ?? undefined, dom);
       return;
     }
-    setEvents(ctx, node, newValue);
+    setEvents(ctx, node, newValue, dom);
     return;
   }
   if (SKIP_PROPS.has(name)) return;
   if (ctx.policy !== null) {
     // read through the DOM's own accessor: a form holding a control named
     // `localName` would otherwise reach the policy as some other tag
-    const tag = localNameOf(ctx, node);
+    const tag = localNameOf(dom, node);
     const decided = ctx.policy.prop(name, newValue, tag);
     // A rejected NAME (scripting sink, inline `on*`, injection-shaped) is
     // dropped; a sanitized-away URL or dangerous style keeps its (safe) name
@@ -1363,9 +1302,9 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
       // an object with no declaration is no attribute, as the serializer omits it
       newValue = styleToString(newValue) || null;
     }
-    if (writeEnumerated(node, name, newValue)) return;
-    if (newValue == null || newValue === false) node.removeAttribute(name);
-    else node.setAttribute(name, newValue === true ? '' : String(newValue));
+    if (writeEnumerated(dom, node, name, newValue)) return;
+    if (newValue == null || newValue === false) removeAttribute(dom, node, name);
+    else setAttribute(dom, node, name, newValue === true ? '' : String(newValue));
     return;
   }
   // A handler prop that is not a function is written by no renderer (the
@@ -1386,39 +1325,74 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
   if ((name === 'value' || name === 'checked')
     && (node.nodeName === 'INPUT' || node.nodeName === 'TEXTAREA' || node.nodeName === 'SELECT')) {
     if (node.__jarenWidget === undefined) return;
-    if (newValue == null || newValue === false) node.removeAttribute(name);
-    else node.setAttribute(name, newValue === true ? '' : String(newValue));
+    if (newValue == null || newValue === false) removeAttribute(dom, node, name);
+    else setAttribute(dom, node, name, newValue === true ? '' : String(newValue));
     return;
   }
   const attrNs = name.startsWith('xlink:') ? 'http://www.w3.org/1999/xlink'
     : name.startsWith('xml:') ? 'http://www.w3.org/XML/1998/namespace' : null;
-  if (attrNs !== null && typeof node.setAttributeNS === 'function') {
-    if (newValue == null || newValue === false) node.removeAttributeNS(attrNs, name.slice(name.indexOf(':') + 1));
-    else node.setAttributeNS(attrNs, name, String(newValue));
+  if (attrNs !== null && (dom.setAttributeNS !== null || typeof node.setAttributeNS === 'function')) {
+    if (newValue == null || newValue === false) removeAttributeNS(dom, node, attrNs, name.slice(name.indexOf(':') + 1));
+    else setAttributeNS(dom, node, attrNs, name, String(newValue));
     return;
   }
-  if (writeEnumerated(node, name, newValue)) return;
+  if (writeEnumerated(dom, node, name, newValue)) return;
   if (name === 'style' && typeof newValue === 'object' && newValue !== null) {
     newValue = styleToString(newValue);
     // an object with no declaration is no attribute, as the serializer omits it
     if (newValue === '') {
-      node.removeAttribute('style');
+      removeAttribute(dom, node, 'style');
       return;
     }
   }
   // A name every object inherits (`constructor`, `toString`) is never a DOM
   // property to write: the write would shadow the method, where the markup
   // writes an attribute.
-  if (ns === null && name in node && name !== 'list' && name !== 'form' && !(name in Object.prototype)) {
-    if (newValue == null || newValue === false) removeProperty(node, name, oldValue);
-    else writeProperty(node, name, newValue);
+  // A form answers a control's name or id as a property of its own that no
+  // write can change: an attribute of that name is no property of the form.
+  if (ns === null && name in node && name !== 'list' && name !== 'form' && !(name in Object.prototype)
+    && !isFormControlName(dom, node, name)) {
+    if (newValue == null || newValue === false) removeProperty(dom, node, name, oldValue);
+    else writeProperty(dom, node, name, newValue);
   }
   else if (newValue == null || newValue === false) {
-    node.removeAttribute(name);
+    removeAttribute(dom, node, name);
   }
   else {
-    node.setAttribute(name, newValue === true ? '' : String(newValue));
+    setAttribute(dom, node, name, newValue === true ? '' : String(newValue));
   }
+}
+
+/**
+ * Whether `node`, a `form` ({@link membersOf}), answers `name` through a
+ * control of that name or id (a read-only property of its own) and has no
+ * property of that name besides: a write to it can never change the form
+ * (it throws), so `name` is the form's attribute. A name the form has as a property of its own (`action`,
+ * `title`) is still written through the property, which a control shadows
+ * only on reads.
+ * @param {import('./members.js').DomReader} dom
+ * @param {any} node
+ * @param {string} name
+ * @returns {boolean}
+ */
+function isFormControlName(dom, node, name) {
+  return dom !== DIRECT_MEMBERS && !(name in Object.getPrototypeOf(node))
+    && Object.getOwnPropertyDescriptor(node, name)?.writable === false;
+}
+
+/**
+ * How the renderer reaches the members of an element of `tag` in the
+ * namespace `ns`: an HTML `form` (in any case: the document lowercases it)
+ * through the DOM's own accessors (`ctx.dom`), which its controls cannot
+ * shadow; any other element, which answers no member through named
+ * properties, by asking it, which costs nothing on the patch path.
+ * @param {any} ctx
+ * @param {string} tag
+ * @param {string | null} ns
+ * @returns {import('./members.js').DomReader}
+ */
+function membersOf(ctx, tag, ns) {
+  return ns === null && (tag === 'form' || (tag.length === 4 && tag.toLowerCase() === 'form')) ? ctx.dom : DIRECT_MEMBERS;
 }
 
 /**
@@ -1428,26 +1402,28 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
  * @param {any} ctx
  * @param {any} node
  * @param {string} tag
+ * @param {import('./members.js').DomReader} dom - how `node`'s members are reached ({@link membersOf})
  */
-function writeFixed(ctx, node, tag) {
+function writeFixed(ctx, node, tag, dom) {
   const fixed = ctx.policy.fixed(tag);
-  if (fixed !== null) for (const [name, value] of fixed) node.setAttribute(name, value);
+  if (fixed !== null) for (const [name, value] of fixed) setAttribute(dom, node, name, value);
 }
 
 /**
  * An enumerated attribute (the property table) is an attribute in every
  * mode, written with its keyword: never through the boolean property that
  * reads `'false'` as true. Answers whether `name` was one.
+ * @param {import('./members.js').DomReader} dom
  * @param {any} node
  * @param {string} name
  * @param {any} value
  * @returns {boolean}
  */
-function writeEnumerated(node, name, value) {
+function writeEnumerated(dom, node, name, value) {
   const attribute = enumeratedAttribute(name, value);
   if (attribute === undefined) return false;
-  if (attribute.value === null) node.removeAttribute(attribute.name);
-  else node.setAttribute(attribute.name, attribute.value);
+  if (attribute.value === null) removeAttribute(dom, node, attribute.name);
+  else setAttribute(dom, node, attribute.name, attribute.value);
   return true;
 }
 
@@ -1481,20 +1457,23 @@ function interactiveSink(ctx) {
     // inside a dialog it would close it behind the app's back)
     if (event?.type === 'submit' && typeof event.preventDefault === 'function') event.preventDefault();
     onEvent(binding, projectEvent(event, event?.target?.__jarenSecret === true
-      || risesFromWidget(event?.target, event?.currentTarget)));
+      || risesFromWidget(ctx.dom, event?.target, event?.currentTarget)));
   };
 }
 
 /**
  * Whether an event's target lies inside a widget host, at or below the node
  * whose binding fired: the path from the target up to that node crosses a
- * node this renderer made a widget host.
+ * node this renderer made a widget host. The path is read through the DOM's
+ * own `parentNode`: a form holding `<input name="parentNode">` answers that
+ * input as its parent, and the walk would never end.
+ * @param {import('./members.js').DomReader} dom
  * @param {any} target
  * @param {any} bound
  * @returns {boolean}
  */
-function risesFromWidget(target, bound) {
-  for (let node = target; node != null; node = node.parentNode) {
+function risesFromWidget(dom, target, bound) {
+  for (let node = target; node != null; node = parentOf(dom, node)) {
     if (node.__jarenWidget !== undefined) return true;
     if (node === bound) return false;
   }
@@ -1525,17 +1504,18 @@ function interactiveEmit(ctx) {
  * @param {any} ctx
  * @param {any} node
  * @param {Record<string, any> | undefined} newOn
+ * @param {import('./members.js').DomReader} dom - how `node`'s members are reached ({@link membersOf})
  */
-function setEvents(ctx, node, newOn) {
+function setEvents(ctx, node, newOn, dom) {
   const prev = node.__jarenOn ?? EMPTY_PROPS;
   const next = newOn ?? EMPTY_PROPS;
   node.__jarenOn = next;
   node.__jarenEmit = ctx.eventSink;
   for (const type in prev) {
-    if (!(type in next)) node.removeEventListener(type, eventProxy);
+    if (!(type in next)) unlisten(dom, node, type, eventProxy);
   }
   for (const type in next) {
-    if (!(type in prev)) node.addEventListener(type, eventProxy);
+    if (!(type in prev)) listen(dom, node, type, eventProxy);
   }
 }
 
@@ -1583,7 +1563,8 @@ function createWidgetNode(ctx, vnode, ns) {
   const node = ns !== null
     ? ctx.doc.createElementNS(ns, tag)
     : ctx.doc.createElement(tag);
-  if (ctx.policy !== null) writeFixed(ctx, node, tag);
+  const dom = membersOf(ctx, tag, ns);
+  if (ctx.policy !== null) writeFixed(ctx, node, tag, dom);
   // the bookkeeping first: it is what marks the node a host to `setProp`
   node.__jarenWidget = {
     name: props.name,
@@ -1599,7 +1580,7 @@ function createWidgetNode(ctx, vnode, ns) {
   };
   for (const name in props) {
     if (WIDGET_SKIP_PROPS.has(name)) continue;
-    setProp(ctx, node, name, undefined, props[name], ns);
+    setProp(ctx, node, name, undefined, props[name], ns, dom);
   }
   ctx.hasWidgets = true;
   ctx.mountQueue.push(node);
@@ -1633,11 +1614,12 @@ function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
     // one begins — half-mounted handles never receive updates
     destroyNode(ctx, node);
     const next = createWidgetNode(ctx, newV, ns);
-    parent.replaceChild(next, node);
+    replaceChild(ctx.dom, parent, next, node);
     return next;
   }
   widgetDef(ctx, newV, newProps);
-  patchWidgetProps(ctx, node, oldProps, newProps, (newProps.tag ?? 'div') === 'svg' ? SVG_NS : ns);
+  const hostNs = (newProps.tag ?? 'div') === 'svg' ? SVG_NS : ns;
+  patchWidgetProps(ctx, node, oldProps, newProps, hostNs, membersOf(ctx, newProps.tag ?? 'div', hostNs));
   const props = newProps.props ?? null;
   const prevProps = oldProps.props ?? null;
   if (props !== prevProps) {
@@ -1721,19 +1703,20 @@ function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
  * @param {Record<string, any>} oldProps
  * @param {Record<string, any>} newProps
  * @param {string | null} ns
+ * @param {import('./members.js').DomReader} dom - how `node`'s members are reached ({@link membersOf})
  */
-function patchWidgetProps(ctx, node, oldProps, newProps, ns) {
+function patchWidgetProps(ctx, node, oldProps, newProps, ns, dom) {
   if (oldProps === newProps) return;
   for (const name in oldProps) {
     if (WIDGET_SKIP_PROPS.has(name)) continue;
     if (!Object.hasOwn(newProps, name)) {
-      setProp(ctx, node, name, oldProps[name], undefined, ns);
+      setProp(ctx, node, name, oldProps[name], undefined, ns, dom);
     }
   }
   for (const name in newProps) {
     if (WIDGET_SKIP_PROPS.has(name)) continue;
     if (oldProps[name] !== newProps[name]) {
-      setProp(ctx, node, name, oldProps[name], newProps[name], ns);
+      setProp(ctx, node, name, oldProps[name], newProps[name], ns, dom);
     }
   }
 }
@@ -1827,7 +1810,7 @@ function destroyDomWalk(ctx, node, failures) {
     }
     return; // the widget owns everything below its host
   }
-  const children = node.childNodes;
+  const children = childNodesOf(ctx.dom, node);
   if (children !== undefined) {
     // snapshot before invoking hooks: `childNodes` is live, and an
     // `unmount` that detaches its own host would shift the indices and
@@ -1869,11 +1852,13 @@ export function styleToString(style) {
  * @param {any[]} newCh
  * @param {string | null} ns
  * @param {boolean} foreign - as {@link createNode} takes it, for the children
+ * @param {import('./members.js').DomReader} dom - how `parent`'s members are reached ({@link membersOf})
  */
-function patchChildren(ctx, parent, oldCh, newCh, ns, foreign) {
+function patchChildren(ctx, parent, oldCh, newCh, ns, foreign, dom) {
   const oldDom = [];
   {
-    const live = parent.childNodes;
+    // the read every patched parent makes, asked directly where it can be
+    const live = dom.childNodes === null ? parent.childNodes : childNodesOf(dom, parent);
     for (let i = 0; i < oldCh.length; i++) oldDom.push(live[i]);
   }
   let oldStart = 0;
@@ -1907,14 +1892,14 @@ function patchChildren(ctx, parent, oldCh, newCh, ns, foreign) {
     else if (isSameNode(oS, nE)) {
       // old head moved to the tail
       const node = patchNode(ctx, parent, oldDom[oldStart], oS, nE, ns, foreign);
-      parent.insertBefore(node, tailRef);
+      insertChild(dom, parent, node, tailRef);
       tailRef = node;
       oldStart++; newEnd--;
     }
     else if (isSameNode(oE, nS)) {
       // old tail moved to the head
       const node = patchNode(ctx, parent, oldDom[oldEnd], oE, nS, ns, foreign);
-      parent.insertBefore(node, oldDom[oldStart]);
+      insertChild(dom, parent, node, oldDom[oldStart]);
       oldEnd--; newStart++;
     }
     else {
@@ -1922,11 +1907,11 @@ function patchChildren(ctx, parent, oldCh, newCh, ns, foreign) {
       const key = keyOf(nS);
       const idx = key !== undefined ? keyMap.get(key) : undefined;
       if (idx === undefined || oldCh[idx] === undefined || !isSameNode(oldCh[idx], nS)) {
-        parent.insertBefore(createNode(ctx, nS, ns, foreign), oldDom[oldStart]);
+        insertChild(dom, parent, createNode(ctx, nS, ns, foreign), oldDom[oldStart]);
       }
       else {
         const node = patchNode(ctx, parent, oldDom[idx], oldCh[idx], nS, ns, foreign);
-        parent.insertBefore(node, oldDom[oldStart]);
+        insertChild(dom, parent, node, oldDom[oldStart]);
         oldCh[idx] = undefined;
       }
       newStart++;
@@ -1937,7 +1922,7 @@ function patchChildren(ctx, parent, oldCh, newCh, ns, foreign) {
     // old range exhausted: mount the remaining new children before the tail
     for (let i = newStart; i <= newEnd; i++) {
       if (ctx.destroyed) return;
-      parent.insertBefore(createNode(ctx, newCh[i], ns, foreign), tailRef);
+      insertChild(dom, parent, createNode(ctx, newCh[i], ns, foreign), tailRef);
     }
   }
   else {
@@ -1946,7 +1931,7 @@ function patchChildren(ctx, parent, oldCh, newCh, ns, foreign) {
       if (ctx.destroyed) return;
       if (oldCh[i] !== undefined) {
         destroyNode(ctx, oldDom[i]);
-        parent.removeChild(oldDom[i]);
+        removeChild(dom, parent, oldDom[i]);
       }
     }
   }

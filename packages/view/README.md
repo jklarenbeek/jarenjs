@@ -76,7 +76,14 @@ string, so `download: true` is a download with no name of its own and
 `width: '100px'` never becomes `width="0"` — on the client as in the markup,
 and through hydration. A tag that is not an element name
 (`['Total:', 3]`, `[' ', …]`) throws a `TypeError` naming its JSON Pointer in
-both renderers; `[null, 'Total:', 3]` is the list that was meant.
+both renderers; `[null, 'Total:', 3]` is the list that was meant. A `form`
+answers a member through its controls' names and ids
+(`<input name="insertBefore">` is the form's `insertBefore`), so the renderer
+reaches a form's children, attributes, listeners and parent through the DOM's
+own accessors: a form whose controls are named after any DOM member renders,
+patches, hydrates and binds as the markup says, in every mode, also in a
+document without a `defaultView` (VIEW-FORMAT §5.6). Upgrade note: such a form
+used to throw the pass, or hang it on a control named `parentNode`.
 
 ### On the server
 

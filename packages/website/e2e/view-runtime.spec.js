@@ -545,3 +545,90 @@ test('a form whose controls are named after its DOM members neither throws nor h
   expect(result).toEqual({ seen: ['name:jaren-u-g', 'prop:action', 'prop:method', 'prop:target'], value: 'next',
     form: ['method=dialog', 'name=jaren-u-f'] });
 });
+
+test('a form control named after any DOM member renders, patches, hydrates and binds as the serializer writes it', async ({ page }) => {
+  const failures = await page.evaluate(() => {
+    const J = window.JarenTest;
+    // every member a form has, from the engine's own interfaces
+    const members = [...new Set([EventTarget, Node, Element, HTMLElement, HTMLFormElement]
+      .flatMap((type) => Object.getOwnPropertyNames(type.prototype)))].filter((name) => !/^[A-Z_]+$/.test(name));
+    const frames = (c) => [
+      ['form', { class: 'a' }, c, ['b', { key: 1 }, '1'], ['b', { key: 2 }, '2']],
+      ['form', { class: 'b', title: 't' }, c, ['i', {}, 'new'], ['b', { key: 2 }, '2'], ['b', { key: 1 }, '1']],
+      ['form', { dir: 'rtl' }, c, ['b', { key: 1 }, '1']],
+      ['form', { 'aria-label': 'x' }, c],
+      ['form', { lang: 'en' }, c, ['s', {}, 'end']],
+    ];
+    const failed = [];
+    const check = (label, host, vnode, safe) => {
+      const want = J.renderToString(vnode, { safe });
+      if (host.innerHTML !== want) failed.push(`${label}: ${host.innerHTML}`);
+    };
+    const host = document.getElementById('host');
+    for (const safe of [undefined, true, 'interactive']) for (const attr of safe ? ['name'] : ['name', 'id']) for (const member of members) {
+      const label = `${member} by ${attr}, safe ${safe}`;
+      try {
+        host.textContent = '';
+        const render = J.createDomRenderer(host, { safe });
+        for (const frame of frames(['input', { [attr]: member }])) { render(frame); check(label, host, frame, safe); }
+        render.destroy();
+        // a document without a defaultView, as createHTMLDocument and DOMParser make
+        const other = document.implementation.createHTMLDocument('').body;
+        const renderOther = J.createDomRenderer(other, { safe });
+        for (const frame of frames(['input', { [attr]: member }])) { renderOther(frame); check(`${label}, no defaultView`, other, frame, safe); }
+        if (safe === undefined) {
+          // hydration adopts the server's form, through the members it reads
+          const server = frames(['input', { [attr]: member }])[0];
+          host.innerHTML = J.renderToString(server);
+          const adopted = host.firstChild;
+          const hydrated = J.createDomRenderer(host, { hydrate: true });
+          hydrated(server);
+          const next = frames(['input', { [attr]: member }])[1];
+          hydrated(next);
+          check(`${label}, hydrated`, host, next, safe);
+          if (host.firstChild !== adopted) failed.push(`${label}: the server form was not adopted`);
+          hydrated.destroy();
+          // a form's own binding, bound and unbound
+          const seen = [];
+          const bound = J.createDomRenderer(host, { onEvent: (binding) => seen.push(binding) });
+          bound(['form', { on: { click: 'save' } }, ['input', { [attr]: member }], ['button', { type: 'button' }, 'go']]);
+          host.querySelector('button').click();
+          bound(['form', {}, ['input', { [attr]: member }], ['button', { type: 'button' }, 'go']]);
+          host.querySelector('button').click();
+          if (seen.join() !== 'save') failed.push(`${label}: bindings fired ${JSON.stringify(seen)}`);
+          bound.destroy();
+        }
+        if (safe === 'interactive') {
+          // a binding around the form: delivery walks up from the target through the form
+          const seen = [];
+          const outer = J.createDomRenderer(host, { safe, onEvent: (binding) => seen.push(binding) });
+          outer(['div', { on: { click: 'pick' } }, ['form', {}, ['input', { [attr]: member }], ['button', { type: 'button' }, 'go']]]);
+          host.querySelector('button').click();
+          if (seen.join() !== 'pick') failed.push(`${label}: delivered ${JSON.stringify(seen)}`);
+          outer.destroy();
+        }
+      }
+      catch (error) {
+        failed.push(`${label}: ${error}`);
+      }
+    }
+    // a prop the form has no property of, named like one of its controls, is the form's attribute
+    for (const name of ['foo', 'aria-label', 'data-x']) {
+      try {
+        host.textContent = '';
+        const render = J.createDomRenderer(host);
+        for (const props of [{ [name]: 'a' }, { [name]: 'b' }, {}]) {
+          const frame = ['form', props, ['input', { name }]];
+          render(frame);
+          check(`prop ${name}`, host, frame, undefined);
+        }
+        render.destroy();
+      }
+      catch (error) {
+        failed.push(`prop ${name}: ${error}`);
+      }
+    }
+    return failed;
+  });
+  expect(failures).toEqual([]);
+});

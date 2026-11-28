@@ -189,19 +189,27 @@ delete it or fix it.
   choice (or a host-called re-check). Neither looks at `window`: any page
   element whose id equals a prefixed name the root writes is `window[name]`
   too.
-- [ ] **A document's form control named after a DOM member breaks its own render.**
-  A `form` answers a member through its controls' names. So `['form', {},
-  ['input', { name: 'insertBefore' }], …]` throws `TypeError:
-  parent.insertBefore is not a function` on the next patch that inserts into
-  the form, in every mode; the same holds for `appendChild`, `setAttribute`
-  and `childNodes`. The parent walks, the reports and the policy's tag already
-  read through the document's own accessors, and no probed member let a form
-  escape the safe profile. A document made by `createHTMLDocument` or
-  `DOMParser` has no `defaultView`, so it is still read through the element
-  there: a `parentNode` control still hangs its controlled reconciliation.
-  Wanted: either read and write a form through those accessors on the patch
-  path (a cost on every patch) or, under a safe profile, namespace a control
-  `name` that shadows a form member, as a `form`'s or an `img`'s `name` is.
+- [ ] **A form control named after the renderer's own bookkeeping breaks the form's
+  `on` binding.** A `form` answers a name through a control of that name or
+  id, and a write to that name throws. The DOM's members are reached through
+  the DOM's own accessors (VIEW-FORMAT §5.6), but the renderer keeps its
+  bookkeeping on the node: `__jarenOn` and `__jarenEmit` for an `on` binding,
+  `__jarenWidget` for a widget host. So `['form', { on: { submit: 'save' } },
+  ['input', { name: '__jarenOn' }], …]` throws the pass in every mode (a
+  bundle that is not strict mode drops the binding silently), and a form
+  holding `<input name="__jarenWidget">` reads as a widget host on teardown,
+  so the widgets inside it never unmount. Wanted: keep the bookkeeping under
+  symbols or in weak maps; test/website/project-data.test.js finds a node by
+  `node.__jarenOn` today.
+- [ ] **A trusted document naming an element after a `document` member breaks its
+  own render.** `document` answers the `name` of its `img`, `form`, `embed`,
+  `object` and `iframe` elements over its own members, so `['div', {}, ['img',
+  { name: 'createElement' }]]` throws `ctx.doc.createElement is not a
+  function` on the next frame that creates an element (`createTextNode`,
+  `createElementNS` the same), in every engine. Safe roots namespace those
+  names. Wanted: call the document's own `createElement`, `createElementNS`
+  and `createTextNode` through `Document.prototype`, as a form's members are
+  reached.
 - [ ] **Segmented logical scrolling past the CSS extent ceiling.** The [reusable collection](../components/collection/docs/COLLECTION.md) and [injected provider coordinator](../packages/app/docs/COLLECTION-PROVIDER.md) cover fixed/measured axes, keyed interaction and bounded page caches up to the conservative CSS extent ceiling; a source longer than that needs segmented logical scrolling. Complete sequential database snapshots and index seeks behind the provider also need an independently qualified source contract.
 
 - [ ] **Collection table semantics beyond activation and selection.** A host serving a record table still lacks per-column
