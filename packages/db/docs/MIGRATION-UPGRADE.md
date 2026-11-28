@@ -4388,7 +4388,7 @@ release ticked, counting a later backlog as it counted one.
 Exact identity stores complete canonical documents and model endpoints, so
 storage and comparison costs grow with their size. A short fingerprint remains
 useful for display; it does not replace this evidence. The migration pen adds <!--fact:bundle.migration-->36,643<!--/fact--> bytes to an otherwise empty
-consumer bundle; the DB-client fixture is <!--fact:bundle.db-->1,211,124<!--/fact--> bytes. These are complete measured
+consumer bundle; the DB-client fixture is <!--fact:bundle.db-->1,211,320<!--/fact--> bytes. These are complete measured
 fixture sizes, not the incremental price of identity alone.
 
 The following native SQLite workload measures current receipts and repeat
@@ -4410,8 +4410,8 @@ with the code that produced them.
 
 | Native runtime / SQLite | Apply all links ms | Status loop ms | No-op apply loop ms | Observation loop ms | Measured at |
 |---|---:|---:|---:|---:|---|
-| node 24.22.1 / 3.53.4 | 10.237 | 292.870 | 314.622 | 101.183 | 2026-11-27T21:42:24.640Z |
-| bun 1.4.4 / 3.53.4 | 10.878 | 276.412 | 278.342 | 68.622 | 2026-11-27T21:42:20.793Z |
+| node 24.22.1 / 3.53.4 | 8.421 | 248.740 | 255.432 | 77.583 | 2026-11-28T07:53:04.616Z |
+| bun 1.4.4 / 3.53.4 | 7.277 | 201.424 | 207.988 | 47.587 | 2026-11-28T07:53:01.361Z |
 
 | Native runtime | Current document JSON bytes | Legacy-shaped JSON projection bytes | Side rows / key+value UTF-8 bytes | SQLite page growth bytes |
 |---|---:|---:|---:|---:|
