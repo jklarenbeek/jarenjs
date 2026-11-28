@@ -347,13 +347,6 @@ delete it or fix it.
   over counted once and multiplied, the EXDATEs and RDATEs in the span
   subtracted and added, and a sub-daily zoned span counted around the zone's
   offset changes.
-- [ ] **The planner asks the temporal seam from each predicate site.** The
-  collection DDL with its CHECK verification and a collection's zoned writes,
-  refusals and `rekey()` each reach the seam through one entry; a store client
-  still calls the planner's `memberType`, `comparison`, `overlap` and order
-  `key` from their own sites in plan.js (and keeps the open and option checks
-  and `JD0017`, which it needs). Wanted: one planner entry, measured to add no
-  work to a query over no calendar member.
 - [ ] **Applying a chain of links reads its whole history at every link.**
   `migrate()` checks a link's history and identity rows against the ones the
   run attested last and verifies only what the link adds, but to refuse a

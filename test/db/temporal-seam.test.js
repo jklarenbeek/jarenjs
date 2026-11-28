@@ -170,3 +170,47 @@ describe('introspection reads a declaration back through the seam', () => {
     finally { cleanup(); }
   });
 });
+
+describe('the planner asks the seam through one entry', () => {
+  const zonedModel = { $model: '0.1',
+    collections: { ev: { schema: SCHEMA, key: '/id', temporals: [{ name: 'z', path: '$.z', kind: 'zoned', policy: 'rfc5545' }, { name: 'u', path: '$.u', kind: 'utc' }],
+      indexes: [{ name: 'by_z', path: '$.z' }, { name: 'by_u', path: '$.u' }] } },
+    entities: { Visit: { schema: { type: 'object', properties: { id: { type: 'string', 'x-entity': { key: true } },
+      z: { type: 'object', 'x-entity': { temporal: { kind: 'zoned', policy: 'rfc5545' }, index: true } },
+      u: { type: 'object', 'x-entity': { temporal: { kind: 'utc' }, index: true } } } } } } };
+  const ZONED = 'a zoned key is the instant a zone provider resolved; the engine orders by it';
+  /** @param {any} orderby @param {string} over */
+  const ordered = (orderby, over) => ({ $for: { it: over }, $orderby: [orderby, '$it.id'], $return: '$it.id' });
+  it('is one function the store hands its planner', () => {
+    assert.equal(typeof storeTemporals().hooks.planner, 'function');
+  });
+  it('refuses an order by a zoned key under its own reason, on a collection, an entity and a join', async () => {
+    const store = await openStore(zonedModel, { driver: nodeDriver(), temporals: storeTemporals(), zoneProvider });
+    try {
+      const zoned = { $instant: ['$it.z', 'rfc5545'] };
+      const collection = await store.collection('ev').explain(ordered(zoned, '$[*]'));
+      assert.deepEqual([collection.mode, collection.barrier, collection.barriers],
+        ['set', { construct: '$orderby', reason: ZONED }, [{ operator: '$orderby', reason: ZONED }]]);
+      const entity = await store.entity('Visit').explain(ordered(zoned, '$.Visit[*]'));
+      assert.deepEqual([entity.mode, entity.barrier, entity.reasons], ['set', { construct: '$orderby', reason: ZONED }, [{ construct: '$orderby', reason: ZONED }]]);
+      const join = await store.entity('Visit').explain({ $for: { it: '$.Visit[*]', o: '$.Visit[*]' }, $where: { $eq: ['$it.id', '$o.id'] },
+        $orderby: [zoned, '$it.id'], $return: '$it.id' });
+      assert.deepEqual([join.mode, join.barrier], ['set', { construct: '$orderby', reason: ZONED }]);
+    }
+    finally { await store.close(); }
+  });
+  it('orders by a utc key natively, and by a comparison over one as any boolean key is ordered', async () => {
+    const store = await openStore(zonedModel, { driver: nodeDriver(), temporals: storeTemporals(), zoneProvider });
+    try {
+      const utc = { $instant: ['$it.u'] };
+      assert.equal((await store.collection('ev').explain(ordered(utc, '$[*]'))).mode, 'native');
+      assert.equal((await store.entity('Visit').explain(ordered(utc, '$.Visit[*]'))).mode, 'native');
+      const compared = { $lt: [utc, 0] };
+      assert.deepEqual((await store.collection('ev').explain(ordered(compared, '$[*]'))).barrier, { construct: '$orderby',
+        reason: 'ordering translates only over singular schema-typed paths (numbers and strings that cannot hold null)' });
+      assert.deepEqual((await store.entity('Visit').explain(ordered(compared, '$.Visit[*]'))).barrier, { construct: '$orderby',
+        reason: 'ordering translates only over typed entity paths (never a boolean, never a document path that admits null)' });
+    }
+    finally { await store.close(); }
+  });
+});

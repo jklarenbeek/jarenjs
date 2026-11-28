@@ -972,7 +972,8 @@ function declaredTemporal(node, itSlot, shape) {
  * of a floating one are exact over their generated key; `$instant` of a zoned
  * member under its declared policy is its stored key, which narrows.
  * @param {any} node @param {number} itSlot @param {any} shape
- * @returns {{ temporal: any, ref: any, exact: boolean, family: 'instant' | 'text' } | null}
+ * @returns {{ temporal: any, ref: any, exact: boolean, family: 'instant' | 'text', reason: string | null } | null}
+ *   `reason`: why the engine orders by a zoned key, `null` for an exact one
  */
 function temporalKey(node, itSlot, shape) {
   if (node?.kind !== 'op') return null;
@@ -997,7 +998,8 @@ function temporalKey(node, itSlot, shape) {
   if (temporal === null) return null;
   const zoned = temporal.kind === 'zoned';
   const ref = { segments: temporal.segments, type: zoned ? 'integer' : 'string', column: temporal.key };
-  return { temporal, ref, exact: !zoned, family: temporal.kind === 'floating' ? 'text' : 'instant' };
+  return { temporal, ref, exact: !zoned, family: temporal.kind === 'floating' ? 'text' : 'instant',
+    reason: zoned ? TEMPORAL_REASONS.zonedOrder : null };
 }
 
 /** A bound over a key column. @param {string} column @param {string} op @param {unknown} lit */
@@ -1119,14 +1121,25 @@ function collectionWrites(collection, zoneProvider) {
   };
 }
 
-/** What a store's planner asks of a collection's declared temporal members. */
-const TEMPORAL_PLANNER = Object.freeze({
-  memberType: temporalMemberType,
-  comparison: planTemporalComparison,
-  overlap: planDateRangeOverlap,
-  key: temporalKey,
-  zonedOrder: TEMPORAL_REASONS.zonedOrder,
-});
+/**
+ * What a store's planner asks of a collection's or an entity's declared
+ * temporal members: its one entry, asked by question.
+ * - `'type'`: the type the member path `subject` (a canonical path) reads
+ *   as — a date's or a date range's member is its key column's text — or
+ *   `undefined` for any other path;
+ * - `'predicate'`: the plan of the comparison or the `$overlaps` node
+ *   `subject` over a member's key, or `null` where the ordinary forms plan it;
+ * - `'key'`: the key the ordering expression `subject` reads, or `null`; a
+ *   zoned key is not exact, and its `reason` is why the engine orders by it.
+ * @param {'type' | 'predicate' | 'key'} question
+ * @param {any} subject @param {number} itSlot @param {any} shape
+ * @returns {any}
+ */
+function temporalPlanner(question, subject, itSlot, shape) {
+  if (question === 'key') return temporalKey(subject, itSlot, shape);
+  if (question === 'type') return temporalMemberType(shape, subject);
+  return subject.name === '$overlaps' ? planDateRangeOverlap(subject, itSlot, shape) : planTemporalComparison(subject, itSlot, shape);
+}
 
 /**
  * The temporal seam's hooks: what the store, its planner, its tables, its
@@ -1156,5 +1169,5 @@ export const TEMPORAL_HOOKS = Object.freeze({
   /** The stamp a zoned key a store keyed through `provider` carries, or `null`
    * beside a provider that names no identity. @param {any} provider */
   zoneStamp: (provider) => (provider?.identity === undefined || provider?.identity === null ? null : stampOf(provider.identity)),
-  planner: TEMPORAL_PLANNER,
+  planner: temporalPlanner,
 });

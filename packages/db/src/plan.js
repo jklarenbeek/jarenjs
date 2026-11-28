@@ -639,7 +639,7 @@ function pathRef(node, itSlot, shape) {
     segments: path.segments,
     // a declared date's or date range's member is its key, and the key
     // column holds its text whatever the schema says of it
-    type: shape.temporalPlanner?.memberType(shape, path.canonical) ?? typeOfPath(shape.schema, path.segments),
+    type: shape.temporalPlanner?.('type', path.canonical, itSlot, shape) ?? typeOfPath(shape.schema, path.segments),
     column,
     // a member of several kinds: its column holds the first type's, and
     // answers a value of that kind alone, unless it is an untyped column
@@ -2012,13 +2012,13 @@ function planPredicate(node, itSlot, shape) {
   if (spatial !== null) return spatial;
 
   if (node.name === '$overlaps') {
-    const ranged = shape.temporalPlanner?.overlap(node, itSlot, shape) ?? null;
+    const ranged = shape.temporalPlanner?.('predicate', node, itSlot, shape) ?? null;
     if (ranged !== null) return ranged;
     return planIntervalOverlap(node, itSlot, shape);
   }
 
   if (COMPARISONS.has(node.name)) {
-    const keyed = shape.temporalPlanner?.comparison(node, itSlot, shape) ?? null;
+    const keyed = shape.temporalPlanner?.('predicate', node, itSlot, shape) ?? null;
     if (keyed !== null) return keyed;
   }
 
@@ -3565,7 +3565,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     const terms = [];
     let refused = null;
     for (const spec of node.orderby.specs) {
-      const keyed = shape.temporalPlanner?.key(spec.key, itSlot, shape) ?? null;
+      const keyed = shape.temporalPlanner?.('key', spec.key, itSlot, shape) ?? null;
       if (keyed !== null && keyed.exact) {
         if (spec.collation !== null || spec.collationName !== null) {
           refused = refusal('$collation', FLWOR_REASONS.collation);
@@ -3575,7 +3575,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
         continue;
       }
       if (keyed !== null) {
-        refused = refusal('$orderby', shape.temporalPlanner.zonedOrder);
+        refused = refusal('$orderby', keyed.reason);
         break;
       }
       const ref = pathRef(spec.key, itSlot, shape);
@@ -5378,7 +5378,7 @@ function planEntityQueryCore(document, entities, mapping, operators, zoneStamp) 
       const keyed = key.kind === 'op' ? temporalOrderKey(key, bindings) : null;
       if (keyed !== null && !keyed.exact) {
         orderPushed = false;
-        reasons.push(refusal('$orderby', keyed.binding.shape.temporalPlanner.zonedOrder));
+        reasons.push(refusal('$orderby', keyed.reason));
         break;
       }
       if (keyed !== null) {
@@ -5486,12 +5486,12 @@ function planEntityQueryCore(document, entities, mapping, operators, zoneStamp) 
  * The key an ordering expression over a binding's declared calendar member
  * reads (`temporal.js`'s planner), with the binding, or `null`.
  * @param {any} key - the ordering key's node @param {any[]} bindings
- * @returns {{ binding: any, ref: any, exact: boolean } | null}
+ * @returns {{ binding: any, ref: any, exact: boolean, reason: string | null } | null}
  */
 function temporalOrderKey(key, bindings) {
   for (const binding of bindings) {
-    const keyed = binding.shape.temporalPlanner?.key(key, binding.slot, binding.shape) ?? null;
-    if (keyed !== null) return { binding, ref: keyed.ref, exact: keyed.exact };
+    const keyed = binding.shape.temporalPlanner?.('key', key, binding.slot, binding.shape) ?? null;
+    if (keyed !== null) return { binding, ref: keyed.ref, exact: keyed.exact, reason: keyed.reason };
   }
   return null;
 }

@@ -245,11 +245,14 @@ The store runs over SQLite — on Node (`@jarenjs/db/node`), on Bun
   keys arrive empty, every row a candidate, until `rekey()`.
 
   The declaration's reading, its key columns, CHECK and read-back by
-  `introspect()`, the refusals of a value and the calendar behind them are
-  the **temporal seam**, the subpath `@jarenjs/db/temporals`, on a
+  `introspect()`, the refusals of a value, the plans of a comparison, an
+  `$overlaps` and an ordering over its keys, and the calendar behind them
+  are the **temporal seam**, the subpath `@jarenjs/db/temporals`, on a
   collection and an entity alike, so a store that declares no temporal
   member carries none of them but the refusal of a declaration met without
-  the seam: open the store with
+  the seam. The store's planner asks the seam through one entry, and never
+  calls it for a collection or an entity that declares no temporal member.
+  Open the store with
   `temporals: storeTemporals()` (and pass it to `prepareModel` for a model
   prepared once, and to `introspectModel` for a connection read without a
   store). A model declaring a temporal member is `JD0017` without it, at
