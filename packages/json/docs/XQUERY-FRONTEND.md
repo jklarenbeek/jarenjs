@@ -42,7 +42,7 @@ q(null, { doc: data }); // parse + compile convenience; returns the engine's com
   |---|---|
   | `unsupported construct '<name>'` | recognized XQuery construct outside the subset |
   | `unsupported function '<name>'` / `unsupported function '<name>#<arity>'` | function (or an arity of one) outside the mapping table |
-  | `unsupported construct 'tokenize flag <f>'` / `'tokenize flags other than a literal'` / `'tokenize flag q with a computed pattern'` | `fn:tokenize` flags an I-Regexp cannot honour, or that are not known as the query is read (§4.6) |
+  | `unsupported construct '<function> flag <f> with ...'` (`'matches flag m with an anchor'`, `'tokenize flag q with a computed pattern'`, ...) / `'<function> flags other than a literal'` / `'replace flags with a replacement that may hold a capture reference'` | `matches`, `replace` or `tokenize` flags no I-Regexp can say for the pattern given, or that are not known as the query is read (§4.6) |
   | `unsupported construct 'cast as <name>'` / `'castable as <name>'` | a cast to a type outside the mapped ones (§4.6) |
   | `unsupported construct 'xs:date with a timezone'`, `'xs:dateTime without a timezone'`, ... | a date or time value outside the values the front-end reads (§4.9) |
   | `unsupported construct '<use> of a value that may be a date'`, `'date arithmetic'` | a use of a value whose date type the query does not fix, the difference of two dates (§3, §4.9) |
@@ -141,8 +141,9 @@ compileXQuery(text)(null, { doc: inputDocument });
 > F&O `fn:matches` tests a **substring** match, which is the JSON format's
 > `$search` (`$match` is the *anchored* RFC 9535 `match()` — no XQuery
 > function maps to it). Patterns are **I-Regexp (RFC 9485)**, not XSD
-> regular expressions (deviation **D5**); there is no flags argument
-> (`matches#3`, `replace#4` are unsupported arities).
+> regular expressions (deviation **D5**); the flags argument rewrites a
+> literal pattern into the I-Regexp that matches what it matches under
+> them, where one can (§4.6).
 
 > ### ⚠ Square array constructors flatten their members
 >
@@ -332,9 +333,9 @@ Any other prefix, any name not listed, or any arity not listed is an error
 | `translate` | 3 | `{"$translate": [str, map, trans]}` |
 | `upper-case`, `lower-case` | 1 | `$upper`, `$lower` |
 | `string-length`, `normalize-space` | 1 | `$string-length`, `$normalize-space` |
-| `matches` | 2 | `{"$search": [input, pattern]}` (**not** `$match`; §3) |
-| `replace` | 3 | `{"$replace": [input, pattern, replacement]}` (I-Regexp, no flags) |
-| `tokenize` | 1–3 | `{"$tokenize": [input, pattern]}`; the flags `""` and `q` only (§4.6) |
+| `matches` | 2–3 | `{"$search": [input, pattern]}` (**not** `$match`; §3); the flags rewrite the pattern (§4.6) |
+| `replace` | 3–4 | `{"$replace": [input, pattern, replacement]}` (I-Regexp; the replacement is literal text, **D5**); the flags rewrite the pattern (§4.6) |
+| `tokenize` | 1–3 | `{"$tokenize": [input, pattern]}`; the flags rewrite the pattern (§4.6) |
 | `format-number` | 2–3 | `{"$format-number": [value, picture, format?]}`; a percent or per-mille picture multiplies first (§4.8) |
 | `distinct-values` | 1 | `{"$distinct": e}` |
 | `reverse`, `head`, `tail` | 1 | `$reverse`, `$head`, `$tail` |
@@ -353,8 +354,10 @@ Any other prefix, any name not listed, or any arity not listed is an error
 | `xs:integer`, `xs:decimal`, `xs:double`, `xs:float`, `xs:boolean` | 1 | folded literal or a `$let` phrase (§4.6) |
 | `xs:long`, `xs:int`, `xs:short`, `xs:byte`, `xs:unsignedLong`, `xs:unsignedInt`, `xs:unsignedShort`, `xs:unsignedByte`, `xs:nonNegativeInteger`, `xs:positiveInteger`, `xs:nonPositiveInteger`, `xs:negativeInteger` | 1 | folded literal or a `$let` phrase checking the range (§4.6) |
 | `xs:date`, `xs:dateTime`, `xs:time` | 1 | folded RFC 3339 text or a `$let` phrase reading it (§4.9) |
+| `year-from-date`, `month-from-date`, `day-from-date`, `year-from-dateTime`, `month-from-dateTime`, `day-from-dateTime`, `hours-from-dateTime`, `minutes-from-dateTime`, `seconds-from-dateTime`, `hours-from-time`, `minutes-from-time`, `seconds-from-time` | 1 | `{"$year": d}`, `$month`, `$day`, `$hours`, `$minutes`, `$seconds` (§4.9) |
+| `timezone-from-date` | 1 | `{"$offset": d}`: the empty sequence, as a date in the domain has no timezone (§4.9) |
 
-### 4.6 The `xs:` constructors, `cast as`, `castable as` and `fn:tokenize`
+### 4.6 The `xs:` constructors, `cast as`, `castable as`, `fn:tokenize` and the regular-expression flags
 
 **Numeric constructors** read their operand by what it is:
 
@@ -441,21 +444,43 @@ overlaps itself is matched left to right (`tokenize("aaa", "aa")` is `""`,
 no I-Regexp (FORX0002, which takes in XSD's `\s` and `\w`) is `JQ2001` when
 the call runs. `tokenize($s)` is `tokenize(normalize-space($s), " ")`.
 
-The flags argument is read as the query is read. `""` is the two-argument
-call; `q` reads the pattern as plain text, so a literal pattern is escaped
-into the I-Regexp that matches it (`tokenize($s, ".", "q")` emits
-`{"$tokenize": ["$s", "\\."]}`). `i`, `s`, `m` and `x` change what a pattern
-matches in ways an I-Regexp cannot express and are refused by name
-(`unsupported construct 'tokenize flag i'`), as are flags computed when the
-query runs and `q` with a computed pattern; a letter F&O does not define is
-F&O's `err:FORX0001`, raised when the call runs.
+**The flags** of `fn:matches`, `fn:replace` and `fn:tokenize` (F&O §5.6.2)
+are read as the query is read. `""` is the call without them. Any other
+flags rewrite a literal pattern into the I-Regexp that matches what the
+pattern matches under them, and the call is the engine's `$search`,
+`$replace` or `$tokenize` over it:
+
+| Flag | The pattern it emits |
+|---|---|
+| `q` | the text escaped into the I-Regexp that matches it (`tokenize($s, ".", "q")` emits `{"$tokenize": ["$s", "\\."]}`); `s`, `m` and `x` beside it have no effect, as in F&O |
+| `x` | the white space (tab, line feed, carriage return, space) outside a character class removed before the pattern is read (`"he ll o[ ]world"` is `hello[ ]world`) |
+| `s` | each `.` outside a class written as the class of every character, `[\p{L}\P{L}]`, which matches `\n` and `\r` too |
+| `m` | the pattern itself, where it holds no `^` or `$` outside a class (`m` only changes what those match) |
+| `i` | each ASCII letter written as the class of its case variants (`"ABC"` is `[Aa][Bb][Cc]`), a class given the variants of the letters it names (`[^Q]` is `[^Qq]`, `[x-z]` is `[x-zXYZ]`); `k` also matches the Kelvin sign (U+212A) and `s` the long s (U+017F); `\p{Lu}` stays as it is |
+
+What no I-Regexp can say is refused by name, never answered: `m` beside an
+anchor (`unsupported construct 'matches flag m with an anchor'`, since an
+I-Regexp has no anchor at the end of a line), `i` with the letter `i` or `I`
+(whether the dotted capital I, U+0130, matches it depends on which of
+Unicode's case mappings F&O's "default case mapping" reads, the simple one
+or the full one) or a character outside ASCII, a pattern that is no I-Regexp
+once `x` removed its white space (`\s`, a back-reference, a class
+subtraction: the call without flags reads it as D5 does), a pattern or flags
+computed when the query runs, and, without `q`, a replacement that may hold
+F&O's capture references or escapes (`$1`, `\$`; `'replace flags with a
+replacement that may hold a capture reference'`): the engine reads a
+replacement as literal text, which is what F&O reads under `q`. A letter
+F&O does not define is F&O's `err:FORX0001`, and the empty sequence as
+flags its `err:XPTY0004`, both raised when the call runs.
 
 *Upgrade: `tokenize` used to emit a `$let` phrase over the separator's
 positions, whose cost grew with the square of the text's length and whose
 positions the sequence guards bounded (`JQ2007`, `JQ2009`); it now emits
 `$tokenize`, which reads the text once and answers past those bounds. A
 regular-expression pattern, a separator that overlaps itself and the flags
-`""` and `q` used to be refused and now answer.*
+`""` and `q` used to be refused and now answer. The flags `i`, `s`, `m` and
+`x` were refused for every pattern, and `matches#3` and `replace#4` were
+unsupported arities; each now answers where its pattern can be rewritten.*
 
 ### 4.7 `fn:remove`, `fn:insert-before` and `fn:compare`
 
@@ -615,6 +640,25 @@ values of another — or of another type's value among dates — is `()`, as
 F&O's `eq` reads two values that do not compare, both operands still
 evaluated.
 
+**The component functions** (`year-from-date`, `month-from-date`,
+`day-from-date`, the six of `xs:dateTime`, the three of `xs:time`) are the
+engine's lexical component operators over the value's text (`$year`,
+`$month`, `$day`, `$hours`, `$minutes`, `$seconds`, QUERY-FORMAT.md §8.13),
+which in the domain is the value's canonical form:
+`hours-from-dateTime(xs:dateTime("1999-12-31T24:00:00Z"))` is `0` and its
+`day-from-dateTime` is `1`. A value outside the domain is refused where it
+is constructed, by the constructor's own refusal. The argument is read by
+its static type: a value of the function's type or the empty sequence gives
+the component or the empty sequence; any other value — a string, literal or
+external, or a date of another type — is XQuery's `err:XPTY0004` where it is
+given (`fn:year-from-date takes an xs:date, not an xs:dateTime`); an
+argument that may or may not be a date value is refused by name
+(`unsupported construct 'fn:year-from-date of a value that may be a
+date'`). A date in the domain has no timezone, so `timezone-from-date` is
+the empty sequence (`$offset`); the timezone of a dateTime or a time is an
+`xs:dayTimeDuration`, so `timezone-from-dateTime` and `timezone-from-time`
+stay unsupported functions, with the durations below.
+
 The duration types (`xs:duration`, `xs:dayTimeDuration`,
 `xs:yearMonthDuration`) stay outside the subset: a duration's text orders
 neither by length (`"P1D"` sorts before `"PT12H"`) nor equals its canonical
@@ -656,7 +700,8 @@ same `$error`, with XQuery's code and a message that names the refusal:
 | a cast that fails (§4.6, §4.9) | `err:FORG0001`, `err:FOCA0002`, `err:XPTY0004` | `xs:integer: 1.5`, `xs:byte: the operand is not one atomic value` |
 | a use of a date value XQuery types as an error (§4.9) | `err:FORG0006`, `err:XPTY0004` | `an xs:date has no effective boolean value (position 8)` |
 | a position of `remove`/`insert-before` that is no integer (§4.7) | `err:XPTY0004` | `fn:remove: position 1.5` |
-| a `tokenize` flag F&O does not define (§4.6) | `err:FORX0001` | `fn:tokenize: invalid flags 't'` |
+| a `matches`, `replace` or `tokenize` flag F&O does not define, the empty sequence as flags (§4.6) | `err:FORX0001`, `err:XPTY0004` | `fn:tokenize: invalid flags 't'`, `fn:matches: the flags are the empty sequence` |
+| a component function of a value of another type (§4.9) | `err:XPTY0004` | `fn:year-from-date takes an xs:date, not an xs:dateTime` |
 | a date value outside the domain (§4.9) | `unsupported` | `xs:date: 1999-05-31Z is a value the front-end does not read` |
 | an `order by` key that may be a date, in a date's shape (§4.9) | `unsupported` | `order by: a key that may be a date is a value the front-end does not order` |
 

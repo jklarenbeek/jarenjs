@@ -413,8 +413,8 @@ describe('XQuery front-end parser', () => {
       failsWith('sum($x, 0)', "unsupported function 'sum#2'", 0);
       failsWith('string()', "unsupported function 'string#0'", 0);
       failsWith('concat("a")', "unsupported function 'concat#1'", 0);
-      failsWith('matches($s, $p, "i")', "unsupported function 'matches#3'", 0);
-      failsWith('fn:replace($s, $p, $r, "i")', "unsupported function 'fn:replace#4'", 0);
+      failsWith('matches($s, $p, "i", 1)', "unsupported function 'matches#4'", 0);
+      failsWith('fn:replace($s, $p, $r, "i", 1)', "unsupported function 'fn:replace#5'", 0);
       failsWith('true(1)', "unsupported function 'true#1'", 0);
     });
   });

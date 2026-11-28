@@ -66,6 +66,7 @@ import {
 } from '@jarenjs/core/scan';
 
 import { civilFromDays, daysFromCivil, daysInMonth } from '@jarenjs/core/dates';
+import { isValidIRegexp } from '@jarenjs/core/text/iregexp';
 import { setObjectMember } from '@jarenjs/core/object';
 import { LabeledSyntaxError, NESTING_CEILING } from '../errors.js';
 import { DEFAULT_DECIMAL_FORMAT, FormatRefusal, compilePicture } from '../query/format-number.js';
@@ -199,7 +200,7 @@ const indexOfFunction = Object.freeze({
   }),
 });
 
-//#region xs: constructors and fn:tokenize
+//#region xs: constructors and the regular-expression functions
 
 // The XSD lexical spaces the numeric constructors read, written once as
 // the unsigned I-Regexp text the emitted documents match with `$match`
@@ -846,16 +847,31 @@ const XS_TABLE = Object.freeze(Object.fromEntries(Object.keys(XS_TYPES).map((nam
   { min: 1, max: 1, emit: (args, refuse, types) => castTo(name, args[0], true, refuse, types[0]) },
 ])));
 
-// fn:tokenize is `$tokenize`, the pieces between the matches of an
-// I-Regexp (D5). F&O's flags argument is read as the query is read: no
-// flags (`""`) is the two-argument call, and `q` (the pattern is plain
-// text) escapes a literal pattern into an I-Regexp that matches that text.
-// The other flags change what a pattern matches in ways an I-Regexp
-// cannot (`i`, `s`, `m`, `x`) and are refused by name, as is a flag
-// computed when the query runs; a letter F&O does not define is F&O's
-// FORX0001, raised when the call is evaluated.
-const TOKENIZE_FLAGS_UNSUPPORTED = 'smix';
-const TOKENIZE_FLAGS = 'smixq';
+// fn:matches, fn:replace and fn:tokenize take a regular expression, which
+// is an I-Regexp (D5), and F&O's flags (section 5.6.2), read as the query
+// is read. No flags (`""`) is the call without the argument. Any other
+// flags rewrite a literal pattern into the I-Regexp that matches what the
+// pattern matches under them, so the call is the engine's `$search`,
+// `$replace` or `$tokenize` over that pattern:
+//
+// - `q`: the pattern is plain text, every character an I-Regexp reads as
+//   syntax escaped (`s`, `m` and `x` then have no effect);
+// - `x`: the white space outside a character class is removed;
+// - `s`: `.` outside a class matches every character, `\n` and `\r` too;
+// - `m`: `^` and `$` would match at the ends of lines, which no I-Regexp
+//   can say, so `m` is read only where the pattern has neither;
+// - `i`: every letter matches its case variants, `[a-z]` its upper case
+//   too, while `\p{Lu}` stays as it is; `k` also matches the Kelvin sign
+//   (U+212A) and `s` the long s (U+017F). The letter `i` and characters
+//   outside ASCII are refused: whether the dotted capital I (U+0130)
+//   matches `i` depends on which case mapping F&O's reading takes.
+//
+// A pattern computed when the query runs, flags so computed, a pattern
+// that is no I-Regexp after `x`, and a replacement that may hold F&O's
+// capture references (`$1`, `\$`; literal under `q`) are refused by name.
+// A letter F&O does not define is F&O's FORX0001, raised when the call is
+// evaluated; the empty sequence for flags is XQuery's type error.
+const REGEX_FLAGS = 'smixq';
 
 // the I-Regexp that matches `text` and nothing else: every character an
 // I-Regexp reads as syntax escaped, `^` and `$` included (the translation
@@ -865,33 +881,265 @@ function literalPattern(text) {
   return text.replace(/[\\|.?*+(){}[\]^]/g, '\\$&').replace(/\$/g, '[$]');
 }
 
+const isRegexWhiteSpace = (c) => c === ' ' || c === '\t' || c === '\n' || c === '\r';
+
+// `x`: the pattern without the white space outside a character class
+// (F&O removes it before the pattern is read, so `\ s` is `\s`)
+function withoutWhiteSpace(pattern) {
+  let out = '';
+  let inClass = false;
+  for (let k = 0; k < pattern.length; k++) {
+    const c = pattern[k];
+    if (inClass) {
+      out += c;
+      if (c === '\\' && k + 1 < pattern.length)
+        out += pattern[++k];
+      else if (c === ']')
+        inClass = false;
+      continue;
+    }
+    if (isRegexWhiteSpace(c))
+      continue;
+    out += c;
+    if (c === '\\') {
+      while (k + 1 < pattern.length && isRegexWhiteSpace(pattern[k + 1]))
+        k++;
+      if (k + 1 < pattern.length)
+        out += pattern[++k];
+    }
+    else if (c === '[') {
+      inClass = true;
+    }
+  }
+  return out;
+}
+
+// `s`: the class of every character
+const ANY_CHARACTER = '[\\p{L}\\P{L}]';
+
+const CC_LOWER_I = 0x69;
+const CC_UPPER_I = 0x49;
+const isAsciiLetter = (cp) => (cp >= 0x41 && cp <= 0x5A) || (cp >= 0x61 && cp <= 0x7A);
+
+// `i`: the characters an ASCII letter matches, itself first
+function caseVariants(letter) {
+  const lower = letter.toLowerCase();
+  const extra = lower === 'k' ? 'K' : lower === 's' ? 'ſ' : '';
+  return letter + (letter === lower ? letter.toUpperCase() : lower) + extra;
+}
+
+// the code point a single-character escape of a class stands for
+const ESCAPED_CODES = Object.freeze({ n: 0x0A, r: 0x0D, t: 0x09 });
+
+// One member of a character class of a valid I-Regexp at `k`: its text,
+// the code point it names (-1 for `\p{...}`), and where it ends.
+function classMember(pattern, k) {
+  if (pattern[k] === '\\') {
+    const c = pattern[k + 1];
+    if (c === 'p' || c === 'P') {
+      const end = pattern.indexOf('}', k) + 1;
+      return { text: pattern.slice(k, end), code: -1, end };
+    }
+    return { text: pattern.slice(k, k + 2), code: ESCAPED_CODES[c] ?? c.charCodeAt(0), end: k + 2 };
+  }
+  const code = pattern.codePointAt(k);
+  const width = code > 0xFFFF ? 2 : 1;
+  // an unescaped '-' is a member only first or last, written escaped
+  return { text: code === CC_MINUS ? '\\-' : pattern.slice(k, k + width), code, end: k + width };
+}
+
+// The character class of a valid I-Regexp at `k` (its '['): its text, with
+// the case variants of the letters it names under `i` (`caseless`), and
+// where it ends; or the reason `i` cannot be read
+function classUnderFlags(pattern, k, caseless) {
+  let at = k + 1;
+  const negated = pattern[at] === '^';
+  if (negated)
+    at++;
+  let members = '';
+  const letters = new Set();
+  let reason = null;
+  while (pattern[at] !== ']') {
+    const low = classMember(pattern, at);
+    let high = low;
+    at = low.end;
+    if (pattern[at] === '-' && pattern[at + 1] !== ']') {
+      high = classMember(pattern, at + 1);
+      at = high.end;
+      members += `${low.text}-${high.text}`;
+    }
+    else {
+      members += low.text;
+    }
+    if (low.code < 0)
+      continue;
+    if (high.code >= 0x80)
+      reason = 'with a character outside ASCII';
+    else if ((low.code <= CC_LOWER_I && high.code >= CC_LOWER_I) || (low.code <= CC_UPPER_I && high.code >= CC_UPPER_I))
+      reason ??= 'with the letter i';
+    for (let cp = low.code; cp <= high.code && cp < 0x80; cp++) {
+      if (isAsciiLetter(cp))
+        letters.add(String.fromCharCode(cp));
+    }
+  }
+  if (!caseless)
+    return { text: pattern.slice(k, at + 1), end: at + 1 };
+  if (reason !== null)
+    return { reason };
+  const variants = [...letters].map((letter) => caseVariants(letter).slice(1)).join('');
+  return { text: `[${negated ? '^' : ''}${members}${variants}]`, end: at + 1 };
+}
+
+// `s`, `m` and `i` over a valid I-Regexp: the I-Regexp that matches what
+// it matches under them, or the flag that cannot be read and why
+function underFlags(pattern, flags) {
+  const dotAll = flags.includes('s');
+  const caseless = flags.includes('i');
+  let out = '';
+  for (let k = 0; k < pattern.length;) {
+    const c = pattern[k];
+    if (c === '\\') {
+      const end = pattern[k + 1] === 'p' || pattern[k + 1] === 'P' ? pattern.indexOf('}', k) + 1 : k + 2;
+      out += pattern.slice(k, end);
+      k = end;
+      continue;
+    }
+    if (c === '[') {
+      const read = classUnderFlags(pattern, k, caseless);
+      if (read.reason !== undefined)
+        return { flag: 'i', reason: read.reason };
+      out += read.text;
+      k = read.end;
+      continue;
+    }
+    if ((c === '^' || c === '$') && flags.includes('m'))
+      return { flag: 'm', reason: 'with an anchor' };
+    const code = pattern.codePointAt(k);
+    if (caseless && code >= 0x80)
+      return { flag: 'i', reason: 'with a character outside ASCII' };
+    if (caseless && (code === CC_LOWER_I || code === CC_UPPER_I))
+      return { flag: 'i', reason: 'with the letter i' };
+    out += c === '.' && dotAll ? ANY_CHARACTER : caseless && isAsciiLetter(code) ? `[${caseVariants(c)}]` : c;
+    k++;
+  }
+  return { pattern: out };
+}
+
+// The I-Regexp a literal pattern reads as under `flags` (no letter outside
+// REGEX_FLAGS, not empty), or the flag that cannot be read and why.
+function flaggedPattern(pattern, flags) {
+  if (flags.includes('q'))
+    return flags.includes('i') ? underFlags(literalPattern(pattern), 'i') : { pattern: literalPattern(pattern) };
+  const read = flags.includes('x') ? withoutWhiteSpace(pattern) : pattern;
+  if (!isValidIRegexp(read))
+    return { flag: flags[0], reason: 'with a pattern that is no I-Regexp' };
+  return underFlags(read, flags);
+}
+
+// The entry of a function whose regular expression is its second argument
+// and whose flags follow its `arity` arguments; `call(args)` is the
+// engine's call over the arguments without the flags.
+function regexFunction(local, arity, call) {
+  return {
+    min: arity,
+    max: arity + 1,
+    emit: (args, refuse) => {
+      if (args.length === arity)
+        return call(args);
+      const flagsArg = args[arity];
+      if (isEmptySeqExpr(flagsArg))
+        return raisedWith(xqueryCode('XPTY0004'), `fn:${local}: the flags are the empty sequence`);
+      const flags = literalText(flagsArg);
+      if (flags === null)
+        return refuse(`unsupported construct '${local} flags other than a literal'`);
+      for (const flag of flags) {
+        if (!REGEX_FLAGS.includes(flag))
+          return raisedWith(xqueryCode('FORX0001'), `fn:${local}: invalid flags '${flags}'`);
+      }
+      const plain = args.slice(0, arity);
+      if (flags === '')
+        return call(plain);
+      const pattern = literalText(args[1]);
+      if (pattern === null)
+        return refuse(`unsupported construct '${local} flag ${flags[0]} with a computed pattern'`);
+      const read = flaggedPattern(pattern, flags);
+      if (read.reason !== undefined)
+        return refuse(`unsupported construct '${local} flag ${read.flag} ${read.reason}'`);
+      // F&O reads `$1` and `\` in a replacement as references and escapes, but for `q`
+      const replacement = local === 'replace' && !flags.includes('q') ? literalText(args[2]) : '';
+      if (replacement === null || /[$\\]/.test(replacement))
+        return refuse("unsupported construct 'replace flags with a replacement that may hold a capture reference'");
+      plain[1] = emitString(read.pattern);
+      return call(plain);
+    },
+  };
+}
+
+// fn:tokenize is `$tokenize`, the pieces between the matches of an
+// I-Regexp; `tokenize($s)` is `tokenize(normalize-space($s), " ")`.
+const TOKENIZE = regexFunction('tokenize', 2, (args) => ({ '$tokenize': args }));
 const tokenizeFunction = Object.freeze({
   min: 1,
   max: 3,
-  emit: (args, refuse) => {
-    if (args.length === 1)
-      return { '$tokenize': [{ '$normalize-space': args[0] }, ' '] };
-    if (args.length === 2)
-      return { '$tokenize': args };
-    const flags = literalText(args[2]);
-    if (flags === null)
-      return refuse("unsupported construct 'tokenize flags other than a literal'");
-    for (const flag of flags) {
-      if (!TOKENIZE_FLAGS.includes(flag))
-        return raisedWith(xqueryCode('FORX0001'), `fn:tokenize: invalid flags '${flags}'`);
-    }
-    for (const flag of TOKENIZE_FLAGS_UNSUPPORTED) {
-      if (flags.includes(flag))
-        return refuse(`unsupported construct 'tokenize flag ${flag}'`);
-    }
-    if (flags === '')
-      return { '$tokenize': [args[0], args[1]] };
-    const pattern = literalText(args[1]);
-    if (pattern === null)
-      return refuse("unsupported construct 'tokenize flag q with a computed pattern'");
-    return { '$tokenize': [args[0], emitString(literalPattern(pattern))] };
-  },
+  emit: (args, refuse) => (args.length === 1
+    ? { '$tokenize': [{ '$normalize-space': args[0] }, ' '] }
+    : TOKENIZE.emit(args, refuse)),
 });
+
+// fn:matches tests a *substring* match (F&O), which is `$search`;
+// `$match` is the anchored RFC 9535 match() - see XQUERY-FRONTEND.md
+const matchesFunction = Object.freeze(regexFunction('matches', 2, (args) => ({ '$search': args })));
+
+const replaceFunction = Object.freeze(regexFunction('replace', 3, (args) => ({ '$replace': args })));
+
+//#endregion
+
+//#region the component functions of dates and times
+
+// `fn:year-from-date` and its siblings are the engine's lexical component
+// operators (`$year`, `$hours`, ...) over the domain's text, which is the
+// canonical form of the value: a date without a timezone, a dateTime or a
+// time in UTC without a fraction (24:00:00 already read as midnight of the
+// next day). A value outside the domain is refused where it is constructed.
+// The argument is read by its static type: a value of the function's type
+// or the empty sequence gives the component; any other value, a string or
+// a date of another type, is XQuery's type error where it is given. A date
+// has no timezone in the domain, so `timezone-from-date` is always the
+// empty sequence (`$offset` of a date); the timezone of a dateTime or a
+// time is an xs:dayTimeDuration, which the subset has no value for.
+const COMPONENT_FUNCTIONS = Object.freeze({
+  'year-from-date': ['date', '$year'],
+  'month-from-date': ['date', '$month'],
+  'day-from-date': ['date', '$day'],
+  'timezone-from-date': ['date', '$offset'],
+  'year-from-dateTime': ['dateTime', '$year'],
+  'month-from-dateTime': ['dateTime', '$month'],
+  'day-from-dateTime': ['dateTime', '$day'],
+  'hours-from-dateTime': ['dateTime', '$hours'],
+  'minutes-from-dateTime': ['dateTime', '$minutes'],
+  'seconds-from-dateTime': ['dateTime', '$seconds'],
+  'hours-from-time': ['time', '$hours'],
+  'minutes-from-time': ['time', '$minutes'],
+  'seconds-from-time': ['time', '$seconds'],
+});
+
+function componentFunction(local, [type, operator]) {
+  return {
+    min: 1,
+    max: 1,
+    emit: ([arg], refuse, [argType]) => {
+      if (argType === type || argType === 'empty')
+        return { [operator]: arg };
+      if (argType === 'maybe' || argType === 'nested')
+        return refuse(`unsupported construct 'fn:${local} of a value that may be a date'`);
+      const other = isDateTypeName(argType) ? `, not an xs:${argType}` : '';
+      return { '$if': [{ '$exists': arg }, raisedWith(xqueryCode('XPTY0004'), `fn:${local} takes an xs:${type}${other}`)] };
+    },
+  };
+}
+
+const COMPONENT_TABLE = Object.freeze(Object.fromEntries(Object.entries(COMPONENT_FUNCTIONS)
+  .map(([local, entry]) => [local, componentFunction(local, entry)])));
 
 //#endregion
 
@@ -1174,13 +1422,11 @@ const FN_TABLE = Object.freeze({
   'substring-before': fnArgs('$substring-before', 2, 2),
   'substring-after': fnArgs('$substring-after', 2, 2),
   'translate': fnArgs('$translate', 3, 3),
-  // fn:matches tests a *substring* match (F&O), which is `$search`;
-  // `$match` is the anchored RFC 9535 match() - see XQUERY-FRONTEND.md
-  'matches': fnArgs('$search', 2, 2),
+  'matches': matchesFunction,
   'index-of': indexOfFunction,
   'concat': fnArgs('$concat', 2, Infinity),
   'string-join': fnArgs('$string-join', 1, 2),
-  'replace': fnArgs('$replace', 3, 3),
+  'replace': replaceFunction,
   'substring': fnAdjustedStart('$substring'),
   'subsequence': fnAdjustedStart('$subsequence'),
   'tokenize': tokenizeFunction,
@@ -1194,6 +1440,7 @@ const FN_TABLE = Object.freeze({
   'compare': compareFunction,
   'format-number': formatNumberFunction,
   'error': errorFunction,
+  ...COMPONENT_TABLE,
   // XQuery has no boolean literals; fn:true()/fn:false() are the spelling
   'true': { min: 0, max: 0, emit: () => true },
   'false': { min: 0, max: 0, emit: () => false },

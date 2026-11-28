@@ -362,9 +362,10 @@ describe('XQuery front-end fn:tokenize', () => {
     assert.deepStrictEqual(values('tokenize("a|b", "a|b", "q")'), ['', '']);
   });
 
-  it('should refuse the flags an I-Regexp cannot honour, and flags or a q pattern computed when the query runs', () => {
-    for (const flag of ['i', 's', 'm', 'x'])
-      failsWith(`tokenize($s, ",", "q${flag}")`, `unsupported construct 'tokenize flag ${flag}'`, 0);
+  it('should read s, m and x beside q as no flag, and refuse flags or a q pattern computed when the query runs', () => {
+    for (const flag of ['s', 'm', 'x'])
+      assert.deepStrictEqual(validated(`tokenize($s, ".", "q${flag}")`), { '$tokenize': ['$s', '\\.'] });
+    assert.deepStrictEqual(values('tokenize("a. b", ". ", "xq")'), ['a', 'b']);
     failsWith('tokenize($s, ",", $f)', "unsupported construct 'tokenize flags other than a literal'", 0);
     failsWith('tokenize($s, $p, "q")', "unsupported construct 'tokenize flag q with a computed pattern'", 0);
   });

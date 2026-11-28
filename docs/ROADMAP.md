@@ -68,19 +68,29 @@ delete it or fix it.
   boolean and string constructors, the derived integer types,
   `xs:date`/`xs:dateTime`/`xs:time` for the values whose RFC 3339 text orders
   in time (a date without a timezone; a dateTime or time in UTC without a
-  fraction), `cast as`/`castable as` for all of these, `fn:format-number`,
-  `fn:tokenize` (I-Regexp, flags `""`/`q`), `substring-before`/`-after`,
-  `translate`, `abs` … `compare`. What remains: the duration constructors
-  (`xs:duration`, `xs:dayTimeDuration`, `xs:yearMonthDuration`) and date
-  arithmetic, which need an engine operator that orders and canonicalizes a
-  duration (its text orders neither by length nor by equality: `P1D`/`PT12H`,
-  `P1Y`/`P12M`); date and time values outside that domain (other timezones, no
-  timezone on a dateTime or time, fractions of a second, a timezone on a
-  date), which need a date value that compares by instant, not by text; the
-  component functions (`year-from-date`, `hours-from-time`, …) onto
-  `$year`/`$hours`/…; `tokenize` flags `i`, `s`, `m`, `x`, which need I-Regexp
-  flags; and the `declare decimal-format` prolog.
-
+  fraction), `cast as`/`castable as` for all of these, their component
+  functions (`year-from-date` … `seconds-from-time`, `timezone-from-date`),
+  `fn:format-number`, `matches`/`replace`/`tokenize` with the flags a literal
+  pattern can be rewritten under (XQUERY-FRONTEND.md §4.6),
+  `substring-before`/`-after`, `translate`, `abs` … `compare`. What remains:
+  the duration constructors (`xs:duration`, `xs:dayTimeDuration`,
+  `xs:yearMonthDuration`), date arithmetic and `timezone-from-dateTime`/
+  `-time` (a duration's value), which need an engine operator that orders and
+  canonicalizes a duration (its text orders neither by length nor by equality:
+  `P1D`/`PT12H`, `P1Y`/`P12M`); date and time values outside that domain
+  (other timezones, no timezone on a dateTime or time, fractions of a second,
+  a timezone on a date), which need a date value that compares by instant, not
+  by text; `m` beside an anchor and a pattern or flags computed when the query
+  runs, which need flags on the engine's regex operators; `i` beside the
+  letter `i` (whether U+0130 is its case variant) or a character outside ASCII
+  (a case-variant table); a `replace` replacement that may hold F&O's capture
+  references or escapes under flags other than `""` and `q`, which needs
+  `$replace` to read them; and the `declare decimal-format` prolog.
+- [ ] **`fn:replace` reads its replacement as literal text.** F&O reads `$N` as a
+  capture group and `\\`/`\$` as escapes: `replace("abc", "b", "\\")` is `a\c`
+  in XQuery and `a\\c` here (D5). Wanted: the escapes translated where the
+  replacement is literal, `$N` refused by name; with flags, `replace` refuses
+  such a replacement today.
 - [ ] **A value that may be a date is told apart only by where it is written.** A
   sequence written as parts of known types (`($x, xs:date(...))`) is read part
   by part by `min`, `max`, a `group by` or `order by` key holding a date
