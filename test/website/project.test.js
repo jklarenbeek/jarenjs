@@ -224,7 +224,7 @@ describe('transform file kinds run live on the stage (the playground fold)', () 
 });
 
 describe('the drag splitter (headless — the pointer drag itself is browser-verified)', () => {
-  const splitterOf = (container) => find(container, (n) => n.__jarenWidget?.name === 'studio-splitter');
+  const splitterOf = (container) => find(container, (n) => n.getAttribute?.('class')?.split(' ').includes('js-split'));
 
   it('renders as an ARIA separator with a live aria-valuenow', () => {
     const { container } = mountSite();

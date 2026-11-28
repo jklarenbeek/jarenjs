@@ -3,6 +3,7 @@
 import { CodedError } from '@jarenjs/core/errors';
 import { createDomRenderer, idPrefixOfRenderer } from '../dom.js';
 import { findByRef } from './focus.js';
+import { activeElementOf, bodyOf, createElementIn, documentReaderOf, elementById, windowOf } from '../members.js';
 import { viewText } from '../messages.js';
 
 /** Stable view host refusals, using the shared coded-error owner. */
@@ -73,9 +74,14 @@ export function createDialog(host, initial, options = {}) {
   if (!host?.ownerDocument || !host.isConnected || host.childNodes.length
     || !options || (options.onClose !== undefined && typeof options.onClose !== 'function')) refuse('JV1001');
   const doc = host.ownerDocument;
-  const dialog = doc.createElement('dialog');
+  // the document's members through its own accessors: a page element named
+  // after one (`<img name="createElement">`) takes it over on `document`
+  const members = documentReaderOf(doc);
+  const make = (tag) => createElementIn(members, doc, tag);
+  const focused = () => activeElementOf(members, doc);
+  const dialog = make('dialog');
   if (typeof dialog.showModal !== 'function' || typeof dialog.close !== 'function') refuse('JV1002');
-  const title = doc.createElement('h2'), content = doc.createElement('div'), closeButton = doc.createElement('button');
+  const title = make('h2'), content = make('div'), closeButton = make('button');
   dialog.setAttribute('class', 'jaren-dialog');
   dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true');
   title.setAttribute('tabindex', '-1');
@@ -98,19 +104,19 @@ export function createDialog(host, initial, options = {}) {
     return [...dialog.querySelectorAll('button, input, select, textarea, a[href], [tabindex], [contenteditable="true"], summary')]
       .filter(node => node.tabIndex >= 0 && !node.matches(':disabled') && !node.closest('[inert]')
         && node.closest('dialog') === dialog && node.getClientRects().length > 0
-        && doc.defaultView.getComputedStyle(node).visibility !== 'hidden');
+        && windowOf(members, doc).getComputedStyle(node).visibility !== 'hidden');
   }
   function focusInitial() {
     const requested = props.initialFocusRef ? findByRef(dialog, props.initialFocusRef) : null;
     requested?.focus?.();
-    if (requested && doc.activeElement === requested) return;
+    if (requested && focused() === requested) return;
     (focusable()[0] ?? title).focus();
-    if (!dialog.contains(doc.activeElement)) title.focus();
+    if (!dialog.contains(focused())) title.focus();
   }
   function restore() {
     const previous = opener; opener = null;
     if (previous?.isConnected) previous.focus?.();
-    if (doc.activeElement !== previous && props.fallbackFocusRef) findByRef(doc.body, props.fallbackFocusRef)?.focus?.();
+    if (focused() !== previous && props.fallbackFocusRef) findByRef(bodyOf(members, doc), props.fallbackFocusRef)?.focus?.();
   }
   function close() {
     if (!dialog.open) return;
@@ -130,7 +136,7 @@ export function createDialog(host, initial, options = {}) {
   function onKey(event) {
     if (event.key !== 'Tab' || event.defaultPrevented || event.target.closest('dialog') !== dialog) return;
     const controls = focusable(), first = controls[0] ?? title, last = controls.at(-1) ?? title;
-    const active = doc.activeElement;
+    const active = focused();
     if (!controls.length || (event.shiftKey ? active === first || !controls.includes(active) : active === last || !controls.includes(active))) {
       event.preventDefault(); (event.shiftKey ? last : first).focus();
     }
@@ -146,20 +152,20 @@ export function createDialog(host, initial, options = {}) {
       properties(next);
       const id = scope + next.id;
       for (const [own, element] of [[id, dialog], [`${id}-title`, title]]) {
-        const existing = doc.getElementById(own);
+        const existing = elementById(members, doc, own);
         if (existing && existing !== element) refuse('JV1001');
       }
       props = next;
       dialog.setAttribute('id', id); title.setAttribute('id', `${id}-title`);
       dialog.setAttribute('aria-labelledby', `${id}-title`);
       title.textContent = props.title; closeButton.textContent = props.closeLabel ?? viewText(options.messages)('view/dialog/close');
-      const wasFocused = dialog.contains(doc.activeElement), opening = props.open && !dialog.open;
-      if (opening) { opener = doc.activeElement; dialog.showModal(); }
+      const wasFocused = dialog.contains(focused()), opening = props.open && !dialog.open;
+      if (opening) { opener = focused(); dialog.showModal(); }
       // Destroy nested modals before closing their parent. Closed widgets keep
       // no active content renderer children, subscriptions or nested owners.
       render(props.open ? props.content ?? null : null);
       if (!props.open) close();
-      else if (opening || (wasFocused && !dialog.contains(doc.activeElement))) focusInitial();
+      else if (opening || (wasFocused && !dialog.contains(focused()))) focusInitial();
     },
     dispose() {
       if (disposed) return;

@@ -204,6 +204,11 @@ const MEMBERS = ['insertBefore', 'appendChild', 'removeChild', 'replaceChild', '
   'namespaceURI', 'setAttribute', 'removeAttribute', 'getAttribute', 'getAttributeNames', 'setAttributeNS',
   'removeAttributeNS', 'addEventListener', 'removeEventListener', 'parentNode'];
 
+/** The string keys the renderer once kept its bookkeeping under on a node;
+ * it keeps it under symbols, which no control's name or id can be. */
+const OLD_BOOKKEEPING = ['__jarenOn', '__jarenEmit', '__jarenWidget', '__jarenControlled', '__jarenComposition',
+  '__jarenComposing', '__jarenDeferred', '__jarenDeferFocused', '__jarenSecret'];
+
 /** Frames that reach each member on the form: mount, insert, append, remove, move, replace and attributes. */
 const FRAMES = (/** @type {any} */ c) => [
   ['form', { class: 'a' }, c, ['b', { key: 1 }, '1'], ['b', { key: 2 }, '2']],
@@ -324,6 +329,66 @@ for (const view of [true, false]) {
         render(['form', props, ['input', { name: 'foo' }]]);
         assert.equal(markup(container), want);
       }
+    });
+
+    it('binds a form\'s on beside a control named after any key the renderer once kept on the node', () => {
+      for (const safe of /** @type {const} */ ([false, 'interactive'])) {
+        for (const key of OLD_BOOKKEEPING) {
+          const { document, container, markup, dispatch, find } = formDom({ view });
+          /** @type {unknown[]} */
+          const seen = [];
+          const render = createDomRenderer(container, { document, safe: safe || undefined, onEvent: (binding) => seen.push(binding) });
+          const frames = [
+            ['form', { on: { click: 'save' } }, ['input', { name: key }], ['button', { type: 'button' }, 'go']],
+            ['form', { on: { click: 'again' } }, ['input', { name: key }], ['button', { type: 'button' }, 'go']],
+            ['form', {}, ['input', { name: key }], ['button', { type: 'button' }, 'go']],
+          ];
+          for (const frame of frames) {
+            render(frame);
+            dispatch(find(container, 'button'), 'click');
+          }
+          assert.deepEqual(seen, ['save', 'again'], `${key}, safe: ${safe}`);
+          assert.equal(markup(container), renderToString(frames[2], { safe: safe || undefined }), key);
+        }
+      }
+    });
+
+    it('unmounts the widgets inside a form whose control is named after any key the renderer once kept', () => {
+      for (const key of OLD_BOOKKEEPING) {
+        const { document, container, find } = formDom({ view });
+        /** @type {unknown[]} */
+        const log = [];
+        const widgets = { w: { mount: () => { log.push('mount'); return 1; }, unmount: () => { log.push('unmount'); } } };
+        const render = createDomRenderer(container, { document, widgets });
+        render(['div', {}, ['form', {}, ['input', { name: key }], ['jaren-widget', { name: 'w' }]]]);
+        render(['div', {}, ['form', { title: 'b' }, ['input', { name: key }], ['jaren-widget', { name: 'w' }]]]);
+        const control = find(container, 'input');
+        render(['p', {}, 'gone']);
+        assert.deepEqual(log, ['mount', 'unmount'], key);
+        assert.deepEqual(Object.keys(control), ['ownerDocument'], `${key}: nothing is written on the control`);
+      }
+    });
+
+    it('keeps a form widget host a host when its widget names a control after its old bookkeeping key', () => {
+      const { document, container } = formDom({ view });
+      /** @type {unknown[]} */
+      const log = [];
+      const widgets = { f: {
+        mount: (/** @type {any} */ host) => {
+          log.push('mount');
+          const control = document.createElement('input');
+          control.setAttribute('name', '__jarenWidget');
+          host.appendChild(control);
+          return 1;
+        },
+        update: () => { log.push('update'); },
+        unmount: () => { log.push('unmount'); },
+      } };
+      const render = createDomRenderer(container, { document, widgets });
+      render(['div', {}, ['jaren-widget', { name: 'f', tag: 'form', props: { n: 1 } }]]);
+      render(['div', {}, ['jaren-widget', { name: 'f', tag: 'form', props: { n: 2 } }]]);
+      render(['p', {}, 'gone']);
+      assert.deepEqual(log, ['mount', 'update', 'unmount']);
     });
   });
 }

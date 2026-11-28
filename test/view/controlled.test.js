@@ -24,7 +24,7 @@ import assert from 'node:assert';
 
 import { createDomRenderer, renderToString } from '@jarenjs/view';
 
-import { createStubHost, fire } from './dom.stub.js';
+import { bookkeeping, createStubHost, fire } from './dom.stub.js';
 
 /** A renderer over a fresh host, plus the current root node. */
 function host() {
@@ -383,7 +383,7 @@ describe('controlled inputs — read as the attribute the serializer writes', ()
       render(vnode);
       const node = /** @type {any} */ (container.childNodes[0]);
       assert.deepStrictEqual([...node.attributes], attributes, JSON.stringify(props));
-      assert.strictEqual(node.__jarenControlled, undefined);
+      assert.strictEqual(bookkeeping(node, 'controlled'), undefined);
       // the widget's live edit is its own: a re-render does not reassert it
       node.value = 'widget';
       render(['jaren-widget', { name: 'w', ...props, class: 'c' }]);

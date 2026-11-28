@@ -32,7 +32,7 @@
  * Widgets (VIEW-FORMAT §7): a vnode with the reserved tag `jaren-widget`
  * mounts a registered JavaScript widget into a host element the patcher
  * owns but never descends into. Widget bookkeeping lives on the DOM node
- * (`__jarenWidget`), never on the vnode — §5.1 forbids annotating vnodes
+ * (under {@link WIDGET}), never on the vnode — §5.1 forbids annotating vnodes
  * — and the destroy walk that guarantees `unmount` only runs when a
  * widget has actually been created, so widget-free documents keep O(1)
  * subtree removal.
@@ -55,12 +55,36 @@ import {
 import { ENUMERATED_ALIASES, attributePresent, attributeText, enumeratedAttribute, isAliased, isInlineHandler, removeProperty, writeProperty, writingSpelling } from './properties.js';
 import { NAMED_TAGS, createSafePolicy, grantedWidgets, idPrefixOf, projectEvent } from './safe.js';
 import {
-  DIRECT_MEMBERS, appendChild, attributeNamesOf, attributeOf, childNodesOf, domReaderOf, insertChild, listen, localNameOf,
-  namespaceOf, nodeTypeOf, parentOf, removeAttribute, removeAttributeNS, removeChild, replaceChild, setAttribute,
-  setAttributeNS, unlisten,
+  DIRECT_MEMBERS, activeElementOf, appendChild, attributeNamesOf, attributeOf, childNodesOf, createShadowed,
+  documentReaderOf, domReaderOf, elementById, elementsMatching, insertChild, listen, localNameOf, namespaceOf,
+  nodeTypeOf, parentOf, removeAttribute, removeAttributeNS, removeChild, replaceChild, setAttribute, setAttributeNS,
+  unlisten,
 } from './members.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+
+// The renderer's bookkeeping on a DOM node lives under these module-private
+// symbols: a `form` answers a string key through a control of that name or
+// id, and a write to it throws (VIEW-FORMAT §5.6), so a document could take
+// any string key over; it can name no symbol.
+/** An element's `on` bindings: `{ [eventType]: binding }`. */
+const ON = Symbol('jaren.on');
+/** What an element's fired binding is delivered to (`ctx.eventSink`). */
+const EMIT = Symbol('jaren.emit');
+/** A widget host's lifecycle record ({@link createWidgetNode}). */
+const WIDGET = Symbol('jaren.widget');
+/** A controlled control's authoritative value and checkedness. */
+const CONTROLLED = Symbol('jaren.controlled');
+/** A controlled control's composition and focus listeners. */
+const COMPOSITION = Symbol('jaren.composition');
+/** True while a composition is in progress on the control. */
+const COMPOSING = Symbol('jaren.composing');
+/** True while the control's authoritative write is held back. */
+const DEFERRED = Symbol('jaren.deferred');
+/** Whether a focused text control's write waits for its blur. */
+const DEFER_FOCUSED = Symbol('jaren.deferFocused');
+/** True once the field was a password field (the event projection). */
+const SECRET = Symbol('jaren.secret');
 
 /** Props that are renderer instructions, never written to the DOM. A Set,
  * so a prop named like an `Object.prototype` member (`constructor`,
@@ -228,11 +252,32 @@ export function createDomRenderer(container, options = {}) {
   const ids = options.safe
     ? claimIdPrefix(doc, container, options.idPrefix === undefined ? undefined : idPrefixOf(options.idPrefix))
     : null;
+  const docMembers = documentReaderOf(doc);
   const ctx = {
     doc,
     /** How the renderer reaches an element's DOM members, which a `form`'s
      * controls shadow by their names and ids (members.js). */
     dom: domReaderOf(doc, container),
+    /** How the renderer reaches its document's members, which the names of
+     * the document's `img`, `form`, ... elements shadow (members.js). */
+    docMembers,
+    /** The `Document` interface's `createElement`, `createElementNS` and
+     * `createTextNode`, resolved once (null for a document double), which a
+     * creator falls back to where a named element of the document holds its
+     * name ({@link createShadowed} in members.js). */
+    makeElement: docMembers.createElement,
+    makeElementNS: docMembers.createElementNS,
+    makeText: docMembers.createTextNode,
+    /** The creators each node a frame builds is made by, one call each,
+     * resolved once per renderer: the document's own, with that fallback
+     * where the document has the interface. */
+    text: docMembers.createTextNode === null ? (/** @type {string} */ t) => doc.createTextNode(t)
+      : (/** @type {string} */ t) => createTextOf(ctx, t),
+    element: docMembers.createElement === null ? (/** @type {string} */ t) => doc.createElement(t)
+      : (/** @type {string} */ t) => createElementOf(ctx, null, t),
+    elementNS: docMembers.createElementNS === null
+      ? (/** @type {string} */ n, /** @type {string} */ t) => doc.createElementNS(n, t)
+      : (/** @type {string} */ n, /** @type {string} */ t) => createElementOf(ctx, n, t),
     onEvent: options.onEvent ?? null,
     /** Under the interactive profile, only the granted widgets. */
     widgets: granted === null ? options.widgets ?? EMPTY_PROPS
@@ -619,7 +664,7 @@ function flushMounts(ctx) {
   while (queue.length > 0) {
     if (ctx.destroyed) { queue.length = 0; return; }
     const node = queue.shift();
-    const w = node.__jarenWidget;
+    const w = node[WIDGET];
     if (w.mounted || w.destroyed) continue;
     w.mounted = true;
     try {
@@ -647,6 +692,35 @@ function childNamespace(tag, ns) {
 }
 
 /**
+ * A new element `tag` of the renderer's document, in namespace `ns` or HTML
+ * ({@link createShadowed} in members.js where a named element holds the
+ * creator's name).
+ * @param {any} ctx
+ * @param {string | null} ns
+ * @param {string} tag
+ * @returns {any}
+ */
+function createElementOf(ctx, ns, tag) {
+  try { return ns !== null ? ctx.doc.createElementNS(ns, tag) : ctx.doc.createElement(tag); }
+  catch (error) {
+    return ns !== null ? createShadowed(ctx.doc, error, 'createElementNS', ctx.makeElementNS, ns, tag)
+      : createShadowed(ctx.doc, error, 'createElement', ctx.makeElement, tag, undefined);
+  }
+}
+
+/**
+ * A new text node of the renderer's document ({@link createShadowed} in
+ * members.js where a named element holds the creator's name).
+ * @param {any} ctx
+ * @param {string} text
+ * @returns {any}
+ */
+function createTextOf(ctx, text) {
+  try { return ctx.doc.createTextNode(text); }
+  catch (error) { return createShadowed(ctx.doc, error, 'createTextNode', ctx.makeText, text, undefined); }
+}
+
+/**
  * Create a fresh DOM node for a vnode.
  * @param {any} ctx
  * @param {any} vnode
@@ -659,7 +733,7 @@ function childNamespace(tag, ns) {
 function createNode(ctx, vnode, ns, foreign) {
   vnode = resolveForPolicy(ctx, vnode, true, foreign);
   if (isTextNode(vnode)) {
-    return ctx.doc.createTextNode(String(vnode));
+    return ctx.text(String(vnode));
   }
   // Fail closed: a value that is neither text nor a valid element vnode (a
   // stray object, say `{foo:'bar'}`, that slipped in as a child) renders as
@@ -667,9 +741,7 @@ function createNode(ctx, vnode, ns, foreign) {
   // with an undefined tag, which would build an `<undefined>` element without
   // consulting the safe allow-list. Lists and skipped values were already
   // resolved by `childrenOf`, so only a malformed node reaches here.
-  if (!isElementNode(vnode)) {
-    return ctx.doc.createTextNode('');
-  }
+  if (!isElementNode(vnode)) return createTextOf(ctx, '');
   const tag = vnode[0];
   if (tag === WIDGET_TAG) {
     // Only reachable in trusted mode and for a widget the interactive
@@ -683,9 +755,7 @@ function createNode(ctx, vnode, ns, foreign) {
   // exception (`[' ', …]`).
   if (!isElementName(tag)) throw elementNameError(ctx.root, vnode, tag);
   if (tag === 'svg') ns = SVG_NS;
-  const node = ns !== null
-    ? ctx.doc.createElementNS(ns, tag)
-    : ctx.doc.createElement(tag);
+  const node = ns !== null ? ctx.elementNS(ns, tag) : ctx.element(tag);
   const dom = ns === null && tag.length === 4 ? membersOf(ctx, tag, ns) : DIRECT_MEMBERS;
   if (ctx.policy !== null) writeFixed(ctx, node, tag, dom);
   const props = propsOf(vnode);
@@ -933,12 +1003,12 @@ function registerControlled(ctx, node, props) {
   const hasValue = ctx.policy === null ? 'value' in props : decided !== null && decided.hasValue;
   const hasChecked = ctx.policy === null ? kind === 'INPUT' && 'checked' in props : decided !== null && decided.hasChecked;
   if (!hasValue && !hasChecked) {
-    if (node.__jarenControlled !== undefined) {
+    if (node[CONTROLLED] !== undefined) {
       releaseControlled(ctx, node);
     }
     return;
   }
-  if (node.__jarenComposition === undefined && kind !== 'SELECT') {
+  if (node[COMPOSITION] === undefined && kind !== 'SELECT') {
     // One deferral for two causes: a composition in progress, and — with
     // `controlled: 'focus'` — a control the operator is typing into. A
     // write either one holds back marks the node, and settles one task
@@ -953,20 +1023,20 @@ function registerControlled(ctx, node, props) {
       // clears Firefox's dirty flag and loses change-on-blur, and a render
       // the change event scheduled lands after the stale write.
       settlement = setTimeout(() => {
-        if (ending) { ending = false; node.__jarenComposing = false; }
-        if (node.__jarenDeferred && !ctx.destroyed && ctx.controlled.has(node) && node.parentNode !== null)
-          reconcileControlled(node);
+        if (ending) { ending = false; node[COMPOSING] = false; }
+        if (node[DEFERRED] && !ctx.destroyed && ctx.controlled.has(node) && node.parentNode !== null)
+          reconcileControlled(ctx, node);
       }, 0);
     };
     const start = () => {
       clearTimeout(settlement);
       ending = false;
-      node.__jarenComposing = true;
+      node[COMPOSING] = true;
     };
     const end = () => { ending = true; settle(); };
     const blur = ctx.deferFocused ? settle : null;
-    node.__jarenComposition = { start, end, blur, cancel: () => clearTimeout(settlement) };
-    node.__jarenDeferFocused = ctx.deferFocused;
+    node[COMPOSITION] = { start, end, blur, cancel: () => clearTimeout(settlement) };
+    node[DEFER_FOCUSED] = ctx.deferFocused;
     node.addEventListener('compositionstart', start, true);
     node.addEventListener('compositionend', end, true);
     if (blur !== null) node.addEventListener('focusout', blur, true);
@@ -975,7 +1045,7 @@ function registerControlled(ctx, node, props) {
   // (`checked: 0` is present, `value: true` the empty value), so the live
   // control shows what server markup shows; a `textarea`'s and a `select`'s
   // value is the text and the selection the serializer writes.
-  node.__jarenControlled = decided !== null ? { ...decided, safe: true } : {
+  node[CONTROLLED] = decided !== null ? { ...decided, safe: true } : {
     hasValue,
     hasChecked,
     value: hasValue ? (kind === 'INPUT' ? attributeText(props.value) : props.value) : undefined,
@@ -987,18 +1057,18 @@ function registerControlled(ctx, node, props) {
 
 /** Release listeners as well as registry ownership, including detached nodes. */
 function releaseControlled(ctx, node) {
-  const listeners = node.__jarenComposition;
+  const listeners = node[COMPOSITION];
   if (listeners !== undefined) {
     listeners.cancel();
     node.removeEventListener('compositionstart', listeners.start, true);
     node.removeEventListener('compositionend', listeners.end, true);
     if (listeners.blur !== null) node.removeEventListener('focusout', listeners.blur, true);
   }
-  node.__jarenComposition = undefined;
-  node.__jarenComposing = false;
-  node.__jarenDeferred = false;
-  node.__jarenDeferFocused = false;
-  node.__jarenControlled = undefined;
+  node[COMPOSITION] = undefined;
+  node[COMPOSING] = false;
+  node[DEFERRED] = false;
+  node[DEFER_FOCUSED] = false;
+  node[CONTROLLED] = undefined;
   ctx.controlled.delete(node);
 }
 
@@ -1011,7 +1081,7 @@ function reconcileControlledSet(ctx, container) {
       releaseControlled(ctx, node);
       continue;
     }
-    reconcileControlled(node);
+    reconcileControlled(ctx, node);
   }
 }
 
@@ -1053,10 +1123,11 @@ function inputType(node) {
  * control. Runs after the whole tree is built, so a `select` sees its
  * options, and a `multiple` select applies an array by marking each option
  * `selected`.
+ * @param {any} ctx
  * @param {any} node
  */
-function reconcileControlled(node) {
-  const c = node.__jarenControlled;
+function reconcileControlled(ctx, node) {
+  const c = node[CONTROLLED];
   if (c === undefined) return;
   if (c.hasChecked) {
     const want = c.checked === true;
@@ -1071,12 +1142,12 @@ function reconcileControlled(node) {
   // a composition in progress, or (opted in) the operator's focused edit
   // of a text control, holds the authoritative write back until it
   // settles (§3); a focused range, colour or date takes its value at once
-  if (node.__jarenComposing
-    || (node.__jarenDeferFocused === true && isTextControl(node) && node.ownerDocument?.activeElement === node)) {
-    node.__jarenDeferred = true;
+  if (node[COMPOSING]
+    || (node[DEFER_FOCUSED] === true && isTextControl(node) && activeElementOf(ctx.docMembers, node.ownerDocument) === node)) {
+    node[DEFERRED] = true;
     return;
   }
-  node.__jarenDeferred = false;
+  node[DEFERRED] = false;
   const isMultiple = node.multiple === true
     || (typeof node.getAttribute === 'function' && node.getAttribute('multiple') != null);
   if (node.nodeName === 'SELECT' && isMultiple && Array.isArray(c.value)) {
@@ -1095,7 +1166,7 @@ function reconcileControlled(node) {
   if (node.value !== want) {
     // Preserve a live edit's caret. A newly created or unfocused control
     // keeps the browser's normal assignment behavior (caret at the end).
-    const focused = node.ownerDocument?.activeElement === node;
+    const focused = activeElementOf(ctx.docMembers, node.ownerDocument) === node;
     const start = focused ? node.selectionStart : null;
     const end = focused ? node.selectionEnd : null;
     const direction = node.selectionDirection;
@@ -1133,8 +1204,8 @@ function isConnectedTo(ctx, node, root) {
  * @param {string} id
  */
 function reportHeldId(ctx, id) {
-  if (ctx.heldIds.has(id) || typeof ctx.doc?.getElementById !== 'function') return;
-  const held = ctx.doc.getElementById(id);
+  if (ctx.heldIds.has(id)) return;
+  const held = elementById(ctx.docMembers, ctx.doc, id);
   if (held == null || !isHeldOutside(ctx, held)) return;
   ctx.heldIds.add(id);
   ctx.onUnsafe({ kind: 'id', name: id });
@@ -1206,8 +1277,8 @@ function reportHeldNames(ctx) {
     const id = documentIdOf(ctx, owner, attributeOf(ctx.dom, owner, 'name'));
     if (id !== null && !ctx.heldNames.has(id)) ids.add(id);
   }
-  if ((names.size === 0 && ids.size === 0) || typeof ctx.doc?.querySelectorAll !== 'function') return;
-  for (const held of ctx.doc.querySelectorAll('form[name], img[name], embed[name], object[name], iframe[name], object[id]')) {
+  if (names.size === 0 && ids.size === 0) return;
+  for (const held of elementsMatching(ctx.docMembers, ctx.doc, 'form[name], img[name], embed[name], object[name], iframe[name], object[id]')) {
     const name = attributeOf(ctx.dom, held, 'name');
     const id = documentIdOf(ctx, held, name);
     const byName = name !== null && (names.has(name) || ids.has(name)) && !ctx.heldNames.has(name) ? name : null;
@@ -1272,13 +1343,13 @@ function setProp(ctx, node, name, oldValue, newValue, ns, dom) {
     // a field that was ever a password field stays one to the event
     // projection: a later frame switching its type to text must not let a
     // binding read what the browser filled in
-    if (typeof newValue === 'string' && name.toLowerCase() === 'type' && newValue.trim().toLowerCase() === 'password') node.__jarenSecret = true;
+    if (typeof newValue === 'string' && name.toLowerCase() === 'type' && newValue.trim().toLowerCase() === 'password') node[SECRET] = true;
     if (newValue === null && given != null && ctx.onUnsafe !== null) ctx.onUnsafe({ kind: 'prop', name });
     // The interactive profile controls a textarea's and a select's value
     // (the policy's `control`): a parser ignores their `value` attribute, so
     // none is written, and the serializer writes the text and the selection
     // the reconciliation reasserts. A widget's host keeps the attribute.
-    if (name === 'value' && (tag === 'textarea' || tag === 'select') && node.__jarenWidget === undefined
+    if (name === 'value' && (tag === 'textarea' || tag === 'select') && node[WIDGET] === undefined
       && ctx.policy.control(tag, { value: given }) !== null) return;
     // SAFE MODE IS ATTRIBUTE-ONLY. Never `node[name] = …`: a live DOM property
     // write can THROW (`input.files` is read-only) and it diverges from SSR
@@ -1324,7 +1395,7 @@ function setProp(ctx, node, name, oldValue, newValue, ns, dom) {
   // the serializer writes, and the widget owns the live value.
   if ((name === 'value' || name === 'checked')
     && (node.nodeName === 'INPUT' || node.nodeName === 'TEXTAREA' || node.nodeName === 'SELECT')) {
-    if (node.__jarenWidget === undefined) return;
+    if (node[WIDGET] === undefined) return;
     if (newValue == null || newValue === false) removeAttribute(dom, node, name);
     else setAttribute(dom, node, name, newValue === true ? '' : String(newValue));
     return;
@@ -1434,9 +1505,9 @@ function writeEnumerated(dom, node, name, value) {
  */
 function eventProxy(event) {
   const node = event.currentTarget;
-  const binding = node.__jarenOn?.[event.type];
-  if (binding !== undefined && node.__jarenEmit !== null) {
-    node.__jarenEmit(binding, event);
+  const binding = node[ON]?.[event.type];
+  if (binding !== undefined && node[EMIT] !== null) {
+    node[EMIT](binding, event);
   }
 }
 
@@ -1456,7 +1527,7 @@ function interactiveSink(ctx) {
     // own default never runs (its `method="dialog"` would send nothing, but
     // inside a dialog it would close it behind the app's back)
     if (event?.type === 'submit' && typeof event.preventDefault === 'function') event.preventDefault();
-    onEvent(binding, projectEvent(event, event?.target?.__jarenSecret === true
+    onEvent(binding, projectEvent(event, event?.target?.[SECRET] === true
       || risesFromWidget(ctx.dom, event?.target, event?.currentTarget)));
   };
 }
@@ -1474,7 +1545,7 @@ function interactiveSink(ctx) {
  */
 function risesFromWidget(dom, target, bound) {
   for (let node = target; node != null; node = parentOf(dom, node)) {
-    if (node.__jarenWidget !== undefined) return true;
+    if (node[WIDGET] !== undefined) return true;
     if (node === bound) return false;
   }
   return false;
@@ -1507,10 +1578,10 @@ function interactiveEmit(ctx) {
  * @param {import('./members.js').DomReader} dom - how `node`'s members are reached ({@link membersOf})
  */
 function setEvents(ctx, node, newOn, dom) {
-  const prev = node.__jarenOn ?? EMPTY_PROPS;
+  const prev = node[ON] ?? EMPTY_PROPS;
   const next = newOn ?? EMPTY_PROPS;
-  node.__jarenOn = next;
-  node.__jarenEmit = ctx.eventSink;
+  node[ON] = next;
+  node[EMIT] = ctx.eventSink;
   for (const type in prev) {
     if (!(type in next)) unlisten(dom, node, type, eventProxy);
   }
@@ -1560,13 +1631,11 @@ function createWidgetNode(ctx, vnode, ns) {
   if (!isElementName(tag)) throw elementNameError(ctx.root, vnode, tag);
   // a host is built in the namespace an element of its tag is (`createNode`)
   if (tag === 'svg') ns = SVG_NS;
-  const node = ns !== null
-    ? ctx.doc.createElementNS(ns, tag)
-    : ctx.doc.createElement(tag);
+  const node = createElementOf(ctx, ns, tag);
   const dom = membersOf(ctx, tag, ns);
   if (ctx.policy !== null) writeFixed(ctx, node, tag, dom);
   // the bookkeeping first: it is what marks the node a host to `setProp`
-  node.__jarenWidget = {
+  node[WIDGET] = {
     name: props.name,
     def,
     props: props.props ?? null,
@@ -1606,7 +1675,7 @@ function createWidgetNode(ctx, vnode, ns) {
 function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
   const oldProps = propsOf(oldV);
   const newProps = propsOf(newV);
-  const w = node.__jarenWidget;
+  const w = node[WIDGET];
   if (newProps.name !== oldProps.name || (newProps.tag ?? 'div') !== (oldProps.tag ?? 'div')
     || w.failed !== false) {
     // a poisoned widget (a hook threw) is replaced, not patched: the
@@ -1789,7 +1858,7 @@ function appendFrameFailure(ctx, value) {
  *   is never hidden behind the first.
  */
 function destroyDomWalk(ctx, node, failures) {
-  const w = node.__jarenWidget;
+  const w = node[WIDGET];
   if (w !== undefined) {
     if (!w.destroyed) {
       w.destroyed = true;

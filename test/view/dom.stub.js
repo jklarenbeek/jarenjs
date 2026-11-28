@@ -249,6 +249,19 @@ export function fire(node, type, props = {}) {
 }
 
 /**
+ * What the renderer keeps on a node under its private symbol `jaren.<name>`
+ * (`controlled`, `widget`, `on`, ...), or undefined where the node holds
+ * none: the renderer's bookkeeping is no string key a document could name.
+ * @param {any} node
+ * @param {string} name
+ * @returns {any}
+ */
+export function bookkeeping(node, name) {
+  const key = Object.getOwnPropertySymbols(node).find((symbol) => symbol.description === `jaren.${name}`);
+  return key === undefined ? undefined : node[key];
+}
+
+/**
  * Serialize a stub tree to markup for easy assertions. Attributes render
  * in insertion order; no escaping (tests control their own text).
  * @param {StubElement | StubText} node

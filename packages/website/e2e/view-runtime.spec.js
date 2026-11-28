@@ -632,3 +632,115 @@ test('a form control named after any DOM member renders, patches, hydrates and b
   });
   expect(failures).toEqual([]);
 });
+
+test('a form control named after any key the renderer once kept on a node binds and unmounts as under any other name', async ({ page }) => {
+  const failures = await page.evaluate(() => {
+    const J = window.JarenTest;
+    const keys = ['x', '__jarenOn', '__jarenEmit', '__jarenWidget', '__jarenControlled', '__jarenComposition',
+      '__jarenComposing', '__jarenDeferred', '__jarenDeferFocused', '__jarenSecret'];
+    const failed = [];
+    const host = document.getElementById('host');
+    for (const key of keys) for (const safe of [undefined, 'interactive']) {
+      const label = `${key}, safe ${safe}`;
+      try {
+        host.textContent = '';
+        const seen = [];
+        const render = J.createDomRenderer(host, { safe, onEvent: (binding) => seen.push(binding) });
+        const frames = [
+          ['form', { on: { click: 'save' } }, ['input', { name: key }], ['button', { type: 'button' }, 'go']],
+          ['form', { on: { click: 'again' } }, ['input', { name: key }], ['button', { type: 'button' }, 'go']],
+          ['form', {}, ['input', { name: key }], ['button', { type: 'button' }, 'go']],
+        ];
+        for (const frame of frames) { render(frame); host.querySelector('button').click(); }
+        if (JSON.stringify(seen) !== '["save","again"]') failed.push(`${label}: bindings fired ${JSON.stringify(seen)}`);
+        if (host.innerHTML !== J.renderToString(frames[2], { safe })) failed.push(`${label}: ${host.innerHTML}`);
+        render.destroy();
+        if (safe === undefined) {
+          // the widgets inside such a form unmount when it leaves
+          const log = [];
+          const widgets = { w: { mount: () => { log.push('mount'); return 1; }, unmount: () => { log.push('unmount'); } } };
+          const withWidget = J.createDomRenderer(host, { widgets });
+          withWidget(['div', {}, ['form', {}, ['input', { name: key }], ['jaren-widget', { name: 'w' }]]]);
+          withWidget(['div', {}, ['form', { title: 'b' }, ['input', { name: key }], ['jaren-widget', { name: 'w' }]]]);
+          withWidget(['p', {}, 'gone']);
+          if (log.join() !== 'mount,unmount') failed.push(`${label}: widget ${log.join()}`);
+          withWidget.destroy();
+          // a form widget host whose widget names a control after the key stays a host
+          const hostLog = [];
+          const formWidget = { mount: (node) => { hostLog.push('mount'); const c = node.ownerDocument.createElement('input'); c.name = key; node.appendChild(c); return 1; },
+            update: () => { hostLog.push('update'); }, unmount: () => { hostLog.push('unmount'); } };
+          const withHost = J.createDomRenderer(host, { widgets: { f: formWidget } });
+          withHost(['div', {}, ['jaren-widget', { name: 'f', tag: 'form', props: { n: 1 } }]]);
+          withHost(['div', {}, ['jaren-widget', { name: 'f', tag: 'form', props: { n: 2 } }]]);
+          withHost(['p', {}, 'gone']);
+          if (hostLog.join() !== 'mount,update,unmount') failed.push(`${label}: form host ${hostLog.join()}`);
+          withHost.destroy();
+        }
+      }
+      catch (error) {
+        failed.push(`${label}: ${error}`);
+      }
+    }
+    return failed;
+  });
+  expect(failures).toEqual([]);
+});
+
+test('a document element named after a document member leaves the render, its reports and focus as under any other name', async ({ page }) => {
+  const failures = await page.evaluate(() => {
+    const J = window.JarenTest;
+    const failed = [];
+    const host = document.getElementById('host');
+    for (const tag of ['img', 'form', 'embed', 'object', 'iframe']) for (const member of ['x', 'createElement', 'createElementNS', 'createTextNode']) {
+      const label = `${tag} named ${member}`;
+      try {
+        host.textContent = '';
+        const render = J.createDomRenderer(host);
+        const frames = [['div', {}, [tag, { name: member }]], ['div', {}, [tag, { name: member }], ['p', {}, 'x'], ['svg', {}, ['g', {}]]]];
+        for (const frame of frames) render(frame);
+        if (host.innerHTML !== J.renderToString(frames[1])) failed.push(`${label}: ${host.innerHTML}`);
+        // a safe root of the same document builds too
+        const section = host.firstChild.appendChild(Document.prototype.createElement.call(document, 'section'));
+        J.createDomRenderer(section, { safe: true })(['p', { class: 'c' }, 'safe']);
+        if (section.innerHTML !== '<p class="c">safe</p>') failed.push(`${label}, safe root: ${section.innerHTML}`);
+        render.destroy();
+      }
+      catch (error) {
+        failed.push(`${label}: ${error}`);
+      }
+    }
+    // a safe root's reports of a prefixed id and name the page holds
+    for (const [member, page, inner, want] of [
+      ['getElementById', ['p', { id: 'jaren-u-a' }], ['p', { id: 'a' }], [{ kind: 'id', name: 'jaren-u-a' }]],
+      ['querySelectorAll', ['form', { name: 'jaren-u-f' }], ['form', { name: 'f' }], [{ kind: 'name', name: 'jaren-u-f' }]],
+    ]) {
+      for (const name of ['x', member]) {
+        try {
+          host.textContent = '';
+          J.createDomRenderer(host)(['div', {}, ['img', { name }], page, ['section', {}]]);
+          const reports = [];
+          J.createDomRenderer(host.querySelector('section'), { safe: true, onUnsafe: (r) => reports.push(r) })(inner);
+          if (JSON.stringify(reports) !== JSON.stringify(want)) failed.push(`report beside an img named ${name}: ${JSON.stringify(reports)}`);
+        }
+        catch (error) {
+          failed.push(`report beside an img named ${name}: ${error}`);
+        }
+      }
+    }
+    // controlled: 'focus' holds a focused edit back beside an img named activeElement
+    for (const name of ['x', 'activeElement']) {
+      host.textContent = '';
+      const render = J.createDomRenderer(host, { controlled: 'focus' });
+      render(['div', {}, ['img', { name }], ['input', { value: 'a' }]]);
+      const input = host.querySelector('input');
+      input.focus();
+      input.value = 'typed';
+      render(['div', {}, ['img', { name }], ['input', { value: 'b' }]]);
+      if (input.value !== 'typed') failed.push(`focused edit beside an img named ${name}: ${input.value}`);
+      render.destroy();
+    }
+    host.textContent = '';
+    return failed;
+  });
+  expect(failures).toEqual([]);
+});

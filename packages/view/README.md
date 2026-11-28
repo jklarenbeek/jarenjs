@@ -83,7 +83,18 @@ reaches a form's children, attributes, listeners and parent through the DOM's
 own accessors: a form whose controls are named after any DOM member renders,
 patches, hydrates and binds as the markup says, in every mode, also in a
 document without a `defaultView` (VIEW-FORMAT §5.6). Upgrade note: such a form
-used to throw the pass, or hang it on a control named `parentNode`.
+used to throw the pass, or hang it on a control named `parentNode`. The
+renderer's bookkeeping on a node (its `on` bindings, a widget host's record)
+lives under symbols, so no control's name can take it over; code that read a
+node's `__jarenOn` or `__jarenWidget` finds nothing there now. `document`
+answers the names of its `img`, `form`, `embed`, `object` and `iframe`
+elements over its own members (`<img name="createElement">`), so the
+renderer and the dialog helper fall back to the document's `Document`
+interface where a creator is taken over that way, and read `getElementById`,
+`querySelectorAll`, `activeElement`, `body` and `defaultView` through it
+always: a page element named `createElement` no longer throws the next
+frame, and a patch set on the `document` object for one of those other
+members is not called (a patch of `createElement` still is).
 
 ### On the server
 

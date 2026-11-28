@@ -11,7 +11,10 @@
  * document's realm ({@link domReaderOf}), which read and change the element
  * itself. Any other element answers no member through named properties and
  * is asked directly ({@link DIRECT_MEMBERS}); so is one where a member has
- * no such accessor (a DOM double).
+ * no such accessor (a DOM double). A `document` answers the names of some
+ * of its elements over its own members the same way, so the members the
+ * renderer calls on it are reached through its `Document` accessors
+ * ({@link documentReaderOf}).
  */
 
 /**
@@ -311,6 +314,139 @@ export function unlisten(dom, node, type, listener) {
   const call = dom.removeEventListener;
   if (call !== null) call.call(node, type, listener);
   else node.removeEventListener(type, listener);
+}
+
+/**
+ * The DOM's own `Document` members a renderer calls on its document, each
+ * null where the document's prototype chain defines none (a document double,
+ * which is asked directly).
+ * @typedef {object} DocumentReader
+ * @property {((this: any, tag: string) => any) | null} createElement
+ * @property {((this: any, ns: string, tag: string) => any) | null} createElementNS
+ * @property {((this: any, data: string) => any) | null} createTextNode
+ * @property {((this: any, id: string) => any) | null} getElementById
+ * @property {((this: any, selectors: string) => any) | null} querySelectorAll
+ * @property {((this: any) => any) | null} activeElement
+ * @property {((this: any) => any) | null} body
+ * @property {((this: any) => any) | null} defaultView
+ */
+
+/**
+ * The accessors of `doc`'s own `Document` interface. A `document` answers
+ * the `name` of its `img`, `form`, `embed`, `object` and `iframe` elements
+ * (and an `img`'s or `object`'s id) over its own members: `<img
+ * name="createElement">` is `document.createElement`. They are read from the
+ * document's prototype chain, which is no named property, rather than from
+ * its `defaultView`, which such an element takes over as well and which a
+ * document `createHTMLDocument` makes has none.
+ * @param {any} doc
+ * @returns {DocumentReader}
+ */
+export function documentReaderOf(doc) {
+  const proto = interfaceOf(doc, 'Document');
+  return {
+    createElement: methodOf(proto, 'createElement'),
+    createElementNS: methodOf(proto, 'createElementNS'),
+    createTextNode: methodOf(proto, 'createTextNode'),
+    getElementById: methodOf(proto, 'getElementById'),
+    querySelectorAll: methodOf(proto, 'querySelectorAll'),
+    activeElement: getterOf(proto, 'activeElement'),
+    body: getterOf(proto, 'body'),
+    defaultView: getterOf(proto, 'defaultView'),
+  };
+}
+
+/**
+ * A new HTML element `tag` of `doc`, made by `doc`'s own `createElement`
+ * ({@link createShadowed} where a named element holds its name).
+ * @param {DocumentReader} reader
+ * @param {any} doc
+ * @param {string} tag
+ * @returns {any}
+ */
+export function createElementIn(reader, doc, tag) {
+  try { return doc.createElement(tag); }
+  catch (error) { return createShadowed(doc, error, 'createElement', reader.createElement, tag, undefined); }
+}
+
+/**
+ * `doc`'s own creator `name` threw. Where a named element of the document
+ * holds that name (`<img name="createElement">`; a named property is never a
+ * function), make the node through the `Document` interface's creator
+ * `make` instead; anything else the creator threw is rethrown, as it is for
+ * a document double, which has no interface (`make` null).
+ * @param {any} doc
+ * @param {unknown} error
+ * @param {string} name
+ * @param {((this: any, a: any, b?: any) => any) | null} make
+ * @param {any} a
+ * @param {any} b
+ * @returns {any}
+ */
+export function createShadowed(doc, error, name, make, a, b) {
+  if (make === null || typeof doc[name] === 'function') throw error;
+  return b === undefined ? make.call(doc, a) : make.call(doc, a, b);
+}
+
+/**
+ * The element of `doc` whose id is `id`, or null; null too in a document
+ * with no `getElementById`.
+ * @param {DocumentReader} reader
+ * @param {any} doc
+ * @param {string} id
+ * @returns {any}
+ */
+export function elementById(reader, doc, id) {
+  const call = reader.getElementById;
+  if (call !== null) return call.call(doc, id);
+  return typeof doc?.getElementById === 'function' ? doc.getElementById(id) : null;
+}
+
+/**
+ * The elements of `doc` that match `selectors`, in document order; none in
+ * a document with no `querySelectorAll`.
+ * @param {DocumentReader} reader
+ * @param {any} doc
+ * @param {string} selectors
+ * @returns {Iterable<any>}
+ */
+export function elementsMatching(reader, doc, selectors) {
+  const call = reader.querySelectorAll;
+  if (call !== null) return call.call(doc, selectors);
+  return typeof doc?.querySelectorAll === 'function' ? doc.querySelectorAll(selectors) : [];
+}
+
+/**
+ * The element of `doc` that has the focus.
+ * @param {DocumentReader} reader
+ * @param {any} doc
+ * @returns {any}
+ */
+export function activeElementOf(reader, doc) {
+  const get = reader.activeElement;
+  return get !== null && doc != null ? get.call(doc) : doc?.activeElement;
+}
+
+/**
+ * `doc`'s `body`.
+ * @param {DocumentReader} reader
+ * @param {any} doc
+ * @returns {any}
+ */
+export function bodyOf(reader, doc) {
+  const get = reader.body;
+  return get !== null ? get.call(doc) : doc.body;
+}
+
+/**
+ * `doc`'s window.
+ * @param {DocumentReader} reader
+ * @param {any} doc
+ * @returns {any}
+ */
+export function windowOf(reader, doc) {
+  const get = reader.defaultView;
+  return get !== null ? get.call(doc) : doc.defaultView;
 }
 
 /**

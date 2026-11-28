@@ -15,7 +15,7 @@ import assert from 'node:assert';
 
 import { createDomRenderer, createSafePolicy, renderToString } from '@jarenjs/view';
 
-import { createStubHost, fire } from './dom.stub.js';
+import { bookkeeping, createStubHost, fire } from './dom.stub.js';
 import { childMarkup } from './interactive-corpus.js';
 
 const INTERACTIVE = /** @type {const} */ ('interactive');
@@ -135,8 +135,8 @@ describe('interactive profile — state resets an input the user edited', () => 
     const h = host({ safe: INTERACTIVE });
     h.render(['div', {}, ['input', { Value: 'cased' }], ['input', Object.create({ value: 'inherited' })]]);
     const [cased, inherited] = h.root().childNodes;
-    assert.equal(cased.__jarenControlled, undefined);
-    assert.equal(inherited.__jarenControlled, undefined);
+    assert.equal(bookkeeping(cased, 'controlled'), undefined);
+    assert.equal(bookkeeping(inherited, 'controlled'), undefined);
     // both keep the attribute-only answer they had
     assert.equal(cased.getAttribute('Value'), 'cased');
     assert.equal(inherited.getAttribute('value'), 'inherited');
@@ -148,7 +148,7 @@ describe('interactive profile — state resets an input the user edited', () => 
     h.render(['input', { value: 'b' }]);
     assert.equal(h.root().value, 'b');
     h.render(['input', {}]);
-    assert.equal(h.root().__jarenControlled, undefined);
+    assert.equal(bookkeeping(h.root(), 'controlled'), undefined);
     assert.equal(h.root().listeners.get('compositionstart')?.size ?? 0, 0);
     h.root().value = 'typed';
     h.render(['input', {}]);
@@ -261,7 +261,7 @@ describe('interactive profile — state resets an input the user edited', () => 
     const spelled = ['select', { Value: 'b' }, ['option', { value: 'b' }, 'B']];
     const g = host({ safe: INTERACTIVE });
     g.render(spelled);
-    assert.equal(g.root().__jarenControlled, undefined);
+    assert.equal(bookkeeping(g.root(), 'controlled'), undefined);
     assert.equal(childMarkup(g.container), '<select Value="b"><option value="b">B</option></select>');
     assert.equal(renderToString(spelled, { safe: INTERACTIVE }), '<select Value="b"><option value="b">B</option></select>');
   });
@@ -271,7 +271,7 @@ describe('interactive profile — state resets an input the user edited', () => 
     h.render(['textarea', { value: 'x' }]);
     assert.equal(h.root().listeners.get('compositionstart')?.size, 1);
     h.render(['textarea', {}]);
-    assert.equal(h.root().__jarenControlled, undefined);
+    assert.equal(bookkeeping(h.root(), 'controlled'), undefined);
     assert.equal(h.root().listeners.get('compositionstart')?.size ?? 0, 0);
     h.root().value = 'typed';
     h.render(['textarea', {}]);
@@ -304,14 +304,14 @@ describe('interactive profile — state resets an input the user edited', () => 
     h.render(['jaren-widget', { name: 'w', tag: 'input', value: 'x' }]);
     const node = h.root();
     assert.equal(node.getAttribute('value'), 'x');
-    assert.equal(node.__jarenControlled, undefined);
+    assert.equal(bookkeeping(node, 'controlled'), undefined);
     // a host textarea or select keeps its attribute too, in both renderers
     for (const tag of ['textarea', 'select']) {
       const g = host({ safe: INTERACTIVE, widgets: { w: { mount() {} } }, capabilities: { widgets: ['w'] } });
       const vnode = ['jaren-widget', { name: 'w', tag, value: 'x' }];
       g.render(vnode);
       assert.equal(g.root().getAttribute('value'), 'x', tag);
-      assert.equal(g.root().__jarenControlled, undefined, tag);
+      assert.equal(bookkeeping(g.root(), 'controlled'), undefined, tag);
       assert.equal(renderToString(vnode, { safe: INTERACTIVE, widgets: { w: {} }, capabilities: { widgets: ['w'] } }), `<${tag} value="x"></${tag}>`);
     }
   });

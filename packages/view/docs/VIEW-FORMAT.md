@@ -383,7 +383,7 @@ equal.
   so a memo-stable subtree can never leave a poisoned widget inert.
 - `memo` is never rendered and never serialized (§3, §6).
 
-### 5.6 A form's controls
+### 5.6 A form's controls and a document's named elements
 
 A `form` answers a member looked up on it through its controls' names and
 ids before its own: `<input name="insertBefore">` is the form's
@@ -398,10 +398,29 @@ mounts, patches, moves, hydrates and binds as the serializer writes it, in
 every mode. A prop the form has no property of, named like one of its
 controls (`['form', { foo: 'a' }, ['input', { name: 'foo' }]]`), is written as
 the form's attribute. No other element answers a member through named
-properties, and those are asked directly.
-The renderer's own bookkeeping on a form is not covered: a control named
-`__jarenOn` or `__jarenEmit` still breaks the form's `on` binding, and one
-named `__jarenWidget` keeps the widgets inside the form from unmounting.
+properties, and those are asked directly. The renderer keeps its own
+bookkeeping on a node (an element's `on` bindings, a widget host's lifecycle,
+a controlled control's state) under symbols, which no name or id can be, so a
+control named `__jarenOn` or `__jarenWidget` is a control like any other.
+
+`document` answers the `name` of its `img`, `form`, `embed`, `object` and
+`iframe` elements, and the id of an `img` or `object`, over its own members
+the same way: `<img name="createElement">` is `document.createElement`. The
+reference renderer and the dialog helper make each node with the document's
+own `createElement`, `createElementNS` or `createTextNode`; only where that
+call throws because a named element holds the creator's name (a named
+property is never a function) do they make it through the creator of the
+`Document` interface on the document's own prototype chain, captured when
+the renderer or dialog is created. Their other document members
+(`getElementById`, `querySelectorAll`, `activeElement`, and the helper's
+`body` and `defaultView`) are always read through that interface, so a patch
+set on the `document` object itself for one of them, or on
+`Document.prototype` after the renderer or dialog was created, is not called;
+a patch of a creator is. A trusted document naming an element after any of
+these members thus renders, reports and keeps a focused edit as under any
+other name. A safe root namespaces such names (§8), so only a trusted
+document can take a member over. A document whose chain has no `Document`
+interface (a DOM double) is asked directly.
 
 ## 6. Serialization
 

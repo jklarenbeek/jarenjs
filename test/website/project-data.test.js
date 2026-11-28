@@ -100,7 +100,7 @@ it('the model widget owns one live view across query switches and releases it on
   t.after(() => runtime.widget.unmount(handle));
   await until(() => handle.ready && handle.live !== null);
   assert.equal((await handle.entry.request('data.lives', null)).count, 1);
-  fire(find(container, (node) => node.__jarenOn?.click === 'insert'), 'click');
+  fire(find(container, (node) => node.tagName === 'button' && serialize(node).includes('Insert row')), 'click');
   await until(() => JSON.stringify(handle.live).includes('New note'));
   runtime.widget.update(handle, { ...props, name: 'notes.query', revision: 2 });
   await until(() => handle.ready && JSON.stringify(handle.result).includes('New note'));
