@@ -169,7 +169,7 @@ the table and stale in the paragraph that cites it:
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->26<!--/fact--> kB | text template capture; no renderer |
 | `./project` | <!--fact:bundle.project.kb-->5<!--/fact--> kB | project files; no Studio engine |
 | `./charts` | <!--fact:bundle.charts.kb-->7<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->1211<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->1212<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both
@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->31 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->71 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -222,13 +222,13 @@ included.
 <!--fact:closure.contract-->
 | Subpath | Modules | By package | Live heap MiB |
 |---|---:|---|---:|
-| `.` | 139 | core 74, validate 29, json 24, contract 12 | 6.4 |
+| `.` | 139 | core 74, validate 29, json 24, contract 12 | 6.5 |
 | `./app` | 29 | core 11, contract 9, json 9 | 1.5 |
 | `./auth-node` | 11 | core 8, contract 3 | 1.4 |
 | `./client` | 139 | core 75, validate 27, json 24, contract 13 | 6.2 |
 | `./command` | 23 | core 11, json 7, contract 5 | 1.2 |
 | `./continuation-node` | 20 | core 10, json 7, contract 3 | 1.7 |
-| `./diff` | 140 | core 74, validate 29, json 24, contract 13 | 6.8 |
+| `./diff` | 140 | core 74, validate 29, json 24, contract 13 | 6.9 |
 | `./fetch` | 11 | core 8, contract 3 | 0.7 |
 | `./http` | 46 | contract 17, core 16, json 7, validate 6 | 2.1 |
 | `./ledger` | 11 | core 9, contract 2 | 0.8 |
@@ -261,7 +261,7 @@ included.
 | `./relational` | 128 | core 63, db 36, json 23, validate 6 | 6.4 |
 | `./schedules` | 44 | core 29, db 9, json 6 | 2.1 |
 | `./search` | 95 | core 67, json 23, db 5 | 4.3 |
-| `./temporals` | 212 | core 88, db 83, json 35, validate 6 | 12.3 |
+| `./temporals` | 212 | core 88, db 83, json 35, validate 6 | 12.4 |
 | `./trigger-rules` | 126 | core 63, db 34, json 23, validate 6 | 6.5 |
 | `./typed` | 1 | db 1 | 0.1 |
 | `./wasm` | 107 | core 62, json 23, db 22 | 5.1 |
@@ -278,7 +278,7 @@ included.
 | `./authoring` | 15 | core 8, linq 7 | 1.0 |
 | `./charts` | 15 | core 8, linq 7 | 1.0 |
 | `./contract` | 20 | core 10, linq 10 | 1.2 |
-| `./db` | 288 | core 101, db 87, json 38, validate 28, linq 27, formats 7 | 15.2 |
+| `./db` | 288 | core 101, db 87, json 38, validate 28, linq 27, formats 7 | 15.3 |
 | `./flow` | 19 | linq 11, core 8 | 1.1 |
 | `./forms` | 21 | linq 13, core 8 | 1.3 |
 | `./formula` | 93 | core 62, json 26, linq 5 | 4.3 |
