@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/play",
   "private": false,
-  "version": "0.244.0",
+  "version": "0.245.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -62,13 +62,13 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/contract": "0.244.0",
-    "@jarenjs/core": "0.244.0",
-    "@jarenjs/emit": "0.244.0",
-    "@jarenjs/josl": "0.244.0",
-    "@jarenjs/json": "0.244.0",
-    "@jarenjs/linq": "0.244.0",
-    "@jarenjs/locales": "0.244.0",
-    "@jarenjs/validate": "0.244.0"
+    "@jarenjs/contract": "0.245.0",
+    "@jarenjs/core": "0.245.0",
+    "@jarenjs/emit": "0.245.0",
+    "@jarenjs/josl": "0.245.0",
+    "@jarenjs/json": "0.245.0",
+    "@jarenjs/linq": "0.245.0",
+    "@jarenjs/locales": "0.245.0",
+    "@jarenjs/validate": "0.245.0"
   }
 }
