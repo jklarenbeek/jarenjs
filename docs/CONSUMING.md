@@ -320,7 +320,7 @@ included.
 <!--fact:closure.validate-->
 | Subpath | Modules | By package | Live heap MiB |
 |---|---:|---|---:|
-| `.` | 124 | core 73, validate 27, json 24 | 5.5 |
+| `.` | 124 | core 73, validate 27, json 24 | 5.6 |
 | `./load` | 41 | core 24, validate 11, json 6 | 1.8 |
 | `./normalize` | 126 | core 73, validate 29, json 24 | 5.9 |
 | `./output` | 42 | core 25, validate 11, json 6 | 2.0 |
