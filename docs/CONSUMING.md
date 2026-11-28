@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->11 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->21 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -235,7 +235,7 @@ included.
 | `./local` | 19 | core 10, contract 9 | 1.1 |
 | `./node` | 13 | core 9, contract 4 | 0.8 |
 | `./port` | 27 | contract 15, core 12 | 1.4 |
-| `./project` | 174 | core 84, json 42, validate 29, contract 14, emit 5 | 9.4 |
+| `./project` | 174 | core 84, json 42, validate 29, contract 14, emit 5 | 9.5 |
 | `./provider` | 115 | core 75, json 32, contract 8 | 4.5 |
 | `./stream` | 16 | core 11, contract 5 | 1.1 |
 | `./webmcp` | 1 | contract 1 | 0.1 |
@@ -303,7 +303,7 @@ included.
 | `./formula/batch` | 89 | core 62, json 27 | 4.0 |
 | `./formula/migrate` | 91 | core 62, json 29 | 4.3 |
 | `./jslt` | 105 | core 73, json 32 | 4.3 |
-| `./jtlt` | 110 | core 73, json 37 | 4.3 |
+| `./jtlt` | 110 | core 73, json 37 | 4.4 |
 | `./node` | 18 | core 10, json 8 | 1.3 |
 | `./patch` | 18 | core 10, json 8 | 1.0 |
 | `./path` | 18 | core 11, json 7 | 1.0 |
@@ -320,7 +320,7 @@ included.
 <!--fact:closure.validate-->
 | Subpath | Modules | By package | Live heap MiB |
 |---|---:|---|---:|
-| `.` | 124 | core 73, validate 27, json 24 | 5.6 |
+| `.` | 124 | core 73, validate 27, json 24 | 5.5 |
 | `./load` | 41 | core 24, validate 11, json 6 | 1.8 |
 | `./normalize` | 126 | core 73, validate 29, json 24 | 5.9 |
 | `./output` | 42 | core 25, validate 11, json 6 | 2.0 |
