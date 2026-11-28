@@ -41,17 +41,16 @@ delete it or fix it.
   reference a host builds itself does not, and covering it in the query
   engine's English catalog costs about 3,300 bytes in every pen that carries
   the query messages.
-- [ ] **JSLT matcher: schema-aware pruning and the rest of the single walk** —
-  a mode's match paths built from names, indexes and wildcards (child or
-  descendant) already run as one walk of the input; three parts remain. Prune
-  shape rules that can never match, from input-schema knowledge: nothing
-  accepts an input schema today, so this needs a new compile option (a minor).
-  Run slice and filter selectors inside the walk too (they still enumerate per
-  path). Specialize location tracking by the modes a dispatch can reach: a
-  mode with no path rule and no `$path` read still builds every location
-  because JT2002/JT2003/JT2004 messages print it (`no rule in mode "s" matched
-  $['a']`), so this first needs messages that do not depend on it, or
-  locations built only on error.
+- [ ] **JSLT matcher: schema-aware pruning** — a mode's match paths (names, indexes,
+  wildcards, slices and filters, child or descendant segments) run as one walk
+  of the input, and a mode whose rules read no location builds none (an error
+  message rebuilds the one it prints). Prune shape rules that can never match,
+  from input-schema knowledge: nothing accepts an input schema today, so this
+  needs a new compile option (a minor). A filter that calls a host path
+  function, or that queries the root (`$` inside the filter), still enumerates
+  its path on its own: the walk calls no host code, and the enumeration
+  memoizes a root query per filter application, which the walk could do only
+  with the filter compiler's reset hooks.
 - [ ] **Prepass-level pruning from the changed-path feed** — skip re-matching
   paths over unchanged regions using the transition's changed paths:
   `evaluate(data, externals)` takes no changed paths today, so this needs a
@@ -299,16 +298,6 @@ delete it or fix it.
   UI also need project identity, storage ownership and a migration policy:
   the current documented lifetime is in-memory, reset on committed model or
   seed changes. Reusing the data page's shared database would break isolation.
-
-## @jarenjs/flow
-
-- [ ] **A workflow guard's evaluation error names its place in the lowered
-  machine.** A guard that compiles but throws while a run evaluates it rejects
-  the run as `JF2016` at `/transitions/<i>/guard` of the lowered, key-sorted
-  statechart (a `choose` guard dividing by a string: `/transitions/1/guard`).
-  A guard that does not compile is re-based onto its branch
-  (`/states/pick/choose/1/guard`). `lowerWorkflow` already knows each guarded
-  transition's branch.
 
 ## @jarenjs/contract
 

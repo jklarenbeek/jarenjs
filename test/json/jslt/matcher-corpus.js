@@ -66,6 +66,28 @@ export const CASES = [
       tag('$.list[*]', 'item'), tag('$.list[-2:]', 'tail'),
     ],
   },
+  {
+    name: 'slice edge cases, in the walk',
+    stylesheet: [
+      tag('$.a[::-2]', 'neg2'), tag('$.a[3:0:-1][0]', 'down'), double('$.list[0:5:0]'), tag('$.list[10:20]', 'out'),
+      double('$.list[-10:2]'), tag('$.list[4:-10:-2]', 'downclamp'), tag('$.store.book[-1:-4:-1].title', 'back'),
+      tag('$.a[1:][1]', 'from1'), tag('$..[-1:]', 'last'), tag('$.list[-10::2]', 'evenclamp'), tag('$.list[9::-2]', 'downclamp2'),
+    ],
+  },
+  {
+    name: 'filters over objects and arrays, in the walk',
+    stylesheet: [
+      tag('$.store[?@.color]', 'objfilter'), tag('$.store.book[?@.isbn && @.price < 10].title', 'and'),
+      double('$..[?length(@) > 2]..price'), tag("$..book[?match(@.category, 'fic.*')]", 'match'),
+      tag('$.list[?@ > 2, 0:1]', 'union'), double('$..[?@.price]..price'), tag("$['0'][?@['0'] == 7]", 'key0'),
+      tag('$.a[*][?!@.b]', 'not'),
+    ],
+  },
+  {
+    name: 'a filter calling a host function stays enumerated beside walked paths',
+    stylesheet: [tag('$..[?big(@.price)]', 'big'), double('$..price'), tag('$.list[1:]', 'rest')],
+    options: [{ pathFunctions: { big: { params: ['value'], returns: 'logical', evaluate: (v) => typeof v === 'number' && v > 9 } } }],
+  },
   { name: 'descendant wildcard', stylesheet: [{ match: '$..*', body: { at: '$path', v: '$' } }] },
   {
     name: 'descendant chains',
@@ -135,6 +157,11 @@ export const CASES = [
     name: 'a descent bound the input reaches',
     stylesheet: [double('$..price'), tag('$.x.y.z..price', 'deep')],
     options: [{ maxDescentDepth: 2 }, { maxDescentDepth: 4 }, { maxDescentDepth: 5 }],
+  },
+  {
+    name: 'a filter holding a descent the input takes past its bound',
+    stylesheet: [tag('$..[?@..price]', 'deepfilter'), double('$.x[?@..price]..price'), tag('$.list[1:]', 'rest')],
+    options: [{ maxDescentDepth: 2 }, { maxDescentDepth: 4 }, {}],
   },
   {
     name: 'a descent bound only the absolute depth reaches',

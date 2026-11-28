@@ -698,3 +698,114 @@ describe('Jaren JSLT dispatch', () => {
     assert.strictEqual(compileCount, 1);
   });
 });
+
+// A mode none of whose dispatches reads its location (no $path, no memo,
+// no $apply into a mode that looks its entry location up) builds none;
+// an error message still prints the location it would have built.
+describe('Jaren JSLT locations of a mode that reads none', () => {
+  const pathRule = { match: '$.zz', body: 0 };
+  const numbers = { mode: 'e', match: { schema: { type: 'number' } }, body: { $add: ['$', 1] } };
+  const strict = (rules) => compileWithStub({ $jslt: '0.1', unmatched: 'fresh', modes: { e: { unmatched: 'error' } }, rules: [pathRule, ...rules] });
+  const message = (transform, data) => {
+    try {
+      transform(data);
+    }
+    catch (error) {
+      assert.strictEqual(error instanceof JsltRuntimeError, true, error.message);
+      return `${error.code} ${error.docPath} ${error.message}`;
+    }
+    assert.fail('expected a JsltRuntimeError');
+  };
+
+  it('names an unmatched $apply item below a rebuilt member with escapes', () => {
+    const transform = strict([{ match: { schema: { type: 'array' } }, body: { $apply: ['$[*]', 'e'] } }, numbers]);
+    assert.strictEqual(message(transform, { a: { "b'c": [[1, 2, 'x']] } }),
+      "JT2003 /modes/e/unmatched JT2003: no rule in mode \"e\" matched $['a']['b\\'c'][0] at /modes/e/unmatched");
+  });
+
+  it('names an unmatched $apply item through every selector kind', () => {
+    const cases = [
+      ['$[-1]', "$['w'][2]"], ['$[0:3:2]', "$['w'][2]"], ['$..x', "$['w'][2]['x']"],
+      ["$[2]['q\\n']", "$['w'][2]['q\\n']"], ['$.*', "$['w'][1]"], ['$[?@.x]', "$['w'][2]"],
+    ];
+    for (const [selector, location] of cases) {
+      const transform = strict([{ match: { schema: { type: 'array' } }, body: { $apply: [selector, 'e'] } }, numbers]);
+      assert.strictEqual(message(transform, { w: [1, 's', { 'q\n': 't', x: 'u' }] }),
+        `JT2003 /modes/e/unmatched JT2003: no rule in mode "e" matched ${location} at /modes/e/unmatched`, selector);
+    }
+  });
+
+  it('names an unmatched item two $apply hops below a located dispatch, and one of a $root selector', () => {
+    const hops = strict([
+      { match: '$', body: { $apply: ['$.a', 'm'] } },
+      { mode: 'm', match: { schema: { type: 'object' } }, body: { r: { $apply: ['$.b[*]', 'n'] } } },
+      { mode: 'n', match: { schema: { type: 'object' } }, body: { s: { $apply: ['$.c', 'e'] } } }, numbers,
+    ]);
+    assert.strictEqual(message(hops, { a: { b: [{ c: 1 }, { c: 'two' }] } }),
+      "JT2003 /modes/e/unmatched JT2003: no rule in mode \"e\" matched $['a']['b'][1]['c'] at /modes/e/unmatched");
+    const root = strict([{ match: { schema: { type: 'string' } }, body: { $apply: ['$root.k[*]', 'e'] } }, numbers]);
+    assert.strictEqual(message(root, { s: 'x', k: [1, null] }),
+      "JT2003 /modes/e/unmatched JT2003: no rule in mode \"e\" matched $['k'][1] at /modes/e/unmatched");
+  });
+
+  it('names a member producing many items, and a failing body, at its location', () => {
+    const many = compileWithStub({ $jslt: '0.1', unmatched: 'fresh', rules: [pathRule,
+      { match: { schema: { type: 'string' } }, body: { $seq: [1, 2] } }] });
+    assert.strictEqual(message(many, { a: [{ "it's": 'x' }] }),
+      "JT2002 /unmatched JT2002: member 'it's' at $['a'][0]['it\\'s'] produced 2 items at /unmatched");
+    assert.strictEqual(message(compileWithStub([{ match: '$..v', body: { $seq: [1, 2] } }]), { a: [{ b: { v: 0 } }] }),
+      "JT2002  JT2002: member 'v' at $['a'][0]['b']['v'] produced 2 items at ''");
+    const reason = 'JQ2001: arithmetic requires a number operand, got a string';
+    const body = compileWithStub({ $jslt: '0.1', unmatched: 'fresh', rules: [pathRule,
+      { match: { schema: { type: 'string' } }, body: { $div: [1, '$'] } }] });
+    assert.strictEqual(message(body, { a: [0, { b: 'x' }] }),
+      `JT2004 /rules/1/body/$div/1 JT2004: rule /rules/1 failed at location $['a'][1]['b']: ${reason} at /$div/1 at /rules/1/body/$div/1`);
+    const applied = compileWithStub({ $jslt: '0.1', unmatched: 'fresh', rules: [pathRule,
+      { match: '$', body: { $apply: ['$.a[*]', 'm'] } },
+      { mode: 'm', match: { schema: { type: 'object' } }, body: { $div: [1, '$.b'] } }] });
+    assert.strictEqual(message(applied, { a: [{ b: 1 }, { b: 's' }] }),
+      `JT2004 /rules/2/body/$div/1 JT2004: rule /rules/2 failed at location $['a'][1]: ${reason} at /$div/1 at /rules/2/body/$div/1`);
+  });
+
+  it('raises a $apply selector\'s descent past its bound as the located evaluation does', () => {
+    const transform = compileWithStub({ $jslt: '0.1', unmatched: 'fresh', modes: { e: { unmatched: 'error' } }, rules: [pathRule,
+      { match: { schema: { type: 'array' } }, body: { $apply: ['$..x', 'e'] } }, numbers] }, { maxDescentDepth: 2 });
+    assert.strictEqual(message(transform, { w: [{ a: { x: 's' } }] }),
+      "JT2004 /rules/1/body JT2004: rule /rules/1 failed at location $['w']: "
+      + "JQ2009: a descendant segment reaches a value nested deeper than 2 levels at '' at /rules/1/body");
+  });
+
+  it('keeps a location-less item location-less', () => {
+    const flwor = strict([{ match: '$', body: [{ $apply: [{ $for: { x: '$.k[*]' }, $return: '$x' }, 'e'] }] }, numbers]);
+    assert.strictEqual(message(flwor, { k: [1, 's'] }),
+      'JT2003 /modes/e/unmatched JT2003: no rule in mode "e" matched a location-less value at /modes/e/unmatched');
+  });
+
+  it('builds the locations a $path read reaches through a mode that reads none itself', () => {
+    const transform = compileWithStub({ $jslt: '0.1', unmatched: 'fresh', rules: [pathRule,
+      { match: { schema: { type: 'array' } }, body: [{ $apply: ['$[*]', 'p'] }] },
+      { mode: 'p', match: { schema: { type: 'number' } }, body: '$path' },
+      { mode: 'p', match: { schema: { type: 'object' } }, body: { $apply: ['$.*', 'p'] } }] });
+    assert.deepStrictEqual(transform({ a: [1, { b: 2, c: [3] }] }),
+      { a: ["$['a'][0]", "$['a'][1]['b']", ["$['a'][1]['c'][0]"]] });
+    // two hops: the reader is the last mode declared
+    const chain = compileWithStub({ $jslt: '0.1', unmatched: 'fresh', rules: [pathRule,
+      { match: { schema: { type: 'array' } }, body: [{ $apply: ['$[*]', 'm'] }] },
+      { mode: 'm', match: { schema: { type: 'number' } }, body: { $apply: ['$', 'p'] } },
+      { mode: 'p', body: '$path' }] });
+    assert.deepStrictEqual(chain({ w: [1, 2] }), { w: ["$['w'][0]", "$['w'][1]"] });
+  });
+
+  it('runs a host path function of a $apply selector once per item, also when an item fails', () => {
+    let calls = 0;
+    const pathFunctions = { is_s: { params: ['value'], returns: 'logical', evaluate: (v) => { calls++; return v !== 1; } } };
+    for (const selector of ['$[?is_s(@)]', '$root.w[?is_s(@)]']) {
+      calls = 0;
+      const transform = compileWithStub({ $jslt: '0.1', unmatched: 'fresh', modes: { e: { unmatched: 'error' } }, rules: [pathRule,
+        { match: { schema: { type: 'array' } }, body: { $apply: [selector, 'e'] } }, numbers] }, { pathFunctions });
+      assert.strictEqual(message(transform, { w: [1, 's', 2] }),
+        "JT2003 /modes/e/unmatched JT2003: no rule in mode \"e\" matched $['w'][1] at /modes/e/unmatched", selector);
+      assert.strictEqual(calls, 3, selector);
+    }
+  });
+});

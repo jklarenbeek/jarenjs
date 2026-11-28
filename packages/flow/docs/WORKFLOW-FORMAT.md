@@ -127,9 +127,10 @@ checkpoints remain available for a later retry.
 
 Unlike a standalone statechart, a workflow rejects a guard evaluation error
 as JF2016 before advancing control: choosing a fallback after a broken work
-predicate is not a successful workflow decision. The lower-level diagnostic
-path remains on the error. Task effects are at-least-once across crash windows;
-checkpointing does not make an external service exactly-once. Implementation
+predicate is not a successful workflow decision. The error names the guard
+at its branch in the workflow document (`/states/pick/choose/1/guard`), as a
+compile refusal does, and keeps the guard's own failure in its message.
+Task effects are at-least-once across crash windows; checkpointing does not make an external service exactly-once. Implementation
 versions remain host declarations: the compiler cannot detect code changes
 hidden behind an unchanged version token.
 

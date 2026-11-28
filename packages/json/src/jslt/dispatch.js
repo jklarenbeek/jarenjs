@@ -9,6 +9,7 @@ import {
 import {
   RE_NAME_NEEDS_ESCAPE,
   appendName,
+  compileLogicalExpr,
   compileSegmentP,
   descentCeilingOption,
   runSegmentsP,
@@ -43,6 +44,10 @@ import { setObjectMember } from '@jarenjs/core/object';
 const hasOwn = Object.hasOwn;
 const NO_RULE = Symbol('Jslt.NoRule');
 const NO_EXTERNAL_VALUES = Object.freeze([]);
+// The location of a value dispatched in a mode that reads no location
+// (see lazyModesOf): the dispatch has one, but it is not built unless an
+// error message prints it (see materializeLocation).
+const LAZY = Symbol('Jslt.LazyLocation');
 
 function composeDocPath(base, inner) {
   return inner.length === 0 ? base : base + inner;
@@ -166,6 +171,15 @@ function createApplyEntry(ruleBox, tableBox, targetModes) {
       const segs = locatedPath
         ? (selector.segments ?? []).map(compileSegmentP)
         : null;
+      // a target that needs its entry location needs this rule's own;
+      // so does a selector calling a host function, which then runs once
+      // per item as it always has, never again to rebuild a location
+      const hostCalls = locatedPath && callsHostFunction(selector.segments);
+      if (currentPath) {
+        ruleBox.locatedTargets.add(targetMode);
+        if (hostCalls)
+          ruleBox.readsLoc = true;
+      }
 
       return (frame) => {
         const tctx = frame[tctxSlot];
@@ -175,6 +189,40 @@ function createApplyEntry(ruleBox, tableBox, targetModes) {
 
         if (tableBox.needsLoc && locatedPath) {
           const baseLoc = currentPath ? frame[locSlot] : '$';
+          if (baseLoc !== null && !hostCalls && tableBox.lazyEntries.has(targetMode)) {
+            // the target reads no location: record how to build each
+            // item's, should an error message print it
+            let selected;
+            try {
+              selected = get(frame);
+            }
+            catch (error) {
+              // a selector's own refusal (a descent past its bound) is
+              // raised as the located evaluation raises it
+              if (error instanceof JsonQueryRuntimeError)
+                runSegmentsP(segs, frame[rootSlot], '$', frame[0]);
+              throw error;
+            }
+            if (selected === EMPTY)
+              return seqOf(acc);
+            const step = new ApplyStep(segs, baseLoc, frame[rootSlot], frame[0]);
+            const keys = tctx.keys;
+            const items = tctx.items;
+            if (selected instanceof Seq) {
+              const values = selected.items;
+              for (let i = 0; i < values.length; i++) {
+                keys[depth] = step;
+                items[depth] = i;
+                appendItem(acc, dispatch(values[i], LAZY, targetMode, depth, tctx));
+              }
+            }
+            else {
+              keys[depth] = step;
+              items[depth] = 0;
+              appendItem(acc, dispatch(selected, LAZY, targetMode, depth, tctx));
+            }
+            return seqOf(acc);
+          }
           if (baseLoc !== null) {
             const baseValue = frame[rootSlot];
             const result = runSegmentsP(segs, baseValue, baseLoc, frame[0]);
@@ -193,6 +241,26 @@ function createApplyEntry(ruleBox, tableBox, targetModes) {
   };
 }
 
+// Whether a parsed JSONPath part holds a node `found` answers true for,
+// anywhere inside it.
+function holdsNode(node, found) {
+  if (typeof node !== 'object' || node === null)
+    return false;
+  if (found(node))
+    return true;
+  for (const key in node) {
+    if (hasOwn(node, key) && holdsNode(node[key], found))
+      return true;
+  }
+  return false;
+}
+
+// Whether a parsed JSONPath part calls a registered function extension
+// (a node carrying the host's `evaluate`).
+function callsHostFunction(node) {
+  return holdsNode(node, (n) => typeof n.evaluate === 'function');
+}
+
 function wrapBodyCompileError(rule, error) {
   throw new JsltCompileError('JT0007',
     `rule body failed to compile: ${error.message}`,
@@ -206,6 +274,9 @@ function compileBody(rule, compileTypeTest, tableBox, targetModes, pathOptions) 
     depthSlot: -1,
     tctxSlot: -1,
     targets: new Set(), // the modes this body's $apply calls dispatch into
+    // the modes a $apply of a path from the current value dispatches into
+    locatedTargets: new Set(),
+    readsLoc: false, // a $apply builds on this rule's location regardless
   };
   const applyEntry = createApplyEntry(ruleBox, tableBox, targetModes);
   let normalized;
@@ -263,6 +334,8 @@ function compileBody(rule, compileTypeTest, tableBox, targetModes, pathOptions) 
     readsPath,
     userExternals,
     targets: ruleBox.targets,
+    locatedTargets: ruleBox.locatedTargets,
+    readsLoc: ruleBox.readsLoc,
   };
 }
 
@@ -424,7 +497,8 @@ function makeBodyEvaluator(rule, body, userSlots) {
         throw error;
       if (!(error instanceof JsonQueryRuntimeError))
         throw error;
-      const location = loc === null ? 'a location-less value' : `location ${loc}`;
+      const location = loc === null ? 'a location-less value'
+        : `location ${loc === LAZY ? materializeLocation(tctx, depth) : loc}`;
       throw new JsltRuntimeError('JT2004',
         `rule ${ruleDocPath} failed at ${location}: ${error.message}`,
         composeDocPath(bodyDocPath, error.docPath), error);
@@ -486,6 +560,10 @@ function compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled
       index: item.rule.index,
       pathQuery: item.pathQuery,
       test: item.test,
+      // what makes a dispatch of this rule read its location: the body
+      // binds $path, the memo keys on it, or a $apply builds on it
+      readsLoc: item.body.readsPath || item.body.readsLoc || (memoEligible !== null && memoEligible[i]),
+      locatedTargets: item.body.locatedTargets,
       bodyEval,
       userSlots: frozenSlots,
       userIndexes: frozenIndexes,
@@ -701,15 +779,17 @@ function matchPathsOf(query, root) {
 
 //#region single-walk matcher
 
-// The match paths whose selectors are all names, indexes and wildcards
-// (child or descendant segments) run together in ONE walk of the input
-// instead of one enumeration each: an automaton state is one (path,
-// segment) position, the walk carries the states alive at each value and
-// descends only where one is, and builds the trie directly - no
-// normalized path string is built and none is parsed back. Paths with a
-// slice or a filter selector keep their enumeration (getQueryPaths) and
-// are inserted after the walk, in ordinal order, so host functions run
-// exactly as before. The walk calls no host code; it gives up - and the
+// The match paths whose selectors are names, indexes, wildcards, slices
+// and filters (child or descendant segments) run together in ONE walk of
+// the input instead of one enumeration each: an automaton state is one
+// (path, segment) position, the walk carries the states alive at each
+// value and descends only where one is, and builds the trie directly - no
+// normalized path string is built and none is parsed back. A path with a
+// filter that calls a host function or reads the root (`$` inside it)
+// keeps its enumeration (getQueryPaths) and is inserted after the walk,
+// in ordinal order, so host functions run exactly as before and a root
+// query is memoized per filter application as the enumeration does. The
+// walk calls no host code; it gives up - and the
 // whole mode falls back to the per-path enumerations, which then raise
 // exactly what they always raised - on any throw (an accessor, a host
 // stack overflow) and before a descendant segment could reach a
@@ -721,12 +801,39 @@ function walkableSegments(segments) {
   for (let i = 0; i < segments.length; i++) {
     const selectors = segments[i].selectors;
     for (let j = 0; j < selectors.length; j++) {
-      const kind = selectors[j].kind;
-      if (kind !== 'name' && kind !== 'index' && kind !== 'wildcard')
+      const selector = selectors[j];
+      if (selector.kind === 'filter' && (callsHostFunction(selector.expr) || readsRoot(selector.expr)))
         return false;
     }
   }
   return true;
+}
+
+// Whether a parsed filter expression holds a query from the root (`$`).
+function readsRoot(node) {
+  return holdsNode(node, (n) => n.relative === false);
+}
+
+// Whether a slice selector selects element `index` of an array of
+// `length` elements (RFC 9535 section 2.3.4.2.2).
+function selectsSlice(slice, index, length) {
+  const step = slice.step === null ? 1 : slice.step;
+  if (step === 0)
+    return false;
+  const start = slice.start;
+  const end = slice.end;
+  // only the bound the steps count from is clamped: `index` lies in the
+  // array, so clamping the other bound would not change the answer
+  if (step > 0) {
+    const s = start === null ? 0 : start < 0 ? length + start : start;
+    const e = end === null ? length : end < 0 ? length + end : end;
+    const lower = s < 0 ? 0 : s > length ? length : s;
+    return index >= lower && index < e && (index - lower) % step === 0;
+  }
+  const s = start === null ? length - 1 : start < 0 ? length + start : start;
+  const e = end === null ? -1 : end < 0 ? length + end : end;
+  const upper = s < -1 ? -1 : s > length - 1 ? length - 1 : s;
+  return index <= upper && index > e && (upper - index) % -step === 0;
 }
 
 // One automaton step per (walkable path, segment position); the position
@@ -746,6 +853,8 @@ function compileWalk(pathQueries, bitMasks, descentCeiling) {
       const selectors = segments[i].selectors;
       let names = null;
       let indexes = null;
+      let slices = null;
+      let filters = null;
       let wildcard = false;
       for (let j = 0; j < selectors.length; j++) {
         const selector = selectors[j];
@@ -753,12 +862,19 @@ function compileWalk(pathQueries, bitMasks, descentCeiling) {
           wildcard = true;
         else if (selector.kind === 'name')
           (names ??= []).push(selector.name);
-        else
+        else if (selector.kind === 'index')
           (indexes ??= []).push(selector.index);
+        else if (selector.kind === 'slice')
+          (slices ??= []).push(selector);
+        else
+          (filters ??= []).push(withDescentCeiling(descentCeiling, () => compileLogicalExpr(selector.expr)));
       }
-      steps.push({ ordinal: -1, descendant: segments[i].descendant, wildcard, names, indexes });
+      const scans = slices !== null || filters !== null;
+      steps.push({ ordinal: -1, descendant: segments[i].descendant, wildcard, names, indexes, slices, filters,
+        picks: scans || names !== null || indexes !== null, scans });
     }
-    steps.push({ ordinal, descendant: false, wildcard: false, names: null, indexes: null });
+    steps.push({ ordinal, descendant: false, wildcard: false, names: null, indexes: null, slices: null, filters: null,
+      picks: false, scans: false });
   }
   if (starts.length === 0)
     return null;
@@ -790,17 +906,37 @@ function selectsIndex(indexes, index, length) {
   return false;
 }
 
-// The states a child inherits: every state alive for all children, plus
-// the next state of each named/indexed step selecting this key (a member
+// Whether a step's slices or filters select a child (`key` a member
 // name, or an element index of an array of `length` elements).
-function childStates(every, picks, steps, key, length) {
+function scanSelects(step, key, length, child, root) {
+  if (length >= 0 && step.slices !== null) {
+    for (let j = 0; j < step.slices.length; j++) {
+      if (selectsSlice(step.slices[j], key, length))
+        return true;
+    }
+  }
+  if (step.filters !== null) {
+    for (let j = 0; j < step.filters.length; j++) {
+      if (step.filters[j](child, root))
+        return true;
+    }
+  }
+  return false;
+}
+
+// The states a child inherits: every state alive for all children, plus
+// the next state of each picking step selecting this key (a member name,
+// or an element index of an array of `length` elements) and its value.
+// Null when no state is alive there.
+function childStates(every, picks, steps, key, length, child, root) {
   let states = every;
   let copied = false;
   for (let p = 0; p < picks.length; p++) {
     const step = steps[picks[p]];
-    if (length < 0
-      ? step.names === null || !step.names.includes(key)
-      : step.indexes === null || !selectsIndex(step.indexes, key, length))
+    if (!(length < 0
+      ? step.names !== null && step.names.includes(key)
+      : step.indexes !== null && selectsIndex(step.indexes, key, length))
+      && !(step.scans && scanSelects(step, key, length, child, root)))
       continue;
     if (!copied) {
       states = every === null ? [] : every.slice();
@@ -811,14 +947,15 @@ function childStates(every, picks, steps, key, length) {
   return states;
 }
 
-function walkNode(value, states, depth, walk) {
+function walkNode(value, states, depth, walk, root) {
   const steps = walk.steps;
   const bitMode = walk.bitMode;
   let match = bitMode ? 0 : undefined;
   let matched = false;
   const container = typeof value === 'object' && value !== null;
   let every = null; // states alive at every child
-  let picks = null; // steps selecting named or indexed children
+  let picks = null; // steps selecting some children
+  let scans = false; // a pick by slice or filter: every child is asked
   let descends = false;
   for (let s = 0; s < states.length; s++) {
     const state = states[s];
@@ -839,8 +976,10 @@ function walkNode(value, states, depth, walk) {
     }
     if (step.wildcard)
       every = addState(every, state + 1);
-    if (step.names !== null || step.indexes !== null)
+    if (step.picks)
       picks = addState(picks, state);
+    if (step.scans)
+      scans = true;
   }
   if (!container || (every === null && picks === null))
     return matched ? new PrepassNode(match, null) : null;
@@ -850,10 +989,13 @@ function walkNode(value, states, depth, walk) {
   let children = null;
   if (Array.isArray(value)) {
     const length = value.length;
-    if (every !== null) {
+    if (every !== null || scans) {
       for (let i = 0; i < length; i++) {
-        const next = picks === null ? every : childStates(every, picks, steps, i, length);
-        const child = walkNode(value[i], next, depth + 1, walk);
+        const item = value[i];
+        const next = picks === null ? every : childStates(every, picks, steps, i, length, item, root);
+        if (next === null)
+          continue;
+        const child = walkNode(item, next, depth + 1, walk, root);
         if (child !== null)
           (children ??= new Map()).set(i, child);
       }
@@ -867,19 +1009,23 @@ function walkNode(value, states, depth, walk) {
           const index = indexes[j] < 0 ? length + indexes[j] : indexes[j];
           if (index < 0 || index >= length || (children !== null && children.has(index)))
             continue;
-          const child = walkNode(value[index], childStates(null, picks, steps, index, length), depth + 1, walk);
+          const item = value[index];
+          const child = walkNode(item, childStates(null, picks, steps, index, length, item, root), depth + 1, walk, root);
           if (child !== null)
             (children ??= new Map()).set(index, child);
         }
       }
     }
   }
-  else if (every !== null) {
+  else if (every !== null || scans) {
     for (const key in value) {
       if (!hasOwn(value, key))
         continue;
-      const next = picks === null ? every : childStates(every, picks, steps, key, -1);
-      const child = walkNode(value[key], next, depth + 1, walk);
+      const member = value[key];
+      const next = picks === null ? every : childStates(every, picks, steps, key, -1, member, root);
+      if (next === null)
+        continue;
+      const child = walkNode(member, next, depth + 1, walk, root);
       if (child !== null)
         (children ??= new Map()).set(key, child);
     }
@@ -893,7 +1039,8 @@ function walkNode(value, states, depth, walk) {
         const name = names[j];
         if (!hasOwn(value, name) || (children !== null && children.has(name)))
           continue;
-        const child = walkNode(value[name], childStates(null, picks, steps, name, -1), depth + 1, walk);
+        const member = value[name];
+        const child = walkNode(member, childStates(null, picks, steps, name, -1, member, root), depth + 1, walk, root);
         if (child !== null)
           (children ??= new Map()).set(name, child);
       }
@@ -925,7 +1072,7 @@ function buildPrepass(mode, tctx) {
   let ordinals = mode.allOrdinals;
   if (walk !== null) {
     try {
-      root = walkNode(tctx.root, walk.starts, 0, walk);
+      root = walkNode(tctx.root, walk.starts, 0, walk, tctx.root);
       ordinals = walk.enumerated;
     }
     catch {
@@ -976,8 +1123,36 @@ function scanSetRules(mode, value, loc, depth, tctx, matched) {
   return NO_RULE;
 }
 
-function describeLocation(loc) {
-  return loc === null ? 'a location-less value' : loc;
+function describeLocation(loc, tctx, depth) {
+  return loc === null ? 'a location-less value' : loc === LAZY ? materializeLocation(tctx, depth) : loc;
+}
+
+// How a lazily located dispatch's location derives from its caller's:
+// one item of a $apply of a path from a value at `base` (a location, or
+// LAZY for the caller's own).
+class ApplyStep {
+  constructor(segs, base, value, current) {
+    this.segs = segs;
+    this.base = base;
+    this.value = value;
+    this.current = current;
+  }
+}
+
+// The location of the LAZY dispatch at `depth`, rebuilt from what each
+// dispatch on its chain recorded at its depth: `tctx.keys[depth]` is the
+// member name or index a rebuild descended through (its parent's location
+// in `tctx.parents[depth - 1]`), or the ApplyStep and `tctx.items[depth]`
+// the item index of a $apply. Only an error message reads it.
+function materializeLocation(tctx, depth) {
+  const key = tctx.keys[depth];
+  if (key instanceof ApplyStep) {
+    const base = key.base === LAZY ? materializeLocation(tctx, depth - 1) : key.base;
+    return runSegmentsP(key.segs, key.value, base, key.current).paths[tctx.items[depth]];
+  }
+  const parent = tctx.parents[depth - 1];
+  const base = parent === LAZY ? materializeLocation(tctx, depth - 1) : parent;
+  return typeof key === 'number' ? base + '[' + key + ']' : appendName(base, key);
 }
 
 // `children` is the dispatched location's pre-pass children map (null
@@ -990,6 +1165,9 @@ function describeLocation(loc) {
 function rebuildObject(value, loc, mode, depth, tctx, dispatchMode, fresh, children, prune) {
   const out = {};
   let changed = fresh;
+  const lazy = mode.lazy && loc !== null;
+  if (lazy)
+    tctx.parents[depth] = loc;
   for (const key in value) {
     if (!hasOwn(value, key))
       continue;
@@ -998,7 +1176,14 @@ function rebuildObject(value, loc, mode, depth, tctx, dispatchMode, fresh, child
       setObjectMember(out, key, value[key]);
       continue;
     }
-    const childLoc = loc === null ? null : appendName(loc, key);
+    let childLoc = null;
+    if (lazy) {
+      tctx.keys[depth + 1] = key;
+      childLoc = LAZY;
+    }
+    else if (loc !== null) {
+      childLoc = appendName(loc, key);
+    }
     const child = dispatchMode(value[key], childLoc, mode, depth + 1, tctx, node);
     if (child === EMPTY) {
       changed = true;
@@ -1006,7 +1191,7 @@ function rebuildObject(value, loc, mode, depth, tctx, dispatchMode, fresh, child
     }
     if (child instanceof Seq) {
       throw new JsltRuntimeError('JT2002',
-        `member '${key}' at ${describeLocation(childLoc)} produced ${child.items.length} items`,
+        `member '${key}' at ${describeLocation(childLoc, tctx, depth + 1)} produced ${child.items.length} items`,
         mode.unmatchedPath);
     }
     setObjectMember(out, key, child);
@@ -1019,13 +1204,23 @@ function rebuildObject(value, loc, mode, depth, tctx, dispatchMode, fresh, child
 function rebuildArray(value, loc, mode, depth, tctx, dispatchMode, fresh, children, prune) {
   const out = [];
   let changed = fresh;
+  const lazy = mode.lazy && loc !== null;
+  if (lazy)
+    tctx.parents[depth] = loc;
   for (let i = 0; i < value.length; i++) {
     const node = children === null ? null : children.get(i) ?? null;
     if (prune && node === null) {
       out.push(value[i]);
       continue;
     }
-    const childLoc = loc === null ? null : loc + '[' + i + ']';
+    let childLoc = null;
+    if (lazy) {
+      tctx.keys[depth + 1] = i;
+      childLoc = LAZY;
+    }
+    else if (loc !== null) {
+      childLoc = loc + '[' + i + ']';
+    }
     const child = dispatchMode(value[i], childLoc, mode, depth + 1, tctx, node);
     if (child === EMPTY) {
       changed = true;
@@ -1049,7 +1244,7 @@ function rebuildArray(value, loc, mode, depth, tctx, dispatchMode, fresh, childr
 function builtIn(value, loc, mode, depth, tctx, dispatchMode, children, prune) {
   if (mode.unmatched === 'error') {
     throw new JsltRuntimeError('JT2003',
-      `no rule in mode ${JSON.stringify(mode.name)} matched ${describeLocation(loc)}`,
+      `no rule in mode ${JSON.stringify(mode.name)} matched ${describeLocation(loc, tctx, depth)}`,
       mode.unmatchedPath);
   }
 
@@ -1062,7 +1257,7 @@ function builtIn(value, loc, mode, depth, tctx, dispatchMode, children, prune) {
     : rebuildObject(value, loc, mode, depth, tctx, dispatchMode, fresh, children, prune);
 }
 
-function compileMode(modelMode, compiledRules, prepassIdOf, walkCeiling, fallbackUnmatched, fallbackPath) {
+function compileMode(modelMode, compiledRules, prepassIdOf, walkCeiling, fallbackUnmatched, fallbackPath, lazy) {
   const rankedRules = modelMode === null ? NO_EXTERNAL_VALUES : modelMode.rules;
   const name = modelMode === null ? '' : modelMode.name;
   const unmatched = modelMode === null ? fallbackUnmatched : modelMode.unmatched;
@@ -1113,6 +1308,9 @@ function compileMode(modelMode, compiledRules, prepassIdOf, walkCeiling, fallbac
     name,
     unmatched,
     unmatchedPath,
+    // no dispatch in this mode reads its location: a rebuild hands its
+    // children LAZY instead of building theirs (see lazyModesOf)
+    lazy,
     // Every rule of a share-mode chain requires a positional match: a
     // value without a match entry (off-spine, or location-less) can fire
     // nothing here or below and returns by reference without a scan.
@@ -1132,7 +1330,7 @@ function compileMode(modelMode, compiledRules, prepassIdOf, walkCeiling, fallbac
   });
 }
 
-function buildModes(model, compiledRules, targetModes, walkCeiling) {
+function buildModes(model, compiledRules, targetModes, walkCeiling, lazyModes) {
   const modelModes = new Map();
   const names = [];
   for (let i = 0; i < model.modes.length; i++) {
@@ -1169,13 +1367,73 @@ function buildModes(model, compiledRules, targetModes, walkCeiling) {
     const modelMode = modelModes.get(name);
     const runtime = modelMode === null
       ? Object.freeze({
-          ...compileMode(null, compiledRules, prepassIdOf, walkCeiling, model.unmatched, model.unmatchedPath),
+          ...compileMode(null, compiledRules, prepassIdOf, walkCeiling, model.unmatched, model.unmatchedPath, lazyModes.has(name)),
           name,
         })
-      : compileMode(modelMode, compiledRules, prepassIdOf, walkCeiling, model.unmatched, model.unmatchedPath);
+      : compileMode(modelMode, compiledRules, prepassIdOf, walkCeiling, model.unmatched, model.unmatchedPath, lazyModes.has(name));
     modes.set(name, runtime);
   }
   return { modes, count: queryLists.length };
+}
+
+// The modes no dispatch of which reads its location (`modes`), and those
+// of them that need no entry location either (`entries`): a mode reads
+// its location when one of its rules does (`readsLoc`), or $applies a
+// path from its current value into a mode that needs its entry location
+// - one with a path rule (a $apply's dispatch looks its location up in
+// the pre-pass) or that reads it. A least fixpoint over the $apply
+// graph; a mode only reached as a $apply target has no rules and reads
+// nothing. A rebuild in a mode of `modes` hands its children LAZY (their
+// pre-pass nodes come with them); a $apply into a mode of `entries`
+// hands its items LAZY.
+function lazyModesOf(model, compiledRules, targetModes) {
+  const ruleLists = new Map();
+  for (let i = 0; i < model.modes.length; i++)
+    ruleLists.set(model.modes[i].name, model.modes[i].rules);
+  for (const name of targetModes) {
+    if (!ruleLists.has(name))
+      ruleLists.set(name, NO_EXTERNAL_VALUES);
+  }
+  const reads = new Set();
+  const entry = new Set();
+  for (const [name, ranked] of ruleLists) {
+    for (let i = 0; i < ranked.length; i++) {
+      const compiled = compiledRules[ranked[i].index];
+      if (compiled.pathQuery !== null)
+        entry.add(name);
+      if (compiled.readsLoc)
+        reads.add(name);
+    }
+    if (reads.has(name))
+      entry.add(name);
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [name, ranked] of ruleLists) {
+      if (reads.has(name))
+        continue;
+      for (let i = 0; i < ranked.length && !reads.has(name); i++) {
+        for (const target of compiledRules[ranked[i].index].locatedTargets) {
+          if (entry.has(target)) {
+            reads.add(name);
+            entry.add(name);
+            changed = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+  const modes = new Set();
+  const entries = new Set();
+  for (const name of ruleLists.keys()) {
+    if (!reads.has(name))
+      modes.add(name);
+    if (!entry.has(name))
+      entries.add(name);
+  }
+  return { modes, entries };
 }
 
 function resolveExternalValues(externalNames, compiledRules, ext) {
@@ -1245,12 +1503,20 @@ export function compileJsltDispatch(model, options = {}, walkPaths = true) {
   const tableBox = {
     dispatch: null,
     needsLoc: false,
+    // the modes that read no location of their own, and those of them
+    // that also look none up (no path rule): a $apply into one of the
+    // latter hands it LAZY (see lazyModesOf)
+    lazyModes: null,
+    lazyEntries: null,
   };
   const targetModes = new Set();
   const compiled = withDescentCeiling(descentCeiling, () =>
     compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled, bodyOptions, descentCeiling));
   tableBox.needsLoc = model.anyPathRule || compiled.readsPath;
-  const built = buildModes(model, compiled.rules, targetModes, walkPaths ? descentCeiling : null);
+  const lazy = lazyModesOf(model, compiled.rules, targetModes);
+  tableBox.lazyModes = lazy.modes;
+  tableBox.lazyEntries = lazy.entries;
+  const built = buildModes(model, compiled.rules, targetModes, walkPaths ? descentCeiling : null, tableBox.lazyModes);
   const modes = built.modes;
   const rootMode = modes.get('');
 
@@ -1347,6 +1613,10 @@ export function compileJsltDispatch(model, options = {}, walkPaths = true) {
         prepasses: new Array(modeCount),
         queryPaths: sharedQueries ? null : false,
         highestDepth: 0,
+        // per depth, how a LAZY location derives (see materializeLocation)
+        keys: [],
+        parents: [],
+        items: [],
       };
       try {
         return dispatchMode(data, rootLoc, rootMode, 0, tctx, undefined);

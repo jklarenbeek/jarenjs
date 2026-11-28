@@ -86,6 +86,34 @@ describe('one workflow lowered onto statechart and DAG', () => {
     ]);
   });
 
+  it("rejects a guard that throws while a run evaluates it at its branch in the workflow document, not at the lowered machine's transition", async () => {
+    const tasks = { one: handler(() => ({ x: 'a' })) };
+    const div = { $div: [1, '$.context.data.x'] };
+    const cases = [
+      // the lowering visits states in key order, so this branch is the lowered machine's /transitions/1
+      [workflow({ start: task('one', 'pick'), pick: { choose: [{ guard: false, to: 'done' }, { guard: div, to: 'done' }], otherwise: 'done' }, done: { final: true } }, 'start'),
+        null, '/states/pick/choose/1/guard'],
+      [workflow({ start: task('one', 'wait'), wait: { on: [{ event: 'go', to: 'done' }, { event: 'ok', guard: div, to: 'done' }] }, done: { final: true } }, 'start'),
+        { type: 'ok' }, '/states/wait/on/1/guard'],
+      [workflow({ start: { flow: { initial: 'w', states: { w: task('one', 'a/b'), 'a/b': { choose: [{ guard: div, to: 'f' }], otherwise: 'f' }, f: { final: true } } }, then: 'done' }, done: { final: true } }),
+        null, '/states/start/flow/states/a~1b/choose/0/guard'],
+    ];
+    for (const [doc, event, docPath] of cases) {
+      const wf = compileWorkflow(doc, { tasks });
+      const run = async () => {
+        const first = await wf.run(null, { runId: 'r' });
+        if (event !== null) await wf.run(null, { runId: 'r', snapshot: first.snapshot, event });
+      };
+      await assert.rejects(run, (/** @type {any} */ error) => {
+        assert.equal(error.code, 'JF2016');
+        assert.equal(error.docPath, docPath);
+        assert.equal(error.message, 'JF2016: the guard threw while evaluating and reads false: '
+          + `JQ2001: arithmetic requires a number operand, got a string at /$div/1 at ${docPath}`);
+        return true;
+      }, docPath);
+    }
+  });
+
   it('refuses corrupt saved control before claiming the run or invoking a task', async () => {
     const doc = workflow({ wait: { on: [{ event: 'go', to: 'work' }] }, work: task('one', 'done'), done: { final: true } });
     let calls = 0; let saves = 0;

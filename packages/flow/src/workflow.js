@@ -40,6 +40,18 @@ const malformed = (reason) => { throw new FlowRuntimeError('JF2016', reason); };
  * @returns {LoweredWorkflow}
  * @throws {TypeError} on a malformed option */
 export function lowerWorkflow(document, options) {
+  return lowerWithGuards(document, options).lowered;
+}
+
+/**
+ * `lowerWorkflow`, also answering each guarded lowered transition's
+ * guard pointer in the workflow document, which a run's guard evaluation
+ * error is re-based onto.
+ * @param {any} document
+ * @param {Parameters<typeof lowerWorkflow>[1]} options
+ * @returns {{ lowered: LoweredWorkflow, guards: Map<number, string> }}
+ */
+function lowerWithGuards(document, options) {
   const embedded = { operators: options?.operators, compileTypeTest: options?.compileTypeTest };
   embeddedCompileOptions(embedded, 'lowerWorkflow');
   let doc;
@@ -178,7 +190,7 @@ export function lowerWorkflow(document, options) {
   const fsm = { $fsm: '0.2', initial, states, transitions };
   try { compileStatechart(fsm, embedded); }
   catch (err) { throw relocateGuard(err, guards); }
-  return deepFreeze({ version: '0.1', revision: doc.revision, document: doc, fsm, dags, sources, specs });
+  return { lowered: deepFreeze({ version: '0.1', revision: doc.revision, document: doc, fsm, dags, sources, specs }), guards };
 }
 
 /**
@@ -210,10 +222,21 @@ function relocate(err, id, work) {
  */
 function relocateGuard(err, guards) {
   if (!(err instanceof FlowCompileError) || err.code !== 'JF0007') return err;
-  const index = /^\/transitions\/(\d+)\/guard$/.exec(err.docPath ?? '')?.[1];
-  const docPath = index === undefined ? undefined : guards.get(Number(index));
+  const docPath = guardPointer(err.docPath, guards);
   if (docPath === undefined) return err;
   return new FlowCompileError(err.code, err.reason, docPath, err.cause instanceof Error ? err.cause : undefined);
+}
+
+/**
+ * The workflow document pointer of the guard at a lowered statechart
+ * pointer (`/transitions/<i>/guard`), or undefined for any other pointer.
+ * @param {string | undefined} docPath
+ * @param {Map<number, string>} guards - lowered transition index -> guard pointer
+ * @returns {string | undefined}
+ */
+function guardPointer(docPath, guards) {
+  const index = /^\/transitions\/(\d+)\/guard$/.exec(docPath ?? '')?.[1];
+  return index === undefined ? undefined : guards.get(Number(index));
 }
 
 /** @typedef {{ load: (runId: string) => WorkflowSnapshot | null | Promise<WorkflowSnapshot | null>,
@@ -237,7 +260,7 @@ function relocateGuard(err, guards) {
 export function compileWorkflow(document, options = {}) {
   const compileOptions = embeddedCompileOptions(options, 'compileWorkflow');
   const embedded = { operators: options?.operators, compileTypeTest: options?.compileTypeTest };
-  const lowered = lowerWorkflow(document, embedded);
+  const { lowered, guards } = lowerWithGuards(document, embedded);
   const chart = compileStatechart(lowered.fsm, embedded);
   const store = options.store;
   if (store && (typeof store.load !== 'function' || typeof store.save !== 'function'))
@@ -344,7 +367,11 @@ export function compileWorkflow(document, options = {}) {
       }
     };
     const apply = async (r, mutate = undefined) => {
-      if (r.errors.length) throw new FlowRuntimeError('JF2016', r.errors[0].message, r.errors[0].docPath);
+      if (r.errors.length) {
+        // a guard that threw (JF2003) is named at its branch in the workflow document
+        const { code, docPath, message } = r.errors[0];
+        throw new FlowRuntimeError('JF2016', message, (code === 'JF2003' ? guardPointer(docPath, guards) : undefined) ?? docPath);
+      }
       await persist((next) => {
         mutate?.(next);
         next.control = r.state;

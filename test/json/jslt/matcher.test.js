@@ -125,6 +125,24 @@ describe('JSLT single-walk matcher', () => {
     assert.strictEqual(eight, 24);
   });
 
+  it('runs slice and filter paths in the same walk', () => {
+    const stylesheet = ['$..a', '$.p.q.r[0:1].a', '$.p.q.r[?@.a].a', '$..[?@.u].u']
+      .map((path) => ({ match: path, body: { $mul: ['$', 2] } }));
+    const reads = (walkPaths) => {
+      const counter = { reads: 0 };
+      const input = countedInput(counter);
+      counter.reads = 0;
+      const output = compile(stylesheet, {}, walkPaths)(input);
+      assert.deepStrictEqual(JSON.parse(JSON.stringify(output)),
+        { p: { a: 2, q: { a: 4, r: [{ a: 6 }, { s: 4 }] } }, t: { u: 10 } });
+      return counter.reads;
+    };
+    // the walk's 24 reads of '$..a' alone, plus the filters' reads of
+    // `@.a` and `@.u`; enumerated, each path reads its own spine again
+    assert.strictEqual(reads(true), 28);
+    assert.strictEqual(reads(false), 59);
+  });
+
   it('reads only the named spine for child-segment paths', () => {
     assert.strictEqual(readsOf(['$.p.q.r[*].a', '$.p.a', '$.p.q.a']), 21);
   });
